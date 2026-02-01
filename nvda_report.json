@@ -1,0 +1,105 @@
+{
+  "run_id": "test-NVDA-2026-01-27-1769943134",
+  "ticker": "NVDA",
+  "date": "2026-01-27",
+  "start_time": "2026-02-01T11:52:14.297746",
+  "end_time": "2026-02-01T11:54:24.092179",
+  "duration_seconds": 129.794433,
+  "total_bars": 884,
+  "bars_processed": 884,
+  "regime_detected": "CHOPPY",
+  "strategy_selected": "mean_reversion",
+  "total_trades": 0,
+  "winning_trades": 0,
+  "losing_trades": 0,
+  "total_pnl_pct": 0,
+  "total_pnl_dollars": 0,
+  "total_costs": 0,
+  "win_rate": 0,
+  "avg_win_pct": 0.0,
+  "avg_loss_pct": 0.0,
+  "profit_factor": Infinity,
+  "max_drawdown_pct": 0.0,
+  "trades": [],
+  "decisions": [
+    {
+      "id": "test-NVDA-2026-01-27-1769943134:NVDA:2026-01-27:1",
+      "timestamp": "2026-01-27T09:00:00+00:00",
+      "bar_index": 0,
+      "marker_type": "session_started",
+      "title": "Session Started",
+      "description": "Trading session started for NVDA",
+      "price": 187.25,
+      "side": null,
+      "strategy": null,
+      "regime": null,
+      "confidence": null,
+      "details": {
+        "ticker": "NVDA",
+        "date": "2026-01-27",
+        "run_id": "test-NVDA-2026-01-27-1769943134"
+      }
+    },
+    {
+      "id": "test-NVDA-2026-01-27-1769943134:NVDA:2026-01-27:2",
+      "timestamp": "2026-01-27T09:44:00+00:00",
+      "bar_index": 44,
+      "marker_type": "regime_detected",
+      "title": "Regime: CHOPPY",
+      "description": "Market showing sideways movement with low trend efficiency and high volatility (Trend Efficiency: 0.12, Volatility: 0.01%, ATR: 0.04)",
+      "price": 187.41,
+      "side": null,
+      "strategy": null,
+      "regime": "CHOPPY",
+      "confidence": null,
+      "details": {
+        "indicators": {
+          "trend_efficiency": 0.12,
+          "volatility": 0.012,
+          "atr": 0.036428571428570776
+        },
+        "detection_time_minutes": 15
+      }
+    },
+    {
+      "id": "test-NVDA-2026-01-27-1769943134:NVDA:2026-01-27:3",
+      "timestamp": "2026-01-27T09:44:00+00:00",
+      "bar_index": 44,
+      "marker_type": "strategy_selected",
+      "title": "Strategy: mean_reversion",
+      "description": "Selected mean_reversion strategy for CHOPPY regime",
+      "price": 187.41,
+      "side": null,
+      "strategy": "mean_reversion",
+      "regime": "CHOPPY",
+      "confidence": null,
+      "details": {
+        "alternative_strategies": [],
+        "selection_criteria": "Selected mean_reversion strategy for CHOPPY regime"
+      }
+    },
+    {
+      "id": "test-NVDA-2026-01-27-1769943134:NVDA:2026-01-27:4",
+      "timestamp": "2026-01-27T15:55:00+00:00",
+      "bar_index": 410,
+      "marker_type": "session_ended",
+      "title": "Session Ended",
+      "description": "Trading session ended. Total PnL: +0.00%",
+      "price": 189.16,
+      "side": null,
+      "strategy": null,
+      "regime": null,
+      "confidence": null,
+      "details": {
+        "ticker": "NVDA",
+        "date": "2026-01-27",
+        "regime": "CHOPPY",
+        "strategy": "mean_reversion",
+        "total_trades": 0,
+        "total_pnl_pct": 0,
+        "success": false
+      }
+    }
+  ],
+  "errors": []
+}

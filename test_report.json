@@ -1,0 +1,28 @@
+{
+  "run_id": "test-TSLA-2026-01-27-1769942408",
+  "ticker": "TSLA",
+  "date": "2026-01-27",
+  "start_time": "2026-02-01T11:40:08.391228",
+  "end_time": "2026-02-01T11:41:31.792895",
+  "duration_seconds": 83.401667,
+  "total_bars": 895,
+  "bars_processed": 895,
+  "regime_detected": "CHOPPY",
+  "strategy_selected": "mean_reversion",
+  "total_trades": 0,
+  "winning_trades": 0,
+  "losing_trades": 0,
+  "total_pnl_pct": 0,
+  "total_pnl_dollars": 0,
+  "total_costs": 0,
+  "win_rate": 0,
+  "avg_win_pct": 0.0,
+  "avg_loss_pct": 0.0,
+  "profit_factor": Infinity,
+  "max_drawdown_pct": 0.0,
+  "trades": [],
+  "decisions": [],
+  "errors": [
+    "Markers error: 'list' object has no attribute 'get'"
+  ]
+}
