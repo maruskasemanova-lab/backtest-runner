@@ -1,0 +1,79 @@
+{
+  "run_timestamp": "2026-02-01T21:28:07.323631",
+  "config": {
+    "tickers": [
+      "NVDA"
+    ],
+    "start_date": "2026-01-20",
+    "end_date": "2026-01-20",
+    "total_days": 1
+  },
+  "summary": {
+    "total_trades": 0,
+    "total_pnl_dollars": 0.0,
+    "total_costs": 0.0,
+    "net_pnl": 0.0,
+    "winning_days": 0,
+    "losing_days": 0,
+    "total_days": 1,
+    "avg_trades_per_day": 0.0,
+    "avg_pnl_per_day": 0.0
+  },
+  "by_ticker": {
+    "NVDA": {
+      "trades": 0,
+      "pnl": 0.0,
+      "costs": 0.0,
+      "days": 1
+    }
+  },
+  "by_regime": {
+    "UNKNOWN": {
+      "trades": 0,
+      "pnl": 0.0,
+      "days": 1
+    }
+  },
+  "by_strategy": {
+    "NONE": {
+      "trades": 0,
+      "pnl": 0.0,
+      "days": 1
+    }
+  },
+  "strategy_rankings": [],
+  "regime_summaries": {
+    "TRENDING": {
+      "regime": "TRENDING",
+      "total_trades": 0,
+      "strategies_tested": 0
+    },
+    "CHOPPY": {
+      "regime": "CHOPPY",
+      "total_trades": 0,
+      "strategies_tested": 0
+    },
+    "MIXED": {
+      "regime": "MIXED",
+      "total_trades": 0,
+      "strategies_tested": 0
+    }
+  },
+  "overall_stats": {
+    "total_trades": 0,
+    "total_strategies": 0,
+    "total_regimes": 0
+  },
+  "daily_results": [
+    {
+      "date": "2026-01-20",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "costs": 0.0
+    }
+  ]
+}

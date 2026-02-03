@@ -1,0 +1,4 @@
+trade_id,strategy,regime,ticker,date,side,entry_price,exit_price,entry_time,exit_time,pnl_pct,pnl_dollars,gross_pnl_pct,total_costs,exit_reason,bars_held
+1,Pullback,TRENDING,NVDA,2026-01-20,long,181.25,181.49,2026-01-20T10:36:00+00:00,2026-01-20T10:46:00+00:00,-0.99,-1.8,0.13,0,take_profit,0
+2,Pullback,TRENDING,NVDA,2026-01-21,short,178.28,178.47,2026-01-21T12:21:00+00:00,2026-01-21T12:50:00+00:00,-1.25,-2.23,-0.11,0,stop_loss,0
+3,Pullback,TRENDING,NVDA,2026-01-26,short,187.62,187.05,2026-01-26T14:58:00+00:00,2026-01-26T15:10:00+00:00,-0.79,-1.47,0.3,0,take_profit,0

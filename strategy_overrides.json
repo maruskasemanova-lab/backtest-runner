@@ -1,0 +1,84 @@
+{
+  "AAPL": {
+    "mean_reversion": {
+      "entry_deviation_pct": 0.25,
+      "atr_stop_mult": 1.5,
+      "min_confidence": 55.0,
+      "trailing_stop_pct": 0.3
+    },
+    "momentum": {
+      "breakout_atr_mult": 0.25,
+      "volume_threshold": 1.2,
+      "rr_ratio": 2.0,
+      "trailing_stop_pct": 1.0
+    }
+  },
+  "AMD": {
+    "mean_reversion": {
+      "entry_deviation_pct": 0.4,
+      "atr_stop_mult": 1.5,
+      "min_confidence": 55.0,
+      "trailing_stop_pct": 0.3
+    }
+  },
+  "AMZN": {
+    "mean_reversion": {
+      "entry_deviation_pct": 0.4,
+      "atr_stop_mult": 1.5,
+      "min_confidence": 55.0,
+      "trailing_stop_pct": 0.3
+    },
+    "momentum": {
+      "breakout_atr_mult": 0.25,
+      "volume_threshold": 1.2,
+      "rr_ratio": 2.5,
+      "trailing_stop_pct": 1.0
+    }
+  },
+  "GOOGL": {
+    "mean_reversion": {
+      "entry_deviation_pct": 0.4,
+      "atr_stop_mult": 2.0,
+      "min_confidence": 55.0,
+      "trailing_stop_pct": 0.3
+    }
+  },
+  "META": {
+    "mean_reversion": {
+      "entry_deviation_pct": 0.25,
+      "atr_stop_mult": 1.5,
+      "min_confidence": 55.0,
+      "trailing_stop_pct": 0.3
+    }
+  },
+  "MSFT": {
+    "mean_reversion": {
+      "entry_deviation_pct": 0.25,
+      "atr_stop_mult": 2.0,
+      "min_confidence": 55.0,
+      "trailing_stop_pct": 0.3
+    }
+  },
+  "NVDA": {
+    "mean_reversion": {
+      "entry_deviation_pct": 0.25,
+      "atr_stop_mult": 1.5,
+      "min_confidence": 55.0,
+      "trailing_stop_pct": 0.3
+    }
+  },
+  "TSLA": {
+    "mean_reversion": {
+      "entry_deviation_pct": 0.25,
+      "atr_stop_mult": 1.5,
+      "min_confidence": 55.0,
+      "trailing_stop_pct": 0.3
+    },
+    "momentum": {
+      "breakout_atr_mult": 0.25,
+      "volume_threshold": 1.2,
+      "rr_ratio": 2.0,
+      "trailing_stop_pct": 1.0
+    }
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "run_timestamp": "2026-02-01T21:48:22.295551",
+  "config": {
+    "tickers": [
+      "NVDA"
+    ],
+    "start_date": "2026-01-20",
+    "end_date": "2026-01-28",
+    "total_days": 7
+  },
+  "summary": {
+    "total_trades": 25,
+    "total_pnl_dollars": -3.3,
+    "total_costs": 0.0,
+    "net_pnl": -3.3,
+    "winning_days": 2,
+    "losing_days": 2,
+    "total_days": 7,
+    "avg_trades_per_day": 3.57,
+    "avg_pnl_per_day": -0.47
+  },
+  "by_ticker": {
+    "NVDA": {
+      "trades": 25,
+      "pnl": -3.3000000000000007,
+      "costs": 0.0,
+      "days": 7
+    }
+  },
+  "by_regime": {
+    "TRENDING": {
+      "trades": 25,
+      "pnl": -3.3000000000000007,
+      "days": 4
+    },
+    "CHOPPY": {
+      "trades": 0,
+      "pnl": 0,
+      "days": 2
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "pnl": 0.0,
+      "days": 1
+    }
+  },
+  "by_strategy": {
+    "pullback": {
+      "trades": 25,
+      "pnl": -3.3000000000000007,
+      "days": 4
+    },
+    "mean_reversion": {
+      "trades": 0,
+      "pnl": 0,
+      "days": 2
+    },
+    "NONE": {
+      "trades": 0,
+      "pnl": 0.0,
+      "days": 1
+    }
+  },
+  "strategy_rankings": [
+    {
+      "strategy": "Pullback",
+      "regime": "TRENDING",
+      "total_trades": 25,
+      "winning_trades": 9,
+      "losing_trades": 16,
+      "win_rate": 36.0,
+      "profit_factor": 0.98,
+      "avg_win": 0.13,
+      "avg_loss": -0.0744,
+      "avg_trade": -0.0008,
+      "expectancy": -0.0008,
+      "max_drawdown": 0.71,
+      "total_pnl_pct": -0.02,
+      "total_pnl_dollars": -3.3,
+      "total_costs": 0.0,
+      "score": 30.78
+    }
+  ],
+  "regime_summaries": {
+    "TRENDING": {
+      "regime": "TRENDING",
+      "total_trades": 25,
+      "winning_trades": 9,
+      "losing_trades": 16,
+      "win_rate": 36.0,
+      "total_pnl_pct": -0.02,
+      "strategies_tested": 1,
+      "best_strategy": "Pullback"
+    },
+    "CHOPPY": {
+      "regime": "CHOPPY",
+      "total_trades": 0,
+      "strategies_tested": 0
+    },
+    "MIXED": {
+      "regime": "MIXED",
+      "total_trades": 0,
+      "strategies_tested": 0
+    }
+  },
+  "overall_stats": {
+    "total_trades": 25,
+    "winning_trades": 9,
+    "losing_trades": 16,
+    "win_rate": 36.0,
+    "total_pnl_pct": -0.02,
+    "total_pnl_dollars": -3.3,
+    "total_costs": 0,
+    "avg_trade_pnl": -0.0008,
+    "total_strategies": 1,
+    "total_regimes": 1,
+    "tickers_tested": [
+      "NVDA"
+    ],
+    "date_range": {
+      "first": "2026-01-20",
+      "last": "2026-01-26"
+    }
+  },
+  "daily_results": [
+    {
+      "date": "2026-01-20",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "pullback",
+      "trades": 9,
+      "pnl_dollars": 57.58,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-21",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "pullback",
+      "trades": 7,
+      "pnl_dollars": -41.65,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-22",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "pullback",
+      "trades": 4,
+      "pnl_dollars": -22.9,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-23",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-26",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "pullback",
+      "trades": 5,
+      "pnl_dollars": 3.67,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-27",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-28",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "costs": 0.0
+    }
+  ]
+}

@@ -212,8 +212,13 @@ class StrategyTester:
                 if summary_resp.status == 200:
                     summary = await summary_resp.json()
                     
-                    # Extract trades
+                    # Extract trades (handle nested session_summary)
                     trades_data = summary.get("trades", [])
+                    if not trades_data and "session_summary" in summary:
+                        session_summary = summary.get("session_summary")
+                        if session_summary:
+                            trades_data = session_summary.get("trades", [])
+                    
                     for t in trades_data:
                         trade = TradeResult(
                             id=t.get("id", 0),

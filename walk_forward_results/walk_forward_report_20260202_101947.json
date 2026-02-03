@@ -1,0 +1,278 @@
+{
+  "run_timestamp": "2026-02-02T10:19:47.514718",
+  "config": {
+    "tickers": [
+      "NVDA"
+    ],
+    "start_date": "2026-01-05",
+    "end_date": "2026-01-16",
+    "total_days": 10
+  },
+  "summary": {
+    "total_trades": 46,
+    "total_pnl_dollars": -627.13,
+    "total_costs": 0,
+    "net_pnl": -627.13,
+    "winning_days": 2,
+    "losing_days": 6,
+    "total_days": 10,
+    "avg_trades_per_day": 4.6,
+    "avg_pnl_per_day": -62.71
+  },
+  "by_ticker": {
+    "NVDA": {
+      "trades": 46,
+      "pnl": -627.13,
+      "costs": 0,
+      "days": 10
+    }
+  },
+  "by_regime": {
+    "CHOPPY": {
+      "trades": 25,
+      "pnl": -552.78,
+      "days": 4
+    },
+    "MIXED": {
+      "trades": 15,
+      "pnl": 141.94,
+      "days": 2
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "pnl": 0,
+      "days": 2
+    },
+    "TRENDING": {
+      "trades": 6,
+      "pnl": -216.29000000000002,
+      "days": 2
+    }
+  },
+  "by_strategy": {
+    "vwap_magnet": {
+      "trades": 40,
+      "pnl": -410.8400000000001,
+      "days": 6
+    },
+    "NONE": {
+      "trades": 0,
+      "pnl": 0,
+      "days": 2
+    },
+    "momentum": {
+      "trades": 6,
+      "pnl": -216.29000000000002,
+      "days": 2
+    }
+  },
+  "strategy_rankings": [
+    {
+      "strategy": "VWAPMagnet",
+      "regime": "MIXED",
+      "total_trades": 15,
+      "winning_trades": 8,
+      "losing_trades": 7,
+      "win_rate": 53.33,
+      "profit_factor": 1.38,
+      "avg_win": 0.3425,
+      "avg_loss": -0.2843,
+      "avg_trade": 0.05,
+      "expectancy": 0.05,
+      "max_drawdown": 0.74,
+      "total_pnl_pct": 0.75,
+      "total_pnl_dollars": 141.94,
+      "total_costs": 0.0,
+      "score": 39.9
+    },
+    {
+      "strategy": "VWAPMagnet",
+      "regime": "CHOPPY",
+      "total_trades": 25,
+      "winning_trades": 8,
+      "losing_trades": 17,
+      "win_rate": 32.0,
+      "profit_factor": 0.51,
+      "avg_win": 0.385,
+      "avg_loss": -0.3553,
+      "avg_trade": -0.1184,
+      "expectancy": -0.1184,
+      "max_drawdown": 4.07,
+      "total_pnl_pct": -2.96,
+      "total_pnl_dollars": -552.78,
+      "total_costs": 0.0,
+      "score": 26.64
+    },
+    {
+      "strategy": "Momentum",
+      "regime": "TRENDING",
+      "total_trades": 6,
+      "winning_trades": 0,
+      "losing_trades": 6,
+      "win_rate": 0.0,
+      "profit_factor": 0.0,
+      "avg_win": 0.0,
+      "avg_loss": -0.195,
+      "avg_trade": -0.195,
+      "expectancy": -0.195,
+      "max_drawdown": 1.17,
+      "total_pnl_pct": -1.17,
+      "total_pnl_dollars": -216.29,
+      "total_costs": 0.0,
+      "score": 9.43
+    }
+  ],
+  "regime_summaries": {
+    "TRENDING": {
+      "regime": "TRENDING",
+      "total_trades": 6,
+      "winning_trades": 0,
+      "losing_trades": 6,
+      "win_rate": 0.0,
+      "total_pnl_pct": -1.17,
+      "strategies_tested": 1,
+      "best_strategy": "Momentum"
+    },
+    "CHOPPY": {
+      "regime": "CHOPPY",
+      "total_trades": 25,
+      "winning_trades": 8,
+      "losing_trades": 17,
+      "win_rate": 32.0,
+      "total_pnl_pct": -2.96,
+      "strategies_tested": 1,
+      "best_strategy": "VWAPMagnet"
+    },
+    "MIXED": {
+      "regime": "MIXED",
+      "total_trades": 15,
+      "winning_trades": 8,
+      "losing_trades": 7,
+      "win_rate": 53.33,
+      "total_pnl_pct": 0.75,
+      "strategies_tested": 1,
+      "best_strategy": "VWAPMagnet"
+    }
+  },
+  "overall_stats": {
+    "total_trades": 46,
+    "winning_trades": 16,
+    "losing_trades": 30,
+    "win_rate": 34.78,
+    "total_pnl_pct": -3.38,
+    "total_pnl_dollars": -627.13,
+    "total_costs": 0,
+    "avg_trade_pnl": -0.0735,
+    "total_strategies": 2,
+    "total_regimes": 3,
+    "tickers_tested": [
+      "NVDA"
+    ],
+    "date_range": {
+      "first": "2026-01-05",
+      "last": "2026-01-15"
+    }
+  },
+  "daily_results": [
+    {
+      "date": "2026-01-05",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "vwap_magnet",
+      "trades": 8,
+      "pnl_dollars": -117.82,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-06",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "trades": 6,
+      "pnl_dollars": 26.36,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-07",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "vwap_magnet",
+      "trades": 8,
+      "pnl_dollars": -40.21,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-08",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "vwap_magnet",
+      "trades": 5,
+      "pnl_dollars": -358.83,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-09",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-12",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "vwap_magnet",
+      "trades": 4,
+      "pnl_dollars": -35.92,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-13",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "momentum",
+      "trades": 4,
+      "pnl_dollars": -125.92,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-14",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "momentum",
+      "trades": 2,
+      "pnl_dollars": -90.37,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-15",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "trades": 9,
+      "pnl_dollars": 115.58,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-16",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import PlaybackControls from './components/PlaybackControls';
 import DecisionPanel from './components/DecisionPanel';
 import SessionSummary from './components/SessionSummary';
 import RunConfig from './components/RunConfig';
+import StrategySettings from './components/StrategySettings';
 
 function App() {
   // Run state
@@ -17,10 +18,11 @@ function App() {
   const [markers, setMarkers] = useState([]);
   const [selectedMarker, setSelectedMarker] = useState(null);
   const [currentBar, setCurrentBar] = useState(null);
+  const [strategyApiUrl, setStrategyApiUrl] = useState("http://localhost:8001");
   
   // Playback
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(200); // ms per bar
+  const [speed, setSpeed] = useState('10hz'); // Default: 10 updates per second (string for hz, number for ms)
   
   // WebSocket
   const wsRef = useRef(null);
@@ -93,12 +95,22 @@ function App() {
   
   // Handle new decision from WebSocket
   const handleNewDecision = useCallback((marker) => {
-    setMarkers(prev => [...prev, marker]);
+    setMarkers(prev => {
+      const idx = prev.findIndex(m => m.id === marker.id);
+      if (idx !== -1) {
+        // Merge/update existing marker to avoid duplicates and keep latest info
+        const next = [...prev];
+        next[idx] = { ...prev[idx], ...marker };
+        return next;
+      }
+      return [...prev, marker];
+    });
   }, []);
   
   // Start a new run
   const handleStartRun = async (config) => {
     try {
+      setStrategyApiUrl(config.strategy_api_url || "http://localhost:8001");
       const resp = await fetch('/api/run/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -173,10 +185,21 @@ function App() {
     
     const parts = runKey.split(':');
     try {
+      // Support both hz (string) and ms (number) formats
+      let speedParam;
+      if (typeof speed === 'string') {
+        // 'max', '10hz', '5hz', etc.
+        speedParam = speed;
+      } else if (speed === 0) {
+        speedParam = 'max';
+      } else {
+        speedParam = speed;
+      }
+      
       await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/play`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ speed_ms: speed })
+        body: JSON.stringify({ speed_ms: speedParam })
       });
       setIsPlaying(true);
     } catch (error) {
@@ -264,6 +287,9 @@ function App() {
             onStart={handleStartRun} 
             isRunning={!!runKey}
           />
+
+          {/* Strategy Settings */}
+          <StrategySettings apiUrl={strategyApiUrl} />
           
           {/* Playback Controls */}
           {runKey && (
@@ -290,7 +316,13 @@ function App() {
         <section className="card chart-container">
           <div className="card-header">
             <span className="card-title">
-              {runState ? `${runState.ticker} - ${runState.date}` : 'Price Chart'}
+              {runState
+                ? `${runState.ticker} - ${
+                    runState.date_from && runState.date_to
+                      ? `${runState.date_from} → ${runState.date_to}`
+                      : runState.date
+                  }`
+                : 'Price Chart'}
             </span>
             {runState && (
               <span className={`phase-badge ${runState.phase?.toLowerCase()}`}>
@@ -303,6 +335,7 @@ function App() {
               bars={bars} 
               markers={markers}
               onMarkerClick={handleMarkerClick}
+              selectedMarker={selectedMarker}
             />
           </div>
           {currentBar && (
@@ -337,11 +370,13 @@ function App() {
               {markers.length} total
             </span>
           </div>
-          <DecisionPanel 
-            markers={markers}
-            selectedMarker={selectedMarker}
-            onSelectMarker={setSelectedMarker}
-          />
+          <div className="card-body">
+            <DecisionPanel 
+              markers={markers}
+              selectedMarker={selectedMarker}
+              onSelectMarker={setSelectedMarker}
+            />
+          </div>
         </aside>
       </main>
     </div>

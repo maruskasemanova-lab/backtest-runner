@@ -1,0 +1,187 @@
+{
+  "run_timestamp": "2026-02-02T10:27:03.150520",
+  "config": {
+    "tickers": [
+      "NVDA"
+    ],
+    "start_date": "2026-01-20",
+    "end_date": "2026-01-28",
+    "total_days": 7
+  },
+  "summary": {
+    "total_trades": 17,
+    "total_pnl_dollars": 66.48,
+    "total_costs": 0.0,
+    "net_pnl": 66.48,
+    "winning_days": 2,
+    "losing_days": 0,
+    "total_days": 7,
+    "avg_trades_per_day": 2.43,
+    "avg_pnl_per_day": 9.5
+  },
+  "by_ticker": {
+    "NVDA": {
+      "trades": 17,
+      "pnl": 66.47999999999999,
+      "costs": 0.0,
+      "days": 7
+    }
+  },
+  "by_regime": {
+    "TRENDING": {
+      "trades": 17,
+      "pnl": 66.47999999999999,
+      "days": 2
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "pnl": 0.0,
+      "days": 5
+    }
+  },
+  "by_strategy": {
+    "pullback": {
+      "trades": 17,
+      "pnl": 66.47999999999999,
+      "days": 2
+    },
+    "NONE": {
+      "trades": 0,
+      "pnl": 0.0,
+      "days": 5
+    }
+  },
+  "strategy_rankings": [
+    {
+      "strategy": "Pullback",
+      "regime": "TRENDING",
+      "total_trades": 17,
+      "winning_trades": 8,
+      "losing_trades": 9,
+      "win_rate": 47.06,
+      "profit_factor": 1.46,
+      "avg_win": 0.1388,
+      "avg_loss": -0.0844,
+      "avg_trade": 0.0206,
+      "expectancy": 0.0206,
+      "max_drawdown": 0.34,
+      "total_pnl_pct": 0.35,
+      "total_pnl_dollars": 66.48,
+      "total_costs": 0.0,
+      "score": 39.14
+    }
+  ],
+  "regime_summaries": {
+    "TRENDING": {
+      "regime": "TRENDING",
+      "total_trades": 17,
+      "winning_trades": 8,
+      "losing_trades": 9,
+      "win_rate": 47.06,
+      "total_pnl_pct": 0.35,
+      "strategies_tested": 1,
+      "best_strategy": "Pullback"
+    },
+    "CHOPPY": {
+      "regime": "CHOPPY",
+      "total_trades": 0,
+      "strategies_tested": 0
+    },
+    "MIXED": {
+      "regime": "MIXED",
+      "total_trades": 0,
+      "strategies_tested": 0
+    }
+  },
+  "overall_stats": {
+    "total_trades": 17,
+    "winning_trades": 8,
+    "losing_trades": 9,
+    "win_rate": 47.06,
+    "total_pnl_pct": 0.35,
+    "total_pnl_dollars": 66.48,
+    "total_costs": 0,
+    "avg_trade_pnl": 0.0206,
+    "total_strategies": 1,
+    "total_regimes": 1,
+    "tickers_tested": [
+      "NVDA"
+    ],
+    "date_range": {
+      "first": "2026-01-20",
+      "last": "2026-01-26"
+    }
+  },
+  "daily_results": [
+    {
+      "date": "2026-01-20",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "pullback",
+      "trades": 9,
+      "pnl_dollars": 57.58,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-21",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-22",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-23",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-26",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "pullback",
+      "trades": 8,
+      "pnl_dollars": 8.9,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-27",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-28",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "costs": 0.0
+    }
+  ]
+}

@@ -167,25 +167,41 @@ class DecisionTracker:
         strategy: str,
         size: float,
         stop_loss: float,
-        take_profit: float
+        take_profit: float,
+        reasoning: str = "",
+        confidence: float = 50,
+        metadata: Dict[str, Any] = None
     ) -> DecisionMarker:
-        """Record trade entry."""
+        """Record trade entry with detailed reasoning."""
+        # Build detailed description
+        description_parts = [f"Entered {side} position at ${price:.2f}"]
+        if reasoning:
+            description_parts.append(f"Reason: {reasoning}")
+        if confidence:
+            description_parts.append(f"Confidence: {confidence:.0f}%")
+        
+        details = {
+            "size": size,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "risk_reward": abs(take_profit - price) / abs(price - stop_loss) if stop_loss != price else 0,
+            "reasoning": reasoning,
+            "confidence": confidence,
+            "metadata": metadata or {}
+        }
+        
         marker = DecisionMarker(
             id=self._generate_id(),
             timestamp=timestamp,
             bar_index=bar_index,
             marker_type=MarkerType.ENTRY_EXECUTED,
             title=f"Entry: {side.upper()}",
-            description=f"Entered {side} position at ${price:.2f}",
+            description=" | ".join(description_parts),
             price=price,
             side=side,
             strategy=strategy,
-            details={
-                "size": size,
-                "stop_loss": stop_loss,
-                "take_profit": take_profit,
-                "risk_reward": abs(take_profit - price) / abs(price - stop_loss) if stop_loss != price else 0
-            }
+            confidence=confidence,
+            details=details
         )
         self.markers.append(marker)
         return marker
@@ -198,14 +214,41 @@ class DecisionTracker:
         side: str,
         reason: str,
         pnl_pct: float,
-        pnl_dollars: float
+        pnl_dollars: float,
+        entry_price: float = None,
+        entry_time: str = None,
+        bars_held: int = None,
+        size: float = None,
+        costs: Dict[str, float] = None,
+        gross_pnl_pct: float = None,
+        gross_pnl_dollars: float = None
     ) -> DecisionMarker:
-        """Record trade exit."""
+        """Record trade exit with detailed data."""
         marker_type = MarkerType.EXIT_EXECUTED
         if "stop" in reason.lower():
             marker_type = MarkerType.STOP_LOSS_HIT
         elif "profit" in reason.lower() or "take" in reason.lower():
             marker_type = MarkerType.TAKE_PROFIT_HIT
+        
+        # Build detailed description
+        description_parts = [f"Closed {side} position. PnL: {pnl_pct:+.2f}% (${pnl_dollars:+.2f})"]
+        if bars_held:
+            description_parts.append(f"Held: {bars_held} bars")
+        if costs:
+            description_parts.append(f"Costs: ${costs.get('total', 0):.2f}")
+        
+        details = {
+            "exit_reason": reason,
+            "pnl_pct": pnl_pct,
+            "pnl_dollars": pnl_dollars,
+            "entry_price": entry_price,
+            "entry_time": entry_time,
+            "bars_held": bars_held,
+            "size": size,
+            "costs": costs or {},
+            "gross_pnl_pct": gross_pnl_pct,
+            "gross_pnl_dollars": gross_pnl_dollars
+        }
         
         marker = DecisionMarker(
             id=self._generate_id(),
@@ -213,14 +256,10 @@ class DecisionTracker:
             bar_index=bar_index,
             marker_type=marker_type,
             title=f"Exit: {reason}",
-            description=f"Closed {side} position. PnL: {pnl_pct:+.2f}% (${pnl_dollars:+.2f})",
+            description=" | ".join(description_parts),
             price=price,
             side=side,
-            details={
-                "exit_reason": reason,
-                "pnl_pct": pnl_pct,
-                "pnl_dollars": pnl_dollars
-            }
+            details=details
         )
         self.markers.append(marker)
         return marker

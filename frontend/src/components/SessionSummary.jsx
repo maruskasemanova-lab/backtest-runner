@@ -1,20 +1,32 @@
 function SessionSummary({ runState, markers }) {
-  // Calculate stats from markers
-  const trades = markers.filter(m => 
+  // Deduplicate markers by id to avoid double-counting
+  const uniqueMarkers = Object.values(
+    (markers || []).reduce((acc, m) => {
+      if (m.id && acc[m.id]) return acc;
+      if (m.id) acc[m.id] = m;
+      else acc[Math.random()] = m; // fallback
+      return acc;
+    }, {})
+  );
+
+  // Calculate stats from unique markers
+  const trades = uniqueMarkers.filter(m => 
     m.marker_type === 'exit_executed' || 
     m.marker_type === 'stop_loss_hit' || 
     m.marker_type === 'take_profit_hit'
   );
   
-  const winningTrades = trades.filter(t => t.details?.pnl_pct > 0);
-  const losingTrades = trades.filter(t => t.details?.pnl_pct <= 0);
+  // Count wins by gross PnL if available, else net
+  const getScore = (t) => t.details?.gross_pnl_pct ?? t.details?.pnl_pct ?? 0;
+  const winningTrades = trades.filter(t => getScore(t) > 0);
+  const losingTrades = trades.filter(t => getScore(t) <= 0);
   
   const totalPnl = trades.reduce((sum, t) => sum + (t.details?.pnl_pct || 0), 0);
   const winRate = trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0;
   
-  // Get regime from markers
-  const regimeMarker = markers.find(m => m.marker_type === 'regime_detected');
-  const strategyMarker = markers.find(m => m.marker_type === 'strategy_selected');
+  // Get latest regime/strategy marker (for multi-day runs)
+  const regimeMarker = [...uniqueMarkers].reverse().find(m => m.marker_type === 'regime_detected');
+  const strategyMarker = [...uniqueMarkers].reverse().find(m => m.marker_type === 'strategy_selected');
   
   return (
     <div className="card">

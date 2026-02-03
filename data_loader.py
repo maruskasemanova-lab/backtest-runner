@@ -6,6 +6,7 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime, time
 from typing import List, Dict, Any, Optional, Tuple
+from zoneinfo import ZoneInfo
 import os
 
 
@@ -17,6 +18,14 @@ class DataLoader:
     
     def __init__(self, data_dir: Optional[str] = None):
         self.data_dir = Path(data_dir) if data_dir else Path(self.DEFAULT_DATA_DIR)
+        self.market_tz = ZoneInfo("America/New_York")
+
+    def _market_timestamp_series(self, df: pd.DataFrame) -> pd.Series:
+        """Return timestamps converted to market timezone (ET)."""
+        ts = df["timestamp"]
+        if ts.dt.tz is None:
+            ts = ts.dt.tz_localize("UTC")
+        return ts.dt.tz_convert(self.market_tz)
     
     def load_csv(self, filename: str) -> pd.DataFrame:
         """Load data from CSV file."""
@@ -93,22 +102,56 @@ class DataLoader:
     ) -> pd.DataFrame:
         """Filter data to a specific trading day."""
         target_date = pd.to_datetime(date).date()
-        
-        # Filter by date
-        mask = df['timestamp'].dt.date == target_date
-        day_df = df[mask].copy()
-        
+        market_ts = self._market_timestamp_series(df)
+
+        # Filter by market date (ET)
+        date_mask = market_ts.dt.date == target_date
+
         if include_premarket:
-            # Include data from premarket start
-            time_mask = day_df['timestamp'].dt.time >= premarket_start
-        else:
-            # Only regular hours
             time_mask = (
-                (day_df['timestamp'].dt.time >= market_open) & 
-                (day_df['timestamp'].dt.time <= market_close)
+                (market_ts.dt.time >= premarket_start) &
+                (market_ts.dt.time <= market_close)
             )
-        
-        return day_df[time_mask].reset_index(drop=True)
+        else:
+            time_mask = (
+                (market_ts.dt.time >= market_open) & 
+                (market_ts.dt.time <= market_close)
+            )
+
+        final_mask = date_mask & time_mask
+        return df[final_mask].reset_index(drop=True)
+
+    def filter_trading_range(
+        self,
+        df: pd.DataFrame,
+        start_date: str,
+        end_date: str,
+        include_premarket: bool = True,
+        premarket_start: time = time(4, 0),
+        market_open: time = time(9, 30),
+        market_close: time = time(16, 0)
+    ) -> pd.DataFrame:
+        """Filter data to a date range (inclusive) and session hours."""
+        start = pd.to_datetime(start_date).date()
+        end = pd.to_datetime(end_date).date()
+        market_ts = self._market_timestamp_series(df)
+
+        # Date range filter (inclusive) in ET
+        date_mask = (market_ts.dt.date >= start) & (market_ts.dt.date <= end)
+
+        if include_premarket:
+            time_mask = (
+                (market_ts.dt.time >= premarket_start) &
+                (market_ts.dt.time <= market_close)
+            )
+        else:
+            time_mask = (
+                (market_ts.dt.time >= market_open) &
+                (market_ts.dt.time <= market_close)
+            )
+
+        final_mask = date_mask & time_mask
+        return df[final_mask].reset_index(drop=True)
     
     def get_bars_iterator(
         self, 

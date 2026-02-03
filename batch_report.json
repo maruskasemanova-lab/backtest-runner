@@ -1,0 +1,56 @@
+{
+  "ticker": "NVDA",
+  "start_date": "2026-01-22",
+  "end_date": "2026-01-28",
+  "run_timestamp": "2026-02-01T13:54:59.140855",
+  "total_days": 5,
+  "param_regime_detection_minutes": 15,
+  "total_trades": 0,
+  "total_pnl_dollars": 0.0,
+  "total_costs": 0.0,
+  "winning_trades": 0,
+  "losing_trades": 0,
+  "daily_results": [
+    {
+      "date": "2026-01-22",
+      "regime": "MIXED",
+      "strategy": "rotation",
+      "trades": 0,
+      "pnl": 0,
+      "win_rate": 0
+    },
+    {
+      "date": "2026-01-23",
+      "regime": "MIXED",
+      "strategy": "rotation",
+      "trades": 0,
+      "pnl": 0,
+      "win_rate": 0
+    },
+    {
+      "date": "2026-01-26",
+      "regime": "MIXED",
+      "strategy": "rotation",
+      "trades": 0,
+      "pnl": 0.0,
+      "win_rate": 0.0
+    },
+    {
+      "date": "2026-01-27",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl": 0.0,
+      "win_rate": 0.0
+    },
+    {
+      "date": "2026-01-28",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl": 0.0,
+      "win_rate": 0.0
+    }
+  ],
+  "errors": []
+}

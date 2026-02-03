@@ -1,0 +1,451 @@
+{
+  "run_timestamp": "2026-02-02T09:05:37.749827",
+  "config": {
+    "tickers": [
+      "NVDA",
+      "TSLA"
+    ],
+    "start_date": "2025-12-15",
+    "end_date": "2025-12-31",
+    "total_days": 13
+  },
+  "summary": {
+    "total_trades": 124,
+    "total_pnl_dollars": -2234.03,
+    "total_costs": 0.0,
+    "net_pnl": -2234.03,
+    "winning_days": 9,
+    "losing_days": 13,
+    "total_days": 26,
+    "avg_trades_per_day": 4.77,
+    "avg_pnl_per_day": -85.92
+  },
+  "by_ticker": {
+    "NVDA": {
+      "trades": 51,
+      "pnl": -46.770000000000024,
+      "costs": 0.0,
+      "days": 13
+    },
+    "TSLA": {
+      "trades": 73,
+      "pnl": -2187.26,
+      "costs": 0.0,
+      "days": 13
+    }
+  },
+  "by_regime": {
+    "MIXED": {
+      "trades": 46,
+      "pnl": -1933.5,
+      "days": 6
+    },
+    "CHOPPY": {
+      "trades": 73,
+      "pnl": -295.9900000000002,
+      "days": 13
+    },
+    "TRENDING": {
+      "trades": 5,
+      "pnl": -4.539999999999992,
+      "days": 5
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "pnl": 0.0,
+      "days": 2
+    }
+  },
+  "by_strategy": {
+    "vwap_magnet": {
+      "trades": 46,
+      "pnl": -1933.5,
+      "days": 6
+    },
+    "mean_reversion": {
+      "trades": 73,
+      "pnl": -295.9900000000002,
+      "days": 13
+    },
+    "momentum": {
+      "trades": 5,
+      "pnl": -4.539999999999992,
+      "days": 5
+    },
+    "NONE": {
+      "trades": 0,
+      "pnl": 0.0,
+      "days": 2
+    }
+  },
+  "strategy_rankings": [
+    {
+      "strategy": "MeanReversion",
+      "regime": "CHOPPY",
+      "total_trades": 73,
+      "winning_trades": 28,
+      "losing_trades": 45,
+      "win_rate": 38.36,
+      "profit_factor": 0.76,
+      "avg_win": 0.2668,
+      "avg_loss": -0.2173,
+      "avg_trade": -0.0316,
+      "expectancy": -0.0316,
+      "max_drawdown": 4.01,
+      "total_pnl_pct": -2.31,
+      "total_pnl_dollars": -295.99,
+      "total_costs": 0.0,
+      "score": 38.22
+    },
+    {
+      "strategy": "VWAPMagnet",
+      "regime": "MIXED",
+      "total_trades": 46,
+      "winning_trades": 16,
+      "losing_trades": 30,
+      "win_rate": 34.78,
+      "profit_factor": 0.72,
+      "avg_win": 0.38,
+      "avg_loss": -0.283,
+      "avg_trade": -0.0524,
+      "expectancy": -0.0524,
+      "max_drawdown": 5.27,
+      "total_pnl_pct": -2.41,
+      "total_pnl_dollars": -1933.5,
+      "total_costs": 0.0,
+      "score": 35.42
+    },
+    {
+      "strategy": "Momentum",
+      "regime": "TRENDING",
+      "total_trades": 5,
+      "winning_trades": 2,
+      "losing_trades": 3,
+      "win_rate": 40.0,
+      "profit_factor": 0.78,
+      "avg_win": 0.195,
+      "avg_loss": -0.1667,
+      "avg_trade": -0.022,
+      "expectancy": -0.022,
+      "max_drawdown": 0.39,
+      "total_pnl_pct": -0.11,
+      "total_pnl_dollars": -4.54,
+      "total_costs": 0.0,
+      "score": 25.45
+    }
+  ],
+  "regime_summaries": {
+    "TRENDING": {
+      "regime": "TRENDING",
+      "total_trades": 5,
+      "winning_trades": 2,
+      "losing_trades": 3,
+      "win_rate": 40.0,
+      "total_pnl_pct": -0.11,
+      "strategies_tested": 1,
+      "best_strategy": "Momentum"
+    },
+    "CHOPPY": {
+      "regime": "CHOPPY",
+      "total_trades": 73,
+      "winning_trades": 28,
+      "losing_trades": 45,
+      "win_rate": 38.36,
+      "total_pnl_pct": -2.31,
+      "strategies_tested": 1,
+      "best_strategy": "MeanReversion"
+    },
+    "MIXED": {
+      "regime": "MIXED",
+      "total_trades": 46,
+      "winning_trades": 16,
+      "losing_trades": 30,
+      "win_rate": 34.78,
+      "total_pnl_pct": -2.41,
+      "strategies_tested": 1,
+      "best_strategy": "VWAPMagnet"
+    }
+  },
+  "overall_stats": {
+    "total_trades": 124,
+    "winning_trades": 46,
+    "losing_trades": 78,
+    "win_rate": 37.1,
+    "total_pnl_pct": -4.83,
+    "total_pnl_dollars": -2234.03,
+    "total_costs": 0,
+    "avg_trade_pnl": -0.039,
+    "total_strategies": 3,
+    "total_regimes": 3,
+    "tickers_tested": [
+      "NVDA",
+      "TSLA"
+    ],
+    "date_range": {
+      "first": "2025-12-15",
+      "last": "2025-12-31"
+    }
+  },
+  "daily_results": [
+    {
+      "date": "2025-12-15",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "trades": 4,
+      "pnl_dollars": 257.84,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-16",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "trades": 9,
+      "pnl_dollars": 137.19,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-17",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 8,
+      "pnl_dollars": -272.89,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-18",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "momentum",
+      "trades": 2,
+      "pnl_dollars": -68.93,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-19",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 8,
+      "pnl_dollars": -65.93,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-22",
+      "ticker": "NVDA",
+      "regime": "TRENDING",
+      "strategy": "momentum",
+      "trades": 1,
+      "pnl_dollars": 44.8,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-23",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 2,
+      "pnl_dollars": -91.97,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-24",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "trades": 1,
+      "pnl_dollars": 52.72,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-25",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "costs": 0.0
+    },
+    {
+      "date": "2025-12-26",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 4,
+      "pnl_dollars": -96.49,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-29",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 4,
+      "pnl_dollars": 114.4,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-30",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 2,
+      "pnl_dollars": 9.42,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-31",
+      "ticker": "NVDA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 6,
+      "pnl_dollars": -66.93,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-15",
+      "ticker": "TSLA",
+      "regime": "TRENDING",
+      "strategy": "momentum",
+      "trades": 1,
+      "pnl_dollars": 72.31,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-16",
+      "ticker": "TSLA",
+      "regime": "TRENDING",
+      "strategy": "momentum",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-17",
+      "ticker": "TSLA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 17,
+      "pnl_dollars": -194.55,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-18",
+      "ticker": "TSLA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "trades": 12,
+      "pnl_dollars": -724.12,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-19",
+      "ticker": "TSLA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "trades": 11,
+      "pnl_dollars": -838.01,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-22",
+      "ticker": "TSLA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 7,
+      "pnl_dollars": -77.65,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-23",
+      "ticker": "TSLA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 9,
+      "pnl_dollars": 740.44,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-24",
+      "ticker": "TSLA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "trades": 9,
+      "pnl_dollars": -819.12,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-25",
+      "ticker": "TSLA",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0,
+      "costs": 0.0
+    },
+    {
+      "date": "2025-12-26",
+      "ticker": "TSLA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-29",
+      "ticker": "TSLA",
+      "regime": "TRENDING",
+      "strategy": "momentum",
+      "trades": 1,
+      "pnl_dollars": -52.72,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-30",
+      "ticker": "TSLA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 5,
+      "pnl_dollars": -313.5,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2025-12-31",
+      "ticker": "TSLA",
+      "regime": "CHOPPY",
+      "strategy": "mean_reversion",
+      "trades": 1,
+      "pnl_dollars": 19.66,
+      "pnl_pct": 0,
+      "costs": 0
+    }
+  ]
+}

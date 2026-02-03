@@ -6,9 +6,13 @@ function RunConfig({ onStart, isRunning }) {
     run_id: `backtest-${Date.now()}`,
     ticker: "",
     date: "",
+    date_from: "",
+    date_to: "",
     data_file: null, // Auto-discovered from available data
-    strategy_api_url: "http://localhost:8001",
+    strategy_api_url: `http://${window.location.hostname}:8001`,
     regime_detection_minutes: 15,
+    trailing_stop_pct: 0.3,
+    account_size_usd: 10000,
   });
 
   const [loading, setLoading] = useState(false);
@@ -31,6 +35,8 @@ function RunConfig({ onStart, isRunning }) {
               ...prev,
               ticker: defaultTicker,
               date: range?.end || new Date().toISOString().split("T")[0],
+              date_from: range?.end || new Date().toISOString().split("T")[0],
+              date_to: range?.end || new Date().toISOString().split("T")[0],
             }));
           }
         }
@@ -70,6 +76,30 @@ function RunConfig({ onStart, isRunning }) {
     setConfig((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleDateFromChange = (value) => {
+    setConfig((prev) => {
+      const nextTo = prev.date_to && value > prev.date_to ? value : prev.date_to;
+      return {
+        ...prev,
+        date_from: value,
+        date: value,
+        date_to: nextTo,
+      };
+    });
+  };
+
+  const handleDateToChange = (value) => {
+    setConfig((prev) => {
+      const nextFrom = prev.date_from && value < prev.date_from ? value : prev.date_from;
+      return {
+        ...prev,
+        date_to: value,
+        date: nextFrom || prev.date,
+        date_from: nextFrom,
+      };
+    });
+  };
+
   const handleTickerChange = (ticker) => {
     // Update date to last available date for this ticker
     const range = availableData?.date_ranges[ticker];
@@ -77,6 +107,8 @@ function RunConfig({ onStart, isRunning }) {
       ...prev,
       ticker,
       date: range?.end || prev.date,
+      date_from: range?.end || prev.date_from,
+      date_to: range?.end || prev.date_to,
     }));
   };
 
@@ -102,9 +134,23 @@ function RunConfig({ onStart, isRunning }) {
             </div>
           </div>
           <div className="form-group">
-            <label>Date</label>
+            <label>Date Range</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {config.date}
+              {config.date_from && config.date_to
+                ? `${config.date_from} → ${config.date_to}`
+                : config.date}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Account Size</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              ${Number(config.account_size_usd || 0).toLocaleString()}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Global Trailing Stop</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {config.trailing_stop_pct != null ? `${config.trailing_stop_pct}%` : "Default"}
             </div>
           </div>
         </div>
@@ -160,8 +206,8 @@ function RunConfig({ onStart, isRunning }) {
           </div>
 
           <div className="form-group">
-            <label htmlFor="date">
-              Date
+            <label htmlFor="date_from">
+              Date From
               {dateRange.min && dateRange.max && (
                 <span
                   style={{
@@ -176,12 +222,24 @@ function RunConfig({ onStart, isRunning }) {
               )}
             </label>
             <input
-              id="date"
+              id="date_from"
               type="date"
-              value={config.date}
+              value={config.date_from}
               min={dateRange.min || undefined}
               max={dateRange.max || undefined}
-              onChange={(e) => handleChange("date", e.target.value)}
+              onChange={(e) => handleDateFromChange(e.target.value)}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="date_to">Date To</label>
+            <input
+              id="date_to"
+              type="date"
+              value={config.date_to}
+              min={dateRange.min || undefined}
+              max={dateRange.max || undefined}
+              onChange={(e) => handleDateToChange(e.target.value)}
               required
             />
           </div>
@@ -192,10 +250,36 @@ function RunConfig({ onStart, isRunning }) {
               id="regime_minutes"
               type="number"
               min="5"
-              max="60"
               value={config.regime_detection_minutes}
               onChange={(e) =>
                 handleChange("regime_detection_minutes", Number(e.target.value))
+              }
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="account_size_usd">Account Size (USD)</label>
+            <input
+              id="account_size_usd"
+              type="number"
+              min="100"
+              step="100"
+              value={config.account_size_usd}
+              onChange={(e) =>
+                handleChange("account_size_usd", Number(e.target.value))
+              }
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="trailing_stop_pct">Global Trailing Stop (%)</label>
+            <input
+              id="trailing_stop_pct"
+              type="number"
+              min="0.1"
+              max="5"
+              step="0.1"
+              value={config.trailing_stop_pct ?? ""}
+              onChange={(e) =>
+                handleChange("trailing_stop_pct", Number(e.target.value))
               }
             />
           </div>
@@ -217,7 +301,7 @@ function RunConfig({ onStart, isRunning }) {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={loading || !config.ticker || !config.date}
+            disabled={loading || !config.ticker || !config.date_from || !config.date_to}
             style={{ width: "100%", marginTop: "var(--spacing-sm)" }}
           >
             {loading ? "⏳ Starting..." : "🚀 Start Backtest"}

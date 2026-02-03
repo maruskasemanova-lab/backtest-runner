@@ -20,6 +20,8 @@ class RunConfig:
     run_id: str
     ticker: str
     date: str
+    date_from: str | None = None
+    date_to: str | None = None
     strategy_api_url: str = "http://localhost:8001"
     regime_detection_minutes: int = 15
     auto_close_eod: bool = True
@@ -42,6 +44,7 @@ class SessionRunner:
         self.bars: List[Dict[str, Any]] = []
         self.is_running = False
         self.is_paused = False
+        self.last_run_speed = None  # remember requested speed for UI/resume
         self.phase = "INITIALIZED"
         self.last_response: Optional[Dict[str, Any]] = None
         self.session_summary: Optional[Dict[str, Any]] = None
@@ -86,8 +89,13 @@ class SessionRunner:
         self.current_bar_index = 0
         logger.info(f"Loaded {len(bars)} bars for session")
     
-    async def step(self) -> Dict[str, Any]:
-        """Process the next bar and return the result."""
+    async def step(self, notify: bool = True) -> Dict[str, Any]:
+        """Process the next bar and return the result.
+        
+        Args:
+            notify: Whether to notify callbacks (WebSocket) about this step. 
+                   Set to False when batch processing for performance.
+        """
         if self.current_bar_index >= len(self.bars):
             return {
                 "success": False,
@@ -101,11 +109,12 @@ class SessionRunner:
         self.current_bar_index += 1
         self.last_response = result
         
-        # Notify callbacks
-        await self._notify_bar({
-            **bar,
-            "bar_index": self.current_bar_index - 1
-        })
+        # Notify callbacks if requested
+        if notify:
+            await self._notify_bar({
+                **bar,
+                "bar_index": self.current_bar_index - 1
+            })
         
         return result
     
@@ -184,37 +193,37 @@ class SessionRunner:
         """Extract and record decision markers from API response."""
         action = response.get('action', '')
         
-        # Regime detected
-        if action == 'regime_detected' or 'regime' in response:
+        # Regime detected (allow one per day by relying on action flag)
+        if action == 'regime_detected':
             regime = response.get('regime')
-            if regime and self.phase == 'TRADING':
-                # Only add marker once when transitioning to TRADING
-                existing = [m for m in self.tracker.markers 
-                           if m.marker_type == MarkerType.REGIME_DETECTED]
-                if not existing:
-                    explanation = self._generate_regime_explanation(response)
-                    marker = self.tracker.add_regime_detected(
+            if regime:
+                explanation = self._generate_regime_explanation(response)
+                marker = self.tracker.add_regime_detected(
+                    timestamp=timestamp,
+                    bar_index=self.current_bar_index,
+                    price=bar['close'],
+                    regime=regime,
+                    explanation=explanation,
+                    indicators=response.get('indicators', {})
+                )
+                await self._notify_decision(marker.to_dict())
+
+                # Also add strategy selected marker for this day
+                strategy = (
+                    response.get('strategy')
+                    or response.get('selected_strategy')
+                    or (response.get('strategies') or [None])[0]
+                )
+                if strategy:
+                    marker = self.tracker.add_strategy_selected(
                         timestamp=timestamp,
                         bar_index=self.current_bar_index,
                         price=bar['close'],
+                        strategy=strategy,
                         regime=regime,
-                        explanation=explanation,
-                        indicators=response.get('indicators', {})
+                        reasoning=f"Selected {strategy} strategy for {regime} regime"
                     )
                     await self._notify_decision(marker.to_dict())
-                    
-                    # Also add strategy selected marker
-                    strategy = response.get('strategy')
-                    if strategy:
-                        marker = self.tracker.add_strategy_selected(
-                            timestamp=timestamp,
-                            bar_index=self.current_bar_index,
-                            price=bar['close'],
-                            strategy=strategy,
-                            regime=regime,
-                            reasoning=f"Selected {strategy} strategy for {regime} regime"
-                        )
-                        await self._notify_decision(marker.to_dict())
         
         # Signals generated
         signals = response.get('signals', [])
@@ -235,6 +244,12 @@ class SessionRunner:
         # Trades opened
         if 'position_opened' in response:
             pos = response['position_opened']
+            # Get signal details if available
+            signal_data = response.get('signal', {})
+            reasoning = pos.get('reasoning', signal_data.get('reasoning', ''))
+            confidence = pos.get('confidence', signal_data.get('confidence', 50))
+            metadata = pos.get('metadata', signal_data.get('metadata', {}))
+            
             marker = self.tracker.add_entry(
                 timestamp=timestamp,
                 bar_index=self.current_bar_index,
@@ -243,8 +258,13 @@ class SessionRunner:
                 strategy=pos.get('strategy', 'unknown'),
                 size=pos.get('size', 1.0),
                 stop_loss=pos.get('stop_loss', 0),
-                take_profit=pos.get('take_profit', 0)
+                take_profit=pos.get('take_profit', 0),
+                reasoning=reasoning,
+                confidence=confidence,
+                metadata=metadata
             )
+            # Attach regime for UI context if available
+            marker.regime = response.get('regime') or marker.regime
             await self._notify_decision(marker.to_dict())
         
         # Trades closed
@@ -257,7 +277,14 @@ class SessionRunner:
                 side=pos.get('side', 'long'),
                 reason=pos.get('exit_reason', 'unknown'),
                 pnl_pct=pos.get('pnl_pct', 0),
-                pnl_dollars=pos.get('pnl_dollars', 0)
+                pnl_dollars=pos.get('pnl_dollars', 0),
+                entry_price=pos.get('entry_price'),
+                entry_time=pos.get('entry_time'),
+                bars_held=pos.get('bars_held'),
+                size=pos.get('size'),
+                costs=pos.get('costs'),
+                gross_pnl_pct=pos.get('gross_pnl_pct'),
+                gross_pnl_dollars=pos.get('gross_pnl_pct', 0) * pos.get('entry_price', 0) * pos.get('size', 1) / 100 if pos.get('gross_pnl_pct') is not None else None
             )
             await self._notify_decision(marker.to_dict())
         
@@ -299,23 +326,52 @@ class SessionRunner:
         
         return base
     
-    async def run_all(self, speed_ms: int = 100) -> Dict[str, Any]:
-        """Run through all bars with specified delay."""
+    async def run_all(self, speed_ms: int | str = 100) -> Dict[str, Any]:
+        """Run through all bars with a simple, predictable delay per bar.
+
+        - Strings like "10hz" are converted to milliseconds (100ms for 10hz).
+        - "max"/0/None means no intentional delay (but we still yield to the loop).
+        - Always notifies every processed bar so the UI progress moves smoothly.
+        """
         self.is_running = True
         self.is_paused = False
-        
+        self.last_run_speed = speed_ms
+
+        # Normalize speed to milliseconds delay
+        delay_ms: float
+        if isinstance(speed_ms, str):
+            norm = speed_ms.strip().lower()
+            if norm.endswith("hz") and norm[:-2].isdigit():
+                hz = int(norm[:-2])
+                delay_ms = 1000.0 / hz if hz > 0 else 0
+            elif norm in {"max", "fast", "instant"}:
+                delay_ms = 0
+            else:
+                try:
+                    delay_ms = float(norm)
+                except ValueError:
+                    delay_ms = 100.0
+        else:
+            delay_ms = float(speed_ms) if speed_ms is not None else 100.0
+
+        delay_seconds = max(delay_ms, 0) / 1000.0
+        logger.info(f"Starting run_all with normalized delay {delay_seconds:.4f}s per bar (raw={speed_ms})")
+
         while self.current_bar_index < len(self.bars) and self.is_running:
             if self.is_paused:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)
                 continue
-            
-            await self.step()
-            
-            if speed_ms > 0:
-                await asyncio.sleep(speed_ms / 1000)
-        
+
+            await self.step(notify=True)
+
+            # Yield to event loop; add delay when requested
+            if delay_seconds > 0:
+                await asyncio.sleep(delay_seconds)
+            else:
+                await asyncio.sleep(0)  # cooperative yield, no throttle
+
         self.is_running = False
-        
+        logger.info("run_all completed")
         return self.get_summary()
     
     def pause(self):
@@ -336,6 +392,8 @@ class SessionRunner:
             "run_id": self.config.run_id,
             "ticker": self.config.ticker,
             "date": self.config.date,
+            "date_from": self.config.date_from,
+            "date_to": self.config.date_to,
             "current_bar_index": self.current_bar_index,
             "total_bars": len(self.bars),
             "progress_pct": (self.current_bar_index / len(self.bars) * 100) if self.bars else 0,

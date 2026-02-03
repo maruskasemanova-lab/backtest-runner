@@ -13,6 +13,16 @@ function PlaybackControls({
   const currentBar = runState?.current_bar_index || 0;
   const totalBars = runState?.total_bars || 0;
   
+  // Helper to get label for speed
+  const getSpeedLabel = (s) => {
+    if (s === 'max' || s === 0) return 'instant';
+    if (s === '10hz') return '10/sec';
+    if (s === '5hz') return '5/sec';
+    if (s === '2hz') return '2/sec';
+    if (s === '1hz') return '1/sec';
+    return `${s}ms`;
+  };
+  
   return (
     <div className="card">
       <div className="card-header">
@@ -83,21 +93,91 @@ function PlaybackControls({
           </button>
         </div>
         
-        {/* Speed Control */}
-        <div className="speed-control">
-          <label>
+        {/* Simple Speed Control */}
+        <div style={{ marginTop: '10px' }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            fontSize: '0.8rem',
+            color: 'var(--text-secondary)',
+            marginBottom: '8px'
+          }}>
             <span>Speed</span>
-            <span>{speed}ms / bar</span>
-          </label>
-          <input
-            type="range"
-            className="speed-slider"
-            min="50"
-            max="1000"
-            step="50"
-            value={speed}
-            onChange={(e) => onSpeedChange(Number(e.target.value))}
-          />
+            <span>{getSpeedLabel(speed)}</span>
+          </div>
+          
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            <button 
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.7rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                background: speed === 'max' ? 'var(--accent-blue)' : 'transparent',
+                color: speed === 'max' ? 'white' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+              onClick={() => onSpeedChange('max')}
+            >
+              MAX
+            </button>
+            <button 
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.7rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                background: speed === '10hz' ? 'var(--accent-blue)' : 'transparent',
+                color: speed === '10hz' ? 'white' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+              onClick={() => onSpeedChange('10hz')}
+            >
+              10/s
+            </button>
+            <button 
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.7rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                background: speed === '5hz' ? 'var(--accent-blue)' : 'transparent',
+                color: speed === '5hz' ? 'white' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+              onClick={() => onSpeedChange('5hz')}
+            >
+              5/s
+            </button>
+            <button 
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.7rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                background: speed === '1hz' ? 'var(--accent-blue)' : 'transparent',
+                color: speed === '1hz' ? 'white' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+              onClick={() => onSpeedChange('1hz')}
+            >
+              1/s
+            </button>
+            <button 
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.7rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                background: speed === 200 ? 'var(--accent-blue)' : 'transparent',
+                color: speed === 200 ? 'white' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+              onClick={() => onSpeedChange(200)}
+            >
+              0.2s
+            </button>
+          </div>
         </div>
       </div>
     </div>

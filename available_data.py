@@ -135,6 +135,27 @@ class DataDiscovery:
                     return str(self.data_dir / file)
         
         return None
+
+    def get_files_for_range(self, ticker: str, start_date: str, end_date: str) -> List[str]:
+        """Get all data files that overlap a date range (inclusive)."""
+        data = self.scan()
+        if ticker not in data:
+            return []
+
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        files = []
+
+        for file in data[ticker].files:
+            match = self.FILENAME_PATTERN.match(file)
+            if not match:
+                continue
+            file_start = datetime.strptime(match.group(2), "%Y-%m-%d")
+            file_end = datetime.strptime(match.group(3), "%Y-%m-%d")
+            if file_start <= end and file_end >= start:
+                files.append(str(self.data_dir / file))
+
+        return sorted(files)
     
     def to_dict(self) -> Dict[str, Any]:
         """Return all available data as a dictionary for API response."""

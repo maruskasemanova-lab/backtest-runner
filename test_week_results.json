@@ -1,0 +1,254 @@
+{
+  "test_start": "2026-01-12",
+  "test_end": "2026-01-15",
+  "tickers": {
+    "AAPL": {
+      "ticker": "AAPL",
+      "total_pnl_pct": -1.34,
+      "total_trades": 5,
+      "days": [
+        {
+          "date": "2026-01-12",
+          "pnl_pct": 0.0,
+          "trades": 0,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-13",
+          "pnl_pct": -0.61,
+          "trades": 1,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-14",
+          "pnl_pct": -0.33,
+          "trades": 3,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-15",
+          "pnl_pct": -0.4,
+          "trades": 1,
+          "strategy": "mean_reversion"
+        }
+      ]
+    },
+    "AMD": {
+      "ticker": "AMD",
+      "total_pnl_pct": -2.34,
+      "total_trades": 6,
+      "days": [
+        {
+          "date": "2026-01-12",
+          "pnl_pct": -0.18,
+          "trades": 1,
+          "strategy": "momentum"
+        },
+        {
+          "date": "2026-01-13",
+          "pnl_pct": -0.45,
+          "trades": 1,
+          "strategy": "momentum"
+        },
+        {
+          "date": "2026-01-14",
+          "pnl_pct": -0.59,
+          "trades": 1,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-15",
+          "pnl_pct": -1.12,
+          "trades": 3,
+          "strategy": "momentum"
+        }
+      ]
+    },
+    "AMZN": {
+      "ticker": "AMZN",
+      "total_pnl_pct": -1.01,
+      "total_trades": 6,
+      "days": [
+        {
+          "date": "2026-01-12",
+          "pnl_pct": 0.0,
+          "trades": 0,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-13",
+          "pnl_pct": -0.27,
+          "trades": 3,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-14",
+          "pnl_pct": -0.74,
+          "trades": 3,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-15",
+          "pnl_pct": 0.0,
+          "trades": 0,
+          "strategy": "mean_reversion"
+        }
+      ]
+    },
+    "GOOGL": {
+      "ticker": "GOOGL",
+      "total_pnl_pct": -2.02,
+      "total_trades": 4,
+      "days": [
+        {
+          "date": "2026-01-12",
+          "pnl_pct": -1.33,
+          "trades": 2,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-13",
+          "pnl_pct": 0.0,
+          "trades": 0,
+          "strategy": "momentum"
+        },
+        {
+          "date": "2026-01-14",
+          "pnl_pct": -0.68,
+          "trades": 2,
+          "strategy": "momentum"
+        },
+        {
+          "date": "2026-01-15",
+          "pnl_pct": 0.0,
+          "trades": 0,
+          "strategy": "momentum"
+        }
+      ]
+    },
+    "META": {
+      "ticker": "META",
+      "total_pnl_pct": -0.92,
+      "total_trades": 6,
+      "days": [
+        {
+          "date": "2026-01-12",
+          "pnl_pct": -0.09,
+          "trades": 3,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-13",
+          "pnl_pct": -0.26,
+          "trades": 1,
+          "strategy": "momentum"
+        },
+        {
+          "date": "2026-01-14",
+          "pnl_pct": -0.15,
+          "trades": 1,
+          "strategy": "momentum"
+        },
+        {
+          "date": "2026-01-15",
+          "pnl_pct": -0.42,
+          "trades": 1,
+          "strategy": "momentum"
+        }
+      ]
+    },
+    "MSFT": {
+      "ticker": "MSFT",
+      "total_pnl_pct": -2.09,
+      "total_trades": 8,
+      "days": [
+        {
+          "date": "2026-01-12",
+          "pnl_pct": 0.02,
+          "trades": 1,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-13",
+          "pnl_pct": -0.67,
+          "trades": 2,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-14",
+          "pnl_pct": -0.72,
+          "trades": 3,
+          "strategy": "momentum"
+        },
+        {
+          "date": "2026-01-15",
+          "pnl_pct": -0.71,
+          "trades": 2,
+          "strategy": "momentum"
+        }
+      ]
+    },
+    "NVDA": {
+      "ticker": "NVDA",
+      "total_pnl_pct": -3.79,
+      "total_trades": 12,
+      "days": [
+        {
+          "date": "2026-01-12",
+          "pnl_pct": -1.32,
+          "trades": 3,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-13",
+          "pnl_pct": -0.87,
+          "trades": 3,
+          "strategy": "pullback"
+        },
+        {
+          "date": "2026-01-14",
+          "pnl_pct": -1.23,
+          "trades": 3,
+          "strategy": "pullback"
+        },
+        {
+          "date": "2026-01-15",
+          "pnl_pct": -0.37,
+          "trades": 3,
+          "strategy": "vwap_magnet"
+        }
+      ]
+    },
+    "TSLA": {
+      "ticker": "TSLA",
+      "total_pnl_pct": -2.19,
+      "total_trades": 7,
+      "days": [
+        {
+          "date": "2026-01-12",
+          "pnl_pct": -0.5,
+          "trades": 1,
+          "strategy": "momentum"
+        },
+        {
+          "date": "2026-01-13",
+          "pnl_pct": 0.0,
+          "trades": 0,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-14",
+          "pnl_pct": -0.97,
+          "trades": 3,
+          "strategy": "mean_reversion"
+        },
+        {
+          "date": "2026-01-15",
+          "pnl_pct": -0.71,
+          "trades": 3,
+          "strategy": "mean_reversion"
+        }
+      ]
+    }
+  }
+}
