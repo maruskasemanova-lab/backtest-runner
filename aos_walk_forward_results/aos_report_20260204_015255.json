@@ -1,0 +1,651 @@
+{
+  "run_timestamp": "2026-02-04T01:52:55.705156",
+  "config_path": "aos_optimization/aos_config.json",
+  "config": {
+    "tickers": [
+      "NVDA",
+      "AAPL",
+      "AMD"
+    ],
+    "start_date": "2026-01-06",
+    "end_date": "2026-01-27",
+    "total_days": 16
+  },
+  "summary": {
+    "total_trades": 51,
+    "total_pnl_dollars": -100.02,
+    "total_costs": 0.0,
+    "net_pnl": -100.02,
+    "winning_days": 9,
+    "losing_days": 11,
+    "traded_days": 39,
+    "skipped_days": 9,
+    "avg_pnl_per_traded_day": -2.56,
+    "day_win_rate": 45.0
+  },
+  "filter_analysis": {
+    "skipped_trades": 9,
+    "skipped_pnl_if_traded": 0.0,
+    "filter_effectiveness": "NEGATIVE",
+    "rule_violations": {
+      "regime_filter": 0,
+      "day_filter": 9,
+      "no_trades": 19
+    }
+  },
+  "by_ticker": {
+    "NVDA": {
+      "trades": 36,
+      "pnl": -78.86999999999998,
+      "costs": 0.0,
+      "traded_days": 13,
+      "skipped_days": 3,
+      "winning_days": 6,
+      "losing_days": 6,
+      "win_rate": 50.0,
+      "avg_pnl_per_day": -6.066923076923075
+    },
+    "AAPL": {
+      "trades": 1,
+      "pnl": -6.98,
+      "costs": 0.0,
+      "traded_days": 13,
+      "skipped_days": 3,
+      "winning_days": 0,
+      "losing_days": 1,
+      "win_rate": 0.0,
+      "avg_pnl_per_day": -0.536923076923077
+    },
+    "AMD": {
+      "trades": 14,
+      "pnl": -14.169999999999995,
+      "costs": 0.0,
+      "traded_days": 13,
+      "skipped_days": 3,
+      "winning_days": 3,
+      "losing_days": 4,
+      "win_rate": 42.857142857142854,
+      "avg_pnl_per_day": -1.0899999999999996
+    }
+  },
+  "by_regime": {
+    "MIXED": {
+      "trades": 51,
+      "pnl": -100.01999999999998,
+      "days": 36
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "pnl": 0.0,
+      "days": 3
+    }
+  },
+  "by_strategy": {
+    "vwap_magnet": {
+      "trades": 36,
+      "pnl": -78.86999999999998,
+      "days": 13
+    },
+    "mean_reversion": {
+      "trades": 1,
+      "pnl": -6.98,
+      "days": 13
+    },
+    "momentum": {
+      "trades": 14,
+      "pnl": -14.169999999999995,
+      "days": 13
+    }
+  },
+  "overall_stats": {
+    "total_trades": 51,
+    "winning_trades": 21,
+    "losing_trades": 30,
+    "win_rate": 41.18,
+    "total_pnl_pct": -0.97,
+    "total_pnl_dollars": -100.02,
+    "total_costs": 0,
+    "avg_trade_pnl": -0.019,
+    "total_strategies": 2,
+    "total_regimes": 1,
+    "tickers_tested": [
+      "AMD",
+      "NVDA",
+      "AAPL"
+    ],
+    "date_range": {
+      "first": "2026-01-06",
+      "last": "2026-01-27"
+    }
+  },
+  "daily_results": [
+    {
+      "date": "2026-01-06",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": -60.07,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-07",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": 56.57,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-08",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": -25.6,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-09",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": "vwap_magnet",
+      "should_trade": false,
+      "skip_reason": "Global avoid day: Friday",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-12",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": -19.16,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-13",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": 23.58,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-14",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": 39.33,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-15",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": 35.05,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-16",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": "vwap_magnet",
+      "should_trade": false,
+      "skip_reason": "Global avoid day: Friday",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-19",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-20",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": 6.85,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-21",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": -87.22,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-22",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": 76.24,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-23",
+      "ticker": "NVDA",
+      "regime": null,
+      "strategy": "vwap_magnet",
+      "should_trade": false,
+      "skip_reason": "Global avoid day: Friday",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-26",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": -24.06,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-27",
+      "ticker": "NVDA",
+      "regime": "MIXED",
+      "strategy": "vwap_magnet",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": -100.38,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-06",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-07",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-08",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-09",
+      "ticker": "AAPL",
+      "regime": null,
+      "strategy": "mean_reversion",
+      "should_trade": false,
+      "skip_reason": "Global avoid day: Friday",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-12",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-13",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-14",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-15",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-16",
+      "ticker": "AAPL",
+      "regime": null,
+      "strategy": "mean_reversion",
+      "should_trade": false,
+      "skip_reason": "Global avoid day: Friday",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-19",
+      "ticker": "AAPL",
+      "regime": null,
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-20",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-21",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-22",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-23",
+      "ticker": "AAPL",
+      "regime": null,
+      "strategy": "mean_reversion",
+      "should_trade": false,
+      "skip_reason": "Global avoid day: Friday",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-26",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 1,
+      "pnl_dollars": -6.98,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-27",
+      "ticker": "AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-06",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-07",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-08",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-09",
+      "ticker": "AMD",
+      "regime": null,
+      "strategy": "momentum",
+      "should_trade": false,
+      "skip_reason": "Global avoid day: Friday",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-12",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 1,
+      "pnl_dollars": -6.01,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-13",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-14",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 1,
+      "pnl_dollars": -28.97,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-15",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": 33.25,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-16",
+      "ticker": "AMD",
+      "regime": null,
+      "strategy": "momentum",
+      "should_trade": false,
+      "skip_reason": "Global avoid day: Friday",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-19",
+      "ticker": "AMD",
+      "regime": null,
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-20",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": 14.39,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-21",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 3,
+      "pnl_dollars": -7.11,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-22",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 2,
+      "pnl_dollars": -23.77,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-23",
+      "ticker": "AMD",
+      "regime": null,
+      "strategy": "momentum",
+      "should_trade": false,
+      "skip_reason": "Global avoid day: Friday",
+      "trades": 0,
+      "pnl_dollars": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "date": "2026-01-26",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 1,
+      "pnl_dollars": 4.05,
+      "pnl_pct": 0
+    },
+    {
+      "date": "2026-01-27",
+      "ticker": "AMD",
+      "regime": "MIXED",
+      "strategy": "momentum",
+      "should_trade": true,
+      "skip_reason": "",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0
+    }
+  ]
+}

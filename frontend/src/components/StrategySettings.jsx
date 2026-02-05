@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 
-function StrategySettings({ apiUrl }) {
+function StrategySettings({ apiUrl, selectedTicker }) {
   const [strategies, setStrategies] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [drafts, setDrafts] = useState({});
   const [overrideUrl, setOverrideUrl] = useState("");
+  const [tickerPresets, setTickerPresets] = useState({});
+  const [presetsLoaded, setPresetsLoaded] = useState(false);
 
   const resolvedUrl =
     overrideUrl.trim() ||
@@ -43,24 +45,42 @@ function StrategySettings({ apiUrl }) {
     () => ({
       mean_reversion: {
         entry_deviation_pct: 0.3,
-        atr_stop_mult: 2.0,
         min_confidence: 60.0,
+        volume_confirmation: true,
+        volume_lookback: 20,
+        volume_exhaustion_ratio: 0.9,
+        volume_stop_pct: 0.6,
         trailing_stop_pct: 0.3,
         allowed_regimes: ["CHOPPY", "MIXED"],
       },
       momentum: {
         consolidation_bars: 10,
-        breakout_atr_mult: 0.3,
         volume_threshold: 1.5,
-        atr_stop_mult: 2.0,
+        volume_lookback: 20,
+        consolidation_range_pct: 0.6,
+        breakout_pct: 0.15,
+        volume_stop_pct: 0.8,
         rr_ratio: 2.5,
         trailing_stop_pct: 1.5,
+        allowed_regimes: ["TRENDING"],
+      },
+      pullback: {
+        pullback_threshold_pct: 0.5,
+        ma_fast_period: 50,
+        ma_slow_period: 100,
+        volume_lookback: 20,
+        volume_surge_ratio: 1.2,
+        volume_stop_pct: 1.0,
+        rr_ratio: 1.5,
+        trailing_stop_pct: 1.0,
         allowed_regimes: ["TRENDING"],
       },
       rotation: {
         lookback_period: 10,
         rotation_threshold: 0.5,
-        atr_stop_mult: 3.0,
+        volume_lookback: 10,
+        volume_increase_ratio: 1.05,
+        volume_stop_pct: 0.9,
         trailing_stop_pct: 1.0,
         allowed_regimes: ["MIXED", "CHOPPY"],
       },
@@ -69,13 +89,67 @@ function StrategySettings({ apiUrl }) {
         max_distance_pct: 3.0,
         bars_since_vwap_threshold: 5,
         volume_confirm: true,
-        atr_stop_mult: 2.0,
+        volume_lookback: 20,
+        volume_stop_pct: 0.7,
         trailing_stop_pct: 0.4,
         allowed_regimes: ["TRENDING", "CHOPPY", "MIXED"],
       },
     }),
     []
   );
+
+  // Fetch all ticker presets on mount
+  useEffect(() => {
+    const fetchPresets = async () => {
+      try {
+        const resp = await fetch(`http://${window.location.hostname}:8002/api/strategy-overrides`);
+        if (resp.ok) {
+          const data = await resp.json();
+          setTickerPresets(data);
+          setPresetsLoaded(true);
+        }
+      } catch (err) {
+        console.error("Failed to load ticker presets:", err);
+      }
+    };
+    fetchPresets();
+  }, []);
+
+  // Apply ticker-specific presets when ticker changes
+  const applyTickerPresets = useCallback(async (ticker) => {
+    if (!ticker || !presetsLoaded) return;
+    
+    const presets = tickerPresets[ticker];
+    if (!presets) return;
+    
+    console.log(`Applying presets for ${ticker}:`, presets);
+    
+    for (const [stratName, params] of Object.entries(presets)) {
+      try {
+        const resp = await fetch(`${resolvedUrl}/api/strategies/update`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ strategy_name: stratName, params }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setStrategies((prev) =>
+            prev ? { ...prev, [stratName]: data.current } : prev
+          );
+          setDrafts((prev) => ({ ...prev, [stratName]: data.current }));
+        }
+      } catch (err) {
+        console.error(`Failed to apply preset for ${stratName}:`, err);
+      }
+    }
+  }, [resolvedUrl, presetsLoaded, tickerPresets]);
+
+  // Watch for ticker changes and apply presets
+  useEffect(() => {
+    if (selectedTicker && presetsLoaded) {
+      applyTickerPresets(selectedTicker);
+    }
+  }, [selectedTicker, presetsLoaded, applyTickerPresets]);
 
   useEffect(() => {
     fetchStrategies();

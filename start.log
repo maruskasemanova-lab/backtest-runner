@@ -2130,9 +2130,8 @@ INFO:     127.0.0.1:62040 - "POST /api/run/wf-NVDA-2026-01-23-1770025938/NVDA/20
 INFO:     127.0.0.1:62115 - "POST /api/session/bar HTTP/1.1" 200 OK
 INFO:     127.0.0.1:62040 - "POST /api/run/wf-NVDA-2026-01-23-1770025938/NVDA/2026-01-23/step HTTP/1.1" 200 OK
 INFO:     127.0.0.1:62117 - "POST /api/session/bar HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62040 - "POST /api/run/wf-NVDA-2026-01-23-1770025938/NVDA/2026-01-23/step HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62119 - "POST /api/session/bar HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62040 - "POST /api/run/wf-NVDA-2026-01-23-1770025938/NVDA/2026-01-23/step HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62040 - "POST /api/run/wf-NVDA-2026-01-23-1./start_all.sh: line 47: 85738 Killed: 9               python -m uvicorn api_server:app --port 8002  (wd: ~/.gemini/antigravity/scratch/backtest-runner)
+i/run/wf-NVDA-2026-01-23-1770025938/NVDA/2026-01-23/step HTTP/1.1" 200 OK
 INFO:     127.0.0.1:62121 - "POST /api/session/bar HTTP/1.1" 200 OK
 INFO:     127.0.0.1:62040 - "POST /api/run/wf-NVDA-2026-01-23-1770025938/NVDA/2026-01-23/step HTTP/1.1" 200 OK
 INFO:     127.0.0.1:62123 - "POST /api/session/bar HTTP/1.1" 200 OK
@@ -16127,3 +16126,4 @@ AggregateError [ECONNREFUSED]:
 1:36:42 PM [vite] hmr update /src/App.jsx
 1:45:45 PM [vite] hmr update /src/components/SessionSummary.jsx
 1:54:07 PM [vite] hmr update /src/components/RunConfig.jsx
+2:55:37 PM [vite] hmr update /src/components/StrategySettings.jsx

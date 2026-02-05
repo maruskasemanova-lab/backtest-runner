@@ -5,7 +5,7 @@ Orchestrates the look-ahead free data feeding and strategy evaluation.
 import asyncio
 import json
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +45,7 @@ data_loader = DataLoader()
 active_runners: Dict[str, SessionRunner] = {}
 connected_clients: List[WebSocket] = []
 STRATEGY_OVERRIDES_PATH = Path(__file__).parent / "strategy_overrides.json"
+AOS_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "aos_config.json"
 
 
 def _load_strategy_overrides() -> Dict[str, Any]:
@@ -54,6 +55,27 @@ def _load_strategy_overrides() -> Dict[str, Any]:
         return json.loads(STRATEGY_OVERRIDES_PATH.read_text())
     except Exception:
         return {}
+
+
+def _load_aos_config() -> Dict[str, Any]:
+    """Load AOS optimization config from JSON file."""
+    if not AOS_CONFIG_PATH.exists():
+        return {"version": "1.0.0", "tickers": {}}
+    try:
+        return json.loads(AOS_CONFIG_PATH.read_text())
+    except Exception:
+        return {"version": "1.0.0", "tickers": {}}
+
+
+def _save_aos_config(config: Dict[str, Any]) -> bool:
+    """Save AOS optimization config to JSON file."""
+    try:
+        AOS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        AOS_CONFIG_PATH.write_text(json.dumps(config, indent=2))
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save AOS config: {e}")
+        return False
 
 
 async def _apply_strategy_overrides(strategy_api_url: str, ticker: str) -> None:
@@ -104,6 +126,44 @@ async def _apply_global_trailing(strategy_api_url: str, trailing_stop_pct: Optio
         logger.warning(f"Global trailing update failed: {e}")
 
 
+async def _apply_aos_optimizations(strategy_api_url: str, ticker: str) -> Dict[str, Any]:
+    """Apply AOS optimizations (time filter, long_only, params) to strategy API."""
+    aos_config = _load_aos_config()
+    ticker_config = aos_config.get("tickers", {}).get(ticker.upper(), {})
+    
+    if not ticker_config:
+        return {}
+    
+    applied = {}
+    
+    # Get the strategy name from AOS config
+    strategy_name = ticker_config.get("strategy")
+    params = ticker_config.get("params", {})
+    
+    if strategy_name and params:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{strategy_api_url}/api/strategies/update",
+                    json={"strategy_name": strategy_name, "params": params},
+                ) as resp:
+                    if resp.status == 200:
+                        applied["strategy"] = strategy_name
+                        applied["params"] = params
+                        logger.info(f"Applied AOS params for {ticker}: {params}")
+                    else:
+                        logger.warning(f"AOS update failed for {ticker}:{strategy_name} (HTTP {resp.status})")
+        except Exception as e:
+            logger.warning(f"AOS update error for {ticker}: {e}")
+    
+    # Store time and directional filters for session to use
+    applied["trading_hours"] = ticker_config.get("trading_hours")
+    applied["long_only"] = ticker_config.get("long_only", False)
+    applied["time_filter_enabled"] = ticker_config.get("time_filter_enabled", False)
+    
+    return applied
+
+
 async def _configure_session(
     strategy_api_url: str,
     run_id: str,
@@ -149,7 +209,7 @@ class StartRunRequest(BaseModel):
 
 class PlayRequest(BaseModel):
     # Accept strings like "max" / "10hz" as well as raw millisecond values.
-    speed_ms: int | str | None = 100
+    speed_ms: Optional[Union[int, str]] = 100
 
 
 # ============ WebSocket Management ============
@@ -225,10 +285,64 @@ async def get_available_data():
     return discovery.to_dict()
 
 
+@app.get("/api/strategy-overrides")
+async def get_strategy_overrides():
+    """Get optimized strategy parameters per ticker."""
+    return _load_strategy_overrides()
+
+
+@app.get("/api/strategy-overrides/{ticker}")
+async def get_ticker_overrides(ticker: str):
+    """Get optimized strategy parameters for a specific ticker."""
+    overrides = _load_strategy_overrides()
+    return overrides.get(ticker.upper(), {})
+
+
 @app.get("/api/data/files")
 async def list_data_files():
     """List available data files."""
     return data_loader.list_available_files()
+
+
+@app.get("/api/aos-config")
+async def get_aos_config():
+    """Get full AOS optimization config."""
+    return _load_aos_config()
+
+
+@app.get("/api/aos-config/{ticker}")
+async def get_ticker_aos_config(ticker: str):
+    """Get AOS config for a specific ticker."""
+    config = _load_aos_config()
+    ticker_config = config.get("tickers", {}).get(ticker.upper(), {})
+    return ticker_config
+
+
+class AOSUpdateRequest(BaseModel):
+    ticker: str
+    config: Dict[str, Any]
+
+
+@app.post("/api/aos-config/update")
+async def update_aos_config(request: AOSUpdateRequest):
+    """Update AOS config for a specific ticker."""
+    config = _load_aos_config()
+    
+    if "tickers" not in config:
+        config["tickers"] = {}
+    
+    # Merge with existing config
+    ticker_upper = request.ticker.upper()
+    existing = config["tickers"].get(ticker_upper, {})
+    existing.update(request.config)
+    config["tickers"][ticker_upper] = existing
+    
+    # Save
+    if _save_aos_config(config):
+        logger.info(f"Updated AOS config for {ticker_upper}: {request.config}")
+        return {"success": True, "config": existing}
+    else:
+        raise HTTPException(500, "Failed to save AOS config")
 
 
 @app.post("/api/run/start")
@@ -267,6 +381,8 @@ async def start_run(request: StartRunRequest):
 
     # Apply per-ticker strategy overrides (best-effort)
     await _apply_strategy_overrides(request.strategy_api_url, request.ticker)
+    # Apply AOS optimizations (time filter, long_only, params)
+    aos_applied = await _apply_aos_optimizations(request.strategy_api_url, request.ticker)
     # Apply global trailing (best-effort, overrides per-ticker trailing)
     await _apply_global_trailing(request.strategy_api_url, request.trailing_stop_pct)
     
@@ -395,8 +511,8 @@ async def play_run(
     run_id: str,
     ticker: str,
     date: str,
-    request: PlayRequest | None = Body(default=None),
-    speed_ms: int | str | None = None,
+    request: Optional[PlayRequest] = Body(default=None),
+    speed_ms: Optional[Union[int, str]] = None,
     raw_request: Request = None,
 ):
     """Start or resume auto-advancing through bars.

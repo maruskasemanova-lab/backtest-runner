@@ -6,6 +6,7 @@ import DecisionPanel from './components/DecisionPanel';
 import SessionSummary from './components/SessionSummary';
 import RunConfig from './components/RunConfig';
 import StrategySettings from './components/StrategySettings';
+import AOSOptimizations from './components/AOSOptimizations';
 
 function App() {
   // Run state
@@ -18,7 +19,9 @@ function App() {
   const [markers, setMarkers] = useState([]);
   const [selectedMarker, setSelectedMarker] = useState(null);
   const [currentBar, setCurrentBar] = useState(null);
+  const [selectedTicker, setSelectedTicker] = useState(null);
   const [strategyApiUrl, setStrategyApiUrl] = useState("http://localhost:8001");
+  const [aosOptimizations, setAosOptimizations] = useState({});
   
   // Playback
   const [isPlaying, setIsPlaying] = useState(false);
@@ -286,10 +289,20 @@ function App() {
           <RunConfig 
             onStart={handleStartRun} 
             isRunning={!!runKey}
+            onTickerChange={setSelectedTicker}
           />
 
           {/* Strategy Settings */}
-          <StrategySettings apiUrl={strategyApiUrl} />
+          <StrategySettings apiUrl={strategyApiUrl} selectedTicker={selectedTicker} />
+
+          {/* AOS Optimizations */}
+          <AOSOptimizations 
+            apiUrl={strategyApiUrl}
+            selectedTicker={selectedTicker}
+            onOptimizationChange={(ticker, config) => {
+              setAosOptimizations(prev => ({...prev, [ticker]: config}));
+            }}
+          />
           
           {/* Playback Controls */}
           {runKey && (

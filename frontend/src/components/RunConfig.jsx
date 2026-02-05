@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-function RunConfig({ onStart, isRunning }) {
+function RunConfig({ onStart, isRunning, onTickerChange }) {
   const [availableData, setAvailableData] = useState(null);
   const [config, setConfig] = useState({
     run_id: `backtest-${Date.now()}`,
@@ -110,6 +110,10 @@ function RunConfig({ onStart, isRunning }) {
       date_from: range?.end || prev.date_from,
       date_to: range?.end || prev.date_to,
     }));
+    // Notify parent about ticker change for strategy preset application
+    if (onTickerChange) {
+      onTickerChange(ticker);
+    }
   };
 
   const dateRange = getDateRange();

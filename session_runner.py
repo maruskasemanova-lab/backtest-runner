@@ -20,8 +20,8 @@ class RunConfig:
     run_id: str
     ticker: str
     date: str
-    date_from: str | None = None
-    date_to: str | None = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
     strategy_api_url: str = "http://localhost:8001"
     regime_detection_minutes: int = 15
     auto_close_eod: bool = True
@@ -326,7 +326,7 @@ class SessionRunner:
         
         return base
     
-    async def run_all(self, speed_ms: int | str = 100) -> Dict[str, Any]:
+    async def run_all(self, speed_ms = 100) -> Dict[str, Any]:
         """Run through all bars with a simple, predictable delay per bar.
 
         - Strings like "10hz" are converted to milliseconds (100ms for 10hz).

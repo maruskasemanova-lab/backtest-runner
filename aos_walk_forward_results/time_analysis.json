@@ -1,0 +1,114 @@
+{
+  "by_time_period": {
+    "LATE_PM": {
+      "trades": 24,
+      "winners": 10,
+      "losers": 14,
+      "win_rate": 41.7,
+      "total_pnl": -84.09,
+      "avg_pnl": -3.5,
+      "best_trade": 101.91,
+      "worst_trade": -42.01
+    },
+    "CLOSE": {
+      "trades": 14,
+      "winners": 5,
+      "losers": 9,
+      "win_rate": 35.7,
+      "total_pnl": -35.55,
+      "avg_pnl": -2.54,
+      "best_trade": 49.85,
+      "worst_trade": -42.41
+    }
+  },
+  "by_ticker_and_time": {
+    "NVDA": {
+      "LATE_PM": {
+        "trades": 24,
+        "winners": 10,
+        "losers": 14,
+        "win_rate": 41.7,
+        "total_pnl": -84.09,
+        "avg_pnl": -3.5,
+        "best_trade": 101.91,
+        "worst_trade": -42.01
+      },
+      "CLOSE": {
+        "trades": 12,
+        "winners": 5,
+        "losers": 7,
+        "win_rate": 41.7,
+        "total_pnl": 5.22,
+        "avg_pnl": 0.44,
+        "best_trade": 49.85,
+        "worst_trade": -42.41
+      }
+    },
+    "AAPL": {
+      "CLOSE": {
+        "trades": 1,
+        "winners": 0,
+        "losers": 1,
+        "win_rate": 0.0,
+        "total_pnl": -6.98,
+        "avg_pnl": -6.98,
+        "best_trade": -6.98,
+        "worst_trade": -6.98
+      }
+    },
+    "GOOGL": {
+      "CLOSE": {
+        "trades": 1,
+        "winners": 0,
+        "losers": 1,
+        "win_rate": 0.0,
+        "total_pnl": -33.79,
+        "avg_pnl": -33.79,
+        "best_trade": -33.79,
+        "worst_trade": -33.79
+      }
+    }
+  },
+  "short_trends": {
+    "consecutive_patterns": {
+      "loss_then_loss": 8,
+      "loss_then_win": 7,
+      "win_then_win": 3,
+      "win_then_loss": 6
+    },
+    "first_trade_analysis": {
+      "first_loss": {
+        "count": 7,
+        "subsequent_pnl": 48.06000000000002,
+        "subsequent_avg": 6.87
+      },
+      "first_win": {
+        "count": 5,
+        "subsequent_pnl": -56.719999999999985,
+        "subsequent_avg": -11.34
+      }
+    },
+    "momentum_continuation": {}
+  },
+  "optimal_time_windows": {
+    "best_hour": 15,
+    "worst_hour": 14,
+    "profitable_hours": [
+      15
+    ],
+    "losing_hours": [
+      14,
+      16,
+      17
+    ],
+    "morning_pnl": 0,
+    "afternoon_pnl": -66.22,
+    "recommended_session": "MORNING",
+    "hourly_breakdown": {
+      "14": -158.87,
+      "15": 92.65,
+      "16": -11.01,
+      "17": -42.41
+    }
+  }
+}

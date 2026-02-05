@@ -1,0 +1,199 @@
+{
+  "version": "1.1.0",
+  "created_at": "2026-02-04T02:00:00",
+  "description": "AOS Configuration - Optimized based on Walk-Forward Testing Results",
+  
+  "global_settings": {
+    "regime_detection_minutes": 30,
+    "max_daily_loss_pct": 3.0,
+    "trading_start_time": "09:45",
+    "trading_end_time": "15:55",
+    "avoid_days": ["Friday"],
+    "min_bars_for_signal": 30
+  },
+  
+  "strategies": {
+    "enabled": [
+      "mean_reversion",
+      "momentum",
+      "pullback",
+      "vwap_magnet",
+      "volume_profile",
+      "gap_liquidity"
+    ],
+    "disabled": ["rotation"]
+  },
+  
+  "tickers": {
+    "NVDA": {
+      "strategy": "vwap_magnet",
+      "params": {
+        "min_distance_pct": 0.2,
+        "max_distance_pct": 1.0,
+        "volume_stop_pct": 1.5,
+        "trailing_stop_pct": 2.0,
+        "rr_ratio": 3.0,
+        "min_confidence": 55.0,
+        "long_only": true
+      },
+      "backup_strategy": "volume_profile",
+      "regime_filter": ["TRENDING", "MIXED"],
+      "avoid_days": ["Friday"],
+      "trading_hours": [15],
+      "min_confidence": 55.0,
+      "max_daily_trades": 3,
+      "notes": "LONG ONLY (shorts lose $233) | Time: 15:00 | Trail: 2.0%"
+    },
+    
+    "TSLA": {
+      "strategy": "momentum",
+      "params": {
+        "volume_threshold": 2.0,
+        "breakout_pct": 0.25,
+        "volume_stop_pct": 2.0,
+        "trailing_stop_pct": 1.5
+      },
+      "backup_strategy": "gap_liquidity",
+      "regime_filter": ["TRENDING"],
+      "avoid_days": ["Friday"],
+      "min_confidence": 70.0,
+      "max_daily_trades": 2,
+      "notes": "Only trade strong trends, high confidence required"
+    },
+    
+    "AAPL": {
+      "strategy": "vwap_magnet",
+      "params": {
+        "min_distance_pct": 0.15,
+        "max_distance_pct": 0.8,
+        "volume_stop_pct": 0.8,
+        "trailing_stop_pct": 0.6,
+        "min_confidence": 55.0
+      },
+      "backup_strategy": "mean_reversion",
+      "regime_filter": ["TRENDING", "MIXED", "CHOPPY"],
+      "avoid_days": [],
+      "min_confidence": 55.0,
+      "max_daily_trades": 4,
+      "notes": "Low volatility, tighter params OK"
+    },
+    
+    "AMD": {
+      "strategy": "momentum",
+      "params": {
+        "volume_threshold": 1.8,
+        "breakout_pct": 0.2,
+        "volume_stop_pct": 1.5,
+        "trailing_stop_pct": 1.2
+      },
+      "backup_strategy": "volume_profile",
+      "regime_filter": ["TRENDING", "MIXED"],
+      "avoid_days": ["Friday"],
+      "min_confidence": 60.0,
+      "max_daily_trades": 3
+    },
+    
+    "GOOGL": {
+      "strategy": "mean_reversion",
+      "params": {
+        "entry_deviation_pct": 0.8,
+        "volume_stop_pct": 0.8,
+        "trailing_stop_pct": 0.5,
+        "min_confidence": 60.0
+      },
+      "backup_strategy": "vwap_magnet",
+      "regime_filter": ["MIXED", "CHOPPY"],
+      "avoid_days": [],
+      "min_confidence": 55.0,
+      "max_daily_trades": 3,
+      "notes": "Low volatility, mean reversion works well"
+    },
+    
+    "META": {
+      "strategy": "pullback",
+      "params": {
+        "pullback_threshold_pct": 0.25,
+        "volume_surge_ratio": 1.4,
+        "volume_stop_pct": 1.2,
+        "rr_ratio": 2.0,
+        "trailing_stop_pct": 0.8
+      },
+      "backup_strategy": "vwap_magnet",
+      "regime_filter": ["TRENDING", "MIXED"],
+      "avoid_days": [],
+      "min_confidence": 60.0,
+      "max_daily_trades": 3
+    },
+    
+    "MSFT": {
+      "strategy": "mean_reversion",
+      "params": {
+        "entry_deviation_pct": 0.8,
+        "volume_stop_pct": 0.8,
+        "trailing_stop_pct": 0.5,
+        "min_confidence": 60.0
+      },
+      "backup_strategy": "vwap_magnet",
+      "regime_filter": ["MIXED", "CHOPPY"],
+      "avoid_days": [],
+      "min_confidence": 55.0,
+      "max_daily_trades": 3,
+      "notes": "Low volatility, similar to GOOGL"
+    },
+    
+    "MU": {
+      "strategy": "momentum",
+      "params": {
+        "volume_threshold": 2.0,
+        "breakout_pct": 0.25,
+        "volume_stop_pct": 1.8,
+        "trailing_stop_pct": 1.5
+      },
+      "backup_strategy": "gap_liquidity",
+      "regime_filter": ["TRENDING"],
+      "avoid_days": ["Friday"],
+      "min_confidence": 65.0,
+      "max_daily_trades": 2,
+      "notes": "High volatility, only clear trends"
+    },
+    
+    "AMZN": {
+      "strategy": "pullback",
+      "params": {
+        "pullback_threshold_pct": 0.25,
+        "volume_surge_ratio": 1.4,
+        "volume_stop_pct": 1.2,
+        "rr_ratio": 2.0,
+        "trailing_stop_pct": 0.8
+      },
+      "backup_strategy": "mean_reversion",
+      "regime_filter": ["TRENDING", "MIXED"],
+      "avoid_days": [],
+      "min_confidence": 55.0,
+      "max_daily_trades": 3
+    }
+  },
+  
+  "risk_management": {
+    "max_position_size_pct": 10.0,
+    "max_daily_trades_total": 6,
+    "stop_loss_atr_mult": 2.5,
+    "take_profit_atr_mult": 5.0,
+    "trailing_stop_activation_pct": 0.5,
+    "min_risk_reward_ratio": 1.5
+  },
+  
+  "optimization_history": [
+    {
+      "date": "2026-02-04",
+      "changes": [
+        "Increased trailing_stop_pct for NVDA from 0.6 to 1.0",
+        "Changed AAPL from mean_reversion to vwap_magnet",
+        "Added CHOPPY regime for low-volatility tickers (AAPL, GOOGL, MSFT)",
+        "Widened stops across all strategies"
+      ],
+      "results_before": "-$135 total, 33% win rate",
+      "results_after": "Pending validation"
+    }
+  ]
+}

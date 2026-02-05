@@ -1,0 +1,139 @@
+{
+  "run_timestamp": "2026-02-03T16:55:59.322321",
+  "config": {
+    "tickers": [
+      "NVDA,AAPL"
+    ],
+    "start_date": "2026-01-20",
+    "end_date": "2026-01-27",
+    "total_days": 6
+  },
+  "summary": {
+    "total_trades": 0,
+    "total_pnl_dollars": 0,
+    "total_costs": 0,
+    "net_pnl": 0,
+    "winning_days": 0,
+    "losing_days": 0,
+    "total_days": 6,
+    "avg_trades_per_day": 0.0,
+    "avg_pnl_per_day": 0.0
+  },
+  "by_ticker": {
+    "NVDA,AAPL": {
+      "trades": 0,
+      "pnl": 0,
+      "costs": 0,
+      "days": 6
+    }
+  },
+  "by_regime": {
+    "MIXED": {
+      "trades": 0,
+      "pnl": 0,
+      "days": 5
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "pnl": 0,
+      "days": 1
+    }
+  },
+  "by_strategy": {
+    "mean_reversion": {
+      "trades": 0,
+      "pnl": 0,
+      "days": 5
+    },
+    "NONE": {
+      "trades": 0,
+      "pnl": 0,
+      "days": 1
+    }
+  },
+  "strategy_rankings": [],
+  "regime_summaries": {
+    "TRENDING": {
+      "regime": "TRENDING",
+      "total_trades": 0,
+      "strategies_tested": 0
+    },
+    "CHOPPY": {
+      "regime": "CHOPPY",
+      "total_trades": 0,
+      "strategies_tested": 0
+    },
+    "MIXED": {
+      "regime": "MIXED",
+      "total_trades": 0,
+      "strategies_tested": 0
+    }
+  },
+  "overall_stats": {
+    "total_trades": 0,
+    "total_strategies": 0,
+    "total_regimes": 0
+  },
+  "daily_results": [
+    {
+      "date": "2026-01-20",
+      "ticker": "NVDA,AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-21",
+      "ticker": "NVDA,AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-22",
+      "ticker": "NVDA,AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-23",
+      "ticker": "NVDA,AAPL",
+      "regime": null,
+      "strategy": null,
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-26",
+      "ticker": "NVDA,AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    },
+    {
+      "date": "2026-01-27",
+      "ticker": "NVDA,AAPL",
+      "regime": "MIXED",
+      "strategy": "mean_reversion",
+      "trades": 0,
+      "pnl_dollars": 0,
+      "pnl_pct": 0,
+      "costs": 0
+    }
+  ]
+}
