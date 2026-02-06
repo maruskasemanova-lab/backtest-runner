@@ -145,6 +145,18 @@ class SessionRunner:
             "volume": bar['volume'],
             "vwap": bar.get('vwap')
         }
+        for l2_key in (
+            "l2_delta",
+            "l2_buy_volume",
+            "l2_sell_volume",
+            "l2_volume",
+            "l2_imbalance",
+            "l2_iceberg_buy_count",
+            "l2_iceberg_sell_count",
+            "l2_iceberg_bias",
+        ):
+            if l2_key in bar:
+                payload[l2_key] = bar.get(l2_key)
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -224,7 +236,66 @@ class SessionRunner:
                         reasoning=f"Selected {strategy} strategy for {regime} regime"
                     )
                     await self._notify_decision(marker.to_dict())
+
+        # Intraday regime refresh (dynamic reclassification).
+        regime_update = response.get('regime_update')
+        if isinstance(regime_update, dict):
+            regime = regime_update.get('regime') or response.get('regime')
+            if regime:
+                update_payload = {
+                    **response,
+                    "regime": regime,
+                    "indicators": response.get("indicators", {}),
+                }
+                explanation = f"Intraday refresh: {self._generate_regime_explanation(update_payload)}"
+                marker = self.tracker.add_regime_detected(
+                    timestamp=timestamp,
+                    bar_index=self.current_bar_index,
+                    price=bar['close'],
+                    regime=regime,
+                    explanation=explanation,
+                    indicators=response.get('indicators', {})
+                )
+                await self._notify_decision(marker.to_dict())
+
+            strategy = (
+                regime_update.get('strategy')
+                or response.get('strategy')
+                or response.get('selected_strategy')
+            )
+            if strategy and regime:
+                marker = self.tracker.add_strategy_selected(
+                    timestamp=timestamp,
+                    bar_index=self.current_bar_index,
+                    price=bar['close'],
+                    strategy=strategy,
+                    regime=regime,
+                    reasoning=f"Updated {strategy} after intraday regime refresh"
+                )
+                await self._notify_decision(marker.to_dict())
         
+        # Candlestick patterns detected (Layer 1)
+        patterns = response.get('patterns_detected', [])
+        layer_scores = response.get('layer_scores')
+        if patterns:
+            # Determine dominant direction
+            bullish = [p for p in patterns if p.get('direction') == 'bullish']
+            bearish = [p for p in patterns if p.get('direction') == 'bearish']
+            if len(bullish) >= len(bearish):
+                direction = 'bullish' if bullish else 'neutral'
+            else:
+                direction = 'bearish'
+
+            marker = self.tracker.add_pattern_detected(
+                timestamp=timestamp,
+                bar_index=self.current_bar_index,
+                price=bar['close'],
+                patterns=patterns,
+                direction=direction,
+                layer_scores=layer_scores,
+            )
+            await self._notify_decision(marker.to_dict())
+
         # Signals generated
         signals = response.get('signals', [])
         for signal in signals:
@@ -245,7 +316,9 @@ class SessionRunner:
         if 'position_opened' in response:
             pos = response['position_opened']
             # Get signal details if available
-            signal_data = response.get('signal', {})
+            signal_data = response.get('signal') or {}
+            if not isinstance(signal_data, dict):
+                signal_data = {}
             reasoning = pos.get('reasoning', signal_data.get('reasoning', ''))
             confidence = pos.get('confidence', signal_data.get('confidence', 50))
             metadata = pos.get('metadata', signal_data.get('metadata', {}))
@@ -302,6 +375,7 @@ class SessionRunner:
     def _generate_regime_explanation(self, response: Dict[str, Any]) -> str:
         """Generate human-readable explanation for regime detection."""
         regime = response.get('regime', 'UNKNOWN')
+        micro_regime = response.get('micro_regime')
         indicators = response.get('indicators', {})
         
         explanations = {
@@ -311,6 +385,8 @@ class SessionRunner:
         }
         
         base = explanations.get(regime, f"Detected {regime} regime")
+        if micro_regime and micro_regime != regime:
+            base += f" (micro: {micro_regime})"
         
         if indicators:
             details = []
