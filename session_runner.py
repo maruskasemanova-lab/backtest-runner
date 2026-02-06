@@ -30,6 +30,16 @@ class RunConfig:
 
 class SessionRunner:
     """Runs a trading session by feeding bars to the strategy evaluator."""
+    L2_PAYLOAD_KEYS = (
+        "l2_delta",
+        "l2_buy_volume",
+        "l2_sell_volume",
+        "l2_volume",
+        "l2_imbalance",
+        "l2_iceberg_buy_count",
+        "l2_iceberg_sell_count",
+        "l2_iceberg_bias",
+    )
     
     def __init__(self, config: RunConfig):
         self.config = config
@@ -145,16 +155,7 @@ class SessionRunner:
             "volume": bar['volume'],
             "vwap": bar.get('vwap')
         }
-        for l2_key in (
-            "l2_delta",
-            "l2_buy_volume",
-            "l2_sell_volume",
-            "l2_volume",
-            "l2_imbalance",
-            "l2_iceberg_buy_count",
-            "l2_iceberg_sell_count",
-            "l2_iceberg_bias",
-        ):
+        for l2_key in self.L2_PAYLOAD_KEYS:
             if l2_key in bar:
                 payload[l2_key] = bar.get(l2_key)
         
@@ -221,11 +222,7 @@ class SessionRunner:
                 await self._notify_decision(marker.to_dict())
 
                 # Also add strategy selected marker for this day
-                strategy = (
-                    response.get('strategy')
-                    or response.get('selected_strategy')
-                    or (response.get('strategies') or [None])[0]
-                )
+                strategy = self._extract_strategy_label(response)
                 if strategy:
                     marker = self.tracker.add_strategy_selected(
                         timestamp=timestamp,
@@ -260,8 +257,7 @@ class SessionRunner:
 
             strategy = (
                 regime_update.get('strategy')
-                or response.get('strategy')
-                or response.get('selected_strategy')
+                or self._extract_strategy_label(response)
             )
             if strategy and regime:
                 marker = self.tracker.add_strategy_selected(
@@ -360,7 +356,7 @@ class SessionRunner:
                 gross_pnl_dollars=pos.get('gross_pnl_pct', 0) * pos.get('entry_price', 0) * pos.get('size', 1) / 100 if pos.get('gross_pnl_pct') is not None else None
             )
             await self._notify_decision(marker.to_dict())
-        
+
         # Session ended
         if response.get('phase') == 'END_OF_DAY' and 'session_summary' in response:
             self.session_summary = response['session_summary']
@@ -371,6 +367,15 @@ class SessionRunner:
                 summary=self.session_summary
             )
             await self._notify_decision(marker.to_dict())
+
+    @staticmethod
+    def _extract_strategy_label(response: Dict[str, Any]) -> Optional[str]:
+        """Resolve selected strategy from possible response keys."""
+        return (
+            response.get('strategy')
+            or response.get('selected_strategy')
+            or (response.get('strategies') or [None])[0]
+        )
     
     def _generate_regime_explanation(self, response: Dict[str, Any]) -> str:
         """Generate human-readable explanation for regime detection."""

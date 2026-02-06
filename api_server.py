@@ -4,7 +4,7 @@ Orchestrates the look-ahead free data feeding and strategy evaluation.
 """
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Union
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +21,13 @@ from data_loader import DataLoader
 from session_runner import SessionRunner, RunConfig
 from decision_tracker import MarkerType
 from available_data import get_discovery
+from src.config_io import (
+    extract_multilayer_payload,
+    load_json_file,
+    save_json_file,
+)
 from src.l2_data_manager import L2DataManager
+from src.l2_feature_service import L2FeatureService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BacktestRunner")
@@ -44,6 +50,7 @@ app.add_middleware(
 # ============ Global State ============
 data_loader = DataLoader()
 l2_manager = L2DataManager()
+l2_features = L2FeatureService(manager=l2_manager, logger=logger)
 active_runners: Dict[str, SessionRunner] = {}
 connected_clients: List[WebSocket] = []
 STRATEGY_OVERRIDES_PATH = Path(__file__).parent / "strategy_overrides.json"
@@ -51,33 +58,20 @@ AOS_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "aos_config.json"
 
 
 def _load_strategy_overrides() -> Dict[str, Any]:
-    if not STRATEGY_OVERRIDES_PATH.exists():
-        return {}
-    try:
-        return json.loads(STRATEGY_OVERRIDES_PATH.read_text())
-    except Exception:
-        return {}
+    return load_json_file(STRATEGY_OVERRIDES_PATH, default={})
 
 
 def _load_aos_config() -> Dict[str, Any]:
     """Load AOS optimization config from JSON file."""
-    if not AOS_CONFIG_PATH.exists():
-        return {"version": "1.0.0", "tickers": {}}
-    try:
-        return json.loads(AOS_CONFIG_PATH.read_text())
-    except Exception:
-        return {"version": "1.0.0", "tickers": {}}
+    return load_json_file(AOS_CONFIG_PATH, default={"version": "1.0.0", "tickers": {}})
 
 
 def _save_aos_config(config: Dict[str, Any]) -> bool:
     """Save AOS optimization config to JSON file."""
-    try:
-        AOS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        AOS_CONFIG_PATH.write_text(json.dumps(config, indent=2))
-        return True
-    except Exception as e:
-        logger.error(f"Failed to save AOS config: {e}")
-        return False
+    ok = save_json_file(AOS_CONFIG_PATH, payload=config)
+    if not ok:
+        logger.error("Failed to save AOS config.")
+    return ok
 
 
 async def _apply_strategy_overrides(strategy_api_url: str, ticker: str) -> None:
@@ -128,85 +122,8 @@ async def _apply_global_trailing(strategy_api_url: str, trailing_stop_pct: Optio
         logger.warning(f"Global trailing update failed: {e}")
 
 
-def _coerce_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "y", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "n", "off"}:
-            return False
-    return default
-
-
 def _extract_multilayer_payload(ticker_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract ticker-specific multi-layer/candlestick settings from AOS config."""
-    allowed_core = {"pattern_weight", "strategy_weight", "threshold", "require_pattern"}
-    allowed_detector = {
-        "body_doji_pct",
-        "wick_ratio_hammer",
-        "engulfing_min_body_pct",
-        "volume_confirm_ratio",
-        "vwap_proximity_pct",
-    }
-
-    raw: Dict[str, Any] = {}
-
-    # Preferred schema keys in ticker config
-    for key in ("multilayer", "multi_layer"):
-        block = ticker_config.get(key)
-        if isinstance(block, dict):
-            raw.update(block)
-
-    # Optional candlestick namespace
-    candlestick = ticker_config.get("candlestick")
-    if isinstance(candlestick, dict):
-        nested_ml = candlestick.get("multilayer")
-        if isinstance(nested_ml, dict):
-            raw.update(nested_ml)
-        detector = candlestick.get("detector")
-        if isinstance(detector, dict):
-            raw.update(detector)
-        for key in allowed_core.union(allowed_detector):
-            if key in candlestick:
-                raw[key] = candlestick[key]
-
-    # Backward-compatible flattened ticker-level keys
-    for key in allowed_core.union(allowed_detector):
-        if key in ticker_config and key not in raw:
-            raw[key] = ticker_config[key]
-
-    # Optional nested detector object under multilayer
-    detector_block = raw.get("detector")
-    if isinstance(detector_block, dict):
-        for key in allowed_detector:
-            if key in detector_block and key not in raw:
-                raw[key] = detector_block[key]
-
-    payload: Dict[str, Any] = {}
-    for key in ("pattern_weight", "strategy_weight", "threshold"):
-        if key not in raw:
-            continue
-        try:
-            payload[key] = float(raw[key])
-        except (TypeError, ValueError):
-            continue
-
-    if "require_pattern" in raw:
-        payload["require_pattern"] = _coerce_bool(raw["require_pattern"], default=True)
-
-    for key in allowed_detector:
-        if key not in raw:
-            continue
-        try:
-            payload[key] = float(raw[key])
-        except (TypeError, ValueError):
-            continue
-
-    return payload
+    return extract_multilayer_payload(ticker_config)
 
 
 async def _apply_aos_optimizations(strategy_api_url: str, ticker: str) -> Dict[str, Any]:
@@ -316,20 +233,7 @@ async def _configure_session(
 
 
 def _to_utc_datetime(value: Any) -> datetime:
-    """Best-effort conversion to timezone-aware UTC datetime."""
-    if isinstance(value, datetime):
-        dt = value
-    else:
-        dt = pd.to_datetime(value).to_pydatetime()
-
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def _epoch_minute_key(value: Any) -> int:
-    dt_utc = _to_utc_datetime(value)
-    return int(dt_utc.timestamp() // 60)
+    return l2_features.to_utc_datetime(value)
 
 
 def _build_l2_feature_map(
@@ -337,122 +241,11 @@ def _build_l2_feature_map(
     start_dt_utc: datetime,
     end_dt_utc: datetime,
 ) -> tuple[Dict[int, Dict[str, float]], Dict[str, Any]]:
-    """
-    Build minute-level L2 features keyed by UTC epoch-minute.
-
-    Features:
-    - l2_delta
-    - l2_buy_volume / l2_sell_volume / l2_volume
-    - l2_imbalance
-    - l2_iceberg_buy_count / l2_iceberg_sell_count / l2_iceberg_bias
-    """
-    feature_map: Dict[int, Dict[str, float]] = {}
-    stats = {
-        "has_l2": False,
-        "footprint_bars": 0,
-        "icebergs": 0,
-        "covered_minutes": 0,
-    }
-
-    start_date = start_dt_utc.strftime("%Y-%m-%d")
-    end_date = end_dt_utc.strftime("%Y-%m-%d")
-    loaded = l2_manager.load_data(ticker, start_date, end_date)
-    if loaded is None:
-        return feature_map, stats
-
-    try:
-        fp_bars = l2_manager.get_footprint_bars(
-            ticker=ticker,
-            start_time=start_dt_utc,
-            end_time=end_dt_utc,
-            timeframe="1min",
-        )
-    except Exception as e:
-        logger.warning(f"L2 footprint aggregation failed for {ticker}: {e}")
-        fp_bars = []
-
-    stats["footprint_bars"] = len(fp_bars)
-    for fp in fp_bars:
-        try:
-            minute_key = int(float(fp.get("time", 0)) // 60)
-        except (TypeError, ValueError):
-            continue
-
-        levels = fp.get("levels") or {}
-        buy_volume = 0.0
-        sell_volume = 0.0
-        if isinstance(levels, dict):
-            for level in levels.values():
-                if not isinstance(level, dict):
-                    continue
-                buy_volume += float(level.get("buy", 0) or 0)
-                sell_volume += float(level.get("sell", 0) or 0)
-
-        total_volume = float(fp.get("volume", 0) or 0)
-        # Prefer explicit volume, fallback to summed footprint levels.
-        if total_volume <= 0:
-            total_volume = buy_volume + sell_volume
-
-        denom = buy_volume + sell_volume
-        imbalance = ((buy_volume - sell_volume) / denom) if denom > 0 else 0.0
-
-        feature_map[minute_key] = {
-            "l2_delta": float(fp.get("delta", 0) or 0),
-            "l2_buy_volume": buy_volume,
-            "l2_sell_volume": sell_volume,
-            "l2_volume": total_volume,
-            "l2_imbalance": imbalance,
-            "l2_iceberg_buy_count": 0.0,
-            "l2_iceberg_sell_count": 0.0,
-            "l2_iceberg_bias": 0.0,
-        }
-
-    try:
-        icebergs = l2_manager.detect_icebergs(
-            ticker=ticker,
-            start_time=start_dt_utc,
-            end_time=end_dt_utc,
-        )
-    except Exception as e:
-        logger.warning(f"L2 iceberg detection failed for {ticker}: {e}")
-        icebergs = []
-
-    stats["icebergs"] = len(icebergs)
-    for ice in icebergs:
-        ts = ice.get("time")
-        if not ts:
-            continue
-        try:
-            minute_key = _epoch_minute_key(ts)
-        except Exception:
-            continue
-
-        bucket = feature_map.setdefault(
-            minute_key,
-            {
-                "l2_delta": 0.0,
-                "l2_buy_volume": 0.0,
-                "l2_sell_volume": 0.0,
-                "l2_volume": 0.0,
-                "l2_imbalance": 0.0,
-                "l2_iceberg_buy_count": 0.0,
-                "l2_iceberg_sell_count": 0.0,
-                "l2_iceberg_bias": 0.0,
-            },
-        )
-        side = str(ice.get("side", "")).lower()
-        if side == "buy":
-            bucket["l2_iceberg_buy_count"] += 1.0
-        elif side == "sell":
-            bucket["l2_iceberg_sell_count"] += 1.0
-        bucket["l2_iceberg_bias"] = (
-            bucket["l2_iceberg_buy_count"] - bucket["l2_iceberg_sell_count"]
-        )
-
-    stats["covered_minutes"] = len(feature_map)
-    # Consider L2 "available" only when at least one aligned minute exists.
-    stats["has_l2"] = stats["covered_minutes"] > 0
-    return feature_map, stats
+    return l2_features.build_feature_map(
+        ticker=ticker,
+        start_dt_utc=start_dt_utc,
+        end_dt_utc=end_dt_utc,
+    )
 
 
 def _attach_l2_features(
@@ -460,27 +253,11 @@ def _attach_l2_features(
     feature_map: Dict[int, Dict[str, float]],
     l2_only: bool = False,
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """Attach minute-aligned L2 features to bars and optionally keep only covered bars."""
-    if not bars:
-        return bars, {"bars_with_l2": 0, "bars_total": 0}
-
-    enriched: List[Dict[str, Any]] = []
-    bars_with_l2 = 0
-    for bar in bars:
-        minute_key = _epoch_minute_key(bar.get("timestamp"))
-        feats = feature_map.get(minute_key)
-        if feats:
-            bars_with_l2 += 1
-            bar = {**bar, **feats}
-        if not l2_only or feats:
-            enriched.append(bar)
-
-    stats = {
-        "bars_with_l2": bars_with_l2,
-        "bars_total": len(bars),
-        "bars_after_filter": len(enriched),
-    }
-    return enriched, stats
+    return l2_features.attach_features(
+        bars=bars,
+        feature_map=feature_map,
+        l2_only=l2_only,
+    )
 
 
 # ============ Pydantic Models ============
