@@ -81,7 +81,28 @@ PARAM_GRIDS = {
         "magnet_threshold": [0.1, 0.15, 0.2],
         "atr_multiplier": [1.0, 1.5, 2.0],
         "trailing_stop_pct": [0.3, 0.5, 0.7],
-    }
+    },
+    "momentum_flow": {
+        "min_signed_aggression": [0.06, 0.08, 0.10],
+        "min_directional_consistency": [0.5, 0.55, 0.6],
+        "min_sweep_intensity": [0.05, 0.08, 0.12],
+        "min_book_pressure": [0.0, 0.02, 0.05],
+        "min_confidence": [52.0, 58.0, 64.0],
+    },
+    "absorption_reversal": {
+        "min_absorption_rate": [0.45, 0.5, 0.55],
+        "min_signed_aggression": [0.06, 0.08, 0.1],
+        "min_book_pressure": [0.03, 0.05, 0.08],
+        "min_divergence": [0.12, 0.15, 0.2],
+        "min_confidence": [58.0, 62.0, 66.0],
+    },
+    "exhaustion_fade": {
+        "min_delta_zscore": [1.1, 1.4, 1.8],
+        "min_signed_aggression": [0.02, 0.04, 0.06],
+        "max_sweep_intensity": [0.6, 0.8, 1.0],
+        "min_book_pressure": [0.0, 0.02, 0.05],
+        "min_confidence": [58.0, 63.0, 68.0],
+    },
 }
 
 

@@ -3,7 +3,10 @@ __pycache__/
 *.pyc
 .DS_Store
 .kilocode/
-.claude/
+.claude/*
+!.claude/commands/
+!.claude/commands/**
+.claude/settings.local.json
 
 # Runtime logs
 *.log
@@ -20,6 +23,13 @@ tuning_results.json
 wfo_results.json
 aos_walk_forward_results/
 walk_forward_results/
+
+# Specific run artifacts
+mu_*.json
+mu_*.csv
+mu_oos_trades_*.csv
+mu_phase_*.json
+mu_phase_*.csv
 
 # Frontend build output
 frontend/dist/

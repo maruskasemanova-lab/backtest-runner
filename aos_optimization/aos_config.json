@@ -2,16 +2,16 @@
   "version": "1.1.0",
   "created_at": "2026-02-04T02:00:00",
   "description": "AOS Configuration - Optimized based on Walk-Forward Testing Results",
-  
   "global_settings": {
     "regime_detection_minutes": 30,
     "max_daily_loss_pct": 3.0,
     "trading_start_time": "09:45",
     "trading_end_time": "15:55",
-    "avoid_days": ["Friday"],
+    "avoid_days": [
+      "Friday"
+    ],
     "min_bars_for_signal": 30
   },
-  
   "strategies": {
     "enabled": [
       "mean_reversion",
@@ -21,9 +21,10 @@
       "volume_profile",
       "gap_liquidity"
     ],
-    "disabled": ["rotation"]
+    "disabled": [
+      "rotation"
+    ]
   },
-  
   "tickers": {
     "NVDA": {
       "strategy": "vwap_magnet",
@@ -37,14 +38,20 @@
         "long_only": true
       },
       "backup_strategy": "volume_profile",
-      "regime_filter": ["TRENDING", "MIXED"],
-      "avoid_days": ["Friday"],
-      "trading_hours": [15],
+      "regime_filter": [
+        "TRENDING",
+        "MIXED"
+      ],
+      "avoid_days": [
+        "Friday"
+      ],
+      "trading_hours": [
+        15
+      ],
       "min_confidence": 55.0,
       "max_daily_trades": 3,
       "notes": "LONG ONLY (shorts lose $233) | Time: 15:00 | Trail: 2.0%"
     },
-    
     "TSLA": {
       "strategy": "momentum",
       "params": {
@@ -54,13 +61,16 @@
         "trailing_stop_pct": 1.5
       },
       "backup_strategy": "gap_liquidity",
-      "regime_filter": ["TRENDING"],
-      "avoid_days": ["Friday"],
+      "regime_filter": [
+        "TRENDING"
+      ],
+      "avoid_days": [
+        "Friday"
+      ],
       "min_confidence": 70.0,
       "max_daily_trades": 2,
       "notes": "Only trade strong trends, high confidence required"
     },
-    
     "AAPL": {
       "strategy": "vwap_magnet",
       "params": {
@@ -71,13 +81,16 @@
         "min_confidence": 55.0
       },
       "backup_strategy": "mean_reversion",
-      "regime_filter": ["TRENDING", "MIXED", "CHOPPY"],
+      "regime_filter": [
+        "TRENDING",
+        "MIXED",
+        "CHOPPY"
+      ],
       "avoid_days": [],
       "min_confidence": 55.0,
       "max_daily_trades": 4,
       "notes": "Low volatility, tighter params OK"
     },
-    
     "AMD": {
       "strategy": "momentum",
       "params": {
@@ -87,12 +100,16 @@
         "trailing_stop_pct": 1.2
       },
       "backup_strategy": "volume_profile",
-      "regime_filter": ["TRENDING", "MIXED"],
-      "avoid_days": ["Friday"],
+      "regime_filter": [
+        "TRENDING",
+        "MIXED"
+      ],
+      "avoid_days": [
+        "Friday"
+      ],
       "min_confidence": 60.0,
       "max_daily_trades": 3
     },
-    
     "GOOGL": {
       "strategy": "mean_reversion",
       "params": {
@@ -102,13 +119,15 @@
         "min_confidence": 60.0
       },
       "backup_strategy": "vwap_magnet",
-      "regime_filter": ["MIXED", "CHOPPY"],
+      "regime_filter": [
+        "MIXED",
+        "CHOPPY"
+      ],
       "avoid_days": [],
       "min_confidence": 55.0,
       "max_daily_trades": 3,
       "notes": "Low volatility, mean reversion works well"
     },
-    
     "META": {
       "strategy": "pullback",
       "params": {
@@ -119,12 +138,14 @@
         "trailing_stop_pct": 0.8
       },
       "backup_strategy": "vwap_magnet",
-      "regime_filter": ["TRENDING", "MIXED"],
+      "regime_filter": [
+        "TRENDING",
+        "MIXED"
+      ],
       "avoid_days": [],
       "min_confidence": 60.0,
       "max_daily_trades": 3
     },
-    
     "MSFT": {
       "strategy": "mean_reversion",
       "params": {
@@ -134,48 +155,60 @@
         "min_confidence": 60.0
       },
       "backup_strategy": "vwap_magnet",
-      "regime_filter": ["MIXED", "CHOPPY"],
+      "regime_filter": [
+        "MIXED",
+        "CHOPPY"
+      ],
       "avoid_days": [],
       "min_confidence": 55.0,
       "max_daily_trades": 3,
       "notes": "Low volatility, similar to GOOGL"
     },
-    
     "MU": {
-      "strategy": "momentum",
+      "strategy": "momentum_flow",
       "params": {
-        "volume_threshold": 2.0,
-        "breakout_pct": 0.25,
-        "volume_stop_pct": 1.8,
-        "trailing_stop_pct": 1.5,
-        "min_confidence": 68.0
+        "min_signed_aggression": 0.06,
+        "min_directional_consistency": 0.5,
+        "min_imbalance": 0.025,
+        "min_sweep_intensity": 0.07,
+        "min_book_pressure": 0,
+        "min_confidence": 58,
+        "atr_stop_multiplier": 1.8,
+        "rr_ratio": 2.2,
+        "trailing_stop_pct": 0.9
       },
-      "backup_strategy": "gap_liquidity",
-      "regime_filter": ["TRENDING", "MIXED"],
-      "avoid_days": ["Friday"],
-      "long_only": true,
-      "min_confidence": 60.0,
+      "backup_strategy": "absorption_reversal",
+      "regime_filter": [
+        "TRENDING",
+        "MIXED",
+        "CHOPPY"
+      ],
+      "avoid_days": [
+        "Friday"
+      ],
+      "long_only": false,
+      "min_confidence": 60,
       "max_daily_trades": 3,
       "multilayer": {
         "pattern_weight": 0.45,
         "strategy_weight": 0.55,
-        "threshold": 58.0,
+        "threshold": 58,
         "require_pattern": false,
         "volume_confirm_ratio": 1.15
       },
       "l2": {
         "confirm_enabled": true,
-        "min_delta": 1200.0,
+        "min_delta": 1000,
         "min_imbalance": 0.04,
-        "min_iceberg_bias": 0.0,
+        "min_iceberg_bias": 0,
         "lookback_bars": 3,
         "min_participation_ratio": 0.12,
-        "min_directional_consistency": 0.6,
-        "min_signed_aggression": 0.04
+        "min_directional_consistency": 0.5,
+        "min_signed_aggression": 0.03
       },
-      "notes": "High volatility, only clear trends; L2 confirms directional pressure."
+      "notes": "Flow-first MU profile with book pressure + softer L2 confirm for intraday scalps.",
+      "trailing_stop_pct": 2
     },
-    
     "AMZN": {
       "strategy": "pullback",
       "params": {
@@ -186,13 +219,15 @@
         "trailing_stop_pct": 0.8
       },
       "backup_strategy": "mean_reversion",
-      "regime_filter": ["TRENDING", "MIXED"],
+      "regime_filter": [
+        "TRENDING",
+        "MIXED"
+      ],
       "avoid_days": [],
       "min_confidence": 55.0,
       "max_daily_trades": 3
     }
   },
-  
   "risk_management": {
     "max_position_size_pct": 10.0,
     "max_daily_trades_total": 6,
@@ -201,7 +236,6 @@
     "trailing_stop_activation_pct": 0.5,
     "min_risk_reward_ratio": 1.5
   },
-  
   "optimization_history": [
     {
       "date": "2026-02-04",

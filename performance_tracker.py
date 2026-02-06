@@ -38,6 +38,11 @@ class TradeRecord:
     total_costs: float
     exit_reason: str
     bars_held: int = 0
+    flow_strategy: bool = False
+    book_pressure_confirmed: Optional[bool] = None
+    book_pressure_avg: Optional[float] = None
+    book_pressure_trend: Optional[float] = None
+    signed_aggression: Optional[float] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -56,7 +61,12 @@ class TradeRecord:
             'gross_pnl_pct': round(self.gross_pnl_pct, 4),
             'total_costs': round(self.total_costs, 4),
             'exit_reason': self.exit_reason,
-            'bars_held': self.bars_held
+            'bars_held': self.bars_held,
+            'flow_strategy': self.flow_strategy,
+            'book_pressure_confirmed': self.book_pressure_confirmed,
+            'book_pressure_avg': round(self.book_pressure_avg, 6) if self.book_pressure_avg is not None else None,
+            'book_pressure_trend': round(self.book_pressure_trend, 6) if self.book_pressure_trend is not None else None,
+            'signed_aggression': round(self.signed_aggression, 6) if self.signed_aggression is not None else None,
         }
 
 
@@ -299,7 +309,12 @@ class PerformanceTracker:
         gross_pnl_pct: float = 0.0,
         total_costs: float = 0.0,
         exit_reason: str = "unknown",
-        bars_held: int = 0
+        bars_held: int = 0,
+        flow_strategy: bool = False,
+        book_pressure_confirmed: Optional[bool] = None,
+        book_pressure_avg: Optional[float] = None,
+        book_pressure_trend: Optional[float] = None,
+        signed_aggression: Optional[float] = None,
     ) -> TradeRecord:
         """
         Record a completed trade.
@@ -325,7 +340,12 @@ class PerformanceTracker:
             gross_pnl_pct=gross_pnl_pct,
             total_costs=total_costs,
             exit_reason=exit_reason,
-            bars_held=bars_held
+            bars_held=bars_held,
+            flow_strategy=flow_strategy,
+            book_pressure_confirmed=book_pressure_confirmed,
+            book_pressure_avg=book_pressure_avg,
+            book_pressure_trend=book_pressure_trend,
+            signed_aggression=signed_aggression,
         )
         
         # Add to all trades list
@@ -442,6 +462,69 @@ class PerformanceTracker:
             'strategies_tested': len(performances),
             'best_strategy': max(performances, key=lambda x: x.score).strategy if performances else None
         }
+
+    @staticmethod
+    def _extract_trade_hour(entry_time: str) -> int:
+        """Best-effort extraction of trade entry hour (0-23)."""
+        if not entry_time:
+            return -1
+        try:
+            return datetime.fromisoformat(str(entry_time).replace("Z", "+00:00")).hour
+        except Exception:
+            parts = str(entry_time).split(":")
+            if parts and parts[0].isdigit():
+                hour = int(parts[0])
+                if 0 <= hour <= 23:
+                    return hour
+        return -1
+
+    def get_hourly_summary(self) -> Dict[str, Dict[str, float]]:
+        """Aggregate performance by entry hour."""
+        buckets: Dict[int, List[TradeRecord]] = {}
+        for trade in self._all_trades:
+            hour = self._extract_trade_hour(trade.entry_time)
+            if hour < 0:
+                continue
+            buckets.setdefault(hour, []).append(trade)
+
+        out: Dict[str, Dict[str, float]] = {}
+        for hour in sorted(buckets.keys()):
+            trades = buckets[hour]
+            wins = sum(1 for t in trades if t.pnl_pct > 0)
+            total = len(trades)
+            pnl = sum(t.pnl_pct for t in trades)
+            out[f"{hour:02d}:00"] = {
+                "trades": float(total),
+                "win_rate": round((wins / total) * 100, 2) if total > 0 else 0.0,
+                "total_pnl_pct": round(pnl, 4),
+                "avg_pnl_pct": round((pnl / total), 4) if total > 0 else 0.0,
+            }
+        return out
+
+    def get_weekday_summary(self) -> Dict[str, Dict[str, float]]:
+        """Aggregate performance by weekday."""
+        labels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        buckets: Dict[int, List[TradeRecord]] = {}
+        for trade in self._all_trades:
+            try:
+                day_idx = datetime.strptime(trade.date, "%Y-%m-%d").weekday()
+            except Exception:
+                continue
+            buckets.setdefault(day_idx, []).append(trade)
+
+        out: Dict[str, Dict[str, float]] = {}
+        for idx in sorted(buckets.keys()):
+            trades = buckets[idx]
+            wins = sum(1 for t in trades if t.pnl_pct > 0)
+            total = len(trades)
+            pnl = sum(t.pnl_pct for t in trades)
+            out[labels[idx]] = {
+                "trades": float(total),
+                "win_rate": round((wins / total) * 100, 2) if total > 0 else 0.0,
+                "total_pnl_pct": round(pnl, 4),
+                "avg_pnl_pct": round((pnl / total), 4) if total > 0 else 0.0,
+            }
+        return out
     
     def get_all_trades(
         self,
@@ -460,6 +543,57 @@ class PerformanceTracker:
             trades = [t for t in trades if t.ticker.upper() == ticker.upper()]
         
         return trades
+
+    @staticmethod
+    def _summarize_trade_subset(trades: List[TradeRecord]) -> Dict[str, Any]:
+        """Aggregate a subset of trades into comparable summary stats."""
+        total = len(trades)
+        if total == 0:
+            return {
+                "total_trades": 0,
+                "win_rate": 0.0,
+                "total_pnl_pct": 0.0,
+                "total_pnl_dollars": 0.0,
+                "avg_pnl_pct": 0.0,
+            }
+        winning = sum(1 for t in trades if t.pnl_pct > 0)
+        total_pnl_pct = sum(t.pnl_pct for t in trades)
+        total_pnl_dollars = sum(t.pnl_dollars for t in trades)
+        return {
+            "total_trades": total,
+            "win_rate": round((winning / total) * 100, 2),
+            "total_pnl_pct": round(total_pnl_pct, 4),
+            "total_pnl_dollars": round(total_pnl_dollars, 4),
+            "avg_pnl_pct": round(total_pnl_pct / total, 4),
+        }
+
+    def get_flow_breakdown(self) -> Dict[str, Any]:
+        """
+        Flow-specific performance split:
+        - all flow trades
+        - flow trades with book-pressure confirmation
+        - flow trades without book-pressure confirmation
+        """
+        flow_trades = [
+            t for t in self._all_trades
+            if t.flow_strategy or ("flow" in t.strategy.lower())
+        ]
+        with_book = [
+            t for t in flow_trades
+            if (t.book_pressure_confirmed is True)
+            or (t.book_pressure_confirmed is None and t.book_pressure_avg is not None)
+        ]
+        without_book = [
+            t for t in flow_trades
+            if (t.book_pressure_confirmed is False)
+            or (t.book_pressure_confirmed is None and t.book_pressure_avg is None)
+        ]
+
+        return {
+            "flow_trades": self._summarize_trade_subset(flow_trades),
+            "with_book_pressure": self._summarize_trade_subset(with_book),
+            "without_book_pressure": self._summarize_trade_subset(without_book),
+        }
     
     def get_overall_stats(self) -> Dict[str, Any]:
         """Get overall performance statistics."""
@@ -467,7 +601,8 @@ class PerformanceTracker:
             return {
                 'total_trades': 0,
                 'total_strategies': 0,
-                'total_regimes': 0
+                'total_regimes': 0,
+                'flow_breakdown': self.get_flow_breakdown(),
             }
         
         total_trades = len(self._all_trades)
@@ -491,6 +626,7 @@ class PerformanceTracker:
             'total_strategies': len(strategies),
             'total_regimes': len(regimes),
             'tickers_tested': list(tickers),
+            'flow_breakdown': self.get_flow_breakdown(),
             'date_range': {
                 'first': min(t.date for t in self._all_trades),
                 'last': max(t.date for t in self._all_trades)

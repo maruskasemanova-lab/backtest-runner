@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "project": {
+    "name": "Backtest Runner + Market Regime Detection",
+    "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
+    "services": [
+      {
+        "name": "market_regime_detection",
+        "port": 8001,
+        "responsibility": "Regime detection, strategy selection, signal/execution lifecycle"
+      },
+      {
+        "name": "backtest-runner",
+        "port": 8002,
+        "responsibility": "Data orchestration, bar playback, session control, WebSocket broadcast"
+      },
+      {
+        "name": "frontend",
+        "port": 5173,
+        "responsibility": "Visualization, controls, diagnostics"
+      }
+    ],
+    "data_flow": "CSV/Parquet -> DataLoader -> SessionRunner -> POST /api/session/bar -> DayTradingManager -> decisions/trades -> WebSocket -> frontend"
+  },
+  "domains": [
+    {
+      "id": "orchestration",
+      "title": "Run Orchestration API",
+      "mission": "Own run lifecycle, API contracts, and integration to strategy service.",
+      "depends_on": [
+        "strategy-engine",
+        "data-l2",
+        "frontend"
+      ],
+      "entrypoints": [
+        "api_server.py",
+        "session_runner.py"
+      ],
+      "files": [
+        "api_server.py",
+        "session_runner.py",
+        "data_loader.py",
+        "src/config_io.py",
+        "src/l2_feature_service.py"
+      ],
+      "change_checks": [
+        "Keep API contracts backward compatible where possible.",
+        "Always preserve no-lookahead semantics in bar stepping.",
+        "Update tests for request model changes."
+      ]
+    },
+    {
+      "id": "strategy-engine",
+      "title": "Flow Strategy Engine",
+      "mission": "Own regime detection, signal generation, position management, and execution realism.",
+      "depends_on": [
+        "orchestration",
+        "data-l2"
+      ],
+      "entrypoints": [
+        "../market_regime_detection/api_server.py",
+        "../market_regime_detection/src/day_trading_manager.py"
+      ],
+      "files": [
+        "../market_regime_detection/api_server.py",
+        "../market_regime_detection/src/day_trading_manager.py",
+        "../market_regime_detection/src/multi_layer_decision.py",
+        "../market_regime_detection/src/strategy_factory.py",
+        "../market_regime_detection/src/strategies/base_strategy.py",
+        "../market_regime_detection/src/strategies/momentum_flow.py",
+        "../market_regime_detection/src/strategies/absorption_reversal.py",
+        "../market_regime_detection/src/strategies/exhaustion_fade.py"
+      ],
+      "change_checks": [
+        "No same-bar signal execution (signal bar index must be < entry bar index).",
+        "Risk/execution changes must be reflected in config endpoints and tests.",
+        "Keep flow metrics no-lookahead (past/current bars only)."
+      ]
+    },
+    {
+      "id": "data-l2",
+      "title": "L2 Data & Features",
+      "mission": "Own L2 acquisition, conversion, minute alignment, and flow-feature extraction.",
+      "depends_on": [
+        "orchestration",
+        "strategy-engine"
+      ],
+      "entrypoints": [
+        "src/l2_data_manager.py",
+        "src/l2_feature_service.py"
+      ],
+      "files": [
+        "src/l2_data_manager.py",
+        "src/l2_feature_service.py",
+        "scripts/download_l2_data.py",
+        "scripts/convert_l2_to_parquet.py",
+        "scripts/verify_l2_data.py"
+      ],
+      "change_checks": [
+        "Preserve timezone normalization to UTC.",
+        "Do not leak future L2 events into current bar features.",
+        "Keep feature names consistent with strategy API payload."
+      ]
+    },
+    {
+      "id": "optimization-validation",
+      "title": "Optimization & Validation",
+      "mission": "Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness analysis.",
+      "depends_on": [
+        "orchestration",
+        "strategy-engine"
+      ],
+      "entrypoints": [
+        "wfo_optimizer.py",
+        "walk_forward_runner.py",
+        "oos_validator.py",
+        "monte_carlo.py"
+      ],
+      "files": [
+        "wfo_optimizer.py",
+        "walk_forward_runner.py",
+        "performance_tracker.py",
+        "oos_validator.py",
+        "monte_carlo.py",
+        "tests/test_wfo_optimizer.py",
+        "tests/test_performance_tracker_time_buckets.py"
+      ],
+      "change_checks": [
+        "Score by executed strategy, not selected_strategy label.",
+        "Keep strict chronological split for hold-out testing.",
+        "Report regime/hour/weekday breakdowns."
+      ]
+    },
+    {
+      "id": "frontend",
+      "title": "Frontend",
+      "mission": "Own playback UI, chart rendering, and operational diagnostics.",
+      "depends_on": [
+        "orchestration",
+        "strategy-engine"
+      ],
+      "entrypoints": [
+        "frontend/src/App.jsx",
+        "frontend/src/components"
+      ],
+      "files": [
+        "frontend/src/App.jsx",
+        "frontend/src/components/CandlestickChart.jsx",
+        "frontend/src/components/DecisionPanel.jsx",
+        "frontend/src/components/SessionSummary.jsx",
+        "frontend/src/components/RunConfig.jsx"
+      ],
+      "change_checks": [
+        "Any API payload change must include frontend compatibility check.",
+        "Keep desktop/mobile rendering stable.",
+        "Preserve marker semantics (signal queued, position opened/closed)."
+      ]
+    }
+  ]
+}

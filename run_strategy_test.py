@@ -31,6 +31,8 @@ class TradeResult:
     exit_reason: str
     gross_pnl_pct: Optional[float] = None
     total_costs: Optional[float] = None
+    signal_metadata: Optional[Dict[str, Any]] = None
+    flow_snapshot: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -290,7 +292,9 @@ class StrategyTester:
                                 pnl_dollars=t.get("pnl_dollars", 0),
                                 exit_reason=t.get("exit_reason", ""),
                                 gross_pnl_pct=t.get("gross_pnl_pct"),
-                                total_costs=trade_cost
+                                total_costs=trade_cost,
+                                signal_metadata=t.get("signal_metadata"),
+                                flow_snapshot=t.get("flow_snapshot"),
                             )
                             report.trades.append(trade)
                         

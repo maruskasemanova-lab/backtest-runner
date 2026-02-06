@@ -48,6 +48,25 @@ Navigate to: **http://localhost:5173**
    - **Reset** (🔄) - Clear run
 4. Click on decision markers in the right panel to see detailed explanations
 
+## LLM Workflow (BMAD Ready)
+
+For structured Claude/Codex work on large changes, use:
+
+- `BMAD_QUICKSTART.md`
+- `bmad/README.md`
+
+Refresh domain context packs:
+
+```bash
+python3 scripts/generate_context_pack.py
+```
+
+Optional official BMAD bootstrap:
+
+```bash
+./scripts/bootstrap_bmad.sh
+```
+
 ## Architecture
 
 ```

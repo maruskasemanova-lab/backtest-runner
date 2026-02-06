@@ -1,5 +1,20 @@
 import { useState, useEffect } from "react";
 
+const MU_FLOW_PRESET = {
+  regime_detection_minutes: 10,
+  trailing_stop_pct: 0.9,
+  account_size_usd: 10000,
+  l2_only: true,
+  l2_confirm_enabled: true,
+  l2_min_delta: 1000,
+  l2_min_imbalance: 0.04,
+  l2_min_iceberg_bias: 0.0,
+  l2_lookback_bars: 3,
+  l2_min_participation_ratio: 0.12,
+  l2_min_directional_consistency: 0.5,
+  l2_min_signed_aggression: 0.03,
+};
+
 function RunConfig({ onStart, isRunning, onTickerChange }) {
   const [availableData, setAvailableData] = useState(null);
   const [config, setConfig] = useState({
@@ -8,46 +23,60 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     date: "",
     date_from: "",
     date_to: "",
-    data_file: null, // Auto-discovered from available data
+    data_file: null,
     strategy_api_url: `http://${window.location.hostname}:8001`,
-    regime_detection_minutes: 15,
-    trailing_stop_pct: 0.3,
-    account_size_usd: 10000,
-    l2_only: true, // User requested L2 default
+    ...MU_FLOW_PRESET,
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Fetch available data on mount
+  const applyMuPreset = (date = "2026-02-03") => {
+    setConfig((prev) => ({
+      ...prev,
+      ticker: "MU",
+      date,
+      date_from: date,
+      date_to: date,
+      ...MU_FLOW_PRESET,
+    }));
+    if (onTickerChange) {
+      onTickerChange("MU");
+    }
+  };
+
   useEffect(() => {
     const fetchAvailableData = async () => {
       try {
         const resp = await fetch("/api/available-data");
-        if (resp.ok) {
-          const data = await resp.json();
-          setAvailableData(data);
+        if (!resp.ok) {
+          return;
+        }
 
-          // Set default ticker and date if available
-          if (data.tickers && data.tickers.length > 0) {
-            // Default to MU if available, otherwise first ticker
-            const targetTicker = data.tickers.includes("MU") ? "MU" : data.tickers[0];
-            const range = data.date_ranges[targetTicker];
-            
-            // Default date to 2026-02-03 if available for MU, otherwise range end
-            let defaultDate = range?.end || new Date().toISOString().split("T")[0];
-            if (targetTicker === "MU") {
-                defaultDate = "2026-02-03";
-            }
-            
-            setConfig((prev) => ({
-              ...prev,
-              ticker: targetTicker,
-              date: defaultDate,
-              date_from: defaultDate,
-              date_to: defaultDate,
-            }));
-          }
+        const data = await resp.json();
+        setAvailableData(data);
+
+        if (!data.tickers || data.tickers.length === 0) {
+          return;
+        }
+
+        const targetTicker = data.tickers.includes("MU") ? "MU" : data.tickers[0];
+        const range = data.date_ranges[targetTicker];
+        const defaultDate = targetTicker === "MU"
+          ? "2026-02-03"
+          : range?.end || new Date().toISOString().split("T")[0];
+
+        setConfig((prev) => ({
+          ...prev,
+          ticker: targetTicker,
+          date: defaultDate,
+          date_from: defaultDate,
+          date_to: defaultDate,
+          ...(targetTicker === "MU" ? MU_FLOW_PRESET : {}),
+        }));
+
+        if (onTickerChange) {
+          onTickerChange(targetTicker);
         }
       } catch (err) {
         console.error("Failed to fetch available data:", err);
@@ -55,11 +84,12 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     };
 
     fetchAvailableData();
-  }, []);
+  }, [onTickerChange]);
 
-  // Get date range for current ticker
   const getDateRange = () => {
-    if (!availableData || !config.ticker) return { min: null, max: null };
+    if (!availableData || !config.ticker) {
+      return { min: null, max: null };
+    }
     const range = availableData.date_ranges[config.ticker];
     return {
       min: range?.start || null,
@@ -110,16 +140,18 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
   };
 
   const handleTickerChange = (ticker) => {
-    // Update date to last available date for this ticker
     const range = availableData?.date_ranges[ticker];
+    const defaultDate = ticker === "MU" ? "2026-02-03" : range?.end;
+
     setConfig((prev) => ({
       ...prev,
       ticker,
-      date: range?.end || prev.date,
-      date_from: range?.start || prev.date_from,
-      date_to: range?.end || prev.date_to,
+      date: defaultDate || prev.date,
+      date_from: defaultDate || range?.start || prev.date_from,
+      date_to: defaultDate || range?.end || prev.date_to,
+      ...(ticker === "MU" ? MU_FLOW_PRESET : {}),
     }));
-    // Notify parent about ticker change for strategy preset application
+
     if (onTickerChange) {
       onTickerChange(ticker);
     }
@@ -136,15 +168,11 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
         <div className="card-body">
           <div className="form-group">
             <label>Run ID</label>
-            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {config.run_id}
-            </div>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>{config.run_id}</div>
           </div>
           <div className="form-group">
             <label>Ticker</label>
-            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {config.ticker}
-            </div>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>{config.ticker}</div>
           </div>
           <div className="form-group">
             <label>Date Range</label>
@@ -161,9 +189,9 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
             </div>
           </div>
           <div className="form-group">
-            <label>Global Trailing Stop</label>
+            <label>L2 Confirmation</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {config.trailing_stop_pct != null ? `${config.trailing_stop_pct}%` : "Default"}
+              {config.l2_confirm_enabled ? "Enabled" : "Disabled"}
             </div>
           </div>
         </div>
@@ -178,6 +206,23 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
       </div>
       <div className="card-body">
         <form className="run-config-form" onSubmit={handleSubmit}>
+          <div className="preset-box">
+            <div className="preset-header">
+              <span className="preset-title">MU Flow Preset</span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => applyMuPreset()}
+                style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+              >
+                Apply
+              </button>
+            </div>
+            <div className="preset-copy">
+              Strategies: momentum_flow, absorption_reversal, exhaustion_fade. L2 confirm + depth thresholds are prefilled.
+            </div>
+          </div>
+
           <div className="form-group">
             <label htmlFor="run_id">Run ID</label>
             <input
@@ -191,28 +236,24 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
 
           <div className="form-group">
             <label htmlFor="ticker">
-                Ticker
-                <div style={{ float: "right", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <span style={{ fontSize: "0.75rem", fontWeight: "normal", color: "var(--text-muted)" }}>L2 Only</span>
-                    <input 
-                        type="checkbox" 
-                        checked={config.l2_only || false}
-                        onChange={(e) => {
-                            const checked = e.target.checked;
-                            
-                            // If enabling L2 only, check if current ticker is valid
-                            if (checked && availableData?.l2_tickers) {
-                                const isCurrentTickerL2 = availableData.l2_tickers.includes(config.ticker);
-                                if (!isCurrentTickerL2 && availableData.l2_tickers.length > 0) {
-                                    // Switch to first available L2 ticker
-                                    handleTickerChange(availableData.l2_tickers[0]);
-                                }
-                            }
-                            
-                            handleChange("l2_only", checked);
-                        }}
-                    />
-                </div>
+              Ticker
+              <div className="inline-toggle">
+                <span>L2 Only</span>
+                <input
+                  type="checkbox"
+                  checked={config.l2_only || false}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    if (checked && availableData?.l2_tickers) {
+                      const isCurrentTickerL2 = availableData.l2_tickers.includes(config.ticker);
+                      if (!isCurrentTickerL2 && availableData.l2_tickers.length > 0) {
+                        handleTickerChange(availableData.l2_tickers[0]);
+                      }
+                    }
+                    handleChange("l2_only", checked);
+                  }}
+                />
+              </div>
             </label>
             {availableData?.tickers ? (
               <select
@@ -222,21 +263,19 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
                 required
               >
                 {availableData.tickers
-                    .filter(t => !config.l2_only || availableData.l2_tickers?.includes(t)) // Assuming availableData has l2_tickers
-                    .map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
+                  .filter((t) => !config.l2_only || availableData.l2_tickers?.includes(t))
+                  .map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
               </select>
             ) : (
               <input
                 id="ticker"
                 type="text"
                 value={config.ticker}
-                onChange={(e) =>
-                  handleChange("ticker", e.target.value.toUpperCase())
-                }
+                onChange={(e) => handleChange("ticker", e.target.value.toUpperCase())}
                 placeholder="Loading..."
                 required
               />
@@ -247,15 +286,8 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
             <label htmlFor="date_from">
               Date From
               {dateRange.min && dateRange.max && (
-                <span
-                  style={{
-                    color: "var(--text-muted)",
-                    fontWeight: "normal",
-                    fontSize: "0.75rem",
-                  }}
-                >
-                  {" "}
-                  ({dateRange.min} to {dateRange.max})
+                <span style={{ color: "var(--text-muted)", fontWeight: "normal", fontSize: "0.75rem" }}>
+                  {` (${dateRange.min} to ${dateRange.max})`}
                 </span>
               )}
             </label>
@@ -269,6 +301,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               required
             />
           </div>
+
           <div className="form-group">
             <label htmlFor="date_to">Date To</label>
             <input
@@ -289,11 +322,10 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               type="number"
               min="5"
               value={config.regime_detection_minutes}
-              onChange={(e) =>
-                handleChange("regime_detection_minutes", Number(e.target.value))
-              }
+              onChange={(e) => handleChange("regime_detection_minutes", Number(e.target.value))}
             />
           </div>
+
           <div className="form-group">
             <label htmlFor="account_size_usd">Account Size (USD)</label>
             <input
@@ -302,11 +334,10 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               min="100"
               step="100"
               value={config.account_size_usd}
-              onChange={(e) =>
-                handleChange("account_size_usd", Number(e.target.value))
-              }
+              onChange={(e) => handleChange("account_size_usd", Number(e.target.value))}
             />
           </div>
+
           <div className="form-group">
             <label htmlFor="trailing_stop_pct">Global Trailing Stop (%)</label>
             <input
@@ -317,10 +348,105 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               step="0.1"
               value={config.trailing_stop_pct ?? ""}
               onChange={(e) =>
-                handleChange("trailing_stop_pct", Number(e.target.value))
+                handleChange(
+                  "trailing_stop_pct",
+                  e.target.value === "" ? null : Number(e.target.value)
+                )
               }
             />
           </div>
+
+          <div className="form-group">
+            <label className="field-row" htmlFor="l2_confirm_enabled">
+              <span>L2 Confirmation Gate</span>
+              <input
+                id="l2_confirm_enabled"
+                type="checkbox"
+                checked={config.l2_confirm_enabled || false}
+                onChange={(e) => handleChange("l2_confirm_enabled", e.target.checked)}
+              />
+            </label>
+          </div>
+
+          {config.l2_confirm_enabled && (
+            <>
+              <div className="form-group">
+                <label htmlFor="l2_min_delta">L2 Min Delta</label>
+                <input
+                  id="l2_min_delta"
+                  type="number"
+                  step="100"
+                  value={config.l2_min_delta}
+                  onChange={(e) => handleChange("l2_min_delta", Number(e.target.value))}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="l2_min_imbalance">L2 Min Imbalance</label>
+                <input
+                  id="l2_min_imbalance"
+                  type="number"
+                  step="0.01"
+                  value={config.l2_min_imbalance}
+                  onChange={(e) => handleChange("l2_min_imbalance", Number(e.target.value))}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="l2_min_signed_aggression">L2 Min Signed Aggression</label>
+                <input
+                  id="l2_min_signed_aggression"
+                  type="number"
+                  step="0.01"
+                  value={config.l2_min_signed_aggression}
+                  onChange={(e) => handleChange("l2_min_signed_aggression", Number(e.target.value))}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="l2_min_directional_consistency">L2 Min Directional Consistency</label>
+                <input
+                  id="l2_min_directional_consistency"
+                  type="number"
+                  step="0.01"
+                  value={config.l2_min_directional_consistency}
+                  onChange={(e) =>
+                    handleChange("l2_min_directional_consistency", Number(e.target.value))
+                  }
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="l2_min_participation_ratio">L2 Min Participation Ratio</label>
+                <input
+                  id="l2_min_participation_ratio"
+                  type="number"
+                  step="0.01"
+                  value={config.l2_min_participation_ratio}
+                  onChange={(e) =>
+                    handleChange("l2_min_participation_ratio", Number(e.target.value))
+                  }
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="l2_min_iceberg_bias">L2 Min Iceberg Bias</label>
+                <input
+                  id="l2_min_iceberg_bias"
+                  type="number"
+                  step="0.01"
+                  value={config.l2_min_iceberg_bias}
+                  onChange={(e) => handleChange("l2_min_iceberg_bias", Number(e.target.value))}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="l2_lookback_bars">L2 Lookback Bars</label>
+                <input
+                  id="l2_lookback_bars"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={config.l2_lookback_bars}
+                  onChange={(e) => handleChange("l2_lookback_bars", Number(e.target.value))}
+                />
+              </div>
+            </>
+          )}
 
           {error && (
             <div
@@ -342,7 +468,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
             disabled={loading || !config.ticker || !config.date_from || !config.date_to}
             style={{ width: "100%", marginTop: "var(--spacing-sm)" }}
           >
-            {loading ? "⏳ Starting..." : "🚀 Start Backtest"}
+            {loading ? "Starting..." : "Start Backtest"}
           </button>
         </form>
       </div>

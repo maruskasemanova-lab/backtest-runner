@@ -1,0 +1,250 @@
+{
+  "version": 1,
+  "updated_at": "2026-02-06",
+  "stories": [
+    {
+      "id": "ER-01",
+      "epic": "EPIC-01",
+      "title": "Deterministic partial fill model",
+      "priority": "P0",
+      "domain": "strategy-engine",
+      "status": "todo",
+      "files": [
+        "../market_regime_detection/src/day_trading_manager.py",
+        "../market_regime_detection/api_server.py",
+        "tests/test_execution_realism.py"
+      ],
+      "acceptance": [
+        "Entry fill uses participation cap and emits fill_ratio.",
+        "No-lookahead execution invariant remains true."
+      ],
+      "prompt_seed": "Implement deterministic partial fill behavior and expose fill metadata in API responses."
+    },
+    {
+      "id": "ER-02",
+      "epic": "EPIC-01",
+      "title": "Validate time/adverse flow exits",
+      "priority": "P0",
+      "domain": "strategy-engine",
+      "status": "todo",
+      "files": [
+        "../market_regime_detection/src/day_trading_manager.py",
+        "tests/test_execution_realism.py"
+      ],
+      "acceptance": [
+        "Time exit and adverse flow exit are covered by tests.",
+        "Exit reasons are visible in session markers."
+      ],
+      "prompt_seed": "Add/strengthen tests for time_exit and adverse_flow exit behavior."
+    },
+    {
+      "id": "ER-03",
+      "epic": "EPIC-01",
+      "title": "Harden execution config contract",
+      "priority": "P0",
+      "domain": "orchestration",
+      "status": "todo",
+      "files": [
+        "api_server.py",
+        "../market_regime_detection/api_server.py"
+      ],
+      "acceptance": [
+        "All execution config fields are passed runner -> strategy API.",
+        "Response includes effective execution_config."
+      ],
+      "prompt_seed": "Verify and harden execution config passthrough between services."
+    },
+    {
+      "id": "FF-01",
+      "epic": "EPIC-02",
+      "title": "Flow-only profile without pattern gate",
+      "priority": "P1",
+      "domain": "strategy-engine",
+      "status": "todo",
+      "files": [
+        "../market_regime_detection/src/multi_layer_decision.py",
+        "../market_regime_detection/src/day_trading_manager.py"
+      ],
+      "acceptance": [
+        "Flow strategy can execute with no detected candlestick patterns.",
+        "Pattern layer remains optional."
+      ],
+      "prompt_seed": "Optimize multi-layer logic for flow-first execution where pattern gate is disabled."
+    },
+    {
+      "id": "FF-02",
+      "epic": "EPIC-02",
+      "title": "Extend microstructure feature surface",
+      "priority": "P1",
+      "domain": "strategy-engine",
+      "status": "todo",
+      "files": [
+        "../market_regime_detection/src/day_trading_manager.py"
+      ],
+      "acceptance": [
+        "Metrics include large trader activity and VWAP execution flow.",
+        "Regime update payload includes these metrics."
+      ],
+      "prompt_seed": "Add and wire additional microstructure metrics into regime and decision payloads."
+    },
+    {
+      "id": "FF-03",
+      "epic": "EPIC-02",
+      "title": "Flow strategy param grids",
+      "priority": "P1",
+      "domain": "optimization-validation",
+      "status": "todo",
+      "files": [
+        "wfo_optimizer.py",
+        "oos_validator.py"
+      ],
+      "acceptance": [
+        "Flow strategies appear in optimization parameter grids.",
+        "OOS validator handles flow strategy overrides."
+      ],
+      "prompt_seed": "Add flow strategies to tuning/OOS parameter search."
+    },
+    {
+      "id": "OV-01",
+      "epic": "EPIC-03",
+      "title": "Improve 60/20/20 OOS reporting",
+      "priority": "P1",
+      "domain": "optimization-validation",
+      "status": "todo",
+      "files": [
+        "oos_validator.py"
+      ],
+      "acceptance": [
+        "Report shows split dates and metrics for all buckets.",
+        "Errors are explicit per ticker."
+      ],
+      "prompt_seed": "Enhance OOS validator output for direct decision making."
+    },
+    {
+      "id": "OV-02",
+      "epic": "EPIC-03",
+      "title": "Monte Carlo risk threshold gate",
+      "priority": "P1",
+      "domain": "optimization-validation",
+      "status": "todo",
+      "files": [
+        "monte_carlo.py"
+      ],
+      "acceptance": [
+        "Script emits pass/fail against configurable P95 drawdown threshold."
+      ],
+      "prompt_seed": "Add a machine-checkable risk gate to Monte Carlo simulation."
+    },
+    {
+      "id": "OV-03",
+      "epic": "EPIC-03",
+      "title": "Hourly and weekday ranking",
+      "priority": "P1",
+      "domain": "optimization-validation",
+      "status": "todo",
+      "files": [
+        "performance_tracker.py",
+        "walk_forward_runner.py",
+        "tests/test_performance_tracker_time_buckets.py"
+      ],
+      "acceptance": [
+        "Walk-forward report contains hourly and weekday summaries."
+      ],
+      "prompt_seed": "Complete and test time-bucketed performance analytics."
+    },
+    {
+      "id": "AO-01",
+      "epic": "EPIC-04",
+      "title": "Document run/session contracts",
+      "priority": "P2",
+      "domain": "orchestration",
+      "status": "todo",
+      "files": [
+        "README.md",
+        "bmad/context/component-map.json"
+      ],
+      "acceptance": [
+        "Field-level contracts documented for start/config endpoints."
+      ],
+      "prompt_seed": "Produce explicit API contract docs for run and session configuration."
+    },
+    {
+      "id": "AO-02",
+      "epic": "EPIC-04",
+      "title": "Decision payload schema tests",
+      "priority": "P2",
+      "domain": "orchestration",
+      "status": "todo",
+      "files": [
+        "session_runner.py",
+        "tests"
+      ],
+      "acceptance": [
+        "Schema tests fail on incompatible marker payload changes."
+      ],
+      "prompt_seed": "Add schema-level tests for decision marker payloads."
+    },
+    {
+      "id": "AO-03",
+      "epic": "EPIC-04",
+      "title": "Regime refresh telemetry reasons",
+      "priority": "P2",
+      "domain": "strategy-engine",
+      "status": "todo",
+      "files": [
+        "../market_regime_detection/src/day_trading_manager.py"
+      ],
+      "acceptance": [
+        "Payload contains prior/new regime and reason metrics."
+      ],
+      "prompt_seed": "Add explicit reason fields to regime refresh telemetry."
+    },
+    {
+      "id": "FE-01",
+      "epic": "EPIC-05",
+      "title": "Expose execution controls in UI",
+      "priority": "P2",
+      "domain": "frontend",
+      "status": "todo",
+      "files": [
+        "frontend/src/components/RunConfig.jsx",
+        "frontend/src/App.jsx"
+      ],
+      "acceptance": [
+        "UI can edit execution config and pass it to run start endpoint."
+      ],
+      "prompt_seed": "Add advanced execution/risk controls to run configuration panel."
+    },
+    {
+      "id": "FE-02",
+      "epic": "EPIC-05",
+      "title": "L2 diagnostics panel",
+      "priority": "P2",
+      "domain": "frontend",
+      "status": "todo",
+      "files": [
+        "frontend/src/components/DecisionPanel.jsx",
+        "frontend/src/components/SessionSummary.jsx"
+      ],
+      "acceptance": [
+        "Panel displays core L2 diagnostics from decision payload."
+      ],
+      "prompt_seed": "Add visual diagnostics for flow metrics and execution quality."
+    },
+    {
+      "id": "FE-03",
+      "epic": "EPIC-05",
+      "title": "Marker drill-down for new exit reasons",
+      "priority": "P2",
+      "domain": "frontend",
+      "status": "todo",
+      "files": [
+        "frontend/src/components/DecisionPanel.jsx"
+      ],
+      "acceptance": [
+        "Marker details support partial_take_profit and adverse_flow exits."
+      ],
+      "prompt_seed": "Extend marker detail renderer for new exit/cost fields."
+    }
+  ]
+}

@@ -121,6 +121,15 @@ class WalkForwardRunner:
             
             # Record trades in performance tracker
             for trade in report.trades:
+                flow_snapshot = trade.flow_snapshot if isinstance(trade.flow_snapshot, dict) else {}
+                signal_metadata = trade.signal_metadata if isinstance(trade.signal_metadata, dict) else {}
+                order_flow = signal_metadata.get("order_flow") if isinstance(signal_metadata, dict) else {}
+                if not isinstance(order_flow, dict):
+                    order_flow = {}
+                book_pressure_avg = flow_snapshot.get("book_pressure_avg", order_flow.get("book_pressure_avg"))
+                book_pressure_trend = flow_snapshot.get("book_pressure_trend", order_flow.get("book_pressure_trend"))
+                signed_aggression = flow_snapshot.get("signed_aggression", order_flow.get("signed_aggression"))
+
                 self.tracker.record_trade(
                     strategy=trade.strategy,
                     regime=report.regime_detected or "UNKNOWN",
@@ -135,7 +144,12 @@ class WalkForwardRunner:
                     pnl_dollars=trade.pnl_dollars,
                     gross_pnl_pct=trade.gross_pnl_pct or 0,
                     total_costs=trade.total_costs or 0,
-                    exit_reason=trade.exit_reason
+                    exit_reason=trade.exit_reason,
+                    flow_strategy=("flow" in (trade.strategy or "").lower()),
+                    book_pressure_confirmed=flow_snapshot.get("l2_confirmation_passed"),
+                    book_pressure_avg=book_pressure_avg,
+                    book_pressure_trend=book_pressure_trend,
+                    signed_aggression=signed_aggression,
                 )
             
             if self.config.verbose:
@@ -180,7 +194,9 @@ class WalkForwardRunner:
             'pnl_dollars': trade.pnl_dollars,
             'exit_reason': trade.exit_reason,
             'gross_pnl_pct': trade.gross_pnl_pct,
-            'total_costs': trade.total_costs
+            'total_costs': trade.total_costs,
+            'signal_metadata': trade.signal_metadata,
+            'flow_snapshot': trade.flow_snapshot,
         }
     
     async def run(self) -> Dict[str, Any]:
@@ -302,6 +318,8 @@ class WalkForwardRunner:
                 regime: self.tracker.get_regime_summary(regime)
                 for regime in ['TRENDING', 'CHOPPY', 'MIXED']
             },
+            'hourly_summary': self.tracker.get_hourly_summary(),
+            'weekday_summary': self.tracker.get_weekday_summary(),
             'overall_stats': self.tracker.get_overall_stats(),
             'daily_results': [
                 {

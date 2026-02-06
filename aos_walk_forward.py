@@ -17,6 +17,24 @@ from run_strategy_test import StrategyTester, BacktestReport
 from performance_tracker import PerformanceTracker
 from available_data import get_discovery
 
+FLOW_PARAM_GRIDS: Dict[str, Dict[str, List[float]]] = {
+    "momentum_flow": {
+        "min_signed_aggression": [0.06, 0.08, 0.10],
+        "min_book_pressure": [0.0, 0.02, 0.05],
+        "min_sweep_intensity": [0.05, 0.08, 0.12],
+    },
+    "absorption_reversal": {
+        "min_signed_aggression": [0.06, 0.08, 0.10],
+        "min_book_pressure": [0.03, 0.05, 0.08],
+        "min_divergence": [0.12, 0.15, 0.20],
+    },
+    "exhaustion_fade": {
+        "min_signed_aggression": [0.02, 0.04, 0.06],
+        "min_book_pressure": [0.0, 0.02, 0.05],
+        "max_sweep_intensity": [0.6, 0.8, 1.0],
+    },
+}
+
 
 @dataclass
 class AOSConfig:
@@ -214,6 +232,15 @@ class AOSWalkForwardRunner:
             # Track only trades that pass AOS rules.
             if result.should_trade:
                 for trade in report.trades:
+                    flow_snapshot = trade.flow_snapshot if isinstance(trade.flow_snapshot, dict) else {}
+                    signal_metadata = trade.signal_metadata if isinstance(trade.signal_metadata, dict) else {}
+                    order_flow = signal_metadata.get("order_flow") if isinstance(signal_metadata, dict) else {}
+                    if not isinstance(order_flow, dict):
+                        order_flow = {}
+                    book_pressure_avg = flow_snapshot.get("book_pressure_avg", order_flow.get("book_pressure_avg"))
+                    book_pressure_trend = flow_snapshot.get("book_pressure_trend", order_flow.get("book_pressure_trend"))
+                    signed_aggression = flow_snapshot.get("signed_aggression", order_flow.get("signed_aggression"))
+
                     self.tracker.record_trade(
                         strategy=trade.strategy,
                         regime=report.regime_detected or "UNKNOWN",
@@ -228,7 +255,12 @@ class AOSWalkForwardRunner:
                         pnl_dollars=trade.pnl_dollars,
                         gross_pnl_pct=trade.gross_pnl_pct or 0,
                         total_costs=trade.total_costs or 0,
-                        exit_reason=trade.exit_reason
+                        exit_reason=trade.exit_reason,
+                        flow_strategy=("flow" in (trade.strategy or "").lower()),
+                        book_pressure_confirmed=flow_snapshot.get("l2_confirmation_passed"),
+                        book_pressure_avg=book_pressure_avg,
+                        book_pressure_trend=book_pressure_trend,
+                        signed_aggression=signed_aggression,
                     )
             
             if self.verbose:
@@ -258,7 +290,9 @@ class AOSWalkForwardRunner:
             'exit_time': trade.exit_time,
             'pnl_pct': trade.pnl_pct,
             'pnl_dollars': trade.pnl_dollars,
-            'exit_reason': trade.exit_reason
+            'exit_reason': trade.exit_reason,
+            'signal_metadata': trade.signal_metadata,
+            'flow_snapshot': trade.flow_snapshot,
         }
     
     async def run(
@@ -391,7 +425,8 @@ class AOSWalkForwardRunner:
                 'tickers': tickers,
                 'start_date': start_date,
                 'end_date': end_date,
-                'total_days': len(self._generate_dates(start_date, end_date))
+                'total_days': len(self._generate_dates(start_date, end_date)),
+                'flow_param_grids': FLOW_PARAM_GRIDS,
             },
             'summary': {
                 'total_trades': total_trades,

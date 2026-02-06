@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Tuple
 import pandas as pd
 
 from .l2_data_manager import L2DataManager
+from .order_flow_engine import OrderFlowEngine
 
 
 @dataclass
@@ -50,6 +51,8 @@ class L2FeatureService:
         - l2_delta
         - l2_buy_volume / l2_sell_volume / l2_volume
         - l2_imbalance
+        - l2_bid_depth_total / l2_ask_depth_total
+        - l2_book_pressure / l2_book_pressure_change
         - l2_iceberg_buy_count / l2_iceberg_sell_count / l2_iceberg_bias
         """
         feature_map: Dict[int, Dict[str, float]] = {}
@@ -60,57 +63,24 @@ class L2FeatureService:
             "covered_minutes": 0,
         }
 
-        start_date = start_dt_utc.strftime("%Y-%m-%d")
-        end_date = end_dt_utc.strftime("%Y-%m-%d")
-        loaded = self.manager.load_data(ticker, start_date, end_date)
-        if loaded is None:
-            return feature_map, stats
-
         try:
-            fp_bars = self.manager.get_footprint_bars(
+            flow_engine = OrderFlowEngine(manager=self.manager)
+            feature_map, flow_stats = flow_engine.build_enriched_feature_map(
                 ticker=ticker,
-                start_time=start_dt_utc,
-                end_time=end_dt_utc,
-                timeframe="1min",
+                start_dt_utc=start_dt_utc,
+                end_dt_utc=end_dt_utc,
             )
+            stats.update(flow_stats)
         except Exception as e:
-            self.logger.warning(f"L2 footprint aggregation failed for {ticker}: {e}")
-            fp_bars = []
-
-        stats["footprint_bars"] = len(fp_bars)
-        for fp in fp_bars:
-            try:
-                minute_key = int(float(fp.get("time", 0)) // 60)
-            except (TypeError, ValueError):
-                continue
-
-            levels = fp.get("levels") or {}
-            buy_volume = 0.0
-            sell_volume = 0.0
-            if isinstance(levels, dict):
-                for level in levels.values():
-                    if not isinstance(level, dict):
-                        continue
-                    buy_volume += float(level.get("buy", 0) or 0)
-                    sell_volume += float(level.get("sell", 0) or 0)
-
-            total_volume = float(fp.get("volume", 0) or 0)
-            if total_volume <= 0:
-                total_volume = buy_volume + sell_volume
-
-            denom = buy_volume + sell_volume
-            imbalance = ((buy_volume - sell_volume) / denom) if denom > 0 else 0.0
-
-            feature_map[minute_key] = {
-                "l2_delta": float(fp.get("delta", 0) or 0),
-                "l2_buy_volume": buy_volume,
-                "l2_sell_volume": sell_volume,
-                "l2_volume": total_volume,
-                "l2_imbalance": imbalance,
-                "l2_iceberg_buy_count": 0.0,
-                "l2_iceberg_sell_count": 0.0,
-                "l2_iceberg_bias": 0.0,
-            }
+            self.logger.warning(f"OrderFlowEngine build failed for {ticker}: {e}")
+            feature_map = {}
+            stats.update(
+                {
+                    "has_l2": False,
+                    "footprint_bars": 0,
+                    "covered_minutes": 0,
+                }
+            )
 
         try:
             icebergs = self.manager.detect_icebergs(
@@ -140,11 +110,25 @@ class L2FeatureService:
                     "l2_sell_volume": 0.0,
                     "l2_volume": 0.0,
                     "l2_imbalance": 0.0,
+                    "l2_signed_aggression": 0.0,
+                    "l2_absorption_rate": 0.0,
+                    "l2_cumulative_delta": 0.0,
+                    "l2_delta_price_divergence": 0.0,
+                    "l2_delta_acceleration": 0.0,
+                    "l2_bid_depth_total": 0.0,
+                    "l2_ask_depth_total": 0.0,
+                    "l2_book_pressure": 0.0,
+                    "l2_book_pressure_change": 0.0,
+                    "l2_top_heavy_bid": 0.0,
+                    "l2_top_heavy_ask": 0.0,
                     "l2_iceberg_buy_count": 0.0,
                     "l2_iceberg_sell_count": 0.0,
                     "l2_iceberg_bias": 0.0,
                 },
             )
+            bucket.setdefault("l2_iceberg_buy_count", 0.0)
+            bucket.setdefault("l2_iceberg_sell_count", 0.0)
+            bucket.setdefault("l2_iceberg_bias", 0.0)
             side = str(ice.get("side", "")).lower()
             if side == "buy":
                 bucket["l2_iceberg_buy_count"] += 1.0
@@ -186,4 +170,3 @@ class L2FeatureService:
             "bars_after_filter": len(enriched),
         }
         return enriched, stats
-

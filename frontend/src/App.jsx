@@ -217,6 +217,7 @@ function App() {
   // Start a new run
   const handleStartRun = async (config) => {
     try {
+      setSelectedTicker(config.ticker || null);
       setStrategyApiUrl(config.strategy_api_url || "http://localhost:8001");
       const resp = await fetch('/api/run/start', {
         method: 'POST',

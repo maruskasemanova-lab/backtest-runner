@@ -193,6 +193,17 @@ async def _configure_session(
     regime_detection_minutes: int,
     regime_refresh_bars: int,
     account_size_usd: float,
+    risk_per_trade_pct: float = 1.0,
+    max_position_notional_pct: float = 100.0,
+    max_fill_participation_rate: float = 0.20,
+    min_fill_ratio: float = 0.35,
+    enable_partial_take_profit: bool = True,
+    partial_take_profit_rr: float = 1.0,
+    partial_take_profit_fraction: float = 0.5,
+    time_exit_bars: int = 40,
+    adverse_flow_exit_enabled: bool = True,
+    adverse_flow_threshold: float = 0.12,
+    adverse_flow_min_hold_bars: int = 3,
     l2_confirm_enabled: bool = False,
     l2_min_delta: float = 0.0,
     l2_min_imbalance: float = 0.0,
@@ -209,6 +220,17 @@ async def _configure_session(
         "regime_detection_minutes": int(regime_detection_minutes),
         "regime_refresh_bars": int(regime_refresh_bars),
         "account_size_usd": float(account_size_usd),
+        "risk_per_trade_pct": float(risk_per_trade_pct),
+        "max_position_notional_pct": float(max_position_notional_pct),
+        "max_fill_participation_rate": float(max_fill_participation_rate),
+        "min_fill_ratio": float(min_fill_ratio),
+        "enable_partial_take_profit": int(bool(enable_partial_take_profit)),
+        "partial_take_profit_rr": float(partial_take_profit_rr),
+        "partial_take_profit_fraction": float(partial_take_profit_fraction),
+        "time_exit_bars": int(time_exit_bars),
+        "adverse_flow_exit_enabled": int(bool(adverse_flow_exit_enabled)),
+        "adverse_flow_threshold": float(adverse_flow_threshold),
+        "adverse_flow_min_hold_bars": int(adverse_flow_min_hold_bars),
         "l2_confirm_enabled": int(bool(l2_confirm_enabled)),
         "l2_min_delta": float(l2_min_delta),
         "l2_min_imbalance": float(l2_min_imbalance),
@@ -273,6 +295,17 @@ class StartRunRequest(BaseModel):
     regime_refresh_bars: int = 12
     trailing_stop_pct: Optional[float] = None
     account_size_usd: float = 10_000.0
+    risk_per_trade_pct: float = 1.0
+    max_position_notional_pct: float = 100.0
+    max_fill_participation_rate: float = 0.20
+    min_fill_ratio: float = 0.35
+    enable_partial_take_profit: bool = True
+    partial_take_profit_rr: float = 1.0
+    partial_take_profit_fraction: float = 0.5
+    time_exit_bars: int = 40
+    adverse_flow_exit_enabled: bool = True
+    adverse_flow_threshold: float = 0.12
+    adverse_flow_min_hold_bars: int = 3
     allow_mock_data: bool = False
     l2_only: bool = False
     l2_confirm_enabled: bool = False
@@ -643,6 +676,17 @@ async def start_run(request: StartRunRequest):
         request.regime_detection_minutes,
         request.regime_refresh_bars,
         request.account_size_usd,
+        risk_per_trade_pct=request.risk_per_trade_pct,
+        max_position_notional_pct=request.max_position_notional_pct,
+        max_fill_participation_rate=request.max_fill_participation_rate,
+        min_fill_ratio=request.min_fill_ratio,
+        enable_partial_take_profit=request.enable_partial_take_profit,
+        partial_take_profit_rr=request.partial_take_profit_rr,
+        partial_take_profit_fraction=request.partial_take_profit_fraction,
+        time_exit_bars=request.time_exit_bars,
+        adverse_flow_exit_enabled=request.adverse_flow_exit_enabled,
+        adverse_flow_threshold=request.adverse_flow_threshold,
+        adverse_flow_min_hold_bars=request.adverse_flow_min_hold_bars,
         l2_confirm_enabled=effective_l2_confirm,
         l2_min_delta=l2_min_delta,
         l2_min_imbalance=l2_min_imbalance,
@@ -711,6 +755,20 @@ async def start_run(request: StartRunRequest):
             "l2_min_participation_ratio": l2_min_participation_ratio,
             "l2_min_directional_consistency": l2_min_directional_consistency,
             "l2_min_signed_aggression": l2_min_signed_aggression,
+        },
+        "execution_config": {
+            "account_size_usd": request.account_size_usd,
+            "risk_per_trade_pct": request.risk_per_trade_pct,
+            "max_position_notional_pct": request.max_position_notional_pct,
+            "max_fill_participation_rate": request.max_fill_participation_rate,
+            "min_fill_ratio": request.min_fill_ratio,
+            "enable_partial_take_profit": request.enable_partial_take_profit,
+            "partial_take_profit_rr": request.partial_take_profit_rr,
+            "partial_take_profit_fraction": request.partial_take_profit_fraction,
+            "time_exit_bars": request.time_exit_bars,
+            "adverse_flow_exit_enabled": request.adverse_flow_exit_enabled,
+            "adverse_flow_threshold": request.adverse_flow_threshold,
+            "adverse_flow_min_hold_bars": request.adverse_flow_min_hold_bars,
         },
         "first_bar": bars[0] if bars else None,
         "last_bar": bars[-1] if bars else None
