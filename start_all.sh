@@ -16,14 +16,14 @@ check_port() {
 # Start Strategy Evaluator on port 8001
 echo "📊 Starting Strategy Evaluator on port 8001..."
 cd /Users/hotovo/.gemini/antigravity/scratch/market_regime_detection
-python3 -m uvicorn api_server:app --port 8001 &
+python3 -m uvicorn api_server:app --port 8001 --reload &
 STRATEGY_PID=$!
 sleep 2
 
 # Start Backtest Runner on port 8002
 echo "🎯 Starting Backtest Runner API on port 8002..."
 cd /Users/hotovo/.gemini/antigravity/scratch/backtest-runner
-python3 -m uvicorn api_server:app --port 8002 &
+python3 -m uvicorn api_server:app --port 8002 --reload &
 RUNNER_PID=$!
 sleep 2
 

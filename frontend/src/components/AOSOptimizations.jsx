@@ -56,7 +56,11 @@ function AOSOptimizations({ apiUrl, selectedTicker, onOptimizationChange }) {
     setLoading(true);
     setError(null);
     try {
-      const resp = await fetch(`${resolvedUrl}/api/aos-config`);
+      // AOS Config is served by the runner API (port 8002), not the strategy API (8001)
+      // If apiUrl is passed as 8001, we need to override it here or use relative path if proxied.
+      // Assuming we are running locally, hardcode 8002 fallback or derive.
+      const runnerUrl = apiUrl && apiUrl.includes("8001") ? apiUrl.replace("8001", "8002") : "http://localhost:8002";
+      const resp = await fetch(`${runnerUrl}/api/aos-config`);
       if (resp.ok) {
         const data = await resp.json();
         setAosConfig(data);
@@ -108,7 +112,8 @@ function AOSOptimizations({ apiUrl, selectedTicker, onOptimizationChange }) {
 
     // Try to save to server
     try {
-      await fetch(`${resolvedUrl}/api/aos-config/update`, {
+      const runnerUrl = resolvedUrl && resolvedUrl.includes("8001") ? resolvedUrl.replace("8001", "8002") : "http://localhost:8002";
+      await fetch(`${runnerUrl}/api/aos-config/update`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -200,12 +200,11 @@ class StrategyPerformance:
         Combines multiple factors with weights.
         """
         if self.total_trades < 3:
-            # Not enough data - give base score based on what we have
             if self.total_trades == 0:
                 return -10.0
-            # Small sample bonus/penalty based on early results
-            base_score = 30.0 if self.win_rate >= 50 else 10.0
-            return base_score + (self.total_trades * 5)
+            # Avoid overrating tiny samples; require early evidence of positive edge.
+            base_score = 8.0 if self.total_pnl_pct > 0 else -6.0
+            return round(base_score + (self.total_pnl_pct * 10) + (self.total_trades * 1.5), 2)
         
         # Weights for different factors
         win_rate_weight = 0.3
@@ -562,7 +561,7 @@ class PerformanceTracker:
                 perf.total_costs = perf_data['total_costs']
                 perf.gross_pnl_pct = perf_data.get('gross_pnl_pct', 0)
                 
-                self._performance[(strategy, regime)] = perf
+                self._performance[self._get_key(perf.strategy, perf.regime)] = perf
     
     def clear(self):
         """Clear all performance data."""

@@ -20,6 +20,7 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
       regime_detected: '🎯',
       strategy_selected: '📋',
       signal_generated: '📊',
+      pattern_detected: '🕯️',
       entry_executed: '🟢',
       exit_executed: '⚪',
       stop_loss_hit: '🔴',
@@ -74,6 +75,19 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
                   ({pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%)
                 </span>
               )}
+              {marker.marker_type === 'pattern_detected' && marker.details?.direction && (
+                <span style={{
+                  marginLeft: 8,
+                  padding: '1px 6px',
+                  borderRadius: 3,
+                  fontSize: '0.75em',
+                  fontWeight: 600,
+                  background: marker.details.direction === 'bullish' ? 'rgba(34,197,94,0.15)' : marker.details.direction === 'bearish' ? 'rgba(239,68,68,0.15)' : 'rgba(100,116,139,0.15)',
+                  color: marker.details.direction === 'bullish' ? 'var(--accent-green)' : marker.details.direction === 'bearish' ? 'var(--accent-red)' : 'var(--text-secondary)',
+                }}>
+                  {marker.details.direction === 'bullish' ? '▲ BULL' : marker.details.direction === 'bearish' ? '▼ BEAR' : '◆ NEUTRAL'}
+                </span>
+              )}
             </div>
           </div>
         );})}
@@ -117,6 +131,86 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
                 <span className="detail-label">Confidence</span>
                 <span className="detail-value">{selectedMarker.confidence.toFixed(0)}%</span>
               </div>
+            )}
+            {/* Layer Scores (multi-layer decision) */}
+            {selectedMarker.details?.layer_scores && (
+              <>
+                <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
+                  <span className="detail-label" style={{ fontWeight: 600 }}>Multi-Layer Scores</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">Pattern Score</span>
+                  <span className="detail-value">{Number(selectedMarker.details.layer_scores.pattern_score || 0).toFixed(1)}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">Strategy Score</span>
+                  <span className="detail-value">{Number(selectedMarker.details.layer_scores.strategy_score || 0).toFixed(1)}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">Combined</span>
+                  <span className={`detail-value ${(selectedMarker.details.layer_scores.combined_score || 0) >= (selectedMarker.details.layer_scores.threshold || 65) ? 'positive' : 'negative'}`}>
+                    {Number(selectedMarker.details.layer_scores.combined_score || 0).toFixed(1)} / {selectedMarker.details.layer_scores.threshold || 65}
+                  </span>
+                </div>
+              </>
+            )}
+            {/* Patterns list */}
+            {selectedMarker.details?.patterns && selectedMarker.details.patterns.length > 0 && (
+              <>
+                <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
+                  <span className="detail-label" style={{ fontWeight: 600 }}>Candlestick Patterns</span>
+                </div>
+                {selectedMarker.details.patterns.map((pattern, pidx) => (
+                  <div className="detail-item" key={pidx} style={{ gridColumn: '1 / -1' }}>
+                    <span className="detail-label">
+                      {pattern.direction === 'bullish' ? '▲' : pattern.direction === 'bearish' ? '▼' : '◆'} {pattern.name}
+                    </span>
+                    <span className="detail-value">
+                      Strength: {Number(pattern.strength || 0).toFixed(0)}
+                      {pattern.metadata?.volume_confirmed ? ' | Vol ✓' : ''}
+                      {pattern.metadata?.trend_aligned ? ' | Trend ✓' : ''}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
+            {/* Also show layer_scores from metadata (for entry markers) */}
+            {selectedMarker.details?.metadata?.layer_scores && !selectedMarker.details?.layer_scores && (
+              <>
+                <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
+                  <span className="detail-label" style={{ fontWeight: 600 }}>Multi-Layer Scores</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">Pattern Score</span>
+                  <span className="detail-value">{Number(selectedMarker.details.metadata.layer_scores.pattern_score || 0).toFixed(1)}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">Strategy Score</span>
+                  <span className="detail-value">{Number(selectedMarker.details.metadata.layer_scores.strategy_score || 0).toFixed(1)}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">Combined</span>
+                  <span className={`detail-value ${(selectedMarker.details.metadata.layer_scores.combined_score || 0) >= (selectedMarker.details.metadata.layer_scores.threshold || 65) ? 'positive' : 'negative'}`}>
+                    {Number(selectedMarker.details.metadata.layer_scores.combined_score || 0).toFixed(1)} / {selectedMarker.details.metadata.layer_scores.threshold || 65}
+                  </span>
+                </div>
+              </>
+            )}
+            {/* Patterns from metadata (for entry markers) */}
+            {selectedMarker.details?.metadata?.patterns && selectedMarker.details.metadata.patterns.length > 0 && !selectedMarker.details?.patterns && (
+              <>
+                <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
+                  <span className="detail-label" style={{ fontWeight: 600 }}>Triggering Patterns</span>
+                </div>
+                {selectedMarker.details.metadata.patterns.map((pattern, pidx) => (
+                  <div className="detail-item" key={pidx} style={{ gridColumn: '1 / -1' }}>
+                    <span className="detail-label">
+                      {pattern.direction === 'bullish' ? '▲' : pattern.direction === 'bearish' ? '▼' : '◆'} {pattern.name}
+                    </span>
+                    <span className="detail-value">Strength: {Number(pattern.strength || 0).toFixed(0)}</span>
+                  </div>
+                ))}
+              </>
             )}
             {selectedMarker.details?.pnl_pct !== undefined && selectedMarker.details?.pnl_pct !== null && (
               <div className="detail-item">

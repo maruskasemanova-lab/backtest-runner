@@ -211,24 +211,25 @@ class AOSWalkForwardRunner:
             if report.total_trades == 0:
                 self.rule_violations['no_trades'] += 1
             
-            # Track in performance tracker
-            for trade in report.trades:
-                self.tracker.record_trade(
-                    strategy=trade.strategy,
-                    regime=report.regime_detected or "UNKNOWN",
-                    ticker=ticker,
-                    date=date,
-                    side=trade.side,
-                    entry_price=trade.entry_price,
-                    exit_price=trade.exit_price,
-                    entry_time=trade.entry_time,
-                    exit_time=trade.exit_time,
-                    pnl_pct=trade.pnl_pct,
-                    pnl_dollars=trade.pnl_dollars,
-                    gross_pnl_pct=trade.gross_pnl_pct or 0,
-                    total_costs=trade.total_costs or 0,
-                    exit_reason=trade.exit_reason
-                )
+            # Track only trades that pass AOS rules.
+            if result.should_trade:
+                for trade in report.trades:
+                    self.tracker.record_trade(
+                        strategy=trade.strategy,
+                        regime=report.regime_detected or "UNKNOWN",
+                        ticker=ticker,
+                        date=date,
+                        side=trade.side,
+                        entry_price=trade.entry_price,
+                        exit_price=trade.exit_price,
+                        entry_time=trade.entry_time,
+                        exit_time=trade.exit_time,
+                        pnl_pct=trade.pnl_pct,
+                        pnl_dollars=trade.pnl_dollars,
+                        gross_pnl_pct=trade.gross_pnl_pct or 0,
+                        total_costs=trade.total_costs or 0,
+                        exit_reason=trade.exit_reason
+                    )
             
             if self.verbose:
                 icon = "🟢" if result.total_pnl_dollars >= 0 else "🔴"

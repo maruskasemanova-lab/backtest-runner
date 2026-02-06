@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createChart } from "lightweight-charts";
 import ChartTooltip from "./ChartTooltip";
 
-function CandlestickChart({ bars, markers, onMarkerClick, selectedMarker }) {
+function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMarker, chartState, onChartStateChange, l2Data, priceRange, onPriceRangeChange }) {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -79,6 +79,15 @@ function CandlestickChart({ bars, markers, onMarkerClick, selectedMarker }) {
         },
       });
 
+      // Subscribe to range changes
+      if (onChartStateChange) {
+          chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+              if (range && !isSyncingRef.current) {
+                  onChartStateChange(range);
+              }
+          });
+      }
+
       // Candlestick series
       const candleSeries = chart.addCandlestickSeries({
         upColor: colors.up,
@@ -134,11 +143,46 @@ function CandlestickChart({ bars, markers, onMarkerClick, selectedMarker }) {
           chartRef.current = null;
         }
       };
+
     } catch (err) {
       console.error("Chart initialization error:", err);
       setError(err.message);
     }
   }, []);
+
+    // Keep a ref to bars for the event listener to access latest data without re-binding
+    const barsRef = useRef(bars);
+    useEffect(() => {
+        barsRef.current = bars;
+    }, [bars]);
+
+    // Use a ref to track if we are currently syncing from props to prevent loop
+    const isSyncingRef = useRef(false);
+
+  // Sync external chart state
+  useEffect(() => {
+      if (chartRef.current && chartState) {
+          const api = chartRef.current.timeScale();
+          const current = api.getVisibleRange();
+          
+          // Basic equality check to avoid redundant sets
+          const isSame = current && 
+                         Math.abs(current.from - chartState.from) < 0.001 && 
+                         Math.abs(current.to - chartState.to) < 0.001;
+
+          if (!isSame) {
+              isSyncingRef.current = true;
+              try {
+                  api.setVisibleRange(chartState);
+              } catch(e) { 
+                  // ignore errors if data not ready
+              } finally {
+                  // Reset flag immediately after
+                  isSyncingRef.current = false;
+              }
+          }
+      }
+  }, [chartState]);
 
   // Update data when bars change
   useEffect(() => {
@@ -182,8 +226,8 @@ function CandlestickChart({ bars, markers, onMarkerClick, selectedMarker }) {
       candleSeriesRef.current.setData(candleData);
       volumeSeriesRef.current.setData(volumeData);
 
-      // Auto-scroll to latest bar
-      if (chartRef.current) {
+      // Auto-scroll to latest bar if no explicit state
+      if (chartRef.current && !chartState) {
         chartRef.current.timeScale().scrollToPosition(0, false);
       }
     } catch (err) {
@@ -327,15 +371,9 @@ function CandlestickChart({ bars, markers, onMarkerClick, selectedMarker }) {
     };
   }, [markers, onMarkerClick]);
 
-  // Update markers
+  // Update markers (Decisions + Delta/CVD + Icebergs)
   useEffect(() => {
-    if (!candleSeriesRef.current) return;
-    if (!markers || markers.length === 0) {
-      try {
-        candleSeriesRef.current.setMarkers([]);
-      } catch (e) {}
-      return;
-    }
+    if (!candleSeriesRef.current || !bars || bars.length === 0) return;
 
     try {
       const getCssVar = (name, fallback) => {
@@ -350,7 +388,25 @@ function CandlestickChart({ bars, markers, onMarkerClick, selectedMarker }) {
         neutral: "#475569",
         blue: getCssVar("--accent-blue", "#1d4ed8"),
         amber: getCssVar("--accent-amber", "#f59e0b"),
+        ice_buy: "#00dbe3", // Svetlo modrá pre Support (Buy Iceberg)
+        ice_sell: "#ff00d4", // Fialová/Magenta pre Rezistenciu (Sell Iceberg) - pre lepší kontrast
       };
+
+      // 1. Calculate Dynamic Threshold for Icebergs
+      // Zistíme priemerný volume z viditeľných barov, aby sme filtrovali šum.
+      // Ak nemáme bars, použijeme hardcoded fallback.
+      const avgVolume = bars.reduce((acc, bar) => acc + (bar.volume || 0), 0) / (bars.length || 1);
+      // Iceberg musí byť aspoň 5% z priemerného volume sviečky (pôvodne 1.5x bolo príliš veľa)
+      // avgVolume * 1.5 means iceberg > 150% of total candle volume -> IMPOSSIBLE
+      // avgVolume * 0.05 means iceberg > 5% of total candle volume -> REASONABLE
+      const ICEBERG_MIN_SIZE = avgVolume * 0.05; 
+      
+      console.log("Iceberg Debug:", { 
+          avgVolume, 
+          ICEBERG_MIN_SIZE, 
+          icebergsCount: icebergs?.length,
+          processedCount: icebergs?.length 
+      }); 
 
       const validMarkerTypes = [
         "entry_executed",
@@ -359,60 +415,130 @@ function CandlestickChart({ bars, markers, onMarkerClick, selectedMarker }) {
         "take_profit_hit",
         "regime_detected",
         "strategy_selected",
+        "iceberg_detected",
       ];
+      
+      // 2. Helper to snap timestamps to bars
+      const barTimes = bars.map(b => b.time).sort((a,b) => a-b);
+      const findClosestBarTime = (targetTime) => {
+          if (!barTimes.length) return targetTime;
+          // Binary search for speed
+          let l = 0, r = barTimes.length - 1;
+          let closest = barTimes[0];
+          let minDiff = Math.abs(targetTime - closest);
+          while (l <= r) {
+              const m = Math.floor((l + r) / 2);
+              const t = barTimes[m];
+              const diff = Math.abs(targetTime - t);
+              if (diff < minDiff) { minDiff = diff; closest = t; }
+              if (t < targetTime) l = m + 1;
+              else if (t > targetTime) r = m - 1;
+              else return t;
+          }
+          // Ak je rozdiel väčší ako 2 minúty (120s), pravdepodobne to nepatrí k tejto sviečke
+          if (minDiff > 120) return null;
+          return closest;
+      };
 
-      const chartMarkers = markers
+      // 3. Process Icebergs
+      const processedIcebergs = (icebergs || []).map(ice => {
+          let ts = ice.time;
+          if (typeof ts === 'string') {
+               // Fix pre formáty ako "2023-10-10T10:00:00.123456"
+               const cleanIso = ts.replace(/(\.\d{3})\d+/, '$1'); 
+               const parsed = Date.parse(cleanIso);
+               if (!isNaN(parsed)) ts = parsed / 1000;
+               else return null;
+          } else if (!ts && ice.timestamp) {
+              ts = new Date(ice.timestamp).getTime() / 1000;
+          }
+          if (!ts) return null;
+          
+          const time = findClosestBarTime(ts);
+          if (time === null) return null;
+          
+          return { 
+              ...ice, 
+              time, 
+              marker_type: "iceberg_detected",
+              total_size: (ice.trade_size || 0) + (ice.hidden_size || 0)
+          };
+      })
+      .filter(i => i !== null)
+      // FILTER: Zobraz len významné icebergy (väčšie ako threshold)
+      .filter(i => i.total_size > ICEBERG_MIN_SIZE);
+
+      // Deduplicate: Ak je na jednej sviečke viac icebergov, zober ten najväčší
+      const uniqueIcebergsMap = new Map();
+      processedIcebergs.forEach(ice => {
+          const existing = uniqueIcebergsMap.get(ice.time);
+          if (!existing || (ice.total_size > existing.total_size)) {
+              uniqueIcebergsMap.set(ice.time, ice);
+          }
+      });
+      const uniqueIcebergs = Array.from(uniqueIcebergsMap.values());
+
+      // 4. Merge Standard Markers
+      const standardMarkers = (markers || []).map(m => {
+           let ts = m.time;
+           if (!ts && m.timestamp) ts = new Date(m.timestamp).getTime() / 1000;
+           if (ts) {
+               const snapped = findClosestBarTime(ts);
+               if (snapped !== null) return { ...m, time: snapped };
+           }
+           return m;
+      }).filter(m => m && m.time);
+
+      const allMarkers = [...standardMarkers, ...uniqueIcebergs];
+
+      // 5. Build Final Markers for Chart
+      const finalMarkers = allMarkers
         .filter((m) => m && validMarkerTypes.includes(m.marker_type))
         .map((m) => {
-          const time = Math.floor(new Date(m.timestamp).getTime() / 1000);
-
+          const time = m.time;
           let position = "aboveBar";
           let color = "#3b82f6";
           let shape = "circle";
           let text = "";
+          let size = 1; // Default size multiplier if needed (chart lib handles shape size via text usually)
 
           switch (m.marker_type) {
             case "entry_executed":
-              // Entry: Long = BUY (below bar, green), Short = SELL (above bar, red)
               if (m.side === "long") {
-                position = "belowBar";
-                color = palette.long;
-                shape = "arrowUp";
-                text = "BUY";
+                position = "belowBar"; color = palette.long; shape = "arrowUp"; text = "L";
               } else {
-                position = "aboveBar";
-                color = palette.short;
-                shape = "arrowDown";
-                text = "SELL";
+                position = "aboveBar"; color = palette.short; shape = "arrowDown"; text = "S";
               }
               break;
             case "exit_executed":
+              position = m.side === "long" ? "aboveBar" : "belowBar";
+              color = palette.neutral; shape = "circle"; text = "X";
+              break;
             case "stop_loss_hit":
-              // Exit: Long position closed = SELL (above bar), Short position closed = BUY (below bar)
-              if (m.side === "long") {
-                position = "aboveBar";
-                color = m.marker_type === "stop_loss_hit" ? palette.short : palette.neutral;
-                shape = "arrowDown";
-                text = m.marker_type === "stop_loss_hit" ? "SL" : "SELL";
-              } else {
-                position = "belowBar";
-                color = m.marker_type === "stop_loss_hit" ? palette.short : palette.neutral;
-                shape = "arrowUp";
-                text = m.marker_type === "stop_loss_hit" ? "SL" : "BUY";
-              }
+              position = m.side === "long" ? "belowBar" : "aboveBar"; // SL hit pre Long je sell order pod cenou? Zvycajne sa vizualizuje pri cene exitu.
+              color = palette.short; shape = "circle"; text = "SL";
               break;
             case "take_profit_hit":
-              // Take profit: Long position = SELL (above bar), Short position = BUY (below bar)
-              if (m.side === "long") {
-                position = "aboveBar";
-                color = palette.long;
-                shape = "arrowDown";
-                text = "TP";
-              } else {
-                position = "belowBar";
-                color = palette.long;
-                shape = "arrowUp";
-                text = "TP";
+              position = m.side === "long" ? "aboveBar" : "belowBar";
+              color = palette.long; shape = "circle"; text = "TP";
+              break;
+            
+            // --- ICEBERG VISUALIZATION ---
+            case "iceberg_detected":
+              const isMega = m.total_size > (avgVolume * 3); // Extra veľký iceberg
+              
+              if (m.side === "buy") { 
+                  // BUY ICEBERG = SUPPORT = POD SVIEČKOU
+                  position = "belowBar"; 
+                  color = palette.ice_buy;
+                  shape = "arrowUp"; 
+                  text = isMega ? "❄️" : "▲"; // Vločka len pre obrovské, inak šípka
+              } else { 
+                  // SELL ICEBERG = RESISTANCE = NAD SVIEČKOU
+                  position = "aboveBar"; 
+                  color = palette.ice_sell;
+                  shape = "arrowDown"; 
+                  text = isMega ? "❄️" : "▼"; 
               }
               break;
             case "regime_detected":
@@ -435,17 +561,18 @@ function CandlestickChart({ bars, markers, onMarkerClick, selectedMarker }) {
             color,
             shape,
             text,
-            id: m.id,
+            id: m.id || `${m.time}-${m.marker_type}`,
+            size: 2, // Lightweight charts uses size differently based on version, usually text handles visual size
           };
         })
-        .filter((m) => m.time && !isNaN(m.time))
         .sort((a, b) => a.time - b.time);
 
-      candleSeriesRef.current.setMarkers(chartMarkers);
+      candleSeriesRef.current.setMarkers(finalMarkers);
     } catch (err) {
       console.error("Chart markers update error:", err);
     }
-  }, [markers]);
+  }, [markers, icebergs, bars, l2Data]); // Added l2Data potentially but user provided bars.
+
 
   if (error) {
     return (

@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 
 # Configuration
-API_KEY = "db-3hQkGYx4SRQ8TYpVYskMfmT5q8HKE"
+API_KEY = os.getenv("DATABENTO_API_KEY", "")
 DATA_DIR = "/Users/hotovo/.gemini/antigravity/scratch/ibkr-l2-script/databento_data"
 TICKERS = ["NVDA", "TSLA", "AAPL", "AMD", "GOOGL", "META", "MSFT", "MU"]
 
@@ -101,6 +101,9 @@ def merge_with_existing(ticker, new_df, data_dir):
         print(f"  Note: Old file {main_file} can be removed manually")
 
 def main():
+    if not API_KEY:
+        raise RuntimeError("Missing DATABENTO_API_KEY environment variable")
+
     print("=" * 60)
     print(f"Databento Data Download")
     print(f"Tickers: {', '.join(TICKERS)}")

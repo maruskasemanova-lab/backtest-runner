@@ -18,6 +18,7 @@ class MarkerType(str, Enum):
     STOP_LOSS_HIT = "stop_loss_hit"
     TAKE_PROFIT_HIT = "take_profit_hit"
     TRAILING_STOP_UPDATED = "trailing_stop_updated"
+    PATTERN_DETECTED = "pattern_detected"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
 
@@ -264,6 +265,47 @@ class DecisionTracker:
         self.markers.append(marker)
         return marker
     
+    def add_pattern_detected(
+        self,
+        timestamp: datetime,
+        bar_index: int,
+        price: float,
+        patterns: List[Dict[str, Any]],
+        direction: str,
+        layer_scores: Dict[str, Any] = None
+    ) -> DecisionMarker:
+        """Record candlestick pattern detection (Layer 1)."""
+        pattern_names = [p.get('name', '?') for p in patterns]
+        best_strength = max((p.get('strength', 0) for p in patterns), default=0)
+
+        description_parts = [f"Detected: {', '.join(pattern_names)}"]
+        description_parts.append(f"Direction: {direction}")
+        description_parts.append(f"Best strength: {best_strength:.0f}")
+        if layer_scores:
+            description_parts.append(
+                f"Combined score: {layer_scores.get('combined_score', 0):.1f}"
+                f"/{layer_scores.get('threshold', 65)}"
+            )
+
+        marker = DecisionMarker(
+            id=self._generate_id(),
+            timestamp=timestamp,
+            bar_index=bar_index,
+            marker_type=MarkerType.PATTERN_DETECTED,
+            title=f"Pattern: {pattern_names[0]}" if pattern_names else "Pattern",
+            description=" | ".join(description_parts),
+            price=price,
+            side="long" if direction == "bullish" else ("short" if direction == "bearish" else None),
+            confidence=best_strength,
+            details={
+                "patterns": patterns,
+                "direction": direction,
+                "layer_scores": layer_scores or {},
+            }
+        )
+        self.markers.append(marker)
+        return marker
+
     def add_session_start(
         self,
         timestamp: datetime,
@@ -353,6 +395,7 @@ class DecisionTracker:
             MarkerType.STOP_LOSS_HIT: "#ef4444",  # red
             MarkerType.TAKE_PROFIT_HIT: "#22c55e",  # green
             MarkerType.TRAILING_STOP_UPDATED: "#06b6d4",  # cyan
+            MarkerType.PATTERN_DETECTED: "#e879f9",  # fuchsia
             MarkerType.SESSION_STARTED: "#3b82f6",  # blue
             MarkerType.SESSION_ENDED: "#3b82f6",  # blue
         }
@@ -369,6 +412,7 @@ class DecisionTracker:
             MarkerType.STOP_LOSS_HIT: "arrowDown",
             MarkerType.TAKE_PROFIT_HIT: "arrowDown",
             MarkerType.TRAILING_STOP_UPDATED: "circle",
+            MarkerType.PATTERN_DETECTED: "square",
             MarkerType.SESSION_STARTED: "circle",
             MarkerType.SESSION_ENDED: "circle",
         }
@@ -376,7 +420,7 @@ class DecisionTracker:
     
     def _get_marker_position(self, marker: DecisionMarker) -> str:
         """Get position (aboveBar/belowBar) for marker."""
-        if marker.marker_type in [MarkerType.ENTRY_EXECUTED, MarkerType.SIGNAL_GENERATED]:
+        if marker.marker_type in [MarkerType.ENTRY_EXECUTED, MarkerType.SIGNAL_GENERATED, MarkerType.PATTERN_DETECTED]:
             return "belowBar" if marker.side == "long" else "aboveBar"
         elif marker.marker_type in [MarkerType.EXIT_EXECUTED, MarkerType.STOP_LOSS_HIT, MarkerType.TAKE_PROFIT_HIT]:
             return "aboveBar" if marker.side == "long" else "belowBar"

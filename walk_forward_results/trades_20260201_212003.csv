@@ -1,5 +1,0 @@
-trade_id,strategy,regime,ticker,date,side,entry_price,exit_price,entry_time,exit_time,pnl_pct,pnl_dollars,gross_pnl_pct,total_costs,exit_reason,bars_held
-1,MeanReversion,CHOPPY,NVDA,2026-01-27,short,188.52,189.01,2026-01-27T15:09:00+00:00,2026-01-27T15:11:00+00:00,-1.34,-2.53,-0.26,0,stop_loss,0
-2,MeanReversion,CHOPPY,NVDA,2026-01-27,short,189.01,189.45,2026-01-27T15:11:00+00:00,2026-01-27T15:17:00+00:00,-1.31,-2.48,-0.23,0,stop_loss,0
-3,MeanReversion,CHOPPY,NVDA,2026-01-27,short,189.45,189.64,2026-01-27T15:17:00+00:00,2026-01-27T15:36:00+00:00,-1.18,-2.23,-0.1,0,trailing_stop,0
-4,MeanReversion,CHOPPY,NVDA,2026-01-27,short,189.64,189.16,2026-01-27T15:36:00+00:00,2026-01-27T15:55:00+00:00,-0.82,-1.56,0.25,0,end_of_day,0

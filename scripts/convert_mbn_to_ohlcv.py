@@ -1,0 +1,87 @@
+import databento as db
+import pandas as pd
+import os
+
+MBN_FILE = "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/data/l2/MU_2026-02-03_2026-02-05.mbn"
+OUTPUT_DIR = "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/data"
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, "MU_ohlcv-1m_2026-02-03_2026-02-05.csv")
+
+def convert():
+    if not os.path.exists(MBN_FILE):
+        print(f"Error: MBN file not found at {MBN_FILE}")
+        return
+
+    print(f"Loading {MBN_FILE}...")
+    try:
+        stored_data = db.DBNStore.from_file(MBN_FILE)
+        df = stored_data.to_df()
+        
+        print(f"Loaded {len(df)} rows. Columns: {df.columns.tolist()}")
+        
+        # Ensure timestamp index
+        if not isinstance(df.index, pd.DatetimeIndex):
+            # Try to find timestamp column if index is not it
+            if 'ts_event' in df.columns:
+                 df['ts_event'] = pd.to_datetime(df['ts_event'])
+                 df = df.set_index('ts_event')
+            elif 'ts_recv' in df.columns:
+                 df['ts_recv'] = pd.to_datetime(df['ts_recv'])
+                 df = df.set_index('ts_recv')
+        
+        # Filter for trades
+        # Databento: action 'T' is Trade.
+        # Check if 'action' column exists
+        if 'action' in df.columns:
+            trades = df[df['action'] == 'T'].copy()
+        else:
+            # Maybe it's 'T' in 'side' or 'flags'? 
+            # Actually, standard MBP-10 schema has 'action'.
+            # If strictly trades schema, it's always trades.
+            # But MBP-10 has book updates too.
+            print("Warning: 'action' column not found, assuming all rows are valid updates (might be wrong for volume).")
+            trades = df.copy()
+
+        print(f"Filtered to {len(trades)} trade rows.")
+        
+        # Resample to 1-minute OHLCV
+        # price is the trade price
+        # size is volume
+        
+        # Check price and size columns
+        if 'price' not in trades.columns:
+             # Databento prices are fixed precision int64 usually in DBN, but to_df() might convert float?
+             # If it's 'px', rename.
+             pass
+             
+        # Resample
+        ohlcv = trades.resample('1min').agg({
+            'price': ['first', 'max', 'min', 'last'],
+            'size': 'sum'
+        })
+        
+        # Flatten columns
+        ohlcv.columns = ['open', 'high', 'low', 'close', 'volume']
+        
+        # Add timestamp column from index
+        ohlcv = ohlcv.reset_index()
+        ohlcv = ohlcv.rename(columns={'index': 'timestamp', 'ts_event': 'timestamp'}) 
+        # (index name might vary)
+        
+        # Drop empty intervals (no trades)
+        ohlcv = ohlcv[ohlcv['volume'] > 0]
+        
+        # Save
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        ohlcv.to_csv(OUTPUT_FILE, index=False)
+        
+        print(f"Saved {len(ohlcv)} bars to {OUTPUT_FILE}")
+        print("Preview:")
+        print(ohlcv.head())
+
+    except Exception as e:
+        print(f"Conversion failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    convert()

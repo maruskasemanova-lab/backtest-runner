@@ -147,14 +147,33 @@
         "volume_threshold": 2.0,
         "breakout_pct": 0.25,
         "volume_stop_pct": 1.8,
-        "trailing_stop_pct": 1.5
+        "trailing_stop_pct": 1.5,
+        "min_confidence": 68.0
       },
       "backup_strategy": "gap_liquidity",
-      "regime_filter": ["TRENDING"],
+      "regime_filter": ["TRENDING", "MIXED"],
       "avoid_days": ["Friday"],
-      "min_confidence": 65.0,
-      "max_daily_trades": 2,
-      "notes": "High volatility, only clear trends"
+      "long_only": true,
+      "min_confidence": 60.0,
+      "max_daily_trades": 3,
+      "multilayer": {
+        "pattern_weight": 0.45,
+        "strategy_weight": 0.55,
+        "threshold": 58.0,
+        "require_pattern": false,
+        "volume_confirm_ratio": 1.15
+      },
+      "l2": {
+        "confirm_enabled": true,
+        "min_delta": 1200.0,
+        "min_imbalance": 0.04,
+        "min_iceberg_bias": 0.0,
+        "lookback_bars": 3,
+        "min_participation_ratio": 0.12,
+        "min_directional_consistency": 0.6,
+        "min_signed_aggression": 0.04
+      },
+      "notes": "High volatility, only clear trends; L2 confirms directional pressure."
     },
     
     "AMZN": {

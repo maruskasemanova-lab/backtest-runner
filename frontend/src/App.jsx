@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createChart } from 'lightweight-charts';
 import CandlestickChart from './components/CandlestickChart';
+import FootprintChart from './components/FootprintChart';
 import PlaybackControls from './components/PlaybackControls';
 import DecisionPanel from './components/DecisionPanel';
 import SessionSummary from './components/SessionSummary';
 import RunConfig from './components/RunConfig';
 import StrategySettings from './components/StrategySettings';
 import AOSOptimizations from './components/AOSOptimizations';
+import MultiLayerSettings from './components/MultiLayerSettings';
 
 function App() {
   // Run state
@@ -23,12 +25,26 @@ function App() {
   const [strategyApiUrl, setStrategyApiUrl] = useState("http://localhost:8001");
   const [aosOptimizations, setAosOptimizations] = useState({});
   
-  // Playback
+  // L2 Data
+  const [activeTab, setActiveTab] = useState("l2"); // "standard" or "l2"
+  const [l2Data, setL2Data] = useState(null);
+  const [icebergs, setIcebergs] = useState([]);
+  const [timeframe, setTimeframe] = useState("1min");
+  
+  // Chart Synchronization State
+  const [chartState, setChartState] = useState(null); // { from: number, to: number } (Time Range)
+  const [priceRange, setPriceRange] = useState(null); // { from: number, to: number } (Price Range)
+
+  // ...
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState('10hz'); // Default: 10 updates per second (string for hz, number for ms)
   
   // WebSocket
   const wsRef = useRef(null);
+
+  // Debug
+  const [debugMsg, setDebugMsg] = useState("Initializing...");
   
   // Connect WebSocket
   useEffect(() => {
@@ -109,6 +125,94 @@ function App() {
       return [...prev, marker];
     });
   }, []);
+
+  // Resample bars based on timeframe
+  const aggregatedBars = useCallback(() => {
+      if (timeframe === '1min') return bars;
+      if (!bars.length) return [];
+
+      const tfMinutes = parseInt(timeframe);
+      if (isNaN(tfMinutes)) return bars;
+      
+      const interval = tfMinutes * 60; // seconds
+      const groups = new Map();
+
+      bars.forEach(bar => {
+          const time = bar.time; // seconds
+          // quantize time to interval start
+          const bucket = Math.floor(time / interval) * interval;
+           
+          if (!groups.has(bucket)) {
+              groups.set(bucket, {
+                  time: bucket,
+                  open: bar.open,
+                  high: bar.high,
+                  low: bar.low,
+                  close: bar.close,
+                  volume: bar.volume,
+                  count: 1
+              });
+          } else {
+              const b = groups.get(bucket);
+              b.high = Math.max(b.high, bar.high);
+              b.low = Math.min(b.low, bar.low);
+              b.close = bar.close;
+              b.volume += bar.volume;
+              b.count++;
+          }
+      });
+      
+      return Array.from(groups.values()).sort((a,b) => a.time - b.time);
+  }, [bars, timeframe]);
+
+  const displayedBars = aggregatedBars();
+
+  // Fetch L2 Data - Updated to run for Standard tab too (for Delta display)
+  useEffect(() => {
+      // Fetch if we have run info
+      if (!runState || !runKey) return;
+      
+      const fetchL2 = async () => {
+          try {
+              if (!runState.date) return;
+
+              const date = runState.date.split('_')[0]; 
+              const ticker = runState.ticker;
+              const start = `${date}T04:00:00Z`; 
+              const end = `${date}T20:00:00Z`; 
+              
+              setDebugMsg(`Fetching L2 & Icebergs... ${ticker} ${date}`);
+
+              // Parallel fetch
+              const [l2Res, iceRes] = await Promise.all([
+                  fetch(`/api/l2/footprint/${ticker}?start_time=${start}&end_time=${end}&timeframe=${timeframe}`),
+                  fetch(`/api/l2/icebergs/${ticker}?start_time=${start}&end_time=${end}`)
+              ]);
+              
+              if (l2Res.ok) {
+                  const data = await l2Res.json();
+                  setL2Data({...data, date, timeframe});
+                  setDebugMsg(prev => `${prev} L2: ${data.bars?.length}`);
+              } else {
+                  console.error("L2 fetch failed", l2Res.status);
+              }
+              
+              if (iceRes.ok) {
+                  const iceData = await iceRes.json();
+                  setIcebergs(iceData);
+                  setDebugMsg(prev => `${prev} Ice: ${iceData?.length}`);
+              } else {
+                  console.error("Iceberg fetch failed", iceRes.status);
+              }
+
+          } catch (e) {
+              setDebugMsg(`Fetch Error: ${e.message}`);
+              console.error("Fetch error:", e);
+          }
+      };
+      
+      fetchL2();
+  }, [runKey, runState?.ticker, runState?.date, timeframe]); // Removed activeTab dependency so it fetches for Standard too
   
   // Start a new run
   const handleStartRun = async (config) => {
@@ -267,13 +371,18 @@ function App() {
     setSelectedMarker(marker);
   };
   
+  // Debug state moved to top level
+  
   return (
     <div className="app-container">
       {/* Header */}
       <header className="app-header">
-        <h1>
-          <span className="logo">📊</span>
-          Backtest Runner
+        <h1 style={{ display: 'flex', flexDirection: 'column' }}>
+          <div>
+            <span className="logo">📊</span>
+            Backtest Runner
+          </div>
+          <span style={{ fontSize: '10px', color: 'orange' }}>DEBUG: {debugMsg}</span>
         </h1>
         <div className="connection-status">
           <span className={`status-dot ${isConnected ? 'connected' : ''}`}></span>
@@ -294,6 +403,9 @@ function App() {
 
           {/* Strategy Settings */}
           <StrategySettings apiUrl={strategyApiUrl} selectedTicker={selectedTicker} />
+
+          {/* Multi-Layer Decision Engine */}
+          <MultiLayerSettings apiUrl={strategyApiUrl} />
 
           {/* AOS Optimizations */}
           <AOSOptimizations 
@@ -342,14 +454,102 @@ function App() {
                 {runState.phase}
               </span>
             )}
+            <div className="tab-switcher" style={{ marginLeft: "auto", display: "flex", gap: "10px", alignItems: "center" }}>
+                <select 
+                    value={timeframe} 
+                    onChange={(e) => setTimeframe(e.target.value)}
+                    style={{
+                        background: '#333',
+                        color: '#fff',
+                        border: '1px solid #555',
+                        borderRadius: '4px',
+                        padding: '4px',
+                        marginRight: '10px',
+                        cursor: 'pointer'
+                    }}
+                >
+                    <option value="1min">1 Min</option>
+                    <option value="5min">5 Min</option>
+                    <option value="15min">15 Min</option>
+                    <option value="30min">30 Min</option>
+                    <option value="1h">1 Hour</option>
+                </select>
+                <button 
+                    className={`tab-btn ${activeTab === 'standard' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('standard')}
+                    style={{ 
+                        background: activeTab === 'standard' ? 'var(--accent-blue)' : 'transparent',
+                        color: activeTab === 'standard' ? '#fff' : 'var(--text-secondary)',
+                        border: '1px solid var(--border-color)',
+                        padding: '4px 8px',
+                        cursor: 'pointer',
+                        borderRadius: '4px'
+                    }}
+                >
+                    Standard
+                </button>
+                <button 
+                    className={`tab-btn ${activeTab === 'l2' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('l2')}
+                     style={{ 
+                        background: activeTab === 'l2' ? 'var(--accent-blue)' : 'transparent',
+                        color: activeTab === 'l2' ? '#fff' : 'var(--text-secondary)',
+                        border: '1px solid var(--border-color)',
+                        padding: '4px 8px',
+                        cursor: 'pointer',
+                        borderRadius: '4px'
+                    }}
+                >
+                    L2 Footprint
+                </button>
+            </div>
           </div>
           <div className="chart-wrapper">
-            <CandlestickChart 
-              bars={bars} 
-              markers={markers}
-              onMarkerClick={handleMarkerClick}
-              selectedMarker={selectedMarker}
-            />
+            {activeTab === 'standard' ? (
+                <CandlestickChart 
+                  bars={displayedBars} 
+                  markers={markers}
+                  icebergs={icebergs}
+                  onMarkerClick={handleMarkerClick}
+                  selectedMarker={selectedMarker}
+                  chartState={chartState}
+                  onChartStateChange={(newState) => {
+                    setChartState(prev => {
+                        if (prev && newState && 
+                            Math.abs(prev.from - newState.from) < 0.001 && 
+                            Math.abs(prev.to - newState.to) < 0.001) {
+                            return prev;
+                        }
+                        return newState;
+                    });
+                  }}
+                  priceRange={priceRange}
+                  onPriceRangeChange={setPriceRange}
+                  l2Data={l2Data} 
+                />
+            ) : (
+                <FootprintChart 
+                  bars={displayedBars} 
+                  markers={markers}
+                  icebergs={icebergs}
+                  onMarkerClick={handleMarkerClick}
+                  selectedMarker={selectedMarker}
+                  l2Data={l2Data}
+                  chartState={chartState}
+                  onChartStateChange={(newState) => {
+                    setChartState(prev => {
+                        if (prev && newState && 
+                            Math.abs(prev.from - newState.from) < 0.001 && 
+                            Math.abs(prev.to - newState.to) < 0.001) {
+                            return prev;
+                        }
+                        return newState;
+                    });
+                  }}
+                  priceRange={priceRange}
+                  onPriceRangeChange={setPriceRange}
+                />
+            )}
           </div>
           {currentBar && (
             <div className="current-bar-info">

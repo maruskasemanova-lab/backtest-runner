@@ -301,10 +301,13 @@ def main():
             "train_dates": train_dates,
         }
 
-        overrides[ticker] = {
-            "mean_reversion": mean_rev.params,
-            "momentum": momentum.params,
-        }
+        ticker_overrides: Dict[str, Dict[str, Any]] = {}
+        if mean_rev.params and mean_rev.days_used > 0:
+            ticker_overrides["mean_reversion"] = mean_rev.params
+        if momentum.params and momentum.days_used > 0:
+            ticker_overrides["momentum"] = momentum.params
+        if ticker_overrides:
+            overrides[ticker] = ticker_overrides
 
     # Evaluate test week
     test_results = {"test_start": args.test_start, "test_end": args.test_end, "tickers": {}}

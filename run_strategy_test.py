@@ -9,8 +9,6 @@ Usage:
 import argparse
 import asyncio
 import json
-import os
-import sys
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, asdict
@@ -80,16 +78,64 @@ class StrategyTester:
     ):
         self.api_url = api_url
         self.strategy_api_url = strategy_api_url
+
+    @staticmethod
+    def _coerce_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _extract_trade_cost(value: Any) -> float:
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, dict):
+            for key in ("total", "total_costs", "cost"):
+                if key in value:
+                    try:
+                        return float(value[key])
+                    except (TypeError, ValueError):
+                        continue
+        return 0.0
+
+    @staticmethod
+    def _extract_summary_dict(summary_payload: Any) -> Dict[str, Any]:
+        if isinstance(summary_payload, dict):
+            nested = summary_payload.get("session_summary")
+            if isinstance(nested, dict):
+                return nested
+            return summary_payload
+        return {}
+
+    @staticmethod
+    def _extract_trades(summary_payload: Any) -> List[Dict[str, Any]]:
+        if not isinstance(summary_payload, dict):
+            return []
+
+        direct = summary_payload.get("trades")
+        if isinstance(direct, list):
+            return direct
+
+        nested = summary_payload.get("session_summary")
+        if isinstance(nested, dict):
+            nested_trades = nested.get("trades")
+            if isinstance(nested_trades, list):
+                return nested_trades
+
+        return []
     
     async def run_test(
         self,
         ticker: str,
         date: str,
         run_id: Optional[str] = None,
-        verbose: bool = False
+        verbose: bool = False,
+        cleanup_run: bool = True,
+        start_overrides: Optional[Dict[str, Any]] = None,
     ) -> BacktestReport:
         """Run a complete backtest and return the report."""
-        
+        ticker = ticker.upper()
         if run_id is None:
             run_id = f"test-{ticker}-{date}-{int(datetime.now().timestamp())}"
         
@@ -104,29 +150,36 @@ class StrategyTester:
             total_bars=0,
             bars_processed=0
         )
-        
+
+        run_id_part: Optional[str] = None
+        ticker_part: Optional[str] = None
+        date_part: Optional[str] = None
+
         async with aiohttp.ClientSession() as session:
             # 1. Start the backtest
             if verbose:
                 print(f"🚀 Starting backtest: {ticker} on {date}")
             
             try:
-                start_resp = await session.post(
+                start_payload: Dict[str, Any] = {
+                    "run_id": run_id,
+                    "ticker": ticker,
+                    "date": date,
+                    "strategy_api_url": self.strategy_api_url,
+                }
+                if start_overrides:
+                    start_payload.update(start_overrides)
+
+                async with session.post(
                     f"{self.api_url}/api/run/start",
-                    json={
-                        "run_id": run_id,
-                        "ticker": ticker,
-                        "date": date,
-                        "strategy_api_url": self.strategy_api_url
-                    }
-                )
-                
-                if start_resp.status != 200:
-                    error_text = await start_resp.text()
-                    report.errors.append(f"Start failed: {error_text}")
-                    return report
-                
-                start_data = await start_resp.json()
+                    json=start_payload
+                ) as start_resp:
+                    if start_resp.status != 200:
+                        error_text = await start_resp.text()
+                        report.errors.append(f"Start failed: {error_text}")
+                        return report
+                    
+                    start_data = await start_resp.json()
                 report.total_bars = start_data.get("total_bars", 0)
                 run_key = start_data.get("run_key", f"{run_id}:{ticker}:{date}")
                 
@@ -138,7 +191,10 @@ class StrategyTester:
                 return report
             
             # Parse run_key
-            parts = run_key.split(":")
+            parts = run_key.split(":", 2)
+            if len(parts) != 3:
+                report.errors.append(f"Invalid run_key format: {run_key}")
+                return report
             run_id_part, ticker_part, date_part = parts[0], parts[1], parts[2]
             
             # 2. Process all bars
@@ -150,19 +206,19 @@ class StrategyTester:
             
             while bar_count < report.total_bars:
                 try:
-                    step_resp = await session.post(
+                    async with session.post(
                         f"{self.api_url}/api/run/{run_id_part}/{ticker_part}/{date_part}/step"
-                    )
-                    
-                    if step_resp.status != 200:
-                        error_text = await step_resp.text()
-                        report.errors.append(f"Step {bar_count} failed: {error_text}")
-                        break
-                    
-                    step_data = await step_resp.json()
+                    ) as step_resp:
+                        if step_resp.status != 200:
+                            error_text = await step_resp.text()
+                            report.errors.append(f"Step {bar_count} failed: {error_text}")
+                            break
+                        
+                        step_data = await step_resp.json()
                     
                     if not step_data.get("success"):
-                        if step_data.get("reason") == "no_more_bars":
+                        err = str(step_data.get("error", ""))
+                        if step_data.get("phase") == "COMPLETED" or "No more bars" in err:
                             break
                         report.errors.append(f"Step {bar_count} unsuccessful: {step_data}")
                         break
@@ -205,79 +261,119 @@ class StrategyTester:
                 print(f"📄 Getting summary...")
             
             try:
-                summary_resp = await session.get(
+                async with session.get(
                     f"{self.api_url}/api/run/{run_id_part}/{ticker_part}/{date_part}/summary"
-                )
-                
-                if summary_resp.status == 200:
-                    summary = await summary_resp.json()
-                    
-                    # Extract trades (handle nested session_summary)
-                    trades_data = summary.get("trades", [])
-                    if not trades_data and "session_summary" in summary:
-                        session_summary = summary.get("session_summary")
-                        if session_summary:
-                            trades_data = session_summary.get("trades", [])
-                    
-                    for t in trades_data:
-                        trade = TradeResult(
-                            id=t.get("id", 0),
-                            strategy=t.get("strategy", ""),
-                            side=t.get("side", ""),
-                            entry_price=t.get("entry_price", 0),
-                            exit_price=t.get("exit_price", 0),
-                            entry_time=t.get("entry_time", ""),
-                            exit_time=t.get("exit_time", ""),
-                            size=t.get("size", 0),
-                            pnl_pct=t.get("pnl_pct", 0),
-                            pnl_dollars=t.get("pnl_dollars", 0),
-                            exit_reason=t.get("exit_reason", ""),
-                            gross_pnl_pct=t.get("gross_pnl_pct"),
-                            total_costs=t.get("total_costs")
+                ) as summary_resp:
+                    if summary_resp.status == 200:
+                        summary_payload = await summary_resp.json()
+                        summary = self._extract_summary_dict(summary_payload)
+                        trades_data = self._extract_trades(summary_payload)
+
+                        for t in trades_data:
+                            trade_cost = self._extract_trade_cost(t.get("total_costs"))
+                            if trade_cost == 0.0 and t.get("gross_pnl_pct") is not None and t.get("pnl_pct") is not None:
+                                gross = self._coerce_float(t.get("gross_pnl_pct"), 0.0)
+                                net = self._coerce_float(t.get("pnl_pct"), 0.0)
+                                entry = self._coerce_float(t.get("entry_price"), 0.0)
+                                size = self._coerce_float(t.get("size"), 0.0)
+                                trade_cost = max(0.0, abs(gross - net) * entry * size / 100.0)
+                            trade = TradeResult(
+                                id=t.get("id", 0),
+                                strategy=t.get("strategy", ""),
+                                side=t.get("side", ""),
+                                entry_price=t.get("entry_price", 0),
+                                exit_price=t.get("exit_price", 0),
+                                entry_time=t.get("entry_time", ""),
+                                exit_time=t.get("exit_time", ""),
+                                size=int(self._coerce_float(t.get("size", 0), 0.0)),
+                                pnl_pct=t.get("pnl_pct", 0),
+                                pnl_dollars=t.get("pnl_dollars", 0),
+                                exit_reason=t.get("exit_reason", ""),
+                                gross_pnl_pct=t.get("gross_pnl_pct"),
+                                total_costs=trade_cost
+                            )
+                            report.trades.append(trade)
+                        
+                        # Calculate stats
+                        report.total_trades = len(report.trades)
+
+                        total_pnl_pct_candidates = [
+                            summary.get("total_pnl_pct"),
+                            summary.get("total_pnl"),
+                            summary.get("pnl_pct"),
+                        ]
+                        report.total_pnl_pct = next(
+                            (self._coerce_float(v) for v in total_pnl_pct_candidates if v is not None),
+                            sum(t.pnl_pct for t in report.trades),
                         )
-                        report.trades.append(trade)
-                    
-                    # Calculate stats
-                    report.total_trades = len(report.trades)
-                    report.total_pnl_pct = summary.get("total_pnl", 0)
-                    report.total_pnl_dollars = sum(t.pnl_dollars for t in report.trades)
-                    report.total_costs = sum(t.total_costs or 0 for t in report.trades)
-                    
-                    wins = [t for t in report.trades if t.pnl_pct > 0]
-                    losses = [t for t in report.trades if t.pnl_pct <= 0]
-                    
-                    report.winning_trades = len(wins)
-                    report.losing_trades = len(losses)
-                    report.win_rate = len(wins) / len(report.trades) * 100 if report.trades else 0
-                    
-                    if wins:
-                        report.avg_win_pct = sum(t.pnl_pct for t in wins) / len(wins)
-                    if losses:
-                        report.avg_loss_pct = sum(t.pnl_pct for t in losses) / len(losses)
-                    
-                    total_wins = sum(t.pnl_pct for t in wins) if wins else 0
-                    total_losses = abs(sum(t.pnl_pct for t in losses)) if losses else 0
-                    report.profit_factor = total_wins / total_losses if total_losses > 0 else float('inf')
+
+                        total_pnl_dollars_candidates = [
+                            summary.get("total_pnl_dollars"),
+                            summary.get("net_pnl"),
+                            summary.get("pnl_dollars"),
+                        ]
+                        report.total_pnl_dollars = next(
+                            (self._coerce_float(v) for v in total_pnl_dollars_candidates if v is not None),
+                            sum(t.pnl_dollars for t in report.trades),
+                        )
+
+                        report.total_costs = sum(t.total_costs or 0.0 for t in report.trades)
+                        if report.total_costs == 0:
+                            report.total_costs = self._coerce_float(summary.get("total_costs", 0.0), 0.0)
+                        
+                        wins = [t for t in report.trades if t.pnl_pct > 0]
+                        losses = [t for t in report.trades if t.pnl_pct <= 0]
+                        
+                        report.winning_trades = len(wins)
+                        report.losing_trades = len(losses)
+                        report.win_rate = len(wins) / len(report.trades) * 100 if report.trades else 0
+                        
+                        if wins:
+                            report.avg_win_pct = sum(t.pnl_pct for t in wins) / len(wins)
+                        if losses:
+                            report.avg_loss_pct = sum(t.pnl_pct for t in losses) / len(losses)
+                        
+                        total_wins = sum(t.pnl_pct for t in wins) if wins else 0
+                        total_losses = abs(sum(t.pnl_pct for t in losses)) if losses else 0
+                        report.profit_factor = total_wins / total_losses if total_losses > 0 else float('inf')
+                    else:
+                        text = await summary_resp.text()
+                        report.errors.append(f"Summary HTTP {summary_resp.status}: {text}")
                     
             except Exception as e:
                 report.errors.append(f"Summary error: {str(e)}")
             
             # 4. Get decisions
             try:
-                markers_resp = await session.get(
+                async with session.get(
                     f"{self.api_url}/api/run/{run_id_part}/{ticker_part}/{date_part}/markers"
-                )
-                
-                if markers_resp.status == 200:
-                    markers = await markers_resp.json()
-                    # Handle both list and dict responses
-                    if isinstance(markers, list):
-                        report.decisions = markers
+                ) as markers_resp:
+                    if markers_resp.status == 200:
+                        markers = await markers_resp.json()
+                        # Handle both list and dict responses
+                        if isinstance(markers, list):
+                            report.decisions = markers
+                        elif isinstance(markers, dict):
+                            marker_list = markers.get("markers", [])
+                            report.decisions = marker_list if isinstance(marker_list, list) else []
+                        else:
+                            report.decisions = []
                     else:
-                        report.decisions = markers.get("markers", [])
+                        text = await markers_resp.text()
+                        report.errors.append(f"Markers HTTP {markers_resp.status}: {text}")
                     
             except Exception as e:
                 report.errors.append(f"Markers error: {str(e)}")
+
+            # 5. Cleanup run state to prevent memory leaks between batch runs.
+            if cleanup_run and run_id_part and ticker_part and date_part:
+                try:
+                    async with session.delete(
+                        f"{self.api_url}/api/run/{run_id_part}/{ticker_part}/{date_part}"
+                    ):
+                        pass
+                except Exception as e:
+                    report.errors.append(f"Cleanup warning: {str(e)}")
         
         # Finalize report
         end_time = datetime.now()

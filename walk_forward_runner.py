@@ -287,7 +287,7 @@ class WalkForwardRunner:
                 'total_trades': total_trades,
                 'total_pnl_dollars': round(total_pnl, 2),
                 'total_costs': round(total_costs, 2),
-                'net_pnl': round(total_pnl - total_costs, 2),
+                'net_pnl': round(total_pnl, 2),
                 'winning_days': winning_days,
                 'losing_days': losing_days,
                 'total_days': len(self.results),

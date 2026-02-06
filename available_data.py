@@ -1,11 +1,10 @@
 """
 Data discovery module for scanning available trading data files.
 """
-import os
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 import logging
 
@@ -13,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Default data directory
 DEFAULT_DATA_DIR = "/Users/hotovo/.gemini/antigravity/scratch/ibkr-l2-script/databento_data"
+LOCAL_DATA_DIR = str(Path(__file__).resolve().parent / "data")
 
 
 @dataclass
@@ -30,14 +30,29 @@ class DataDiscovery:
     
     # Pattern for parsing filenames like: AAPL_ohlcv-1m_2025-08-01_2026-01-28.csv
     FILENAME_PATTERN = re.compile(
-        r'^([A-Z]+)_ohlcv-\d+[mhd]_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.csv$'
+        r"^([A-Z]+)_ohlcv-\d+[mhd]_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.(csv|parquet|parq)$"
     )
     
-    def __init__(self, data_dir: str = DEFAULT_DATA_DIR):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: Optional[str] = None, data_dirs: Optional[List[str]] = None):
+        if data_dirs:
+            self.data_dirs = [Path(d) for d in data_dirs]
+        elif data_dir:
+            self.data_dirs = [Path(data_dir)]
+        else:
+            # Prefer the external historical dataset, but also scan local project data.
+            self.data_dirs = [Path(DEFAULT_DATA_DIR), Path(LOCAL_DATA_DIR)]
+
+        # Keep the primary path for backwards compatibility with older API payloads.
+        self.data_dir = self.data_dirs[0]
         self._cache: Optional[Dict[str, TickerData]] = None
         self._cache_time: Optional[datetime] = None
         self._cache_ttl_seconds = 60  # Cache for 1 minute
+
+    def _parse_filename(self, file_path: Path) -> Optional[Tuple[str, str, str]]:
+        match = self.FILENAME_PATTERN.match(file_path.name)
+        if not match:
+            return None
+        return match.group(1), match.group(2), match.group(3)
     
     def scan(self, force_refresh: bool = False) -> Dict[str, TickerData]:
         """Scan data directory and return available ticker data."""
@@ -48,28 +63,30 @@ class DataDiscovery:
         
         tickers: Dict[str, TickerData] = {}
         
-        if not self.data_dir.exists():
-            logger.warning(f"Data directory does not exist: {self.data_dir}")
-            return tickers
-        
-        # Scan CSV files
-        for file in self.data_dir.glob("*.csv"):
-            match = self.FILENAME_PATTERN.match(file.name)
-            if match:
-                ticker = match.group(1)
-                start_date = match.group(2)
-                end_date = match.group(3)
-                
-                if ticker not in tickers:
-                    tickers[ticker] = TickerData(ticker=ticker)
-                
-                tickers[ticker].files.append(file.name)
-                
-                # Update date range (take widest range)
-                if tickers[ticker].start_date is None or start_date < tickers[ticker].start_date:
-                    tickers[ticker].start_date = start_date
-                if tickers[ticker].end_date is None or end_date > tickers[ticker].end_date:
-                    tickers[ticker].end_date = end_date
+        for data_dir in self.data_dirs:
+            if not data_dir.exists():
+                logger.warning(f"Data directory does not exist: {data_dir}")
+                continue
+
+            for ext in ("*.csv", "*.parquet", "*.parq"):
+                for file in data_dir.glob(ext):
+                    parsed = self._parse_filename(file)
+                    if not parsed:
+                        continue
+
+                    ticker, start_date, end_date = parsed
+                    if ticker not in tickers:
+                        tickers[ticker] = TickerData(ticker=ticker)
+
+                    file_abs = str(file.resolve())
+                    if file_abs not in tickers[ticker].files:
+                        tickers[ticker].files.append(file_abs)
+
+                    # Update date range (take widest range)
+                    if tickers[ticker].start_date is None or start_date < tickers[ticker].start_date:
+                        tickers[ticker].start_date = start_date
+                    if tickers[ticker].end_date is None or end_date > tickers[ticker].end_date:
+                        tickers[ticker].end_date = end_date
         
         # Generate available trading dates for each ticker
         for ticker_data in tickers.values():
@@ -125,15 +142,24 @@ class DataDiscovery:
             return None
         
         target_date = datetime.strptime(date, "%Y-%m-%d")
-        
+
+        candidates: List[Tuple[int, datetime, str]] = []
         for file in data[ticker].files:
-            match = self.FILENAME_PATTERN.match(file)
-            if match:
-                file_start = datetime.strptime(match.group(2), "%Y-%m-%d")
-                file_end = datetime.strptime(match.group(3), "%Y-%m-%d")
-                if file_start <= target_date <= file_end:
-                    return str(self.data_dir / file)
-        
+            parsed = self._parse_filename(Path(file))
+            if not parsed:
+                continue
+            _, start_str, end_str = parsed
+            file_start = datetime.strptime(start_str, "%Y-%m-%d")
+            file_end = datetime.strptime(end_str, "%Y-%m-%d")
+            if file_start <= target_date <= file_end:
+                span_days = (file_end - file_start).days
+                candidates.append((span_days, file_end, file))
+
+        if candidates:
+            # Prefer the narrowest covering file; if tied use newest end date.
+            candidates.sort(key=lambda x: (x[0], -x[1].toordinal()))
+            return candidates[0][2]
+
         return None
 
     def get_files_for_range(self, ticker: str, start_date: str, end_date: str) -> List[str]:
@@ -147,15 +173,16 @@ class DataDiscovery:
         files = []
 
         for file in data[ticker].files:
-            match = self.FILENAME_PATTERN.match(file)
-            if not match:
+            parsed = self._parse_filename(Path(file))
+            if not parsed:
                 continue
-            file_start = datetime.strptime(match.group(2), "%Y-%m-%d")
-            file_end = datetime.strptime(match.group(3), "%Y-%m-%d")
+            _, start_str, end_str = parsed
+            file_start = datetime.strptime(start_str, "%Y-%m-%d")
+            file_end = datetime.strptime(end_str, "%Y-%m-%d")
             if file_start <= end and file_end >= start:
-                files.append(str(self.data_dir / file))
+                files.append(file)
 
-        return sorted(files)
+        return sorted(set(files))
     
     def to_dict(self) -> Dict[str, Any]:
         """Return all available data as a dictionary for API response."""
@@ -167,11 +194,12 @@ class DataDiscovery:
                 ticker: {
                     "start": td.start_date,
                     "end": td.end_date,
-                    "files": td.files
+                    "files": [Path(f).name for f in td.files]
                 }
                 for ticker, td in data.items()
             },
-            "data_dir": str(self.data_dir)
+            "data_dir": str(self.data_dir),
+            "data_dirs": [str(p) for p in self.data_dirs]
         }
 
 

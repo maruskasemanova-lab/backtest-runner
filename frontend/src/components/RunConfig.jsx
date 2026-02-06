@@ -13,6 +13,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     regime_detection_minutes: 15,
     trailing_stop_pct: 0.3,
     account_size_usd: 10000,
+    l2_only: true, // User requested L2 default
   });
 
   const [loading, setLoading] = useState(false);
@@ -29,14 +30,22 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
 
           // Set default ticker and date if available
           if (data.tickers && data.tickers.length > 0) {
-            const defaultTicker = data.tickers[0];
-            const range = data.date_ranges[defaultTicker];
+            // Default to MU if available, otherwise first ticker
+            const targetTicker = data.tickers.includes("MU") ? "MU" : data.tickers[0];
+            const range = data.date_ranges[targetTicker];
+            
+            // Default date to 2026-02-03 if available for MU, otherwise range end
+            let defaultDate = range?.end || new Date().toISOString().split("T")[0];
+            if (targetTicker === "MU") {
+                defaultDate = "2026-02-03";
+            }
+            
             setConfig((prev) => ({
               ...prev,
-              ticker: defaultTicker,
-              date: range?.end || new Date().toISOString().split("T")[0],
-              date_from: range?.end || new Date().toISOString().split("T")[0],
-              date_to: range?.end || new Date().toISOString().split("T")[0],
+              ticker: targetTicker,
+              date: defaultDate,
+              date_from: defaultDate,
+              date_to: defaultDate,
             }));
           }
         }
@@ -107,7 +116,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
       ...prev,
       ticker,
       date: range?.end || prev.date,
-      date_from: range?.end || prev.date_from,
+      date_from: range?.start || prev.date_from,
       date_to: range?.end || prev.date_to,
     }));
     // Notify parent about ticker change for strategy preset application
@@ -181,7 +190,30 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
           </div>
 
           <div className="form-group">
-            <label htmlFor="ticker">Ticker</label>
+            <label htmlFor="ticker">
+                Ticker
+                <div style={{ float: "right", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span style={{ fontSize: "0.75rem", fontWeight: "normal", color: "var(--text-muted)" }}>L2 Only</span>
+                    <input 
+                        type="checkbox" 
+                        checked={config.l2_only || false}
+                        onChange={(e) => {
+                            const checked = e.target.checked;
+                            
+                            // If enabling L2 only, check if current ticker is valid
+                            if (checked && availableData?.l2_tickers) {
+                                const isCurrentTickerL2 = availableData.l2_tickers.includes(config.ticker);
+                                if (!isCurrentTickerL2 && availableData.l2_tickers.length > 0) {
+                                    // Switch to first available L2 ticker
+                                    handleTickerChange(availableData.l2_tickers[0]);
+                                }
+                            }
+                            
+                            handleChange("l2_only", checked);
+                        }}
+                    />
+                </div>
+            </label>
             {availableData?.tickers ? (
               <select
                 id="ticker"
@@ -189,7 +221,9 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
                 onChange={(e) => handleTickerChange(e.target.value)}
                 required
               >
-                {availableData.tickers.map((t) => (
+                {availableData.tickers
+                    .filter(t => !config.l2_only || availableData.l2_tickers?.includes(t)) // Assuming availableData has l2_tickers
+                    .map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>

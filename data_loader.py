@@ -58,7 +58,7 @@ class DataLoader:
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Prepare dataframe with required columns."""
         # Find and normalize timestamp column
-        timestamp_cols = ['timestamp', 'ts_event', 'time', 'datetime', 'date']
+        timestamp_cols = ['timestamp', 'ts_event', 'ts_recv', 'time', 'datetime', 'date']
         
         for col in timestamp_cols:
             if col in df.columns:
@@ -152,6 +152,27 @@ class DataLoader:
 
         final_mask = date_mask & time_mask
         return df[final_mask].reset_index(drop=True)
+
+    def filter_trading_hours(
+        self,
+        df: pd.DataFrame,
+        hours_et: Optional[List[int]] = None
+    ) -> pd.DataFrame:
+        """Filter bars by allowed hour(s) in market timezone (ET)."""
+        if not hours_et:
+            return df.reset_index(drop=True)
+
+        normalized_hours = set()
+        for hour in hours_et:
+            try:
+                normalized_hours.add(int(hour))
+            except (TypeError, ValueError):
+                continue
+        if not normalized_hours:
+            return df.reset_index(drop=True)
+        market_ts = self._market_timestamp_series(df)
+        mask = market_ts.dt.hour.isin(normalized_hours)
+        return df[mask].reset_index(drop=True)
     
     def get_bars_iterator(
         self, 

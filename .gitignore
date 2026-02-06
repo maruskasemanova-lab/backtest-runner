@@ -3,3 +3,23 @@ __pycache__/
 *.pyc
 .DS_Store
 .kilocode/
+.claude/
+
+# Runtime logs
+*.log
+
+# Generated backtest outputs
+data/
+audit_*.json
+batch_report.json
+nvda_report.json
+performance_data.json
+test_report.json
+test_week_results.json
+tuning_results.json
+wfo_results.json
+aos_walk_forward_results/
+walk_forward_results/
+
+# Frontend build output
+frontend/dist/
