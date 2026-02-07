@@ -45,7 +45,13 @@ def coerce_bool(value: Any, default: bool = False) -> bool:
 
 def extract_multilayer_payload(ticker_config: Dict[str, Any]) -> Dict[str, Any]:
     """Extract ticker-specific multi-layer/candlestick settings from AOS config."""
-    allowed_core = {"pattern_weight", "strategy_weight", "threshold", "require_pattern"}
+    allowed_core = {
+        "pattern_weight",
+        "strategy_weight",
+        "threshold",
+        "require_pattern",
+        "strategy_only_threshold",
+    }
     allowed_detector = {
         "body_doji_pct",
         "wick_ratio_hammer",
@@ -83,7 +89,7 @@ def extract_multilayer_payload(ticker_config: Dict[str, Any]) -> Dict[str, Any]:
                 raw[key] = detector_block[key]
 
     payload: Dict[str, Any] = {}
-    for key in ("pattern_weight", "strategy_weight", "threshold"):
+    for key in ("pattern_weight", "strategy_weight", "threshold", "strategy_only_threshold"):
         if key not in raw:
             continue
         try:
@@ -103,4 +109,3 @@ def extract_multilayer_payload(ticker_config: Dict[str, Any]) -> Dict[str, Any]:
             continue
 
     return payload
-

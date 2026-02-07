@@ -222,7 +222,12 @@ class DecisionTracker:
         size: float = None,
         costs: Dict[str, float] = None,
         gross_pnl_pct: float = None,
-        gross_pnl_dollars: float = None
+        gross_pnl_dollars: float = None,
+        cost_usd: Optional[float] = None,
+        cost_pct: Optional[float] = None,
+        pnl_usd: Optional[float] = None,
+        position_notional_usd: Optional[float] = None,
+        schema_version: int = 2,
     ) -> DecisionMarker:
         """Record trade exit with detailed data."""
         marker_type = MarkerType.EXIT_EXECUTED
@@ -230,23 +235,66 @@ class DecisionTracker:
             marker_type = MarkerType.STOP_LOSS_HIT
         elif "profit" in reason.lower() or "take" in reason.lower():
             marker_type = MarkerType.TAKE_PROFIT_HIT
+
+        costs_payload = costs or {}
+
+        def _to_float(value: Any) -> Optional[float]:
+            try:
+                if value is None:
+                    return None
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        resolved_pnl_usd = _to_float(pnl_usd)
+        if resolved_pnl_usd is None:
+            resolved_pnl_usd = _to_float(pnl_dollars) or 0.0
+
+        resolved_cost_usd = _to_float(cost_usd)
+        if resolved_cost_usd is None:
+            resolved_cost_usd = _to_float(costs_payload.get("total"))
+
+        resolved_notional = _to_float(position_notional_usd)
+        if resolved_notional is None:
+            entry_val = _to_float(entry_price)
+            size_val = _to_float(size)
+            if entry_val is not None and size_val is not None:
+                candidate = entry_val * size_val
+                resolved_notional = candidate if candidate > 0 else None
+
+        resolved_cost_pct = _to_float(cost_pct)
+        if (
+            resolved_cost_pct is None
+            and resolved_cost_usd is not None
+            and resolved_notional is not None
+            and resolved_notional > 0
+        ):
+            resolved_cost_pct = (resolved_cost_usd / resolved_notional) * 100.0
         
         # Build detailed description
-        description_parts = [f"Closed {side} position. PnL: {pnl_pct:+.2f}% (${pnl_dollars:+.2f})"]
+        description_parts = [f"Closed {side} position. PnL: {pnl_pct:+.2f}% (${resolved_pnl_usd:+.2f})"]
+        if resolved_cost_usd is not None:
+            cost_label = f"Costs: ${resolved_cost_usd:.2f}"
+            if resolved_cost_pct is not None:
+                cost_label += f" ({resolved_cost_pct:.2f}%)"
+            description_parts.append(cost_label)
         if bars_held:
             description_parts.append(f"Held: {bars_held} bars")
-        if costs:
-            description_parts.append(f"Costs: ${costs.get('total', 0):.2f}")
         
         details = {
+            "schema_version": int(schema_version),
             "exit_reason": reason,
             "pnl_pct": pnl_pct,
             "pnl_dollars": pnl_dollars,
+            "pnl_usd": resolved_pnl_usd,
+            "cost_usd": resolved_cost_usd,
+            "cost_pct": resolved_cost_pct,
+            "position_notional_usd": resolved_notional,
             "entry_price": entry_price,
             "entry_time": entry_time,
             "bars_held": bars_held,
             "size": size,
-            "costs": costs or {},
+            "costs": costs_payload,
             "gross_pnl_pct": gross_pnl_pct,
             "gross_pnl_dollars": gross_pnl_dollars
         }
@@ -282,10 +330,79 @@ class DecisionTracker:
         description_parts.append(f"Direction: {direction}")
         description_parts.append(f"Best strength: {best_strength:.0f}")
         if layer_scores:
-            description_parts.append(
-                f"Combined score: {layer_scores.get('combined_score', 0):.1f}"
-                f"/{layer_scores.get('threshold', 65)}"
+            def _as_float(value: Any, default: float = 0.0) -> float:
+                try:
+                    if value is None:
+                        return default
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
+
+            pattern_score = _as_float(layer_scores.get("pattern_score", 0.0))
+            pattern_threshold = _as_float(
+                layer_scores.get("pattern_threshold", layer_scores.get("threshold", 65)),
+                65.0,
             )
+            trade_gate_threshold = _as_float(
+                layer_scores.get("trade_gate_threshold", layer_scores.get("threshold", 65)),
+                65.0,
+            )
+            threshold_used = _as_float(layer_scores.get("threshold_used", layer_scores.get("threshold", 65)), 65.0)
+            threshold_reason = layer_scores.get("threshold_used_reason")
+            combined_raw = _as_float(layer_scores.get("combined_raw", layer_scores.get("combined_score", 0.0)))
+            combined_norm = layer_scores.get("combined_norm_0_100")
+            pattern_confirmation = bool(layer_scores.get("pattern_confirmation", pattern_score > 0))
+            pattern_direction = layer_scores.get("pattern_direction", direction)
+            l2_coverage_ratio = layer_scores.get("l2_coverage_ratio")
+
+            effective_strategy_weight = layer_scores.get("effective_strategy_weight")
+            if effective_strategy_weight is None:
+                weights_snapshot = layer_scores.get("weights_snapshot")
+                if isinstance(weights_snapshot, dict):
+                    effective_strategy_weight = weights_snapshot.get("strategy_weight")
+            if effective_strategy_weight is None:
+                effective_strategy_weight = layer_scores.get("strategy_weight")
+            effective_strategy_weight = _as_float(effective_strategy_weight, -1.0)
+            if effective_strategy_weight < 0:
+                effective_strategy_weight = None
+
+            strategy_weight_source = layer_scores.get("strategy_weight_source")
+            if strategy_weight_source is None and effective_strategy_weight is not None:
+                strategy_weight_source = "legacy"
+
+            if not pattern_confirmation and pattern_score == 0 and (
+                pattern_direction == "neutral" or threshold_reason == "no_pattern_confirmation"
+            ):
+                description_parts.append(
+                    f"Pattern score=0.0 (neutral pattern -> forced to 0, th={pattern_threshold:.1f})"
+                )
+            elif pattern_score >= pattern_threshold:
+                description_parts.append(
+                    f"Pattern score={pattern_score:.1f} >= {pattern_threshold:.1f} ({'confirm' if pattern_confirmation else 'no_confirm'})"
+                )
+            else:
+                description_parts.append(
+                    f"Pattern score={pattern_score:.1f} < {pattern_threshold:.1f} ({'confirm' if pattern_confirmation else 'no_confirm'})"
+                )
+            if threshold_reason:
+                description_parts.append(
+                    f"Gate: used={threshold_used:.1f} (trade_th={trade_gate_threshold:.1f}, reason={threshold_reason})"
+                )
+            else:
+                description_parts.append(f"Gate: used={threshold_used:.1f} (trade_th={trade_gate_threshold:.1f})")
+            if combined_norm is not None:
+                description_parts.append(f"Combined: raw={combined_raw:.1f} | norm={float(combined_norm):.1f}/100")
+            else:
+                description_parts.append(f"Combined: raw={combined_raw:.1f}")
+            if effective_strategy_weight is not None:
+                weight_part = f"Weights: effective_strategy_weight={effective_strategy_weight:.2f}"
+                if strategy_weight_source:
+                    weight_part += f" | source={strategy_weight_source}"
+                if l2_coverage_ratio is not None:
+                    weight_part += f" | l2_coverage={_as_float(l2_coverage_ratio):.2f}"
+                description_parts.append(weight_part)
+            if not pattern_confirmation:
+                description_parts.append("Pattern confirmation: no")
 
         marker = DecisionMarker(
             id=self._generate_id(),

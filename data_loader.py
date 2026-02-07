@@ -9,16 +9,56 @@ from typing import List, Dict, Any, Optional, Tuple
 from zoneinfo import ZoneInfo
 import os
 
+from src.system_settings import DEFAULT_EXTERNAL_DATA_DIR, SystemSettings
+
 
 class DataLoader:
     """Loads and prepares trading day data for the backtest runner."""
     
     # Default data directory
-    DEFAULT_DATA_DIR = "/Users/hotovo/.gemini/antigravity/scratch/ibkr-l2-script/databento_data"
+    DEFAULT_DATA_DIR = str(DEFAULT_EXTERNAL_DATA_DIR)
+    PROJECT_ROOT = Path(__file__).resolve().parent
     
-    def __init__(self, data_dir: Optional[str] = None):
-        self.data_dir = Path(data_dir) if data_dir else Path(self.DEFAULT_DATA_DIR)
+    def __init__(self, data_dir: Optional[str] = None, data_dirs: Optional[List[str]] = None):
+        if data_dirs:
+            self.data_dirs = [Path(d).expanduser().resolve() for d in data_dirs]
+        elif data_dir:
+            self.data_dirs = [Path(data_dir).expanduser().resolve()]
+        else:
+            configured = SystemSettings().get_ohlcv_dirs(existing_only=False)
+            self.data_dirs = configured or [Path(self.DEFAULT_DATA_DIR)]
+
+        self.data_dir = self.data_dirs[0]  # Backward compatibility.
+        self.project_root = self.PROJECT_ROOT
         self.market_tz = ZoneInfo("America/New_York")
+
+    def _resolve_file_path(self, filename: str) -> Path:
+        filepath = Path(filename).expanduser()
+        if filepath.is_absolute():
+            if filepath.exists():
+                return filepath
+            raise FileNotFoundError(f"Data file not found: {filepath}")
+
+        # Try direct project-relative path first (e.g., "data/MU_ohlcv-1m_...csv").
+        for candidate in (filepath, self.project_root / filepath):
+            if candidate.exists():
+                return candidate.resolve()
+
+        for base_dir in self.data_dirs:
+            candidate = base_dir / filepath
+            if candidate.exists():
+                return candidate.resolve()
+
+            # Backward-compatible: allow "data/foo.csv" with base root ".../data".
+            parts = filepath.parts
+            if parts and parts[0] == base_dir.name:
+                prefixed = base_dir.parent.joinpath(*parts)
+                if prefixed.exists():
+                    return prefixed.resolve()
+
+        raise FileNotFoundError(
+            f"Data file not found in configured roots {self.data_dirs}: {filename}"
+        )
 
     def _market_timestamp_series(self, df: pd.DataFrame) -> pd.Series:
         """Return timestamps converted to market timezone (ET)."""
@@ -29,14 +69,7 @@ class DataLoader:
     
     def load_csv(self, filename: str) -> pd.DataFrame:
         """Load data from CSV file."""
-        # Handle both relative and absolute paths
-        if os.path.isabs(filename):
-            filepath = Path(filename)
-        else:
-            filepath = self.data_dir / filename
-            
-        if not filepath.exists():
-            raise FileNotFoundError(f"Data file not found: {filepath}")
+        filepath = self._resolve_file_path(filename)
         
         # Read without parse_dates since column names vary
         df = pd.read_csv(filepath)
@@ -44,13 +77,7 @@ class DataLoader:
     
     def load_parquet(self, filename: str) -> pd.DataFrame:
         """Load data from Parquet file."""
-        if os.path.isabs(filename):
-            filepath = Path(filename)
-        else:
-            filepath = self.data_dir / filename
-            
-        if not filepath.exists():
-            raise FileNotFoundError(f"Data file not found: {filepath}")
+        filepath = self._resolve_file_path(filename)
         
         df = pd.read_parquet(filepath)
         return self._prepare_dataframe(df)
@@ -248,20 +275,26 @@ class DataLoader:
         return df
     
     def list_available_files(self) -> List[Dict[str, Any]]:
-        """List available data files in the data directory."""
+        """List available data files in configured data directories."""
         files = []
+        seen_paths = set()
         
-        if not self.data_dir.exists():
-            return files
-        
-        for ext in ['*.csv', '*.parquet', '*.parq']:
-            for filepath in self.data_dir.glob(ext):
-                stat = filepath.stat()
-                files.append({
-                    'name': filepath.name,
-                    'path': str(filepath),
-                    'size_mb': round(stat.st_size / 1024 / 1024, 2),
-                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
-                })
+        for base_dir in self.data_dirs:
+            if not base_dir.exists():
+                continue
+
+            for ext in ['*.csv', '*.parquet', '*.parq']:
+                for filepath in base_dir.glob(ext):
+                    resolved = str(filepath.resolve())
+                    if resolved in seen_paths:
+                        continue
+                    seen_paths.add(resolved)
+                    stat = filepath.stat()
+                    files.append({
+                        'name': filepath.name,
+                        'path': resolved,
+                        'size_mb': round(stat.st_size / 1024 / 1024, 2),
+                        'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                    })
         
         return sorted(files, key=lambda x: x['name'])

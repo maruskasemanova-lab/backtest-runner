@@ -26,10 +26,97 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     data_file: null,
     strategy_api_url: `http://${window.location.hostname}:8001`,
     ...MU_FLOW_PRESET,
+    checkpoint_path: null,
+    auto_save_checkpoint: true,
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [useWarmStart, setUseWarmStart] = useState(false);
+  const [checkpointCatalog, setCheckpointCatalog] = useState([]);
+  const [checkpointLoading, setCheckpointLoading] = useState(false);
+  const [checkpointSaving, setCheckpointSaving] = useState(false);
+  const [checkpointMessage, setCheckpointMessage] = useState(null);
+
+  const strategyApiBase = (config.strategy_api_url || "").replace(/\/+$/, "");
+
+  const formatCheckpointLabel = (item) => {
+    const path = item?.path || "";
+    const file = path.split(/[\\/]/).pop() || path || "(unknown)";
+    const created = item?.created_at ? new Date(item.created_at).toLocaleString() : "unknown time";
+    const trades = Number(item?.source?.total_trades || 0);
+    const wr = item?.source?.win_rate;
+    const wrText = typeof wr === "number" ? `${(wr * 100).toFixed(1)}%` : "n/a";
+    return `${file} | ${trades} trades | WR ${wrText} | ${created}`;
+  };
+
+  const fetchCheckpoints = async (preferredPath = null) => {
+    if (!strategyApiBase) {
+      return;
+    }
+
+    setCheckpointLoading(true);
+    setCheckpointMessage(null);
+    try {
+      const resp = await fetch(`${strategyApiBase}/api/orchestrator/checkpoints`);
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+
+      const payload = await resp.json();
+      const catalog = Array.isArray(payload) ? payload : [];
+      setCheckpointCatalog(catalog);
+
+      if (preferredPath) {
+        setConfig((prev) => ({ ...prev, checkpoint_path: preferredPath }));
+      } else if (useWarmStart && !config.checkpoint_path && catalog.length > 0) {
+        setConfig((prev) => ({ ...prev, checkpoint_path: catalog[0].path || null }));
+      }
+    } catch (err) {
+      console.error("Checkpoint catalog load failed:", err);
+      setCheckpointMessage("Checkpoint API is not reachable right now.");
+    } finally {
+      setCheckpointLoading(false);
+    }
+  };
+
+  const handleSaveCheckpointNow = async () => {
+    if (!strategyApiBase) {
+      setCheckpointMessage("Strategy API URL is missing.");
+      return;
+    }
+
+    setCheckpointSaving(true);
+    setCheckpointMessage(null);
+    try {
+      const params = new URLSearchParams();
+      if (config.run_id) params.set("run_id", config.run_id);
+      if (config.ticker) params.set("ticker", config.ticker);
+      if (config.date_from) params.set("date_from", config.date_from);
+      if (config.date_to) params.set("date_to", config.date_to);
+      const query = params.toString();
+      const saveUrl = `${strategyApiBase}/api/orchestrator/checkpoint/save${query ? `?${query}` : ""}`;
+
+      const resp = await fetch(saveUrl, { method: "POST" });
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+
+      const payload = await resp.json();
+      const savedPath = payload?.path || null;
+      if (savedPath) {
+        setUseWarmStart(true);
+        setConfig((prev) => ({ ...prev, checkpoint_path: savedPath }));
+        await fetchCheckpoints(savedPath);
+      }
+      setCheckpointMessage(savedPath ? `Checkpoint saved: ${savedPath}` : "Checkpoint saved.");
+    } catch (err) {
+      console.error("Checkpoint save failed:", err);
+      setCheckpointMessage("Checkpoint save failed.");
+    } finally {
+      setCheckpointSaving(false);
+    }
+  };
 
   const applyMuPreset = (date = "2026-02-03") => {
     setConfig((prev) => ({
@@ -86,6 +173,11 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     fetchAvailableData();
   }, [onTickerChange]);
 
+  useEffect(() => {
+    fetchCheckpoints();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strategyApiBase]);
+
   const getDateRange = () => {
     if (!availableData || !config.ticker) {
       return { min: null, max: null };
@@ -103,7 +195,15 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     setError(null);
 
     try {
-      await onStart(config);
+      const payload = {
+        ...config,
+        checkpoint_path: useWarmStart ? (config.checkpoint_path || "").trim() || null : null,
+        auto_save_checkpoint: !!config.auto_save_checkpoint,
+      };
+      if (useWarmStart && !payload.checkpoint_path) {
+        throw new Error("Warm start is enabled, but no checkpoint is selected.");
+      }
+      await onStart(payload);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -192,6 +292,18 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
             <label>L2 Confirmation</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
               {config.l2_confirm_enabled ? "Enabled" : "Disabled"}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Warm Start</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {useWarmStart ? "Enabled" : "Disabled"}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Checkpoint Auto-save</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {config.auto_save_checkpoint ? "Enabled" : "Disabled"}
             </div>
           </div>
         </div>
@@ -354,6 +466,101 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
                 )
               }
             />
+          </div>
+
+          <div className="preset-box">
+            <div className="preset-header">
+              <span className="preset-title">Warm Start Checkpoints</span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => fetchCheckpoints()}
+                disabled={checkpointLoading}
+                style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+              >
+                {checkpointLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+            <div className="preset-copy">
+              Warm start keeps learned evidence state between runs (calibration/edge/weights).
+            </div>
+
+            <label className="field-row">
+              <span>Enable Warm Start</span>
+              <input
+                type="checkbox"
+                checked={useWarmStart}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  setUseWarmStart(enabled);
+                  if (enabled && !config.checkpoint_path && checkpointCatalog.length > 0) {
+                    handleChange("checkpoint_path", checkpointCatalog[0].path || null);
+                  }
+                }}
+              />
+            </label>
+
+            <label className="field-row">
+              <span>Auto-save Checkpoint After Run</span>
+              <input
+                type="checkbox"
+                checked={!!config.auto_save_checkpoint}
+                onChange={(e) => handleChange("auto_save_checkpoint", e.target.checked)}
+              />
+            </label>
+
+            {useWarmStart && (
+              <div className="form-group">
+                <label htmlFor="checkpoint_path">Checkpoint</label>
+                <select
+                  id="checkpoint_path"
+                  value={config.checkpoint_path || ""}
+                  onChange={(e) => handleChange("checkpoint_path", e.target.value || null)}
+                >
+                  <option value="">Select checkpoint...</option>
+                  {checkpointCatalog.map((cp) => (
+                    <option key={cp.path} value={cp.path}>
+                      {formatCheckpointLabel(cp)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {useWarmStart && (
+              <div className="form-group">
+                <label htmlFor="checkpoint_path_custom">Custom Checkpoint Path</label>
+                <input
+                  id="checkpoint_path_custom"
+                  type="text"
+                  value={config.checkpoint_path || ""}
+                  onChange={(e) => handleChange("checkpoint_path", e.target.value || null)}
+                  placeholder="data/checkpoints/checkpoint_YYYYMMDD_HHMMSS.json"
+                />
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleSaveCheckpointNow}
+              disabled={checkpointSaving}
+              style={{ width: "100%" }}
+            >
+              {checkpointSaving ? "Saving checkpoint..." : "Save Checkpoint Now"}
+            </button>
+
+            {checkpointMessage && (
+              <div
+                style={{
+                  fontSize: "0.8rem",
+                  color: "var(--text-secondary)",
+                  lineHeight: 1.4,
+                }}
+              >
+                {checkpointMessage}
+              </div>
+            )}
           </div>
 
           <div className="form-group">

@@ -13,6 +13,11 @@ function MultiLayerSettings({ apiUrl }) {
   const [draft, setDraft] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [engineConfig, setEngineConfig] = useState(null);
+  const [engineLoading, setEngineLoading] = useState(false);
+  const [engineError, setEngineError] = useState(null);
+  const [engineSaving, setEngineSaving] = useState(false);
+  const [engineSaved, setEngineSaved] = useState(false);
   const [saved, setSaved] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [detectorExpanded, setDetectorExpanded] = useState(false);
@@ -36,9 +41,46 @@ function MultiLayerSettings({ apiUrl }) {
     }
   }, [resolvedUrl]);
 
+  const fetchEngineConfig = useCallback(async () => {
+    setEngineLoading(true);
+    setEngineError(null);
+    try {
+      const resp = await fetch(`${resolvedUrl}/api/orchestrator/config`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      setEngineConfig(data);
+    } catch (err) {
+      setEngineError(`Failed to load engine config: ${err.message}`);
+    } finally {
+      setEngineLoading(false);
+    }
+  }, [resolvedUrl]);
+
+  const saveEngineConfig = async (useEvidenceEngine) => {
+    setEngineSaving(true);
+    setEngineSaved(false);
+    setEngineError(null);
+    try {
+      const resp = await fetch(`${resolvedUrl}/api/orchestrator/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ use_evidence_engine: useEvidenceEngine }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      await fetchEngineConfig();
+      setEngineSaved(true);
+      setTimeout(() => setEngineSaved(false), 2000);
+    } catch (err) {
+      setEngineError(`Engine switch failed: ${err.message}`);
+    } finally {
+      setEngineSaving(false);
+    }
+  };
+
   useEffect(() => {
     fetchConfig();
-  }, [fetchConfig]);
+    fetchEngineConfig();
+  }, [fetchConfig, fetchEngineConfig]);
 
   const saveConfig = async () => {
     if (!draft) return;
@@ -49,6 +91,7 @@ function MultiLayerSettings({ apiUrl }) {
         pattern_weight: draft.pattern_weight,
         strategy_weight: draft.strategy_weight,
         threshold: draft.threshold,
+        strategy_only_threshold: draft.strategy_only_threshold,
         require_pattern: draft.require_pattern,
         // detector sub-fields
         ...(draft.detector || {}),
@@ -87,6 +130,7 @@ function MultiLayerSettings({ apiUrl }) {
   // Compute whether weights sum to 1
   const weightSum = (draft?.pattern_weight || 0) + (draft?.strategy_weight || 0);
   const weightWarning = Math.abs(weightSum - 1.0) > 0.01;
+  const hasEngineToggle = typeof engineConfig?.use_evidence_engine === "boolean";
 
   return (
     <div className="card">
@@ -115,6 +159,99 @@ function MultiLayerSettings({ apiUrl }) {
             <div style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
               Loading...
             </div>
+          )}
+
+          <div
+            style={{
+              fontSize: "0.8rem",
+              fontWeight: 600,
+              color: "var(--text-secondary)",
+              borderBottom: "1px solid var(--border-color)",
+              paddingBottom: 4,
+            }}
+          >
+            Decision Engine
+          </div>
+
+          {engineError && (
+            <div style={{ color: "var(--accent-red)", fontSize: "0.85rem" }}>
+              {engineError}
+            </div>
+          )}
+
+          {engineLoading && (
+            <div style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+              Loading engine config...
+            </div>
+          )}
+
+          {engineConfig && (
+            <>
+              <div className="field-row">
+                <span className="field-label">Mode</span>
+                <span
+                  style={{
+                    fontSize: "0.82rem",
+                    fontWeight: 600,
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  {hasEngineToggle
+                    ? (engineConfig.use_evidence_engine ? "Evidence-based" : "Legacy multi-layer")
+                    : "Unavailable"}
+                </span>
+              </div>
+
+              {hasEngineToggle ? (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 8,
+                  }}
+                >
+                  <button
+                    className="btn btn-secondary"
+                    disabled={engineSaving || !!engineConfig.use_evidence_engine}
+                    onClick={() => saveEngineConfig(true)}
+                  >
+                    Use Evidence
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    disabled={engineSaving || engineConfig.use_evidence_engine === false}
+                    onClick={() => saveEngineConfig(false)}
+                  >
+                    Use Legacy
+                  </button>
+                </div>
+              ) : (
+                <div style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                  Strategy API does not expose orchestrator toggle.
+                </div>
+              )}
+
+              <div
+                style={{
+                  background: "var(--bg-card)",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: 6,
+                  padding: "8px 10px",
+                  fontSize: "0.78rem",
+                  color: "var(--text-muted)",
+                  lineHeight: 1.45,
+                }}
+              >
+                Evidence mode requires multiple confirming sources. Legacy mode uses
+                pattern + strategy weighted scoring.
+              </div>
+
+              {engineSaved && (
+                <div style={{ color: "var(--accent-green)", fontSize: "0.8rem" }}>
+                  Engine updated
+                </div>
+              )}
+            </>
           )}
 
           {draft && (
@@ -195,6 +332,22 @@ function MultiLayerSettings({ apiUrl }) {
               </div>
 
               <div className="field-row">
+                <span className="field-label">Strategy-only threshold</span>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  max="100"
+                  value={draft.strategy_only_threshold ?? 0}
+                  onChange={(e) =>
+                    updateField("strategy_only_threshold", Number(e.target.value))
+                  }
+                  className="field-input"
+                  style={{ width: 70 }}
+                />
+              </div>
+
+              <div className="field-row">
                 <span className="field-label">Require pattern</span>
                 <input
                   type="checkbox"
@@ -222,6 +375,12 @@ function MultiLayerSettings({ apiUrl }) {
                 {(draft.strategy_weight ?? 0.6).toFixed(2)} × strategy
                 <br />
                 Trade if combined &ge; <strong>{draft.threshold ?? 65}</strong>
+                <br />
+                Strategy-only gate:{" "}
+                <strong>{draft.strategy_only_threshold ?? 0}</strong>
+                {(draft.strategy_only_threshold ?? 0) > 0
+                  ? " (used when pattern score is 0)"
+                  : " (disabled, uses base threshold)"}
                 <br />
                 {draft.require_pattern
                   ? "Patterns MUST fire before strategies are consulted."

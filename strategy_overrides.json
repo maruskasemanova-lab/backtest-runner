@@ -149,6 +149,65 @@
       "trailing_stop_pct": 0.3
     }
   },
+  "MU": {
+    "momentum_flow": {
+      "enabled": true,
+      "min_signed_aggression": 0.06,
+      "min_directional_consistency": 0.5,
+      "min_imbalance": 0.025,
+      "min_sweep_intensity": 0.07,
+      "min_book_pressure": 0.0,
+      "min_confidence": 58.0,
+      "atr_stop_multiplier": 1.8,
+      "rr_ratio": 2.2,
+      "trailing_stop_pct": 0.9
+    },
+    "absorption_reversal": {
+      "enabled": true,
+      "min_absorption_rate": 0.52,
+      "min_divergence": 0.14,
+      "min_signed_aggression": 0.06,
+      "min_book_pressure": 0.03,
+      "min_price_extension_pct": 0.1,
+      "min_confidence": 60.0,
+      "atr_stop_multiplier": 1.4,
+      "rr_ratio": 1.8,
+      "trailing_stop_pct": 0.7
+    },
+    "exhaustion_fade": {
+      "enabled": true,
+      "min_absorption_rate": 0.48,
+      "min_divergence": 0.18,
+      "min_delta_zscore": 1.3,
+      "max_sweep_intensity": 0.85,
+      "min_book_pressure": 0.0,
+      "min_confidence": 60.0,
+      "atr_stop_multiplier": 1.3,
+      "rr_ratio": 1.7,
+      "trailing_stop_pct": 0.6
+    },
+    "mean_reversion": {
+      "enabled": false
+    },
+    "momentum": {
+      "enabled": false
+    },
+    "pullback": {
+      "enabled": false
+    },
+    "rotation": {
+      "enabled": false
+    },
+    "vwap_magnet": {
+      "enabled": false
+    },
+    "volume_profile": {
+      "enabled": false
+    },
+    "gap_liquidity": {
+      "enabled": false
+    }
+  },
   "MSFT": {
     "mean_reversion": {
       "entry_deviation_pct": 0.3,

@@ -62,7 +62,11 @@ class SessionRunner:
         self.phase = "INITIALIZED"
         self.last_response: Optional[Dict[str, Any]] = None
         self.session_summary: Optional[Dict[str, Any]] = None
-        
+        self._session_end_marker_emitted = False
+
+        # Cross-asset reference bars (e.g. QQQ), keyed by ISO timestamp
+        self.ref_bars_map: Dict[str, Dict[str, Any]] = {}
+
         # Callbacks for real-time updates
         self._on_bar_callbacks: List[callable] = []
         self._on_decision_callbacks: List[callable] = []
@@ -101,6 +105,7 @@ class SessionRunner:
         """Load bars for the session."""
         self.bars = bars
         self.current_bar_index = 0
+        self._session_end_marker_emitted = False
         logger.info(f"Loaded {len(bars)} bars for session")
     
     async def step(self, notify: bool = True) -> Dict[str, Any]:
@@ -162,7 +167,19 @@ class SessionRunner:
         for l2_key in self.L2_PAYLOAD_KEYS:
             if l2_key in bar:
                 payload[l2_key] = bar.get(l2_key)
-        
+
+        # Attach cross-asset reference bar if available
+        ts_key = (timestamp.isoformat() if hasattr(timestamp, 'isoformat')
+                  else str(timestamp))
+        ref_bar = self.ref_bars_map.get(ts_key)
+        if ref_bar:
+            payload['ref_ticker'] = ref_bar.get('ticker', 'QQQ')
+            payload['ref_open'] = ref_bar.get('open')
+            payload['ref_high'] = ref_bar.get('high')
+            payload['ref_low'] = ref_bar.get('low')
+            payload['ref_close'] = ref_bar.get('close')
+            payload['ref_volume'] = ref_bar.get('volume')
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -242,11 +259,12 @@ class SessionRunner:
         regime_update = response.get('regime_update')
         if isinstance(regime_update, dict):
             regime = regime_update.get('regime') or response.get('regime')
+            regime_indicators = regime_update.get('indicators') or response.get('indicators', {})
             if regime:
                 update_payload = {
                     **response,
                     "regime": regime,
-                    "indicators": response.get("indicators", {}),
+                    "indicators": regime_indicators,
                 }
                 explanation = f"Intraday refresh: {self._generate_regime_explanation(update_payload)}"
                 marker = self.tracker.add_regime_detected(
@@ -255,7 +273,7 @@ class SessionRunner:
                     price=bar['close'],
                     regime=regime,
                     explanation=explanation,
-                    indicators=response.get('indicators', {})
+                    indicators=regime_indicators
                 )
                 await self._notify_decision(marker.to_dict())
 
@@ -357,12 +375,29 @@ class SessionRunner:
                 size=pos.get('size'),
                 costs=pos.get('costs'),
                 gross_pnl_pct=pos.get('gross_pnl_pct'),
-                gross_pnl_dollars=pos.get('gross_pnl_pct', 0) * pos.get('entry_price', 0) * pos.get('size', 1) / 100 if pos.get('gross_pnl_pct') is not None else None
+                gross_pnl_dollars=(
+                    pos.get('gross_pnl_dollars')
+                    if pos.get('gross_pnl_dollars') is not None
+                    else (
+                        pos.get('gross_pnl_pct', 0) * pos.get('entry_price', 0) * pos.get('size', 1) / 100
+                        if pos.get('gross_pnl_pct') is not None
+                        else None
+                    )
+                ),
+                cost_usd=pos.get('cost_usd'),
+                cost_pct=pos.get('cost_pct'),
+                pnl_usd=pos.get('pnl_usd'),
+                position_notional_usd=pos.get('position_notional_usd'),
+                schema_version=pos.get('schema_version', 1),
             )
             await self._notify_decision(marker.to_dict())
 
         # Session ended
-        if response.get('phase') == 'END_OF_DAY' and 'session_summary' in response:
+        if (
+            not self._session_end_marker_emitted
+            and response.get('phase') == 'END_OF_DAY'
+            and 'session_summary' in response
+        ):
             self.session_summary = response['session_summary']
             marker = self.tracker.add_session_end(
                 timestamp=timestamp,
@@ -370,6 +405,7 @@ class SessionRunner:
                 price=bar['close'],
                 summary=self.session_summary
             )
+            self._session_end_marker_emitted = True
             await self._notify_decision(marker.to_dict())
 
     @staticmethod

@@ -6,12 +6,11 @@ function StrategySettings({ apiUrl, selectedTicker }) {
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [drafts, setDrafts] = useState({});
-  const [overrideUrl, setOverrideUrl] = useState("");
   const [tickerPresets, setTickerPresets] = useState({});
   const [presetsLoaded, setPresetsLoaded] = useState(false);
+  const [showCoreOnly, setShowCoreOnly] = useState(true);
 
   const resolvedUrl =
-    overrideUrl.trim() ||
     apiUrl ||
     `http://${window.location.hostname}:8001`;
 
@@ -40,6 +39,10 @@ function StrategySettings({ apiUrl, selectedTicker }) {
   };
 
   const regimeOptions = useMemo(() => ["TRENDING", "CHOPPY", "MIXED"], []);
+  const flowCoreSet = useMemo(
+    () => new Set(["momentum_flow", "absorption_reversal", "exhaustion_fade"]),
+    []
+  );
 
   const recommendedParams = useMemo(
     () => ({
@@ -150,6 +153,14 @@ function StrategySettings({ apiUrl, selectedTicker }) {
       applyTickerPresets(selectedTicker);
     }
   }, [selectedTicker, presetsLoaded, applyTickerPresets]);
+
+  useEffect(() => {
+    if (selectedTicker === "MU") {
+      setShowCoreOnly(true);
+    } else {
+      setShowCoreOnly(false);
+    }
+  }, [selectedTicker]);
 
   useEffect(() => {
     fetchStrategies();
@@ -313,18 +324,31 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     return null;
   };
 
+  const strategyEntries = useMemo(() => {
+    if (!strategies) {
+      return [];
+    }
+    const entries = Object.entries(strategies);
+    if (selectedTicker === "MU" && showCoreOnly) {
+      return entries.filter(([name]) => flowCoreSet.has(name));
+    }
+    return entries;
+  }, [strategies, selectedTicker, showCoreOnly, flowCoreSet]);
+
   return (
     <div className="card">
       <div className="card-header">
         <span className="card-title">Strategies</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="text"
-            placeholder="http://localhost:8001"
-            value={overrideUrl}
-            onChange={(e) => setOverrideUrl(e.target.value)}
-            style={{ width: 160, fontSize: "0.8rem", padding: "4px 6px" }}
-          />
+          {selectedTicker === "MU" && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowCoreOnly((prev) => !prev)}
+              title="Show only MU flow strategies used in backtest profile"
+            >
+              {showCoreOnly ? "Core Flow" : "All"}
+            </button>
+          )}
           <button className="btn btn-secondary" onClick={fetchStrategies} disabled={loading}>
             ↻
           </button>
@@ -338,8 +362,13 @@ function StrategySettings({ apiUrl, selectedTicker }) {
         {!strategies && !error && !loading && (
           <div style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>No data</div>
         )}
+        {selectedTicker === "MU" && showCoreOnly && (
+          <div style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
+            Showing only MU flow strategies used by current backtest profile.
+          </div>
+        )}
         {strategies &&
-          Object.entries(strategies).map(([name, cfg]) => (
+          strategyEntries.map(([name, cfg]) => (
             <div
               key={name}
               style={{

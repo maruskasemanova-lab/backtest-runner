@@ -8,10 +8,12 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 import logging
 
+from src.system_settings import DEFAULT_EXTERNAL_DATA_DIR, SystemSettings
+
 logger = logging.getLogger(__name__)
 
 # Default data directory
-DEFAULT_DATA_DIR = "/Users/hotovo/.gemini/antigravity/scratch/ibkr-l2-script/databento_data"
+DEFAULT_DATA_DIR = str(DEFAULT_EXTERNAL_DATA_DIR)
 LOCAL_DATA_DIR = str(Path(__file__).resolve().parent / "data")
 
 
@@ -39,8 +41,9 @@ class DataDiscovery:
         elif data_dir:
             self.data_dirs = [Path(data_dir)]
         else:
-            # Prefer the external historical dataset, but also scan local project data.
-            self.data_dirs = [Path(DEFAULT_DATA_DIR), Path(LOCAL_DATA_DIR)]
+            # Keep a single source of truth for scan roots.
+            configured = SystemSettings().get_ohlcv_dirs(existing_only=False)
+            self.data_dirs = configured or [Path(DEFAULT_DATA_DIR), Path(LOCAL_DATA_DIR)]
 
         # Keep the primary path for backwards compatibility with older API payloads.
         self.data_dir = self.data_dirs[0]
@@ -213,3 +216,9 @@ def get_discovery() -> DataDiscovery:
     if _discovery is None:
         _discovery = DataDiscovery()
     return _discovery
+
+
+def reset_discovery() -> None:
+    """Clear singleton so future calls re-read current system settings."""
+    global _discovery
+    _discovery = None

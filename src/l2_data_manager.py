@@ -2,11 +2,25 @@ import databento as db
 import pandas as pd
 import numpy as np
 import os
+from pathlib import Path
 from datetime import datetime, timedelta
+from typing import List, Optional
+
+from .system_settings import SystemSettings
 
 class L2DataManager:
-    def __init__(self, data_dir="data/l2"):
-        self.data_dir = data_dir
+    def __init__(self, data_dir: Optional[str] = None, data_dirs: Optional[List[str]] = None):
+        if data_dirs:
+            self.data_dirs = [str(Path(d).expanduser().resolve()) for d in data_dirs]
+        elif data_dir:
+            self.data_dirs = [str(Path(data_dir).expanduser().resolve())]
+        else:
+            configured = SystemSettings().get_l2_dirs(existing_only=False)
+            self.data_dirs = [str(p.resolve()) for p in configured] if configured else [
+                str((Path(__file__).resolve().parents[1] / "data" / "l2").resolve())
+            ]
+
+        self.data_dir = self.data_dirs[0]  # Backward compatibility for callers that inspect this attr.
         self.data = {} # Cache likely needed, or stream reading
 
     @staticmethod
@@ -25,19 +39,23 @@ class L2DataManager:
         Loads L2 data, preferring Parquet if available, else MBN.
         """
         # Try strict exact files first.
-        parquet_file = os.path.join(self.data_dir, f"{ticker}_{start_date}_{end_date}.parquet")
-        mbn_file = os.path.join(self.data_dir, f"{ticker}_{start_date}_{end_date}.mbn")
-
         matched_files = []
-        if os.path.exists(parquet_file):
-            matched_files = [parquet_file]
-        elif os.path.exists(mbn_file):
-            matched_files = [mbn_file]
+        for root in self.data_dirs:
+            parquet_file = os.path.join(root, f"{ticker}_{start_date}_{end_date}.parquet")
+            mbn_file = os.path.join(root, f"{ticker}_{start_date}_{end_date}.mbn")
+            if os.path.exists(parquet_file):
+                matched_files = [parquet_file]
+                break
+            if os.path.exists(mbn_file):
+                matched_files = [mbn_file]
+                break
         else:
             # Fuzzy match: collect ALL overlapping files for ticker and merge them.
             import glob
-            candidates = glob.glob(os.path.join(self.data_dir, f"{ticker}_*.parquet"))
-            candidates += glob.glob(os.path.join(self.data_dir, f"{ticker}_*.mbn"))
+            candidates = []
+            for root in self.data_dirs:
+                candidates += glob.glob(os.path.join(root, f"{ticker}_*.parquet"))
+                candidates += glob.glob(os.path.join(root, f"{ticker}_*.mbn"))
 
             for f in sorted(candidates):
                 try:

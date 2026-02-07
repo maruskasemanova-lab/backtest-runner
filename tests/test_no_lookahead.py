@@ -74,6 +74,10 @@ class NoLookaheadInvariantTests(unittest.TestCase):
         manager.ticker_params["NVDA"] = {"time_filter_enabled": False, "trading_hours": None}
         session.multi_layer.require_pattern = False
         session.multi_layer.pattern_detector.detect = lambda ohlcv, indicators=None: []
+        # Use legacy multi-layer engine for this test (evidence engine needs
+        # multiple confirming sources that scripted data cannot provide).
+        if session.orchestrator:
+            session.orchestrator.config.use_evidence_engine = False
 
         for idx, close in enumerate(prices[1:], start=1):
             ts = start + timedelta(minutes=idx)

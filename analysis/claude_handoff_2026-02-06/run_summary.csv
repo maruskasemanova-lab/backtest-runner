@@ -1,0 +1,11 @@
+file,date,bars_processed,total_trades,winning_trades,losing_trades,win_rate,total_pnl_pct,total_pnl_dollars,total_costs,profit_factor,max_drawdown_pct,regime_detected_final,strategy_selected_final,decision_count,errors_count,patterns_detected,signals_generated,entries,exits,signal_to_pattern_ratio,regime_refresh_events,regime_transitions
+mu_2026-02-03.json,2026-02-03,719,3,1,2,33.33333333333333,-0.55,-58.769999999999996,3.0000040302000013,0.140625,0.0,MIXED,adaptive,129,0,89,2,2,2,0.02247191011235955,16,15
+mu_2026-02-04.json,2026-02-04,716,2,2,0,100.0,1.55,77.6,2.000003466800001,inf,0.0,MIXED,adaptive,205,0,164,1,1,1,0.006097560975609756,18,17
+mu_2026-02-05.json,2026-02-05,0,0,0,0,0.0,0.0,0.0,0.0,0.0,0.0,,,0,1,0,0,0,0,,0,0
+mu_phase_0.json,2026-02-03,719,1,0,1,0.0,-0.42,-42.07,1.000000666400001,0.0,0.0,MIXED,adaptive,98,0,68,1,1,1,0.014705882352941176,16,15
+mu_phase_2.json,2026-02-03,719,0,0,0,0,0.0,0,0.0,inf,0.0,MIXED,adaptive,105,0,78,0,0,0,0.0,16,15
+mu_phase_2_after_tuning.json,2026-02-03,719,3,1,2,33.33333333333333,-0.55,-58.769999999999996,3.0000040302000013,0.140625,0.0,MIXED,adaptive,129,0,89,2,2,2,0.02247191011235955,16,15
+mu_phase_4_validation.json,2026-02-03,719,3,1,2,33.33333333333333,-0.55,-58.769999999999996,3.0000040302000013,0.140625,0.0,MIXED,adaptive,129,0,89,2,2,2,0.02247191011235955,16,15
+mu_phase_current.json,2026-02-03,719,0,0,0,0,0.0,0,0.0,inf,0.0,MIXED,adaptive,105,0,78,0,0,0,0.0,16,15
+mu_phase_current_after_restart.json,2026-02-03,719,0,0,0,0,0.0,0,0.0,inf,0.0,MIXED,adaptive,105,0,78,0,0,0,0.0,16,15
+mu_test_20260203.json,2026-02-03,719,0,0,0,0,0.0,0,0.0,inf,0.0,MIXED,adaptive,98,0,76,0,0,0,0.0,13,12

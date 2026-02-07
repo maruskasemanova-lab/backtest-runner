@@ -83,6 +83,7 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
       if (onChartStateChange) {
           chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
               if (range && !isSyncingRef.current) {
+                  lastEmittedRangeRef.current = range;
                   onChartStateChange(range);
               }
           });
@@ -136,8 +137,28 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
 
       window.addEventListener("resize", handleResize);
 
+      // Cmd+Scroll for vertical price scale zoom
+      const handleWheel = (e) => {
+          if (e.metaKey || e.ctrlKey) {
+              e.preventDefault();
+              const priceScale = chart.priceScale('right');
+              const currentMargins = priceScale.options().scaleMargins || { top: 0.1, bottom: 0.2 };
+              const delta = e.deltaY > 0 ? 0.02 : -0.02; // Zoom out / in
+              const newTop = Math.max(0.02, Math.min(0.45, currentMargins.top + delta));
+              const newBottom = Math.max(0.02, Math.min(0.45, currentMargins.bottom + delta));
+              priceScale.applyOptions({
+                  scaleMargins: { top: newTop, bottom: newBottom }
+              });
+              if (onPriceRangeChange) {
+                  onPriceRangeChange({ top: newTop, bottom: newBottom });
+              }
+          }
+      };
+      chartContainerRef.current.addEventListener('wheel', handleWheel, { passive: false });
+
       return () => {
         window.removeEventListener("resize", handleResize);
+        chartContainerRef.current?.removeEventListener('wheel', handleWheel);
         if (chartRef.current) {
           chartRef.current.remove();
           chartRef.current = null;
@@ -158,10 +179,20 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
 
     // Use a ref to track if we are currently syncing from props to prevent loop
     const isSyncingRef = useRef(false);
+    // Use a ref to track the last range we emitted to avoid processing our own echo
+    const lastEmittedRangeRef = useRef(null);
 
   // Sync external chart state
   useEffect(() => {
       if (chartRef.current && chartState) {
+          // Check if this update is just an echo of what we just sent
+          if (lastEmittedRangeRef.current) {
+               const emitted = lastEmittedRangeRef.current;
+               const isEcho = Math.abs(chartState.from - emitted.from) < 0.001 && 
+                              Math.abs(chartState.to - emitted.to) < 0.001;
+               if (isEcho) return;
+          }
+
           const api = chartRef.current.timeScale();
           const current = api.getVisibleRange();
           
@@ -174,6 +205,9 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
               isSyncingRef.current = true;
               try {
                   api.setVisibleRange(chartState);
+                  // Update our last known state to match what we just set
+                  // This prevents us from thinking the next user action is a jump if we just moved it
+                  lastEmittedRangeRef.current = chartState;
               } catch(e) { 
                   // ignore errors if data not ready
               } finally {
@@ -307,52 +341,48 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
   useEffect(() => {
     if (!chartRef.current) return;
 
-    const handleClick = (param) => {
-      if (!param.time || !markers || markers.length === 0) return;
-
-      const clickedTime = param.time;
-
-      // Find marker at this time
-      const marker = markers.find((m) => {
+    // Build a marker lookup map ONCE per markers change (O(n) once, O(1) lookups)
+    const markerTimeMap = new Map();
+    if (markers && markers.length > 0) {
+      markers.forEach(m => {
         const mTime = Math.floor(new Date(m.timestamp).getTime() / 1000);
-        return mTime === clickedTime;
+        markerTimeMap.set(mTime, m);
       });
+    }
 
+    const handleClick = (param) => {
+      if (!param.time || markerTimeMap.size === 0) return;
+      const marker = markerTimeMap.get(param.time);
       if (marker && onMarkerClick) {
         onMarkerClick(marker.id);
       }
     };
 
-    // Handle mouse move for tooltips
+    // Handle mouse move for tooltips - OPTIMIZED
     const handleCrosshairMove = (param) => {
-      if (!param.time || !markers || markers.length === 0) {
-        setTooltip(prev => ({ ...prev, visible: false }));
+      if (!param.time || markerTimeMap.size === 0) {
+        setTooltip(prev => prev.visible ? { ...prev, visible: false } : prev);
         return;
       }
 
-      const hoveredTime = param.time;
       const point = param.point;
-      
       if (!point) {
-        setTooltip(prev => ({ ...prev, visible: false }));
+        setTooltip(prev => prev.visible ? { ...prev, visible: false } : prev);
         return;
       }
 
-      // Find marker at this time
-      const marker = markers.find((m) => {
-        const mTime = Math.floor(new Date(m.timestamp).getTime() / 1000);
-        return mTime === hoveredTime;
-      });
-
+      const marker = markerTimeMap.get(param.time);
       if (marker) {
+        // Get rect ONCE, not twice
+        const rect = chartContainerRef.current.getBoundingClientRect();
         setTooltip({
           visible: true,
           marker: marker,
-          x: point.x + chartContainerRef.current.getBoundingClientRect().left,
-          y: point.y + chartContainerRef.current.getBoundingClientRect().top
+          x: point.x + rect.left,
+          y: point.y + rect.top
         });
       } else {
-        setTooltip(prev => ({ ...prev, visible: false }));
+        setTooltip(prev => prev.visible ? { ...prev, visible: false } : prev);
       }
     };
 
@@ -401,12 +431,7 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
       // avgVolume * 0.05 means iceberg > 5% of total candle volume -> REASONABLE
       const ICEBERG_MIN_SIZE = avgVolume * 0.05; 
       
-      console.log("Iceberg Debug:", { 
-          avgVolume, 
-          ICEBERG_MIN_SIZE, 
-          icebergsCount: icebergs?.length,
-          processedCount: icebergs?.length 
-      }); 
+ 
 
       const validMarkerTypes = [
         "entry_executed",

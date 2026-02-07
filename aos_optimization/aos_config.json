@@ -193,6 +193,7 @@
         "pattern_weight": 0.45,
         "strategy_weight": 0.55,
         "threshold": 58,
+        "strategy_only_threshold": 68,
         "require_pattern": false,
         "volume_confirm_ratio": 1.15
       },

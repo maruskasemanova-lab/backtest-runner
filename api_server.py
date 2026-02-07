@@ -20,7 +20,7 @@ import pandas as pd
 from data_loader import DataLoader
 from session_runner import SessionRunner, RunConfig
 from decision_tracker import MarkerType
-from available_data import get_discovery
+from available_data import get_discovery, reset_discovery
 from src.config_io import (
     extract_multilayer_payload,
     load_json_file,
@@ -28,6 +28,7 @@ from src.config_io import (
 )
 from src.l2_data_manager import L2DataManager
 from src.l2_feature_service import L2FeatureService
+from src.databento_service import DatabentoService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BacktestRunner")
@@ -53,6 +54,7 @@ l2_manager = L2DataManager()
 l2_features = L2FeatureService(manager=l2_manager, logger=logger)
 active_runners: Dict[str, SessionRunner] = {}
 connected_clients: List[WebSocket] = []
+databento_svc = DatabentoService()
 STRATEGY_OVERRIDES_PATH = Path(__file__).parent / "strategy_overrides.json"
 AOS_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "aos_config.json"
 
@@ -254,6 +256,186 @@ async def _configure_session(
         logger.warning(f"Session config error for {run_id}:{ticker}:{date}: {e}")
 
 
+async def _clear_remote_strategy_sessions(
+    strategy_api_url: str,
+    run_id: str,
+    ticker: str,
+) -> None:
+    """
+    Best-effort cleanup of strategy API session state.
+
+    This prevents sticky per-run state (phase/cooldown/session caches) from
+    affecting subsequent replays with the same run_id+ticker.
+    """
+    normalized_ticker = ticker.upper()
+
+    async def _clear_v2(session: aiohttp.ClientSession) -> bool:
+        async with session.delete(
+            f"{strategy_api_url}/api/session/run",
+            params={"run_id": run_id, "ticker": normalized_ticker},
+        ) as resp:
+            if resp.status == 200:
+                return True
+            # Endpoint might not exist on older strategy API builds.
+            if resp.status in (404, 405):
+                return False
+            logger.warning(
+                f"Session run-clear failed (HTTP {resp.status}) for {run_id}:{normalized_ticker}"
+            )
+            return False
+
+    async def _clear_legacy(session: aiohttp.ClientSession) -> None:
+        try:
+            async with session.get(f"{strategy_api_url}/api/sessions") as resp:
+                if resp.status != 200:
+                    logger.warning(
+                        f"Session list failed (HTTP {resp.status}) for {run_id}:{normalized_ticker}"
+                    )
+                    return
+                payload = await resp.json()
+        except Exception as exc:
+            logger.warning(f"Session list error for {run_id}:{normalized_ticker}: {exc}")
+            return
+
+        if not isinstance(payload, dict):
+            return
+
+        dates_to_clear: List[str] = []
+        for session_state in payload.values():
+            if not isinstance(session_state, dict):
+                continue
+            if session_state.get("run_id") != run_id:
+                continue
+            if str(session_state.get("ticker", "")).upper() != normalized_ticker:
+                continue
+            date_val = session_state.get("date")
+            if isinstance(date_val, str) and date_val:
+                dates_to_clear.append(date_val)
+
+        for date_val in sorted(set(dates_to_clear)):
+            try:
+                async with session.delete(
+                    f"{strategy_api_url}/api/session",
+                    params={
+                        "run_id": run_id,
+                        "ticker": normalized_ticker,
+                        "date": date_val,
+                    },
+                ) as resp:
+                    if resp.status not in (200, 404):
+                        logger.warning(
+                            f"Legacy session clear failed (HTTP {resp.status}) "
+                            f"for {run_id}:{normalized_ticker}:{date_val}"
+                        )
+            except Exception as exc:
+                logger.warning(
+                    f"Legacy session clear error for {run_id}:{normalized_ticker}:{date_val}: {exc}"
+                )
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            used_v2 = await _clear_v2(session)
+            if not used_v2:
+                await _clear_legacy(session)
+    except Exception as exc:
+        logger.warning(f"Remote session cleanup error for {run_id}:{normalized_ticker}: {exc}")
+
+
+async def _reset_remote_orchestrator_state(strategy_api_url: str) -> bool:
+    """
+    Best-effort full reset of remote strategy/orchestrator state.
+
+    Returns True when a reset endpoint acknowledged the request, False when the
+    endpoint is unavailable or reset failed.
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{strategy_api_url}/api/orchestrator/reset",
+                params={"scope": "all", "clear_sessions": "true"},
+            ) as resp:
+                if resp.status == 200:
+                    return True
+                if resp.status in (404, 405):
+                    # Older strategy API builds do not expose this endpoint.
+                    return False
+                logger.warning(
+                    f"Remote orchestrator reset failed (HTTP {resp.status}) at {strategy_api_url}"
+                )
+                return False
+    except Exception as exc:
+        logger.warning(f"Remote orchestrator reset error at {strategy_api_url}: {exc}")
+        return False
+
+
+async def _reset_remote_orchestrator_state_scoped(
+    strategy_api_url: str, scope: str = "session"
+) -> bool:
+    """Reset remote orchestrator with a specific scope (session/learning/all)."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{strategy_api_url}/api/orchestrator/reset",
+                params={"scope": scope, "clear_sessions": "true"},
+            ) as resp:
+                return resp.status == 200
+    except Exception as exc:
+        logger.warning(f"Remote orchestrator scoped reset error: {exc}")
+        return False
+
+
+async def _load_remote_checkpoint(
+    strategy_api_url: str, checkpoint_path: str
+) -> Optional[Dict]:
+    """Load a checkpoint on the remote strategy API."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{strategy_api_url}/api/orchestrator/checkpoint/load",
+                params={"path": checkpoint_path},
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                logger.warning(
+                    f"Remote checkpoint load failed (HTTP {resp.status}): {checkpoint_path}"
+                )
+                return None
+    except Exception as exc:
+        logger.warning(f"Remote checkpoint load error: {exc}")
+        return None
+
+
+async def _save_remote_checkpoint(
+    strategy_api_url: str,
+    run_id: str = "",
+    ticker: str = "",
+    date_from: str = "",
+    date_to: str = "",
+) -> Optional[str]:
+    """Auto-save checkpoint after a successful backtest run."""
+    try:
+        params = {
+            k: v for k, v in {
+                "run_id": run_id, "ticker": ticker,
+                "date_from": date_from, "date_to": date_to,
+            }.items() if v
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{strategy_api_url}/api/orchestrator/checkpoint/save",
+                params=params,
+            ) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    path = result.get("path")
+                    logger.info(f"Auto-saved checkpoint: {path}")
+                    return path
+                return None
+    except Exception as exc:
+        logger.warning(f"Checkpoint auto-save error: {exc}")
+        return None
+
+
 def _to_utc_datetime(value: Any) -> datetime:
     return l2_features.to_utc_datetime(value)
 
@@ -316,6 +498,9 @@ class StartRunRequest(BaseModel):
     l2_min_participation_ratio: float = 0.0
     l2_min_directional_consistency: float = 0.0
     l2_min_signed_aggression: float = 0.0
+    # Checkpoint: warm-start from a previous backtest's learning state
+    checkpoint_path: Optional[str] = None
+    auto_save_checkpoint: bool = True
 
 
 class PlayRequest(BaseModel):
@@ -392,50 +577,7 @@ async def health():
 @app.get("/api/available-data")
 async def get_available_data():
     """Get available tickers and date ranges from data files."""
-    discovery = get_discovery()
-    data = discovery.to_dict()
-    
-    # Add L2 availability
-    # This is a simple file check in data/l2 directory
-    l2_tickers = []
-    l2_dir = Path("data/l2")
-    if l2_dir.exists():
-        for pattern in ("*.mbn", "*.parquet"):
-            for f in l2_dir.glob(pattern):
-                # Filename format: TICKER_START_END.<ext>
-                stem = f.stem
-                parts = stem.split('_')
-                if len(parts) < 3:
-                    continue
-
-                ticker = parts[0]
-                start = parts[1]
-                end = parts[2]
-                l2_tickers.append(ticker)
-
-                if ticker not in data["tickers"]:
-                    data["tickers"].append(ticker)
-
-                if ticker not in data["date_ranges"]:
-                    data["date_ranges"][ticker] = {
-                        "start": start,
-                        "end": end,
-                        "files": [f.name],
-                    }
-                    continue
-
-                current = data["date_ranges"][ticker]
-                if "files" not in current:
-                    current["files"] = []
-                current["files"].append(f.name)
-                if start < current["start"]:
-                    current["start"] = start
-                if end > current["end"]:
-                    current["end"] = end
-
-    data["tickers"].sort()
-    data["l2_tickers"] = list(set(l2_tickers))
-    return data
+    return databento_svc.get_available_data_summary(refresh=False)
 
 
 @app.get("/api/strategy-overrides")
@@ -524,6 +666,23 @@ async def start_run(request: StartRunRequest):
     if run_key in active_runners:
         raise HTTPException(400, f"Run already exists: {run_key}")
 
+    # Orchestrator state reset: cold start (full) or warm start (session-only).
+    checkpoint_loaded = None
+    if request.checkpoint_path:
+        # Warm start: reset only per-session state, then load checkpoint
+        orchestrator_reset = await _reset_remote_orchestrator_state_scoped(
+            request.strategy_api_url, scope="session"
+        )
+        checkpoint_loaded = await _load_remote_checkpoint(
+            request.strategy_api_url, request.checkpoint_path
+        )
+    else:
+        # Cold start (default): full reset for deterministic backtests
+        orchestrator_reset = await _reset_remote_orchestrator_state(request.strategy_api_url)
+
+    # Defensive cleanup in strategy API for reruns with the same run_id+ticker.
+    await _clear_remote_strategy_sessions(request.strategy_api_url, request.run_id, ticker)
+
     # Apply per-ticker strategy overrides (best-effort)
     await _apply_strategy_overrides(request.strategy_api_url, ticker)
     # Apply AOS optimizations (time filter, long_only, params)
@@ -536,8 +695,26 @@ async def start_run(request: StartRunRequest):
     
     # Auto-discover data file(s) if not provided
     if not data_file:
-        discovery = get_discovery()
-        data_files = discovery.get_files_for_range(ticker, range_start, range_end)
+        # Prefer centralized catalog (Data Manager + runner use the same inventory).
+        databento_svc.scan_existing_files()
+        data_files = databento_svc.get_files_for_range(
+            ticker=ticker,
+            start_date=range_start,
+            end_date=range_end,
+            schema_prefix="ohlcv-",
+        )
+        if not data_files:
+            # Backward-compatible fallback only when centralized catalog has no
+            # OHLCV entries for this ticker at all.
+            catalog_rows = databento_svc.list_catalog(refresh=False, ticker=ticker)
+            has_catalog_ohlcv = any(
+                str(row.get("schema", "")).lower().startswith("ohlcv-")
+                and row.get("status") == "ready"
+                for row in catalog_rows
+            )
+            if not has_catalog_ohlcv:
+                discovery = get_discovery()
+                data_files = discovery.get_files_for_range(ticker, range_start, range_end)
     else:
         data_files = [data_file]
 
@@ -700,6 +877,41 @@ async def start_run(request: StartRunRequest):
     if not bars:
         raise HTTPException(400, "No data available for the specified date/range")
 
+    # Load QQQ reference bars for cross-asset context (best-effort)
+    ref_bars_map = {}
+    if ticker.upper() != 'QQQ':
+        try:
+            databento_svc.scan_existing_files()
+            qqq_files = databento_svc.get_files_for_range(
+                ticker='QQQ', start_date=range_start, end_date=range_end,
+                schema_prefix="ohlcv-",
+            )
+            if not qqq_files:
+                discovery = get_discovery()
+                qqq_files = discovery.get_files_for_range('QQQ', range_start, range_end)
+            if qqq_files:
+                qqq_dfs = []
+                for f in qqq_files:
+                    try:
+                        if f.endswith('.parquet') or f.endswith('.parq'):
+                            qqq_dfs.append(data_loader.load_parquet(f))
+                        else:
+                            qqq_dfs.append(data_loader.load_csv(f))
+                    except Exception:
+                        continue
+                if qqq_dfs:
+                    qqq_df = pd.concat(qqq_dfs, ignore_index=True)
+                    qqq_df = data_loader.filter_trading_range(qqq_df, range_start, range_end)
+                    for qqq_bar in data_loader.get_bars_iterator(qqq_df):
+                        ts = qqq_bar.get('timestamp')
+                        ts_key = (ts.isoformat() if hasattr(ts, 'isoformat')
+                                  else str(ts))
+                        qqq_bar['ticker'] = 'QQQ'
+                        ref_bars_map[ts_key] = qqq_bar
+                    logger.info(f"Loaded {len(ref_bars_map)} QQQ reference bars for cross-asset")
+        except Exception as e:
+            logger.debug(f"Could not load QQQ reference data: {e}")
+
     # Create runner
     config = RunConfig(
         run_id=request.run_id,
@@ -710,8 +922,9 @@ async def start_run(request: StartRunRequest):
         strategy_api_url=request.strategy_api_url,
         regime_detection_minutes=request.regime_detection_minutes
     )
-    
+
     runner = SessionRunner(config)
+    runner.ref_bars_map = ref_bars_map
     runner.load_bars(bars)
     
     # Register callbacks for broadcasting
@@ -734,15 +947,22 @@ async def start_run(request: StartRunRequest):
     runner.on_bar(on_bar)
     runner.on_decision(on_decision)
     
+    # Store checkpoint auto-save metadata on runner for use after run_all
+    runner._checkpoint_auto_save = request.auto_save_checkpoint
+    runner._checkpoint_strategy_url = request.strategy_api_url
+    runner._checkpoint_loaded = checkpoint_loaded
+
     active_runners[run_key] = runner
-    
+
     logger.info(f"Started run {run_key} with {len(bars)} bars")
-    
+
     return {
         "success": True,
         "run_key": run_key,
         "ticker": ticker,
         "total_bars": len(bars),
+        "strategy_state_reset": orchestrator_reset,
+        "checkpoint_loaded": checkpoint_loaded,
         "data_files": data_files,
         "aos_applied": aos_applied,
         "l2_applied": {
@@ -857,10 +1077,24 @@ async def play_run(
         elif normalized in {"", "null", "none"}:
             raw_speed = "max"
     
-    # Start in background
+    # Start in background with optional checkpoint auto-save on completion
     runner.last_run_speed = raw_speed  # cache for resume info
-    asyncio.create_task(runner.run_all(speed_ms=raw_speed))
-    
+
+    async def _run_and_maybe_save():
+        await runner.run_all(speed_ms=raw_speed)
+        if getattr(runner, '_checkpoint_auto_save', False):
+            url = getattr(runner, '_checkpoint_strategy_url', '')
+            if url:
+                await _save_remote_checkpoint(
+                    url,
+                    run_id=runner.config.run_id,
+                    ticker=runner.config.ticker,
+                    date_from=runner.config.date_from or runner.config.date,
+                    date_to=runner.config.date_to or runner.config.date,
+                )
+
+    asyncio.create_task(_run_and_maybe_save())
+
     return {"success": True, "speed_ms": raw_speed}
 
 
@@ -976,6 +1210,11 @@ async def delete_run(run_id: str, ticker: str, date: str):
     
     runner = active_runners[run_key]
     runner.stop()
+    await _clear_remote_strategy_sessions(
+        runner.config.strategy_api_url,
+        runner.config.run_id,
+        runner.config.ticker,
+    )
     del active_runners[run_key]
     
     return {"success": True, "deleted": run_key}
@@ -1034,6 +1273,210 @@ async def get_icebergs(ticker: str, start_time: str, end_time: str):
     icebergs = l2_manager.detect_icebergs(ticker, start_dt, end_dt)
     
     return icebergs
+
+
+# ============ Data Loader Endpoints ============
+
+class DownloadRequest(BaseModel):
+    ticker: str
+    data_schema: str = "mbp-10"
+    start_date: str
+    end_date: str
+    dataset: str = "XNAS.ITCH"
+    convert_to_parquet: bool = True
+
+
+class CostEstimateRequest(BaseModel):
+    ticker: str
+    data_schema: str = "mbp-10"
+    start_date: str
+    end_date: str
+    dataset: str = "XNAS.ITCH"
+
+
+class DeleteDataRequest(BaseModel):
+    ticker: str
+    data_schema: str
+    start_date: str
+    end_date: str
+
+
+class DataSettingsRequest(BaseModel):
+    ohlcv_data_dirs: Optional[List[str]] = None
+    l2_data_dirs: Optional[List[str]] = None
+
+
+class DatabentoApiKeyRequest(BaseModel):
+    api_key: str
+
+
+@app.get("/api/data-loader/catalog")
+async def get_data_catalog(
+    refresh: bool = False,
+    ticker: Optional[str] = None,
+    schema: Optional[str] = None,
+    file_format: Optional[str] = None,
+    source: Optional[str] = None,
+    managed: Optional[bool] = None,
+):
+    """List unified data catalog entries with optional filters."""
+    return databento_svc.list_catalog(
+        refresh=refresh,
+        ticker=ticker,
+        schema=schema,
+        file_format=file_format,
+        source=source,
+        managed=managed,
+    )
+
+
+@app.get("/api/data-loader/catalog/{ticker}")
+async def get_ticker_catalog(ticker: str):
+    """List catalog data for a specific ticker."""
+    return databento_svc.list_catalog(ticker=ticker.upper())
+
+
+@app.get("/api/data-loader/settings")
+async def get_data_loader_settings():
+    """Read centralized data manager settings."""
+    return databento_svc.get_settings()
+
+
+@app.put("/api/data-loader/settings")
+async def update_data_loader_settings(request: DataSettingsRequest):
+    """Update OHLCV/L2 data roots used by catalog discovery."""
+    global data_loader, l2_manager
+    try:
+        settings = databento_svc.update_data_dirs(
+            ohlcv_data_dirs=request.ohlcv_data_dirs,
+            l2_data_dirs=request.l2_data_dirs,
+        )
+        # Recreate loaders so run execution + L2 charts use the same updated roots.
+        data_loader = DataLoader()
+        l2_manager = L2DataManager()
+        l2_features.manager = l2_manager
+        reset_discovery()
+        return settings
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+
+
+@app.put("/api/data-loader/api-key")
+async def set_databento_api_key(request: DatabentoApiKeyRequest):
+    """Set Databento API key for this system (persisted in settings)."""
+    try:
+        settings = databento_svc.set_api_key(request.api_key)
+        return {"status": "ok", **settings}
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/data-loader/schemas")
+async def get_supported_schemas():
+    """List supported Databento schemas."""
+    return databento_svc.get_schemas()
+
+
+@app.post("/api/data-loader/cost-estimate")
+async def get_cost_estimate(request: CostEstimateRequest):
+    """Get Databento cost estimate before downloading."""
+    try:
+        return databento_svc.get_cost_estimate(
+            ticker=request.ticker.upper(),
+            schema=request.data_schema,
+            start=request.start_date,
+            end=request.end_date,
+            dataset=request.dataset,
+        )
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Cost estimate failed: {e}")
+
+
+@app.post("/api/data-loader/download")
+async def start_download(request: DownloadRequest):
+    """Start a data download from Databento (runs in background)."""
+    ticker = request.ticker.upper()
+
+    try:
+        coverage = databento_svc.get_range_coverage(
+            ticker=ticker,
+            schema=request.data_schema,
+            start_date=request.start_date,
+            end_date=request.end_date,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Invalid date range: {e}")
+
+    if coverage.get("fully_covered"):
+        return {"status": "already_exists", "coverage": coverage}
+
+    async def _broadcast(msg):
+        await broadcast(msg)
+
+    # Run download in background task
+    async def _do_download():
+        try:
+            entry = await databento_svc.download(
+                ticker=ticker,
+                schema=request.data_schema,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                dataset=request.dataset,
+                convert_to_parquet=request.convert_to_parquet,
+                broadcast_fn=_broadcast,
+            )
+            logger.info(f"Download complete: {ticker} {request.data_schema} -> {entry.status}")
+        except Exception as e:
+            logger.error(f"Download failed: {e}")
+
+    asyncio.create_task(_do_download())
+    return {
+        "status": "started",
+        "ticker": ticker,
+        "schema": request.data_schema,
+        "days_total": coverage.get("total_days", 0),
+        "days_to_download": len(coverage.get("missing_days", [])),
+        "days_already_covered": len(coverage.get("covered_days", [])),
+    }
+
+
+@app.get("/api/data-loader/downloads/active")
+async def get_active_downloads():
+    """Get list of currently downloading jobs."""
+    return databento_svc.get_active_downloads()
+
+
+@app.delete("/api/data-loader/entry")
+async def delete_data_entry(request: DeleteDataRequest):
+    """Delete a downloaded data entry and its files."""
+    existing = databento_svc.catalog.find(
+        request.ticker.upper(), request.data_schema, request.start_date, request.end_date
+    )
+    if not existing:
+        raise HTTPException(404, "Entry not found")
+    if not bool(existing.get("managed", True)):
+        raise HTTPException(
+            403,
+            "Refusing to delete unmanaged/external entry. Remove file manually if needed.",
+        )
+    success = databento_svc.delete_entry(
+        request.ticker.upper(), request.data_schema, request.start_date, request.end_date
+    )
+    if not success:
+        raise HTTPException(500, "Delete failed")
+    return {"status": "deleted"}
+
+
+@app.post("/api/data-loader/scan")
+async def scan_existing_data():
+    """Scan data directories and register untracked files."""
+    from dataclasses import asdict
+    entries = databento_svc.scan_existing_files()
+    return {"scanned": len(entries), "entries": [asdict(e) for e in entries]}
 
 
 # ============ Static Files (Frontend) ============

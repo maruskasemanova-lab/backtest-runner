@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { createChart } from 'lightweight-charts';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import CandlestickChart from './components/CandlestickChart';
 import FootprintChart from './components/FootprintChart';
 import PlaybackControls from './components/PlaybackControls';
@@ -7,8 +6,8 @@ import DecisionPanel from './components/DecisionPanel';
 import SessionSummary from './components/SessionSummary';
 import RunConfig from './components/RunConfig';
 import StrategySettings from './components/StrategySettings';
-import AOSOptimizations from './components/AOSOptimizations';
 import MultiLayerSettings from './components/MultiLayerSettings';
+import DataManager from './components/DataManager';
 
 function App() {
   // Run state
@@ -23,10 +22,13 @@ function App() {
   const [currentBar, setCurrentBar] = useState(null);
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [strategyApiUrl, setStrategyApiUrl] = useState("http://localhost:8001");
-  const [aosOptimizations, setAosOptimizations] = useState({});
   
+  // View navigation
+  const [activeView, setActiveView] = useState("backtest"); // "backtest" or "data-manager"
+  const [downloadProgress, setDownloadProgress] = useState(null);
+
   // L2 Data
-  const [activeTab, setActiveTab] = useState("l2"); // "standard" or "l2"
+  const [activeTab, setActiveTab] = useState("standard"); // "standard" or "l2"
   const [l2Data, setL2Data] = useState(null);
   const [icebergs, setIcebergs] = useState([]);
   const [timeframe, setTimeframe] = useState("1min");
@@ -35,6 +37,15 @@ function App() {
   const [chartState, setChartState] = useState(null); // { from: number, to: number } (Time Range)
   const [priceRange, setPriceRange] = useState(null); // { from: number, to: number } (Price Range)
 
+  // Marker visibility toggles
+  const [markerVisibility, setMarkerVisibility] = useState({
+    entries: true,
+    exits: true,
+    icebergs: true,
+    regime: true,
+    strategy: true
+  });
+
   // ...
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -42,9 +53,6 @@ function App() {
   
   // WebSocket
   const wsRef = useRef(null);
-
-  // Debug
-  const [debugMsg, setDebugMsg] = useState("Initializing...");
   
   // Connect WebSocket
   useEffect(() => {
@@ -66,6 +74,8 @@ function App() {
           handleNewBar(data.bar);
         } else if (data.type === 'decision') {
           handleNewDecision(data.marker);
+        } else if (data.type === 'download_progress') {
+          setDownloadProgress(data);
         }
       };
       
@@ -126,8 +136,7 @@ function App() {
     });
   }, []);
 
-  // Resample bars based on timeframe
-  const aggregatedBars = useCallback(() => {
+  const displayedBars = useMemo(() => {
       if (timeframe === '1min') return bars;
       if (!bars.length) return [];
 
@@ -165,7 +174,40 @@ function App() {
       return Array.from(groups.values()).sort((a,b) => a.time - b.time);
   }, [bars, timeframe]);
 
-  const displayedBars = aggregatedBars();
+  // Stable chart state change handler
+  const handleChartStateChange = useCallback((newState) => {
+      setChartState(prev => {
+          if (prev && newState && 
+              Math.abs(prev.from - newState.from) < 0.001 && 
+              Math.abs(prev.to - newState.to) < 0.001) {
+              return prev;
+          }
+          return newState;
+      });
+  }, []);
+
+  // Filter markers based on visibility toggles
+  const filteredMarkers = useMemo(() => {
+      if (!markers || markers.length === 0) return [];
+      return markers.filter(m => {
+          const type = m.marker_type;
+          if (type === 'entry_executed' && !markerVisibility.entries) return false;
+          if ((type === 'exit_executed' || type === 'stop_loss_hit' || type === 'take_profit_hit') && !markerVisibility.exits) return false;
+          if (type === 'regime_detected' && !markerVisibility.regime) return false;
+          if (type === 'strategy_selected' && !markerVisibility.strategy) return false;
+          return true;
+      });
+  }, [markers, markerVisibility]);
+
+  const filteredIcebergs = useMemo(() => {
+      if (!markerVisibility.icebergs) return [];
+      return icebergs;
+  }, [icebergs, markerVisibility.icebergs]);
+
+  // Toggle marker visibility helper
+  const toggleMarkerVisibility = useCallback((key) => {
+      setMarkerVisibility(prev => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   // Fetch L2 Data - Updated to run for Standard tab too (for Delta display)
   useEffect(() => {
@@ -180,8 +222,6 @@ function App() {
               const ticker = runState.ticker;
               const start = `${date}T04:00:00Z`; 
               const end = `${date}T20:00:00Z`; 
-              
-              setDebugMsg(`Fetching L2 & Icebergs... ${ticker} ${date}`);
 
               // Parallel fetch
               const [l2Res, iceRes] = await Promise.all([
@@ -192,7 +232,6 @@ function App() {
               if (l2Res.ok) {
                   const data = await l2Res.json();
                   setL2Data({...data, date, timeframe});
-                  setDebugMsg(prev => `${prev} L2: ${data.bars?.length}`);
               } else {
                   console.error("L2 fetch failed", l2Res.status);
               }
@@ -200,13 +239,11 @@ function App() {
               if (iceRes.ok) {
                   const iceData = await iceRes.json();
                   setIcebergs(iceData);
-                  setDebugMsg(prev => `${prev} Ice: ${iceData?.length}`);
               } else {
                   console.error("Iceberg fetch failed", iceRes.status);
               }
 
           } catch (e) {
-              setDebugMsg(`Fetch Error: ${e.message}`);
               console.error("Fetch error:", e);
           }
       };
@@ -378,20 +415,31 @@ function App() {
     <div className="app-container">
       {/* Header */}
       <header className="app-header">
-        <h1 style={{ display: 'flex', flexDirection: 'column' }}>
-          <div>
-            <span className="logo">📊</span>
-            Backtest Runner
-          </div>
-          <span style={{ fontSize: '10px', color: 'orange' }}>DEBUG: {debugMsg}</span>
-        </h1>
+        <h1>Backtest Runner</h1>
+        <nav className="app-nav">
+          <button
+            className={`nav-tab ${activeView === 'backtest' ? 'active' : ''}`}
+            onClick={() => setActiveView('backtest')}
+          >
+            Backtest
+          </button>
+          <button
+            className={`nav-tab ${activeView === 'data-manager' ? 'active' : ''}`}
+            onClick={() => setActiveView('data-manager')}
+          >
+            Data Manager
+          </button>
+        </nav>
         <div className="connection-status">
           <span className={`status-dot ${isConnected ? 'connected' : ''}`}></span>
           <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
         </div>
       </header>
-      
+
       {/* Main Content */}
+      {activeView === 'data-manager' ? (
+        <DataManager downloadProgress={downloadProgress} />
+      ) : (
       <main className="app-content">
         {/* Left Sidebar */}
         <aside className="sidebar">
@@ -407,15 +455,6 @@ function App() {
 
           {/* Multi-Layer Decision Engine */}
           <MultiLayerSettings apiUrl={strategyApiUrl} />
-
-          {/* AOS Optimizations */}
-          <AOSOptimizations 
-            apiUrl={strategyApiUrl}
-            selectedTicker={selectedTicker}
-            onOptimizationChange={(ticker, config) => {
-              setAosOptimizations(prev => ({...prev, [ticker]: config}));
-            }}
-          />
           
           {/* Playback Controls */}
           {runKey && (
@@ -455,19 +494,11 @@ function App() {
                 {runState.phase}
               </span>
             )}
-            <div className="tab-switcher" style={{ marginLeft: "auto", display: "flex", gap: "10px", alignItems: "center" }}>
-                <select 
-                    value={timeframe} 
+            <div className="chart-toolbar">
+                <select
+                    className="chart-timeframe"
+                    value={timeframe}
                     onChange={(e) => setTimeframe(e.target.value)}
-                    style={{
-                        background: '#333',
-                        color: '#fff',
-                        border: '1px solid #555',
-                        borderRadius: '4px',
-                        padding: '4px',
-                        marginRight: '10px',
-                        cursor: 'pointer'
-                    }}
                 >
                     <option value="1min">1 Min</option>
                     <option value="5min">5 Min</option>
@@ -475,31 +506,55 @@ function App() {
                     <option value="30min">30 Min</option>
                     <option value="1h">1 Hour</option>
                 </select>
-                <button 
-                    className={`tab-btn ${activeTab === 'standard' ? 'active' : ''}`}
+                
+                {/* Marker Visibility Toggles */}
+                <div className="marker-toggles">
+                    <button
+                        className={`toggle-btn ${markerVisibility.entries ? 'active' : ''}`}
+                        onClick={() => toggleMarkerVisibility('entries')}
+                        title="Toggle Entry Markers"
+                    >
+                        E
+                    </button>
+                    <button
+                        className={`toggle-btn ${markerVisibility.exits ? 'active' : ''}`}
+                        onClick={() => toggleMarkerVisibility('exits')}
+                        title="Toggle Exit/SL/TP Markers"
+                    >
+                        X
+                    </button>
+                    <button
+                        className={`toggle-btn ${markerVisibility.icebergs ? 'active' : ''}`}
+                        onClick={() => toggleMarkerVisibility('icebergs')}
+                        title="Toggle Iceberg Markers"
+                    >
+                        ❄️
+                    </button>
+                    <button
+                        className={`toggle-btn ${markerVisibility.regime ? 'active' : ''}`}
+                        onClick={() => toggleMarkerVisibility('regime')}
+                        title="Toggle Regime Markers"
+                    >
+                        R
+                    </button>
+                    <button
+                        className={`toggle-btn ${markerVisibility.strategy ? 'active' : ''}`}
+                        onClick={() => toggleMarkerVisibility('strategy')}
+                        title="Toggle Strategy Markers"
+                    >
+                        S
+                    </button>
+                </div>
+                
+                <button
+                    className={`chart-tab ${activeTab === 'standard' ? 'active' : ''}`}
                     onClick={() => setActiveTab('standard')}
-                    style={{ 
-                        background: activeTab === 'standard' ? 'var(--accent-blue)' : 'transparent',
-                        color: activeTab === 'standard' ? '#fff' : 'var(--text-secondary)',
-                        border: '1px solid var(--border-color)',
-                        padding: '4px 8px',
-                        cursor: 'pointer',
-                        borderRadius: '4px'
-                    }}
                 >
-                    Standard
+                    Candles
                 </button>
-                <button 
-                    className={`tab-btn ${activeTab === 'l2' ? 'active' : ''}`}
+                <button
+                    className={`chart-tab ${activeTab === 'l2' ? 'active' : ''}`}
                     onClick={() => setActiveTab('l2')}
-                     style={{ 
-                        background: activeTab === 'l2' ? 'var(--accent-blue)' : 'transparent',
-                        color: activeTab === 'l2' ? '#fff' : 'var(--text-secondary)',
-                        border: '1px solid var(--border-color)',
-                        padding: '4px 8px',
-                        cursor: 'pointer',
-                        borderRadius: '4px'
-                    }}
                 >
                     L2 Footprint
                 </button>
@@ -509,21 +564,12 @@ function App() {
             {activeTab === 'standard' ? (
                 <CandlestickChart 
                   bars={displayedBars} 
-                  markers={markers}
-                  icebergs={icebergs}
+                  markers={filteredMarkers}
+                  icebergs={filteredIcebergs}
                   onMarkerClick={handleMarkerClick}
                   selectedMarker={selectedMarker}
                   chartState={chartState}
-                  onChartStateChange={(newState) => {
-                    setChartState(prev => {
-                        if (prev && newState && 
-                            Math.abs(prev.from - newState.from) < 0.001 && 
-                            Math.abs(prev.to - newState.to) < 0.001) {
-                            return prev;
-                        }
-                        return newState;
-                    });
-                  }}
+                  onChartStateChange={handleChartStateChange}
                   priceRange={priceRange}
                   onPriceRangeChange={setPriceRange}
                   l2Data={l2Data} 
@@ -531,22 +577,13 @@ function App() {
             ) : (
                 <FootprintChart 
                   bars={displayedBars} 
-                  markers={markers}
-                  icebergs={icebergs}
+                  markers={filteredMarkers}
+                  icebergs={filteredIcebergs}
                   onMarkerClick={handleMarkerClick}
                   selectedMarker={selectedMarker}
                   l2Data={l2Data}
                   chartState={chartState}
-                  onChartStateChange={(newState) => {
-                    setChartState(prev => {
-                        if (prev && newState && 
-                            Math.abs(prev.from - newState.from) < 0.001 && 
-                            Math.abs(prev.to - newState.to) < 0.001) {
-                            return prev;
-                        }
-                        return newState;
-                    });
-                  }}
+                  onChartStateChange={handleChartStateChange}
                   priceRange={priceRange}
                   onPriceRangeChange={setPriceRange}
                 />
@@ -593,6 +630,7 @@ function App() {
           </div>
         </aside>
       </main>
+      )}
     </div>
   );
 }
