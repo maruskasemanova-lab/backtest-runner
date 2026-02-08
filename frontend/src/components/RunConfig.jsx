@@ -1,18 +1,20 @@
 import { useState, useEffect } from "react";
 
 const MU_FLOW_PRESET = {
-  regime_detection_minutes: 10,
-  trailing_stop_pct: 0.9,
+  // Keep FE defaults aligned with AOS tuning:
+  // zeros/nulls below intentionally defer to AOS values in backend.
+  regime_detection_minutes: 15,
+  trailing_stop_pct: null,
   account_size_usd: 10000,
-  l2_only: true,
+  l2_only: false,
   l2_confirm_enabled: true,
-  l2_min_delta: 1000,
-  l2_min_imbalance: 0.04,
+  l2_min_delta: 0,
+  l2_min_imbalance: 0.0,
   l2_min_iceberg_bias: 0.0,
   l2_lookback_bars: 3,
-  l2_min_participation_ratio: 0.12,
-  l2_min_directional_consistency: 0.5,
-  l2_min_signed_aggression: 0.03,
+  l2_min_participation_ratio: 0.0,
+  l2_min_directional_consistency: 0.0,
+  l2_min_signed_aggression: 0.0,
 };
 
 function RunConfig({ onStart, isRunning, onTickerChange }) {
@@ -295,9 +297,9 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
             </div>
           </div>
           <div className="form-group">
-            <label>Warm Start</label>
+            <label>Start Mode</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {useWarmStart ? "Enabled" : "Disabled"}
+              {useWarmStart ? "Warm Start" : "Cold Start"}
             </div>
           </div>
           <div className="form-group">
@@ -482,23 +484,37 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               </button>
             </div>
             <div className="preset-copy">
-              Warm start keeps learned evidence state between runs (calibration/edge/weights).
+              Choose how each run should initialize learning state.
             </div>
 
-            <label className="field-row">
-              <span>Enable Warm Start</span>
-              <input
-                type="checkbox"
-                checked={useWarmStart}
-                onChange={(e) => {
-                  const enabled = e.target.checked;
-                  setUseWarmStart(enabled);
-                  if (enabled && !config.checkpoint_path && checkpointCatalog.length > 0) {
-                    handleChange("checkpoint_path", checkpointCatalog[0].path || null);
-                  }
-                }}
-              />
-            </label>
+            <div className="form-group" style={{ marginBottom: "var(--spacing-sm)" }}>
+              <label style={{ marginBottom: "8px" }}>Start Mode</label>
+              <div style={{ display: "grid", gap: "8px" }}>
+                <label className="field-row">
+                  <span>Cold Start (reset learning state)</span>
+                  <input
+                    type="radio"
+                    name="start_mode"
+                    checked={!useWarmStart}
+                    onChange={() => setUseWarmStart(false)}
+                  />
+                </label>
+                <label className="field-row">
+                  <span>Warm Start (load checkpoint)</span>
+                  <input
+                    type="radio"
+                    name="start_mode"
+                    checked={useWarmStart}
+                    onChange={() => {
+                      setUseWarmStart(true);
+                      if (!config.checkpoint_path && checkpointCatalog.length > 0) {
+                        handleChange("checkpoint_path", checkpointCatalog[0].path || null);
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
 
             <label className="field-row">
               <span>Auto-save Checkpoint After Run</span>

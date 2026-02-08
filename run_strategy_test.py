@@ -135,6 +135,10 @@ class StrategyTester:
         verbose: bool = False,
         cleanup_run: bool = True,
         start_overrides: Optional[Dict[str, Any]] = None,
+        execution_mode: str = "step",
+        play_speed: str = "max",
+        poll_interval_sec: float = 0.25,
+        play_timeout_sec: float = 120.0,
     ) -> BacktestReport:
         """Run a complete backtest and return the report."""
         ticker = ticker.upper()
@@ -202,60 +206,122 @@ class StrategyTester:
             # 2. Process all bars
             if verbose:
                 print(f"⏳ Processing {report.total_bars} bars...")
-            
+
+            mode = (execution_mode or "step").strip().lower()
             bar_count = 0
-            last_phase = None
-            
-            while bar_count < report.total_bars:
+
+            if mode == "play":
                 try:
                     async with session.post(
-                        f"{self.api_url}/api/run/{run_id_part}/{ticker_part}/{date_part}/step"
-                    ) as step_resp:
-                        if step_resp.status != 200:
-                            error_text = await step_resp.text()
-                            report.errors.append(f"Step {bar_count} failed: {error_text}")
+                        f"{self.api_url}/api/run/{run_id_part}/{ticker_part}/{date_part}/play",
+                        json={"speed_ms": play_speed},
+                    ) as play_resp:
+                        if play_resp.status != 200:
+                            error_text = await play_resp.text()
+                            report.errors.append(f"Play start failed: {error_text}")
+                        else:
+                            _ = await play_resp.json()
+
+                    started_at = datetime.now()
+                    last_phase = None
+                    last_progress_bucket = -1
+
+                    while True:
+                        async with session.get(
+                            f"{self.api_url}/api/run/{run_id_part}/{ticker_part}/{date_part}/state"
+                        ) as state_resp:
+                            if state_resp.status != 200:
+                                error_text = await state_resp.text()
+                                report.errors.append(f"State poll failed: {error_text}")
+                                break
+                            state = await state_resp.json()
+
+                        total_bars = int(state.get("total_bars", report.total_bars) or report.total_bars or 0)
+                        if total_bars > 0:
+                            report.total_bars = total_bars
+                        bar_count = int(state.get("current_bar_index", bar_count) or bar_count)
+
+                        phase = state.get("phase")
+                        if phase != last_phase:
+                            last_phase = phase
+                            if verbose and phase:
+                                print(f"📈 Phase: {phase}")
+
+                        if verbose and report.total_bars > 0:
+                            progress_bucket = bar_count // 100
+                            if progress_bucket > last_progress_bucket:
+                                last_progress_bucket = progress_bucket
+                                pct = bar_count / report.total_bars * 100
+                                print(f"   Progress: {bar_count}/{report.total_bars} ({pct:.1f}%)")
+
+                        is_running = bool(state.get("is_running"))
+                        if report.total_bars > 0 and bar_count >= report.total_bars and not is_running:
                             break
-                        
-                        step_data = await step_resp.json()
-                    
-                    if not step_data.get("success"):
-                        err = str(step_data.get("error", ""))
-                        if step_data.get("phase") == "COMPLETED" or "No more bars" in err:
+
+                        elapsed = (datetime.now() - started_at).total_seconds()
+                        if play_timeout_sec > 0 and elapsed > play_timeout_sec:
+                            report.errors.append(
+                                f"Play timeout after {play_timeout_sec:.1f}s at {bar_count}/{report.total_bars} bars"
+                            )
                             break
-                        report.errors.append(f"Step {bar_count} unsuccessful: {step_data}")
-                        break
-                    
-                    bar_count = step_data.get("bar_index", bar_count) + 1
-                    phase = step_data.get("phase")
-                    response = step_data.get("response", {})
-                    
-                    # Track regime detection
-                    if response.get("regime") and not report.regime_detected:
-                        report.regime_detected = response["regime"]
-                        if verbose:
-                            print(f"🎯 Regime detected: {report.regime_detected}")
-                    
-                    # Track strategy selection
-                    if response.get("strategy") and not report.strategy_selected:
-                        report.strategy_selected = response["strategy"]
-                        if verbose:
-                            print(f"📋 Strategy selected: {report.strategy_selected}")
-                    
-                    # Track phase changes
-                    if phase != last_phase:
-                        last_phase = phase
-                        if verbose:
-                            print(f"📈 Phase: {phase}")
-                    
-                    # Progress indicator
-                    if verbose and bar_count % 100 == 0:
-                        pct = bar_count / report.total_bars * 100
-                        print(f"   Progress: {bar_count}/{report.total_bars} ({pct:.1f}%)")
-                    
+
+                        await asyncio.sleep(max(0.05, float(poll_interval_sec)))
+
                 except Exception as e:
-                    report.errors.append(f"Step error at bar {bar_count}: {str(e)}")
-                    break
-            
+                    report.errors.append(f"Play mode error at bar {bar_count}: {str(e)}")
+            else:
+                last_phase = None
+
+                while bar_count < report.total_bars:
+                    try:
+                        async with session.post(
+                            f"{self.api_url}/api/run/{run_id_part}/{ticker_part}/{date_part}/step"
+                        ) as step_resp:
+                            if step_resp.status != 200:
+                                error_text = await step_resp.text()
+                                report.errors.append(f"Step {bar_count} failed: {error_text}")
+                                break
+
+                            step_data = await step_resp.json()
+
+                        if not step_data.get("success"):
+                            err = str(step_data.get("error", ""))
+                            if step_data.get("phase") == "COMPLETED" or "No more bars" in err:
+                                break
+                            report.errors.append(f"Step {bar_count} unsuccessful: {step_data}")
+                            break
+
+                        bar_count = step_data.get("bar_index", bar_count) + 1
+                        phase = step_data.get("phase")
+                        response = step_data.get("response", {})
+
+                        # Track regime detection
+                        if response.get("regime") and not report.regime_detected:
+                            report.regime_detected = response["regime"]
+                            if verbose:
+                                print(f"🎯 Regime detected: {report.regime_detected}")
+
+                        # Track strategy selection
+                        if response.get("strategy") and not report.strategy_selected:
+                            report.strategy_selected = response["strategy"]
+                            if verbose:
+                                print(f"📋 Strategy selected: {report.strategy_selected}")
+
+                        # Track phase changes
+                        if phase != last_phase:
+                            last_phase = phase
+                            if verbose:
+                                print(f"📈 Phase: {phase}")
+
+                        # Progress indicator
+                        if verbose and bar_count % 100 == 0:
+                            pct = bar_count / report.total_bars * 100
+                            print(f"   Progress: {bar_count}/{report.total_bars} ({pct:.1f}%)")
+
+                    except Exception as e:
+                        report.errors.append(f"Step error at bar {bar_count}: {str(e)}")
+                        break
+
             report.bars_processed = bar_count
             
             # 3. Get final summary

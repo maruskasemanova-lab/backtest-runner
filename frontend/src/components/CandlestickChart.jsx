@@ -139,6 +139,14 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
 
       // Cmd+Scroll for vertical price scale zoom
       const handleWheel = (e) => {
+          // Track wheel interaction for leader/follower sync
+          // We don't have a clean 'wheel end' event, so we use a timeout
+          isUserInteracting.current = true;
+          if (interactionTimeoutRef.current) clearTimeout(interactionTimeoutRef.current);
+          interactionTimeoutRef.current = setTimeout(() => {
+               isUserInteracting.current = false;
+          }, 200);
+
           if (e.metaKey || e.ctrlKey) {
               e.preventDefault();
               const priceScale = chart.priceScale('right');
@@ -154,11 +162,31 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
               }
           }
       };
+
+
+      // Interaction handlers to detect when we are the "Leader"
+      const handleMouseDown = () => { isUserInteracting.current = true; };
+      const handleMouseUp = () => { isUserInteracting.current = false; };
+      const handleTouchStart = () => { isUserInteracting.current = true; };
+      const handleTouchEnd = () => { isUserInteracting.current = false; };
+
+      chartContainerRef.current.addEventListener('mousedown', handleMouseDown);
+      chartContainerRef.current.addEventListener('mouseup', handleMouseUp);
+      chartContainerRef.current.addEventListener('mouseleave', handleMouseUp);
+      chartContainerRef.current.addEventListener('touchstart', handleTouchStart, { passive: true });
+      chartContainerRef.current.addEventListener('touchend', handleTouchEnd);
       chartContainerRef.current.addEventListener('wheel', handleWheel, { passive: false });
 
       return () => {
         window.removeEventListener("resize", handleResize);
-        chartContainerRef.current?.removeEventListener('wheel', handleWheel);
+        if (chartContainerRef.current) {
+             chartContainerRef.current.removeEventListener('wheel', handleWheel);
+             chartContainerRef.current.removeEventListener('mousedown', handleMouseDown);
+             chartContainerRef.current.removeEventListener('mouseup', handleMouseUp);
+             chartContainerRef.current.removeEventListener('mouseleave', handleMouseUp);
+             chartContainerRef.current.removeEventListener('touchstart', handleTouchStart);
+             chartContainerRef.current.removeEventListener('touchend', handleTouchEnd);
+        }
         if (chartRef.current) {
           chartRef.current.remove();
           chartRef.current = null;
@@ -181,10 +209,17 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
     const isSyncingRef = useRef(false);
     // Use a ref to track the last range we emitted to avoid processing our own echo
     const lastEmittedRangeRef = useRef(null);
+    // Track if user is interacting to decouple state
+    const isUserInteracting = useRef(false);
+    const interactionTimeoutRef = useRef(null);
 
   // Sync external chart state
   useEffect(() => {
       if (chartRef.current && chartState) {
+
+          // If user is interacting, we are the LEADER. Ignore updates from followers.
+          if (isUserInteracting.current) return;
+
           // Check if this update is just an echo of what we just sent
           if (lastEmittedRangeRef.current) {
                const emitted = lastEmittedRangeRef.current;
@@ -351,39 +386,36 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
     }
 
     const handleClick = (param) => {
+      // 1. Hide existing tooltip on any click (toggle behavior or dismiss)
+      setTooltip(prev => ({ ...prev, visible: false }));
+
       if (!param.time || markerTimeMap.size === 0) return;
+      
       const marker = markerTimeMap.get(param.time);
-      if (marker && onMarkerClick) {
-        onMarkerClick(marker.id);
+      if (marker) {
+        // 2. Notify parent
+        if (onMarkerClick) {
+          onMarkerClick(marker.id);
+        }
+        
+        // 3. Show Tooltip on Click
+        const point = param.point;
+        if (point && chartContainerRef.current) {
+             const rect = chartContainerRef.current.getBoundingClientRect();
+             setTooltip({
+               visible: true,
+               marker: marker,
+               x: point.x + rect.left,
+               y: point.y + rect.top
+             });
+        }
       }
     };
 
-    // Handle mouse move for tooltips - OPTIMIZED
+    // Handle mouse move for tooltips - DISABLED HOVER
     const handleCrosshairMove = (param) => {
-      if (!param.time || markerTimeMap.size === 0) {
-        setTooltip(prev => prev.visible ? { ...prev, visible: false } : prev);
-        return;
-      }
-
-      const point = param.point;
-      if (!point) {
-        setTooltip(prev => prev.visible ? { ...prev, visible: false } : prev);
-        return;
-      }
-
-      const marker = markerTimeMap.get(param.time);
-      if (marker) {
-        // Get rect ONCE, not twice
-        const rect = chartContainerRef.current.getBoundingClientRect();
-        setTooltip({
-          visible: true,
-          marker: marker,
-          x: point.x + rect.left,
-          y: point.y + rect.top
-        });
-      } else {
-        setTooltip(prev => prev.visible ? { ...prev, visible: false } : prev);
-      }
+      // Intentionally empty to disable hover tooltips
+      // We could use this to hide tooltip if mouse moves too far, but let's stick to click-only for now
     };
 
     chartRef.current.subscribeClick(handleClick);

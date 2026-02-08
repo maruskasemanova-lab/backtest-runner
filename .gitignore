@@ -11,6 +11,14 @@ __pycache__/
 # Runtime logs
 *.log
 
+# Runtime checkpoints (warm-start state, not source code)
+checkpoint_*.json
+*.checkpoint.json
+checkpoints/
+**/checkpoints/
+data/checkpoints/
+**/data/checkpoints/
+
 # Generated backtest outputs
 data/
 audit_*.json

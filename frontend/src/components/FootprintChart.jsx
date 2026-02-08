@@ -252,6 +252,13 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
 
     // Cmd+Scroll for vertical price scale zoom
     const handleWheel = (e) => {
+        // Track wheel interaction
+        isUserInteracting.current = true;
+        if (interactionTimeoutRef.current) clearTimeout(interactionTimeoutRef.current);
+        interactionTimeoutRef.current = setTimeout(() => {
+             isUserInteracting.current = false;
+        }, 200);
+
         if (e.metaKey || e.ctrlKey) {
             e.preventDefault();
             const priceScale = chart.priceScale('right');
@@ -270,6 +277,19 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
     };
     chartContainerRef.current.addEventListener('wheel', handleWheel, { passive: false });
 
+    // Interaction handlers
+    const handleMouseDown = () => { isUserInteracting.current = true; };
+    const handleMouseUp = () => { isUserInteracting.current = false; };
+    const handleTouchStart = () => { isUserInteracting.current = true; };
+    const handleTouchEnd = () => { isUserInteracting.current = false; };
+
+    chartContainerRef.current.addEventListener('mousedown', handleMouseDown);
+    chartContainerRef.current.addEventListener('mouseup', handleMouseUp);
+    chartContainerRef.current.addEventListener('mouseleave', handleMouseUp);
+    chartContainerRef.current.addEventListener('touchstart', handleTouchStart, { passive: true });
+    chartContainerRef.current.addEventListener('touchend', handleTouchEnd);
+
+
     // Initial canvas setup
      if(canvasRef.current) {
          canvasRef.current.width = chartContainerRef.current.clientWidth;
@@ -285,7 +305,14 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
         if (rafId) cancelAnimationFrame(rafId);
         if (interactionTimeout) clearTimeout(interactionTimeout);
         window.removeEventListener("resize", handleResize);
-        chartContainerRef.current?.removeEventListener('wheel', handleWheel);
+        if (chartContainerRef.current) {
+            chartContainerRef.current.removeEventListener('wheel', handleWheel);
+            chartContainerRef.current.removeEventListener('mousedown', handleMouseDown);
+            chartContainerRef.current.removeEventListener('mouseup', handleMouseUp);
+            chartContainerRef.current.removeEventListener('mouseleave', handleMouseUp);
+            chartContainerRef.current.removeEventListener('touchstart', handleTouchStart);
+            chartContainerRef.current.removeEventListener('touchend', handleTouchEnd);
+        }
         chart.remove();
     };
   }, [drawFootprint, onPriceRangeChange]); // drawFootprint is stable
@@ -301,8 +328,12 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
 
     // Use a ref to track if we are currently syncing from props to prevent loop
     const isSyncingRef = useRef(false);
+
     // Use a ref to track the last range we emitted to avoid processing our own echo
     const lastEmittedRangeRef = useRef(null);
+    // Track user interaction
+    const isUserInteracting = useRef(false);
+    const interactionTimeoutRef = useRef(null);
 
   // Sync external chart state
   useEffect(() => {
@@ -318,11 +349,13 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
           const api = chartRef.current.timeScale();
           const current = api.getVisibleRange();
           
+          
           const isSame = current && 
                          Math.abs(current.from - chartState.from) < 0.001 && 
                          Math.abs(current.to - chartState.to) < 0.001;
-
-          if (!isSame) {
+            
+          // If we are interacting, we ignore external updates (Leader mode)
+          if (!isSame && !isUserInteracting.current) {
               isSyncingRef.current = true;
               try {
                   api.setVisibleRange(chartState);

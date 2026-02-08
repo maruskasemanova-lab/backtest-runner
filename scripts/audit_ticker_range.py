@@ -91,6 +91,10 @@ async def run_audit(args: argparse.Namespace) -> Dict[str, Any]:
             verbose=False,
             cleanup_run=True,
             start_overrides=start_overrides,
+            execution_mode=args.execution_mode,
+            play_speed=args.play_speed,
+            poll_interval_sec=float(args.poll_interval_sec),
+            play_timeout_sec=float(args.play_timeout_sec),
         )
 
         status = "ok"
@@ -142,6 +146,10 @@ async def run_audit(args: argparse.Namespace) -> Dict[str, Any]:
         "flat_days": flat_days,
         "win_day_rate_pct": round((winning_days / len(tested) * 100.0) if tested else 0.0, 2),
         "l2_config": start_overrides,
+        "execution_mode": args.execution_mode,
+        "play_speed": args.play_speed,
+        "poll_interval_sec": float(args.poll_interval_sec),
+        "play_timeout_sec": float(args.play_timeout_sec),
     }
 
     return {
@@ -160,6 +168,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-url", default="http://localhost:8002")
     parser.add_argument("--strategy-api-url", default="http://localhost:8001")
     parser.add_argument("--skip-friday", action="store_true")
+    parser.add_argument(
+        "--execution-mode",
+        choices=["step", "play"],
+        default="play",
+        help="Bar execution method. 'play' is much faster for range audits.",
+    )
+    parser.add_argument(
+        "--play-speed",
+        default="max",
+        help="Value passed to /play endpoint when execution-mode=play.",
+    )
+    parser.add_argument(
+        "--poll-interval-sec",
+        type=float,
+        default=0.25,
+        help="State polling interval in seconds when execution-mode=play.",
+    )
+    parser.add_argument(
+        "--play-timeout-sec",
+        type=float,
+        default=300.0,
+        help="Per-day timeout in seconds when execution-mode=play.",
+    )
 
     parser.add_argument("--l2-only", action="store_true")
     parser.add_argument("--l2-confirm-enabled", action="store_true")

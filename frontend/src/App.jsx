@@ -53,6 +53,8 @@ function App() {
   
   // WebSocket
   const wsRef = useRef(null);
+  const activeRunId = runKey ? String(runKey).split(':')[0] : null;
+  const activeRunTicker = runKey ? String(runKey).split(':')[1] : null;
   
   // Connect WebSocket
   useEffect(() => {
@@ -62,13 +64,20 @@ function App() {
       ws.onopen = () => {
         console.log('WebSocket connected');
         setIsConnected(true);
-        if (runKey) {
-          ws.send(JSON.stringify({ type: 'subscribe', run_id: runKey }));
+        if (activeRunId) {
+          ws.send(JSON.stringify({ type: 'subscribe', run_id: activeRunId }));
         }
       };
       
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        const msgRunId = data?.run_id ? String(data.run_id) : null;
+        const msgTicker = data?.ticker ? String(data.ticker).toUpperCase() : null;
+        const currentTicker = activeRunTicker ? String(activeRunTicker).toUpperCase() : null;
+
+        // Backend broadcasts all runs; ignore frames that do not belong to the active run.
+        if (activeRunId && msgRunId && msgRunId !== activeRunId) return;
+        if (currentTicker && msgTicker && msgTicker !== currentTicker) return;
         
         if (data.type === 'bar') {
           handleNewBar(data.bar);
@@ -100,7 +109,7 @@ function App() {
         wsRef.current.close();
       }
     };
-  }, [runKey]);
+  }, [runKey, activeRunId, activeRunTicker]);
   
   // Handle new bar from WebSocket
   const handleNewBar = useCallback((bar) => {
@@ -115,11 +124,32 @@ function App() {
     
     setBars(prev => [...prev, chartBar]);
     setCurrentBar(bar);
-    setRunState(prev => prev ? {
-      ...prev,
-      current_bar_index: (bar.index || bar.bar_index || 0) + 1,
-      progress_pct: (((bar.index || bar.bar_index || 0) + 1) / prev.total_bars) * 100
-    } : null);
+    setRunState(prev => {
+      if (!prev) return null;
+
+      const totalBars = Number(prev.total_bars || 0);
+      const streamIndex = Number(bar?.bar_index);
+      const legacyIndex = Number(bar?.index);
+
+      const rawCurrent = Number.isFinite(streamIndex)
+        ? streamIndex + 1
+        : (Number.isFinite(legacyIndex)
+            ? legacyIndex + 1
+            : Number(prev.current_bar_index || 0) + 1);
+
+      const current = totalBars > 0
+        ? Math.min(totalBars, Math.max(0, rawCurrent))
+        : Math.max(0, rawCurrent);
+      const progress = totalBars > 0
+        ? Math.min(100, Math.max(0, (current / totalBars) * 100))
+        : 0;
+
+      return {
+        ...prev,
+        current_bar_index: current,
+        progress_pct: progress,
+      };
+    });
   }, []);
   
   // Handle new decision from WebSocket
@@ -310,12 +340,23 @@ function App() {
         handleNewBar(data.bar);
         
         // Update state
-        setRunState(prev => ({
-          ...prev,
-          current_bar_index: data.bar_index,
-          phase: data.phase,
-          progress_pct: data.progress_pct
-        }));
+        setRunState(prev => {
+          if (!prev) return prev;
+          const totalBars = Number(prev.total_bars || 0);
+          const rawCurrent = Number(data.bar_index || 0) + 1;
+          const current = totalBars > 0
+            ? Math.min(totalBars, Math.max(0, rawCurrent))
+            : Math.max(0, rawCurrent);
+          const progress = totalBars > 0
+            ? Math.min(100, Math.max(0, (current / totalBars) * 100))
+            : Number(data.progress_pct || 0);
+          return {
+            ...prev,
+            current_bar_index: current,
+            phase: data.phase,
+            progress_pct: progress
+          };
+        });
       }
       
       return data;
@@ -366,6 +407,37 @@ function App() {
       console.error('Pause error:', error);
     }
   };
+
+  // Poll run state while playing so phase/progress stay in sync in range runs.
+  useEffect(() => {
+    if (!runKey || !isPlaying) return undefined;
+
+    const parts = runKey.split(':');
+    if (parts.length !== 3) return undefined;
+
+    let cancelled = false;
+    const pollState = async () => {
+      try {
+        const resp = await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/state`);
+        if (!resp.ok) return;
+        const state = await resp.json();
+        if (cancelled) return;
+        setRunState(state);
+        if (!state?.is_running) {
+          setIsPlaying(false);
+        }
+      } catch (error) {
+        console.error('State poll error:', error);
+      }
+    };
+
+    pollState();
+    const interval = setInterval(pollState, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [runKey, isPlaying]);
   
   // Stop
   const handleStop = async () => {

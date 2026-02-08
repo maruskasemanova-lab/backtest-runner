@@ -103,7 +103,7 @@ def test_strategy_only_threshold_disabled_falls_back_to_base_threshold() -> None
         active_strategy_names=[],
         current_price=100.3,
         timestamp=datetime(2026, 2, 3, 15, 0, tzinfo=timezone.utc),
-        generate_signal_fn=lambda: _build_strategy_signal(confidence=60.0),
+        generate_signal_fn=lambda: _build_strategy_signal(confidence=65.0),
     )
 
     assert decision.threshold == 58.0

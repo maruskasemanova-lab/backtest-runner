@@ -1,12 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
 
 /**
- * MultiLayerSettings – configures the multi-layer decision engine
- * (candlestick pattern detector + strategy confirmation + threshold scoring).
+ * MultiLayerSettings – configures both decision modes:
+ * - Legacy multi-layer engine (pattern + strategy weighted scoring)
+ * - Evidence-based orchestrator engine
  *
  * Talks directly to the strategy API (port 8001) endpoints:
  *   GET  /api/multilayer/config
  *   POST /api/multilayer/config
+ *   GET  /api/orchestrator/config
+ *   POST /api/orchestrator/config
  */
 function MultiLayerSettings({ apiUrl }) {
   const [config, setConfig] = useState(null);
@@ -14,10 +17,12 @@ function MultiLayerSettings({ apiUrl }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [engineConfig, setEngineConfig] = useState(null);
+  const [engineDraft, setEngineDraft] = useState(null);
   const [engineLoading, setEngineLoading] = useState(false);
   const [engineError, setEngineError] = useState(null);
   const [engineSaving, setEngineSaving] = useState(false);
   const [engineSaved, setEngineSaved] = useState(false);
+  const [evidenceSaved, setEvidenceSaved] = useState(false);
   const [saved, setSaved] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [detectorExpanded, setDetectorExpanded] = useState(false);
@@ -49,6 +54,17 @@ function MultiLayerSettings({ apiUrl }) {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       setEngineConfig(data);
+      if (typeof data?.use_evidence_engine === "boolean") {
+        setEngineDraft({
+          min_confirming_sources: Number(data.min_confirming_sources ?? 2),
+          base_threshold: Number(data.base_threshold ?? 55),
+          use_adaptive_regime: Boolean(data.use_adaptive_regime ?? true),
+          use_calibration: Boolean(data.use_calibration ?? true),
+          use_quality_sizing: Boolean(data.use_quality_sizing ?? true),
+          use_cross_asset: Boolean(data.use_cross_asset ?? true),
+          use_edge_monitor: Boolean(data.use_edge_monitor ?? true),
+        });
+      }
     } catch (err) {
       setEngineError(`Failed to load engine config: ${err.message}`);
     } finally {
@@ -72,6 +88,56 @@ function MultiLayerSettings({ apiUrl }) {
       setTimeout(() => setEngineSaved(false), 2000);
     } catch (err) {
       setEngineError(`Engine switch failed: ${err.message}`);
+    } finally {
+      setEngineSaving(false);
+    }
+  };
+
+  const updateEngineField = (field, value) => {
+    setEngineDraft((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const resetEvidenceDraft = () => {
+    if (!engineConfig || typeof engineConfig.use_evidence_engine !== "boolean") {
+      return;
+    }
+    setEngineDraft({
+      min_confirming_sources: Number(engineConfig.min_confirming_sources ?? 2),
+      base_threshold: Number(engineConfig.base_threshold ?? 55),
+      use_adaptive_regime: Boolean(engineConfig.use_adaptive_regime ?? true),
+      use_calibration: Boolean(engineConfig.use_calibration ?? true),
+      use_quality_sizing: Boolean(engineConfig.use_quality_sizing ?? true),
+      use_cross_asset: Boolean(engineConfig.use_cross_asset ?? true),
+      use_edge_monitor: Boolean(engineConfig.use_edge_monitor ?? true),
+    });
+  };
+
+  const saveEvidenceConfig = async () => {
+    if (!engineDraft) return;
+    setEngineSaving(true);
+    setEngineError(null);
+    setEvidenceSaved(false);
+    try {
+      const payload = {
+        min_confirming_sources: Number(engineDraft.min_confirming_sources),
+        base_threshold: Number(engineDraft.base_threshold),
+        use_adaptive_regime: Boolean(engineDraft.use_adaptive_regime),
+        use_calibration: Boolean(engineDraft.use_calibration),
+        use_quality_sizing: Boolean(engineDraft.use_quality_sizing),
+        use_cross_asset: Boolean(engineDraft.use_cross_asset),
+        use_edge_monitor: Boolean(engineDraft.use_edge_monitor),
+      };
+      const resp = await fetch(`${resolvedUrl}/api/orchestrator/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      await fetchEngineConfig();
+      setEvidenceSaved(true);
+      setTimeout(() => setEvidenceSaved(false), 2000);
+    } catch (err) {
+      setEngineError(`Evidence settings save failed: ${err.message}`);
     } finally {
       setEngineSaving(false);
     }
@@ -131,6 +197,8 @@ function MultiLayerSettings({ apiUrl }) {
   const weightSum = (draft?.pattern_weight || 0) + (draft?.strategy_weight || 0);
   const weightWarning = Math.abs(weightSum - 1.0) > 0.01;
   const hasEngineToggle = typeof engineConfig?.use_evidence_engine === "boolean";
+  const isEvidenceMode = hasEngineToggle && !!engineConfig?.use_evidence_engine;
+  const showLegacyControls = !hasEngineToggle || engineConfig?.use_evidence_engine === false;
 
   return (
     <div className="card">
@@ -242,8 +310,9 @@ function MultiLayerSettings({ apiUrl }) {
                   lineHeight: 1.45,
                 }}
               >
-                Evidence mode requires multiple confirming sources. Legacy mode uses
-                pattern + strategy weighted scoring.
+                {isEvidenceMode
+                  ? "Evidence mode uses dynamic threshold + confirming sources. Legacy pattern/strategy weights are not used for execution."
+                  : "Legacy mode uses pattern + strategy weighted scoring. Evidence mode uses confirming sources with dynamic threshold."}
               </div>
 
               {engineSaved && (
@@ -251,10 +320,148 @@ function MultiLayerSettings({ apiUrl }) {
                   Engine updated
                 </div>
               )}
+
+              {isEvidenceMode && engineDraft && (
+                <>
+                  <div
+                    style={{
+                      fontSize: "0.8rem",
+                      fontWeight: 600,
+                      color: "var(--text-secondary)",
+                      borderBottom: "1px solid var(--border-color)",
+                      paddingBottom: 4,
+                    }}
+                  >
+                    Evidence Settings
+                  </div>
+
+                  <div className="field-row">
+                    <span className="field-label">Min confirming sources</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      max="10"
+                      value={engineDraft.min_confirming_sources ?? 2}
+                      onChange={(e) =>
+                        updateEngineField("min_confirming_sources", Number(e.target.value))
+                      }
+                      className="field-input"
+                      style={{ width: 70 }}
+                    />
+                  </div>
+
+                  <div className="field-row">
+                    <span className="field-label">Base threshold</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={engineDraft.base_threshold ?? 55}
+                      onChange={(e) =>
+                        updateEngineField("base_threshold", Number(e.target.value))
+                      }
+                      className="field-input"
+                      style={{ width: 70 }}
+                    />
+                  </div>
+
+                  <div className="field-row">
+                    <span className="field-label">Adaptive regime</span>
+                    <input
+                      type="checkbox"
+                      checked={engineDraft.use_adaptive_regime ?? true}
+                      onChange={(e) =>
+                        updateEngineField("use_adaptive_regime", e.target.checked)
+                      }
+                    />
+                  </div>
+
+                  <div className="field-row">
+                    <span className="field-label">Calibration</span>
+                    <input
+                      type="checkbox"
+                      checked={engineDraft.use_calibration ?? true}
+                      onChange={(e) =>
+                        updateEngineField("use_calibration", e.target.checked)
+                      }
+                    />
+                  </div>
+
+                  <div className="field-row">
+                    <span className="field-label">Quality sizing</span>
+                    <input
+                      type="checkbox"
+                      checked={engineDraft.use_quality_sizing ?? true}
+                      onChange={(e) =>
+                        updateEngineField("use_quality_sizing", e.target.checked)
+                      }
+                    />
+                  </div>
+
+                  <div className="field-row">
+                    <span className="field-label">Cross-asset context</span>
+                    <input
+                      type="checkbox"
+                      checked={engineDraft.use_cross_asset ?? true}
+                      onChange={(e) =>
+                        updateEngineField("use_cross_asset", e.target.checked)
+                      }
+                    />
+                  </div>
+
+                  <div className="field-row">
+                    <span className="field-label">Edge monitor</span>
+                    <input
+                      type="checkbox"
+                      checked={engineDraft.use_edge_monitor ?? true}
+                      onChange={(e) =>
+                        updateEngineField("use_edge_monitor", e.target.checked)
+                      }
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      marginTop: 6,
+                    }}
+                  >
+                    <button
+                      className="btn btn-secondary"
+                      onClick={resetEvidenceDraft}
+                      disabled={engineSaving}
+                    >
+                      Reset
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={saveEvidenceConfig}
+                      disabled={engineSaving}
+                    >
+                      Save Evidence
+                    </button>
+                    {evidenceSaved && (
+                      <span
+                        style={{
+                          color: "var(--accent-green)",
+                          fontSize: "0.8rem",
+                          alignSelf: "center",
+                        }}
+                      >
+                        Saved
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
             </>
           )}
 
-          {draft && (
+          {draft && showLegacyControls && (
             <>
               {/* ── Scoring weights ──────────────────────── */}
               <div

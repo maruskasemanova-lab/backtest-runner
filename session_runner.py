@@ -292,10 +292,18 @@ class SessionRunner:
                 )
                 await self._notify_decision(marker.to_dict())
         
-        # Candlestick patterns detected (Layer 1)
+        # Candlestick pattern markers are relevant only for multi-layer engine.
+        # Evidence engine can still internally consume pattern evidence, but we
+        # avoid emitting standalone "Pattern" log entries to keep the sidebar
+        # aligned with the selected decision mode.
         patterns = response.get('patterns_detected', [])
         layer_scores = response.get('layer_scores')
-        if patterns:
+        engine_name = ""
+        if isinstance(layer_scores, dict):
+            engine_name = str(layer_scores.get("engine", "")).strip().lower()
+        show_pattern_marker = not engine_name.startswith("evidence")
+
+        if patterns and show_pattern_marker:
             # Determine dominant direction
             bullish = [p for p in patterns if p.get('direction') == 'bullish']
             bearish = [p for p in patterns if p.get('direction') == 'bearish']
@@ -422,29 +430,61 @@ class SessionRunner:
         regime = response.get('regime', 'UNKNOWN')
         micro_regime = response.get('micro_regime')
         indicators = response.get('indicators', {})
-        
-        explanations = {
-            'TRENDING': "Market showing strong directional movement with high trend efficiency",
-            'CHOPPY': "Market showing sideways movement with low trend efficiency and high volatility",
-            'MIXED': "Market showing mixed signals - moderate trend with variable volatility"
-        }
-        
-        base = explanations.get(regime, f"Detected {regime} regime")
+
+        def _as_float(value):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        trend_eff = _as_float(indicators.get('trend_efficiency'))
+        volatility = _as_float(indicators.get('volatility'))
+        adx = _as_float(indicators.get('adx'))
+
+        if regime == 'TRENDING':
+            if trend_eff is None:
+                base = "Market showing directional movement (trend context unavailable)"
+            elif trend_eff >= 0.45:
+                base = "Market showing directional movement with elevated trend efficiency"
+            elif trend_eff < 0.15:
+                base = "Market tagged TRENDING, but measured trend efficiency is low (transition/noise risk)"
+            else:
+                base = "Market showing directional bias with moderate trend efficiency"
+        elif regime == 'CHOPPY':
+            base = "Market showing sideways/noisy movement with low directional efficiency"
+        elif regime == 'MIXED':
+            base = "Market showing mixed directional and mean-reverting behavior"
+        else:
+            base = f"Detected {regime} regime"
+
         if micro_regime and micro_regime != regime:
             base += f" (micro: {micro_regime})"
-        
+
+        # Highlight strong macro/micro disagreement.
+        if regime == 'TRENDING' and micro_regime in {'CHOPPY', 'MIXED', 'TRANSITION'}:
+            base += " [macro/micro divergence]"
+        elif regime == 'CHOPPY' and micro_regime in {'TRENDING_UP', 'TRENDING_DOWN', 'BREAKOUT'}:
+            base += " [macro/micro divergence]"
+        elif micro_regime == 'TRANSITION':
+            base += " [transition/noisy trend]"
+
         if indicators:
             details = []
-            if 'trend_efficiency' in indicators:
-                details.append(f"Trend Efficiency: {indicators['trend_efficiency']:.2f}")
-            if 'volatility' in indicators:
-                details.append(f"Volatility: {indicators['volatility']:.2f}%")
-            if 'atr' in indicators:
-                details.append(f"ATR: {indicators['atr']:.2f}")
-            
+            if trend_eff is not None:
+                details.append(f"Trend Efficiency: {trend_eff:.2f}")
+            if volatility is not None:
+                details.append(f"Volatility: {volatility:.2f}%")
+            if adx is not None:
+                details.append(f"ADX: {adx:.1f}")
+            else:
+                details.append("ADX: N/A")
+            atr = _as_float(indicators.get('atr'))
+            if atr is not None:
+                details.append(f"ATR: {atr:.2f}")
+
             if details:
                 base += f" ({', '.join(details)})"
-        
+
         return base
     
     async def run_all(self, speed_ms = 100) -> Dict[str, Any]:
