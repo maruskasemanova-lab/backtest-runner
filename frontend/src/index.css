@@ -621,6 +621,29 @@ body {
   padding: var(--spacing-md);
 }
 
+.decision-list-tabs {
+  display: flex;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md) 0 var(--spacing-md);
+}
+
+.decision-list-tab {
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
+  border-radius: var(--border-radius-sm);
+  padding: 6px 10px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.decision-list-tab.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+}
+
 .decision-item {
   background: rgba(255, 255, 255, 0.7);
   border-radius: var(--border-radius-sm);
@@ -655,6 +678,9 @@ body {
 }
 .decision-item.take_profit_hit {
   border-left-color: #22c55e;
+}
+.decision-item.iceberg_detected {
+  border-left-color: #06b6d4;
 }
 .decision-item.session_started {
   border-left-color: #3b82f6;
@@ -709,6 +735,29 @@ body {
   gap: var(--spacing-sm);
 }
 
+.decision-detail-tabs {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.decision-detail-tab {
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
+  border-radius: var(--border-radius-sm);
+  padding: 6px 10px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.decision-detail-tab.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -731,6 +780,20 @@ body {
   font-size: var(--font-size-sm);
   color: var(--text-primary);
   font-family: var(--font-mono);
+}
+
+.decision-raw-json {
+  margin: 0;
+  padding: var(--spacing-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ============ Phase Indicator ============ */

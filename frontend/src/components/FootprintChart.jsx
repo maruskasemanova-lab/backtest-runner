@@ -1,5 +1,38 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { createChart } from "lightweight-charts";
+
+const toUnixSeconds = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1e12 ? value / 1000 : value;
+  }
+  if (typeof value === "string") {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric > 1e12 ? numeric / 1000 : numeric;
+    }
+    const normalized = value.replace(/(\.\d{3})\d+/, "$1");
+    const parsed = Date.parse(normalized);
+    if (!Number.isNaN(parsed)) return parsed / 1000;
+  }
+  if (typeof value === "object" && value !== null) {
+    if (typeof value.timestamp === "number") return value.timestamp;
+    if (
+      Number.isFinite(value.year) &&
+      Number.isFinite(value.month) &&
+      Number.isFinite(value.day)
+    ) {
+      return Date.UTC(value.year, value.month - 1, value.day) / 1000;
+    }
+  }
+  return null;
+};
+
+const toIsoTimestamp = (value) => {
+  const seconds = toUnixSeconds(value);
+  if (!Number.isFinite(seconds)) return null;
+  return new Date(seconds * 1000).toISOString();
+};
 
 function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker, l2Data, chartState, onChartStateChange, priceRange, onPriceRangeChange }) {
   const chartContainerRef = useRef(null);
@@ -41,6 +74,61 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
     }
     return lo;
   }, []);
+
+  const normalizedDecisionMarkers = useMemo(() => {
+    return (markers || [])
+      .map((marker, index) => {
+        const time = toUnixSeconds(marker?.time ?? marker?.timestamp);
+        if (!Number.isFinite(time)) return null;
+        return {
+          ...marker,
+          id: marker.id || `${marker.marker_type || "marker"}-${Math.floor(time)}-${index}`,
+          time: Math.floor(time),
+          timestamp: marker.timestamp || toIsoTimestamp(time),
+        };
+      })
+      .filter(Boolean);
+  }, [markers]);
+
+  const normalizedIcebergMarkers = useMemo(() => {
+    return (icebergs || [])
+      .map((iceberg, index) => {
+        const time = toUnixSeconds(iceberg?.time ?? iceberg?.timestamp);
+        if (!Number.isFinite(time)) return null;
+
+        const side = typeof iceberg.side === "string" ? iceberg.side.toLowerCase() : null;
+        const price = Number(iceberg.price);
+        const tradeSize = Number(iceberg.trade_size ?? 0);
+        const hiddenSize = Number(iceberg.hidden_size ?? 0);
+        const totalSize = tradeSize + hiddenSize;
+
+        return {
+          ...iceberg,
+          id: iceberg.id || `iceberg-${Math.floor(time)}-${index}`,
+          marker_type: "iceberg_detected",
+          time: Math.floor(time),
+          timestamp: iceberg.timestamp || toIsoTimestamp(time),
+          side,
+          price: Number.isFinite(price) ? price : null,
+          title: iceberg.title || `Iceberg ${side ? side.toUpperCase() : "UNKNOWN"}`,
+          description: iceberg.description || `Detected ${side || "unknown"} iceberg`,
+          details: {
+            ...(iceberg.details || {}),
+            iceberg_side: side,
+            iceberg_price: Number.isFinite(price) ? price : null,
+            trade_size: tradeSize,
+            hidden_size: hiddenSize,
+            total_size: Number.isFinite(totalSize) ? totalSize : 0,
+          },
+        };
+      })
+      .filter(Boolean);
+  }, [icebergs]);
+
+  const clickableMarkers = useMemo(
+    () => [...normalizedDecisionMarkers, ...normalizedIcebergMarkers],
+    [normalizedDecisionMarkers, normalizedIcebergMarkers]
+  );
 
   // Draw function definition - OPTIMIZED
   const drawFootprint = useCallback(() => {
@@ -412,6 +500,99 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
       requestAnimationFrame(drawFootprint);
   }, [l2Data, drawFootprint]);
 
+  // Focus chart when a marker is selected from decisions.
+  useEffect(() => {
+      if (!chartRef.current || !selectedMarker || !bars || bars.length === 0) {
+          return;
+      }
+
+      const targetTime = toUnixSeconds(selectedMarker.time ?? selectedMarker.timestamp);
+      if (!Number.isFinite(targetTime)) return;
+
+      let closestIndex = -1;
+      let closestDiff = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < bars.length; i += 1) {
+          const barTime = bars[i]?.time;
+          if (!Number.isFinite(barTime)) continue;
+          const diff = Math.abs(barTime - targetTime);
+          if (diff < closestDiff) {
+              closestDiff = diff;
+              closestIndex = i;
+          }
+      }
+
+      if (closestIndex === -1) return;
+
+      const windowSize = 40;
+      const fromIndex = Math.max(0, closestIndex - windowSize);
+      const toIndex = Math.min(bars.length - 1, closestIndex + windowSize);
+      const fromTime = bars[fromIndex]?.time;
+      const toTime = bars[toIndex]?.time;
+      if (Number.isFinite(fromTime) && Number.isFinite(toTime)) {
+          chartRef.current.timeScale().setVisibleRange({
+              from: fromTime,
+              to: toTime,
+          });
+      }
+  }, [selectedMarker, bars]);
+
+  // Click marker in footprint chart -> select corresponding decision detail.
+  useEffect(() => {
+      if (!chartRef.current) return;
+
+      const markersByTime = new Map();
+      clickableMarkers.forEach((marker) => {
+          const key = Math.floor(Number(marker.time));
+          if (!Number.isFinite(key)) return;
+          const existing = markersByTime.get(key) || [];
+          existing.push(marker);
+          markersByTime.set(key, existing);
+      });
+
+      const resolveMarkerForClick = (param) => {
+          const clickedTime = toUnixSeconds(param?.time);
+          if (!Number.isFinite(clickedTime)) return null;
+
+          const candidates = markersByTime.get(Math.floor(clickedTime));
+          if (!candidates || candidates.length === 0) return null;
+          if (candidates.length === 1) return candidates[0];
+
+          const clickedPrice = param?.point && candleSeriesRef.current?.coordinateToPrice
+              ? candleSeriesRef.current.coordinateToPrice(param.point.y)
+              : null;
+          if (!Number.isFinite(clickedPrice)) return candidates[0];
+
+          const pricedCandidates = candidates.filter((candidate) => Number.isFinite(Number(candidate.price)));
+          if (!pricedCandidates.length) return candidates[0];
+
+          return pricedCandidates.reduce((best, candidate) => {
+              const bestDiff = Math.abs(Number(best.price) - clickedPrice);
+              const candidateDiff = Math.abs(Number(candidate.price) - clickedPrice);
+              return candidateDiff < bestDiff ? candidate : best;
+          }, pricedCandidates[0]);
+      };
+
+      const handleClick = (param) => {
+          if (!param?.time || markersByTime.size === 0) return;
+          const marker = resolveMarkerForClick(param);
+          if (!marker) return;
+          if (onMarkerClick) {
+              onMarkerClick(marker);
+          }
+      };
+
+      chartRef.current.subscribeClick(handleClick);
+      return () => {
+          try {
+              if (chartRef.current) {
+                  chartRef.current.unsubscribeClick(handleClick);
+              }
+          } catch (e) {
+              // Ignore cleanup errors
+          }
+      };
+  }, [clickableMarkers, onMarkerClick]);
+
   // Update markers
   useEffect(() => {
       if(!candleSeriesRef.current) return;
@@ -435,27 +616,11 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
         "entry_executed", "exit_executed", "stop_loss_hit", "take_profit_hit", "regime_detected", "strategy_selected", "iceberg_detected"
       ];
 
-      // Merge standard markers and icebergs (if any)
-      // Icebergs need to be formatted to resemble markers if they aren't already
-      const icebergMarkers = (icebergs || []).map(ice => ({
-          ...ice,
-          marker_type: "iceberg_detected",
-          timestamp: ice.time // ensure timestamp field
-      }));
-      
-      const allMarkers = [...(markers || []), ...icebergMarkers];
-
-      const chartMarkers = allMarkers
+      const chartMarkers = clickableMarkers
         .filter((m) => m && validMarkerTypes.includes(m.marker_type))
         .map((m) => {
-          // Robust timestamp handling
-          let ts = m.time;
-          if (!ts && m.timestamp) {
-              ts = new Date(m.timestamp).getTime() / 1000;
-          }
-          if (!ts) return null;
-          
-          const time = Math.floor(ts);
+          const time = Math.floor(Number(m.time));
+          if (!Number.isFinite(time)) return null;
           let position = "aboveBar", color = "#3b82f6", shape = "circle", text = "";
           
             switch (m.marker_type) {
@@ -504,14 +669,14 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
           }
            return { time, position, color, shape, text, id: m.id || `${m.time}-${m.price}` };
         })
-        .filter((m) => m && m.time && !isNaN(m.time))
+        .filter((m) => m && Number.isFinite(m.time))
         .sort((a, b) => a.time - b.time);
 
       candleSeriesRef.current.setMarkers(chartMarkers);
     } catch (err) {
       console.error("Chart markers update error:", err);
     }
-  }, [markers, icebergs]);
+  }, [clickableMarkers]);
 
 
   // Fullscreen Logic

@@ -9,6 +9,115 @@ import StrategySettings from './components/StrategySettings';
 import MultiLayerSettings from './components/MultiLayerSettings';
 import DataManager from './components/DataManager';
 
+const toUnixSeconds = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 1e12 ? value / 1000 : value;
+  }
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric > 1e12 ? numeric / 1000 : numeric;
+    }
+    const normalized = value.replace(/(\.\d{3})\d+/, '$1');
+    const parsed = Date.parse(normalized);
+    if (!Number.isNaN(parsed)) return parsed / 1000;
+  }
+  return null;
+};
+
+const toIsoTimestamp = (value) => {
+  const seconds = toUnixSeconds(value);
+  if (!Number.isFinite(seconds)) return null;
+  return new Date(seconds * 1000).toISOString();
+};
+
+const normalizeText = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value).trim().toLowerCase();
+};
+
+const scoreMarkerMatch = (candidate, target) => {
+  if (!candidate || !target) return Number.NEGATIVE_INFINITY;
+
+  const candidateId = normalizeText(candidate.id);
+  const targetId = normalizeText(target.id);
+  if (candidateId && targetId && candidateId === targetId) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  let score = 0;
+
+  const candidateType = normalizeText(candidate.marker_type);
+  const targetType = normalizeText(target.marker_type);
+  if (candidateType && targetType) {
+    score += candidateType === targetType ? 500 : -200;
+  }
+
+  const candidateSide = normalizeText(candidate.side ?? candidate.details?.side);
+  const targetSide = normalizeText(target.side ?? target.details?.side);
+  if (candidateSide && targetSide && candidateSide === targetSide) {
+    score += 180;
+  }
+
+  const candidateStrategy = normalizeText(candidate.strategy);
+  const targetStrategy = normalizeText(target.strategy);
+  if (candidateStrategy && targetStrategy && candidateStrategy === targetStrategy) {
+    score += 140;
+  }
+
+  const candidateRegime = normalizeText(candidate.regime);
+  const targetRegime = normalizeText(target.regime);
+  if (candidateRegime && targetRegime && candidateRegime === targetRegime) {
+    score += 120;
+  }
+
+  const candidateSignal = normalizeText(candidate.details?.signal_type);
+  const targetSignal = normalizeText(target.details?.signal_type);
+  if (candidateSignal && targetSignal && candidateSignal === targetSignal) {
+    score += 80;
+  }
+
+  const candidateRun = normalizeText(candidate.run_id ?? candidate.details?.run_id);
+  const targetRun = normalizeText(target.run_id ?? target.details?.run_id);
+  if (candidateRun && targetRun && candidateRun === targetRun) {
+    score += 90;
+  }
+
+  const candidateTicker = normalizeText(candidate.ticker ?? candidate.details?.ticker);
+  const targetTicker = normalizeText(target.ticker ?? target.details?.ticker);
+  if (candidateTicker && targetTicker && candidateTicker === targetTicker) {
+    score += 60;
+  }
+
+  const candidateTitle = normalizeText(candidate.title);
+  const targetTitle = normalizeText(target.title);
+  if (candidateTitle && targetTitle && candidateTitle === targetTitle) {
+    score += 40;
+  }
+
+  const candidateTs = toUnixSeconds(candidate.time ?? candidate.timestamp);
+  const targetTs = toUnixSeconds(target.time ?? target.timestamp);
+  if (Number.isFinite(candidateTs) && Number.isFinite(targetTs)) {
+    const diff = Math.abs(candidateTs - targetTs);
+    if (diff <= 1) score += 220;
+    else if (diff <= 5) score += 170;
+    else if (diff <= 60) score += 120;
+    else if (diff <= 300) score += 70;
+    else if (diff <= 1800) score += 20;
+    else score -= Math.min(220, diff / 20);
+  }
+
+  const candidatePrice = Number(candidate.price);
+  const targetPrice = Number(target.price);
+  if (Number.isFinite(candidatePrice) && Number.isFinite(targetPrice)) {
+    const diff = Math.abs(candidatePrice - targetPrice);
+    score += 120 / (1 + diff);
+  }
+
+  return score;
+};
+
 function App() {
   // Run state
   const [runKey, setRunKey] = useState(null);
@@ -233,6 +342,52 @@ function App() {
       if (!markerVisibility.icebergs) return [];
       return icebergs;
   }, [icebergs, markerVisibility.icebergs]);
+
+  const icebergDecisionMarkers = useMemo(() => {
+    if (!icebergs || icebergs.length === 0) return [];
+
+    return icebergs
+      .map((iceberg, idx) => {
+        const rawTime = toUnixSeconds(iceberg?.time ?? iceberg?.timestamp);
+        const timestamp = iceberg?.timestamp || toIsoTimestamp(rawTime);
+        if (!timestamp) return null;
+
+        const tradeSize = Number(iceberg?.trade_size ?? 0);
+        const hiddenSize = Number(iceberg?.hidden_size ?? 0);
+        const totalSize = tradeSize + hiddenSize;
+        const side = typeof iceberg?.side === 'string' ? iceberg.side.toLowerCase() : null;
+        const price = Number(iceberg?.price);
+        const normalizedPrice = Number.isFinite(price) ? price : null;
+        const sideLabel = side ? side.toUpperCase() : 'UNKNOWN';
+        const readableSide = side === 'buy' ? 'BUY support' : side === 'sell' ? 'SELL resistance' : 'unknown side';
+
+        return {
+          ...iceberg,
+          id: iceberg.id || `iceberg-${timestamp}-${normalizedPrice ?? 'na'}-${idx}`,
+          marker_type: 'iceberg_detected',
+          title: iceberg.title || `Iceberg ${sideLabel}`,
+          description: iceberg.description || `Detected ${readableSide} iceberg`,
+          timestamp,
+          time: rawTime,
+          side,
+          price: normalizedPrice,
+          details: {
+            ...(iceberg.details || {}),
+            iceberg_side: side,
+            iceberg_price: normalizedPrice,
+            trade_size: tradeSize,
+            hidden_size: hiddenSize,
+            total_size: totalSize,
+          },
+        };
+      })
+      .filter(Boolean);
+  }, [icebergs]);
+
+  const decisionEvents = useMemo(
+    () => [...markers, ...icebergDecisionMarkers],
+    [markers, icebergDecisionMarkers]
+  );
 
   // Toggle marker visibility helper
   const toggleMarkerVisibility = useCallback((key) => {
@@ -476,10 +631,34 @@ function App() {
   };
   
   // Click marker on chart
-  const handleMarkerClick = (markerId) => {
-    const marker = markers.find(m => m.id === markerId);
-    setSelectedMarker(marker);
-  };
+  const handleMarkerClick = useCallback((markerOrId) => {
+    if (!markerOrId) return;
+
+    if (typeof markerOrId !== 'object') {
+      const marker = decisionEvents.find((eventMarker) => eventMarker.id === markerOrId);
+      if (marker) {
+        setSelectedMarker(marker);
+      }
+      return;
+    }
+
+    let bestMatch = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    decisionEvents.forEach((eventMarker) => {
+      const score = scoreMarkerMatch(eventMarker, markerOrId);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = eventMarker;
+      }
+    });
+
+    if (bestMatch && bestScore > 100) {
+      setSelectedMarker(bestMatch);
+      return;
+    }
+
+    setSelectedMarker(markerOrId);
+  }, [decisionEvents]);
   
   // Debug state moved to top level
   
@@ -690,12 +869,12 @@ function App() {
           <div className="card-header">
             <span className="card-title">Decisions</span>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-              {markers.length} total
+              {decisionEvents.length} total
             </span>
           </div>
           <div className="card-body">
             <DecisionPanel 
-              markers={markers}
+              markers={decisionEvents}
               selectedMarker={selectedMarker}
               onSelectMarker={setSelectedMarker}
             />

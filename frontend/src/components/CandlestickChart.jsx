@@ -1,6 +1,41 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createChart } from "lightweight-charts";
 import ChartTooltip from "./ChartTooltip";
+
+const MAX_SNAP_SECONDS = 120;
+
+const toUnixSeconds = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1e12 ? value / 1000 : value;
+  }
+  if (typeof value === "string") {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric > 1e12 ? numeric / 1000 : numeric;
+    }
+    const normalized = value.replace(/(\.\d{3})\d+/, "$1");
+    const parsed = Date.parse(normalized);
+    if (!Number.isNaN(parsed)) return parsed / 1000;
+  }
+  if (typeof value === "object" && value !== null) {
+    if (typeof value.timestamp === "number") return value.timestamp;
+    if (
+      Number.isFinite(value.year) &&
+      Number.isFinite(value.month) &&
+      Number.isFinite(value.day)
+    ) {
+      return Date.UTC(value.year, value.month - 1, value.day) / 1000;
+    }
+  }
+  return null;
+};
+
+const toIsoTimestamp = (value) => {
+  const seconds = toUnixSeconds(value);
+  if (!Number.isFinite(seconds)) return null;
+  return new Date(seconds * 1000).toISOString();
+};
 
 function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMarker, chartState, onChartStateChange, l2Data, priceRange, onPriceRangeChange }) {
   const chartContainerRef = useRef(null);
@@ -199,12 +234,6 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
     }
   }, []);
 
-    // Keep a ref to bars for the event listener to access latest data without re-binding
-    const barsRef = useRef(bars);
-    useEffect(() => {
-        barsRef.current = bars;
-    }, [bars]);
-
     // Use a ref to track if we are currently syncing from props to prevent loop
     const isSyncingRef = useRef(false);
     // Use a ref to track the last range we emitted to avoid processing our own echo
@@ -212,6 +241,142 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
     // Track if user is interacting to decouple state
     const isUserInteracting = useRef(false);
     const interactionTimeoutRef = useRef(null);
+
+  const avgVolume = useMemo(
+    () => bars.reduce((acc, bar) => acc + (bar?.volume || 0), 0) / (bars.length || 1),
+    [bars]
+  );
+
+  const sortedBarTimes = useMemo(() => {
+    if (!bars || bars.length === 0) return [];
+    return bars
+      .map((bar) => bar?.time)
+      .filter((time) => Number.isFinite(time))
+      .sort((a, b) => a - b);
+  }, [bars]);
+
+  const snapToleranceSeconds = useMemo(() => {
+    if (sortedBarTimes.length < 2) return MAX_SNAP_SECONDS;
+    let minSpacing = Number.POSITIVE_INFINITY;
+    for (let i = 1; i < sortedBarTimes.length; i += 1) {
+      const spacing = sortedBarTimes[i] - sortedBarTimes[i - 1];
+      if (spacing > 0 && spacing < minSpacing) {
+        minSpacing = spacing;
+      }
+    }
+    if (!Number.isFinite(minSpacing)) return MAX_SNAP_SECONDS;
+    return Math.max(MAX_SNAP_SECONDS, minSpacing);
+  }, [sortedBarTimes]);
+
+  const findClosestBarTime = useCallback((targetTime) => {
+    if (!Number.isFinite(targetTime)) return null;
+    if (!sortedBarTimes.length) return targetTime;
+
+    let left = 0;
+    let right = sortedBarTimes.length - 1;
+    let closest = sortedBarTimes[0];
+    let minDiff = Math.abs(targetTime - closest);
+
+    while (left <= right) {
+      const middle = Math.floor((left + right) / 2);
+      const value = sortedBarTimes[middle];
+      const diff = Math.abs(targetTime - value);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = value;
+      }
+      if (value < targetTime) {
+        left = middle + 1;
+      } else if (value > targetTime) {
+        right = middle - 1;
+      } else {
+        return value;
+      }
+    }
+
+    if (minDiff > snapToleranceSeconds) return null;
+    return closest;
+  }, [sortedBarTimes, snapToleranceSeconds]);
+
+  const normalizeDecisionMarker = useCallback((marker, index) => {
+    if (!marker) return null;
+
+    const rawTime = toUnixSeconds(marker.time ?? marker.timestamp);
+    if (!Number.isFinite(rawTime)) return null;
+
+    const snappedTime = findClosestBarTime(rawTime);
+    if (!Number.isFinite(snappedTime)) return null;
+
+    return {
+      ...marker,
+      id: marker.id || `${marker.marker_type || "marker"}-${snappedTime}-${index}`,
+      time: snappedTime,
+      timestamp: marker.timestamp || toIsoTimestamp(rawTime) || toIsoTimestamp(snappedTime),
+    };
+  }, [findClosestBarTime]);
+
+  const normalizedIcebergs = useMemo(() => {
+    return (icebergs || [])
+      .map((iceberg, index) => {
+        const rawTime = toUnixSeconds(iceberg.time ?? iceberg.timestamp);
+        if (!Number.isFinite(rawTime)) return null;
+
+        const snappedTime = findClosestBarTime(rawTime);
+        if (!Number.isFinite(snappedTime)) return null;
+
+        const tradeSize = Number(iceberg.trade_size ?? 0);
+        const hiddenSize = Number(iceberg.hidden_size ?? 0);
+        const totalSize = tradeSize + hiddenSize;
+        const price = Number(iceberg.price);
+        const side = typeof iceberg.side === "string" ? iceberg.side.toLowerCase() : null;
+
+        return {
+          ...iceberg,
+          id: iceberg.id || `iceberg-${snappedTime}-${index}`,
+          marker_type: "iceberg_detected",
+          time: snappedTime,
+          timestamp: iceberg.timestamp || toIsoTimestamp(rawTime) || toIsoTimestamp(snappedTime),
+          side,
+          price: Number.isFinite(price) ? price : null,
+          total_size: Number.isFinite(totalSize) ? totalSize : 0,
+          title: iceberg.title || `Iceberg ${side ? side.toUpperCase() : "UNKNOWN"}`,
+          description: iceberg.description || `Detected ${side || "unknown"} iceberg`,
+          details: {
+            ...(iceberg.details || {}),
+            iceberg_side: side,
+            iceberg_price: Number.isFinite(price) ? price : null,
+            trade_size: tradeSize,
+            hidden_size: hiddenSize,
+            total_size: Number.isFinite(totalSize) ? totalSize : 0,
+          },
+        };
+      })
+      .filter(Boolean);
+  }, [icebergs, findClosestBarTime]);
+
+  const filteredIcebergMarkers = useMemo(() => {
+    if (!normalizedIcebergs.length) return [];
+    const minSize = avgVolume * 0.05;
+    const byTime = new Map();
+
+    normalizedIcebergs
+      .filter((iceberg) => Number(iceberg.total_size || 0) > minSize)
+      .forEach((iceberg) => {
+        const current = byTime.get(iceberg.time);
+        if (!current || Number(iceberg.total_size || 0) > Number(current.total_size || 0)) {
+          byTime.set(iceberg.time, iceberg);
+        }
+      });
+
+    return Array.from(byTime.values());
+  }, [normalizedIcebergs, avgVolume]);
+
+  const clickableMarkers = useMemo(() => {
+    const decisions = (markers || [])
+      .map((marker, index) => normalizeDecisionMarker(marker, index))
+      .filter(Boolean);
+    return [...decisions, ...filteredIcebergMarkers];
+  }, [markers, normalizeDecisionMarker, filteredIcebergMarkers]);
 
   // Sync external chart state
   useEffect(() => {
@@ -311,8 +476,8 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
       return;
     }
 
-    const targetTime = Math.floor(new Date(selectedMarker.timestamp).getTime() / 1000);
-    if (!targetTime || Number.isNaN(targetTime)) return;
+    const targetTime = toUnixSeconds(selectedMarker.time ?? selectedMarker.timestamp);
+    if (!Number.isFinite(targetTime)) return;
 
     // Find closest bar index to the selected marker time
     let closestIndex = -1;
@@ -348,7 +513,7 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
       const x = timeScale.timeToCoordinate
         ? timeScale.timeToCoordinate(targetTime)
         : null;
-      const price = selectedMarker.price;
+      const price = Number(selectedMarker.price);
       const y = candleSeriesRef.current?.priceToCoordinate
         ? candleSeriesRef.current.priceToCoordinate(price)
         : null;
@@ -376,62 +541,75 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
   useEffect(() => {
     if (!chartRef.current) return;
 
-    // Build a marker lookup map ONCE per markers change (O(n) once, O(1) lookups)
     const markerTimeMap = new Map();
-    if (markers && markers.length > 0) {
-      markers.forEach(m => {
-        const mTime = Math.floor(new Date(m.timestamp).getTime() / 1000);
-        markerTimeMap.set(mTime, m);
-      });
-    }
+    clickableMarkers.forEach((marker) => {
+      const key = Math.floor(Number(marker.time));
+      if (!Number.isFinite(key)) return;
+      const existing = markerTimeMap.get(key) || [];
+      existing.push(marker);
+      markerTimeMap.set(key, existing);
+    });
+
+    const resolveMarkerForClick = (param) => {
+      const clickedTime = toUnixSeconds(param?.time);
+      if (!Number.isFinite(clickedTime)) return null;
+
+      const candidates = markerTimeMap.get(Math.floor(clickedTime));
+      if (!candidates || candidates.length === 0) return null;
+      if (candidates.length === 1) return candidates[0];
+
+      const clickedPrice = param?.point && candleSeriesRef.current?.coordinateToPrice
+        ? candleSeriesRef.current.coordinateToPrice(param.point.y)
+        : null;
+
+      if (!Number.isFinite(clickedPrice)) return candidates[0];
+
+      const pricedCandidates = candidates.filter((candidate) => Number.isFinite(Number(candidate.price)));
+      if (!pricedCandidates.length) return candidates[0];
+
+      return pricedCandidates.reduce((best, candidate) => {
+        const bestDiff = Math.abs(Number(best.price) - clickedPrice);
+        const candidateDiff = Math.abs(Number(candidate.price) - clickedPrice);
+        return candidateDiff < bestDiff ? candidate : best;
+      }, pricedCandidates[0]);
+    };
 
     const handleClick = (param) => {
-      // 1. Hide existing tooltip on any click (toggle behavior or dismiss)
-      setTooltip(prev => ({ ...prev, visible: false }));
+      setTooltip((prev) => ({ ...prev, visible: false }));
 
-      if (!param.time || markerTimeMap.size === 0) return;
-      
-      const marker = markerTimeMap.get(param.time);
-      if (marker) {
-        // 2. Notify parent
-        if (onMarkerClick) {
-          onMarkerClick(marker.id);
-        }
-        
-        // 3. Show Tooltip on Click
-        const point = param.point;
-        if (point && chartContainerRef.current) {
-             const rect = chartContainerRef.current.getBoundingClientRect();
-             setTooltip({
-               visible: true,
-               marker: marker,
-               x: point.x + rect.left,
-               y: point.y + rect.top
-             });
-        }
+      if (!param?.time || markerTimeMap.size === 0) return;
+
+      const marker = resolveMarkerForClick(param);
+      if (!marker) return;
+
+      if (onMarkerClick) {
+        onMarkerClick(marker);
+      }
+
+      const point = param.point;
+      if (point && chartContainerRef.current) {
+        const rect = chartContainerRef.current.getBoundingClientRect();
+        setTooltip({
+          visible: true,
+          marker,
+          x: point.x + rect.left,
+          y: point.y + rect.top,
+        });
       }
     };
 
-    // Handle mouse move for tooltips - DISABLED HOVER
-    const handleCrosshairMove = (param) => {
-      // Intentionally empty to disable hover tooltips
-      // We could use this to hide tooltip if mouse moves too far, but let's stick to click-only for now
-    };
-
     chartRef.current.subscribeClick(handleClick);
-    chartRef.current.subscribeCrosshairMove(handleCrosshairMove);
 
     return () => {
       try {
         if (chartRef.current) {
           chartRef.current.unsubscribeClick(handleClick);
-          chartRef.current.unsubscribeCrosshairMove(handleCrosshairMove);
         }
       } catch (e) {
         // Ignore cleanup errors
       }
     };
-  }, [markers, onMarkerClick]);
+  }, [clickableMarkers, onMarkerClick]);
 
   // Update markers (Decisions + Delta/CVD + Icebergs)
   useEffect(() => {
@@ -454,17 +632,6 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
         ice_sell: "#ff00d4", // Fialová/Magenta pre Rezistenciu (Sell Iceberg) - pre lepší kontrast
       };
 
-      // 1. Calculate Dynamic Threshold for Icebergs
-      // Zistíme priemerný volume z viditeľných barov, aby sme filtrovali šum.
-      // Ak nemáme bars, použijeme hardcoded fallback.
-      const avgVolume = bars.reduce((acc, bar) => acc + (bar.volume || 0), 0) / (bars.length || 1);
-      // Iceberg musí byť aspoň 5% z priemerného volume sviečky (pôvodne 1.5x bolo príliš veľa)
-      // avgVolume * 1.5 means iceberg > 150% of total candle volume -> IMPOSSIBLE
-      // avgVolume * 0.05 means iceberg > 5% of total candle volume -> REASONABLE
-      const ICEBERG_MIN_SIZE = avgVolume * 0.05; 
-      
- 
-
       const validMarkerTypes = [
         "entry_executed",
         "exit_executed",
@@ -474,82 +641,8 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
         "strategy_selected",
         "iceberg_detected",
       ];
-      
-      // 2. Helper to snap timestamps to bars
-      const barTimes = bars.map(b => b.time).sort((a,b) => a-b);
-      const findClosestBarTime = (targetTime) => {
-          if (!barTimes.length) return targetTime;
-          // Binary search for speed
-          let l = 0, r = barTimes.length - 1;
-          let closest = barTimes[0];
-          let minDiff = Math.abs(targetTime - closest);
-          while (l <= r) {
-              const m = Math.floor((l + r) / 2);
-              const t = barTimes[m];
-              const diff = Math.abs(targetTime - t);
-              if (diff < minDiff) { minDiff = diff; closest = t; }
-              if (t < targetTime) l = m + 1;
-              else if (t > targetTime) r = m - 1;
-              else return t;
-          }
-          // Ak je rozdiel väčší ako 2 minúty (120s), pravdepodobne to nepatrí k tejto sviečke
-          if (minDiff > 120) return null;
-          return closest;
-      };
 
-      // 3. Process Icebergs
-      const processedIcebergs = (icebergs || []).map(ice => {
-          let ts = ice.time;
-          if (typeof ts === 'string') {
-               // Fix pre formáty ako "2023-10-10T10:00:00.123456"
-               const cleanIso = ts.replace(/(\.\d{3})\d+/, '$1'); 
-               const parsed = Date.parse(cleanIso);
-               if (!isNaN(parsed)) ts = parsed / 1000;
-               else return null;
-          } else if (!ts && ice.timestamp) {
-              ts = new Date(ice.timestamp).getTime() / 1000;
-          }
-          if (!ts) return null;
-          
-          const time = findClosestBarTime(ts);
-          if (time === null) return null;
-          
-          return { 
-              ...ice, 
-              time, 
-              marker_type: "iceberg_detected",
-              total_size: (ice.trade_size || 0) + (ice.hidden_size || 0)
-          };
-      })
-      .filter(i => i !== null)
-      // FILTER: Zobraz len významné icebergy (väčšie ako threshold)
-      .filter(i => i.total_size > ICEBERG_MIN_SIZE);
-
-      // Deduplicate: Ak je na jednej sviečke viac icebergov, zober ten najväčší
-      const uniqueIcebergsMap = new Map();
-      processedIcebergs.forEach(ice => {
-          const existing = uniqueIcebergsMap.get(ice.time);
-          if (!existing || (ice.total_size > existing.total_size)) {
-              uniqueIcebergsMap.set(ice.time, ice);
-          }
-      });
-      const uniqueIcebergs = Array.from(uniqueIcebergsMap.values());
-
-      // 4. Merge Standard Markers
-      const standardMarkers = (markers || []).map(m => {
-           let ts = m.time;
-           if (!ts && m.timestamp) ts = new Date(m.timestamp).getTime() / 1000;
-           if (ts) {
-               const snapped = findClosestBarTime(ts);
-               if (snapped !== null) return { ...m, time: snapped };
-           }
-           return m;
-      }).filter(m => m && m.time);
-
-      const allMarkers = [...standardMarkers, ...uniqueIcebergs];
-
-      // 5. Build Final Markers for Chart
-      const finalMarkers = allMarkers
+      const finalMarkers = clickableMarkers
         .filter((m) => m && validMarkerTypes.includes(m.marker_type))
         .map((m) => {
           const time = m.time;
@@ -557,7 +650,6 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
           let color = "#3b82f6";
           let shape = "circle";
           let text = "";
-          let size = 1; // Default size multiplier if needed (chart lib handles shape size via text usually)
 
           switch (m.marker_type) {
             case "entry_executed":
@@ -582,7 +674,7 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
             
             // --- ICEBERG VISUALIZATION ---
             case "iceberg_detected":
-              const isMega = m.total_size > (avgVolume * 3); // Extra veľký iceberg
+              const isMega = Number(m.total_size || 0) > (avgVolume * 3);
               
               if (m.side === "buy") { 
                   // BUY ICEBERG = SUPPORT = POD SVIEČKOU
@@ -619,7 +711,7 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
             shape,
             text,
             id: m.id || `${m.time}-${m.marker_type}`,
-            size: 2, // Lightweight charts uses size differently based on version, usually text handles visual size
+            size: 2,
           };
         })
         .sort((a, b) => a.time - b.time);
@@ -628,7 +720,7 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
     } catch (err) {
       console.error("Chart markers update error:", err);
     }
-  }, [markers, icebergs, bars, l2Data]); // Added l2Data potentially but user provided bars.
+  }, [clickableMarkers, bars, avgVolume]);
 
 
   if (error) {

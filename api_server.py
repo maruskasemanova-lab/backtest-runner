@@ -214,6 +214,7 @@ async def _configure_session(
     l2_min_participation_ratio: float = 0.0,
     l2_min_directional_consistency: float = 0.0,
     l2_min_signed_aggression: float = 0.0,
+    cold_start_each_day: bool = False,
 ) -> None:
     params = {
         "run_id": run_id,
@@ -241,6 +242,7 @@ async def _configure_session(
         "l2_min_participation_ratio": float(l2_min_participation_ratio),
         "l2_min_directional_consistency": float(l2_min_directional_consistency),
         "l2_min_signed_aggression": float(l2_min_signed_aggression),
+        "cold_start_each_day": int(bool(cold_start_each_day)),
     }
     try:
         async with aiohttp.ClientSession() as session:
@@ -498,6 +500,7 @@ class StartRunRequest(BaseModel):
     l2_min_participation_ratio: float = 0.0
     l2_min_directional_consistency: float = 0.0
     l2_min_signed_aggression: float = 0.0
+    cold_start_each_day: bool = False
     # Checkpoint: warm-start from a previous backtest's learning state
     checkpoint_path: Optional[str] = None
     auto_save_checkpoint: bool = True
@@ -872,6 +875,7 @@ async def start_run(request: StartRunRequest):
         l2_min_participation_ratio=l2_min_participation_ratio,
         l2_min_directional_consistency=l2_min_directional_consistency,
         l2_min_signed_aggression=l2_min_signed_aggression,
+        cold_start_each_day=request.cold_start_each_day,
     )
 
     if not bars:
@@ -989,6 +993,7 @@ async def start_run(request: StartRunRequest):
             "adverse_flow_exit_enabled": request.adverse_flow_exit_enabled,
             "adverse_flow_threshold": request.adverse_flow_threshold,
             "adverse_flow_min_hold_bars": request.adverse_flow_min_hold_bars,
+            "cold_start_each_day": bool(request.cold_start_each_day),
         },
         "first_bar": bars[0] if bars else None,
         "last_bar": bars[-1] if bars else None

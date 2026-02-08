@@ -30,6 +30,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     ...MU_FLOW_PRESET,
     checkpoint_path: null,
     auto_save_checkpoint: true,
+    cold_start_each_day: false,
   });
 
   const [loading, setLoading] = useState(false);
@@ -308,6 +309,12 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               {config.auto_save_checkpoint ? "Enabled" : "Disabled"}
             </div>
           </div>
+          <div className="form-group">
+            <label>Cold Start Each Day</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {config.cold_start_each_day ? "Enabled" : "Disabled"}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -507,6 +514,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
                     checked={useWarmStart}
                     onChange={() => {
                       setUseWarmStart(true);
+                      handleChange("cold_start_each_day", false);
                       if (!config.checkpoint_path && checkpointCatalog.length > 0) {
                         handleChange("checkpoint_path", checkpointCatalog[0].path || null);
                       }
@@ -514,6 +522,19 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
                   />
                 </label>
               </div>
+            </div>
+
+            <label className="field-row">
+              <span>Cold Start Each Day (range runs)</span>
+              <input
+                type="checkbox"
+                checked={!!config.cold_start_each_day}
+                disabled={useWarmStart}
+                onChange={(e) => handleChange("cold_start_each_day", e.target.checked)}
+              />
+            </label>
+            <div className="preset-copy">
+              Re-initializes learning state at each new trading day. Use this to match day-by-day audit behavior.
             </div>
 
             <label className="field-row">

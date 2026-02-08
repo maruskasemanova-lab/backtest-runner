@@ -1,12 +1,102 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+
+const DECISION_MARKER_TYPES = new Set([
+  'entry_executed',
+  'exit_executed',
+  'stop_loss_hit',
+  'take_profit_hit',
+  'signal_generated',
+  'pattern_detected',
+  'trailing_stop_updated',
+]);
+
+const isDecisionMarker = (marker) => DECISION_MARKER_TYPES.has(marker?.marker_type);
+
+const toUnixSeconds = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 1e12 ? value / 1000 : value;
+  }
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric > 1e12 ? numeric / 1000 : numeric;
+    }
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed / 1000;
+  }
+  return null;
+};
+
+const formatGenericValue = (value) => {
+  if (value === null || value === undefined) return 'n/a';
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return 'n/a';
+    return Number.isInteger(value) ? String(value) : value.toFixed(4);
+  }
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (Array.isArray(value)) {
+    if (!value.length) return '[]';
+    return value.map((item) => {
+      if (typeof item === 'object' && item !== null) return JSON.stringify(item);
+      return String(item);
+    }).join(', ');
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (!entries.length) return '{}';
+    return entries
+      .slice(0, 10)
+      .map(([k, v]) => `${k}: ${formatGenericValue(v)}`)
+      .join(' | ');
+  }
+  return String(value);
+};
+
 function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
+  const [detailTab, setDetailTab] = useState('details');
+  const [listTab, setListTab] = useState('decisions');
+  const itemRefs = useRef(new Map());
+
+  useEffect(() => {
+    setDetailTab('details');
+  }, [selectedMarker?.id, selectedMarker?.timestamp, selectedMarker?.time]);
+
+  useEffect(() => {
+    if (!selectedMarker) return;
+    setListTab(isDecisionMarker(selectedMarker) ? 'decisions' : 'events');
+  }, [selectedMarker?.id, selectedMarker?.timestamp, selectedMarker?.time, selectedMarker?.marker_type]);
+
   // Format time
   const formatTime = (timestamp) => {
+    if (!timestamp) return 'N/A';
     const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return 'N/A';
     return date.toLocaleTimeString('en-US', { 
       hour: '2-digit', 
       minute: '2-digit',
       hour12: false 
     });
+  };
+
+  const formatPrice = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? `$${number.toFixed(2)}` : 'N/A';
+  };
+
+  const getMarkerKey = (marker, idx = 0) => {
+    return marker.id || `${marker.marker_type || 'marker'}-${marker.timestamp || marker.time || 'na'}-${idx}`;
+  };
+
+  const isSameMarker = (a, b) => {
+    if (!a || !b) return false;
+    if (a.id && b.id && a.id === b.id) return true;
+    return (
+      String(a.marker_type || '') === String(b.marker_type || '') &&
+      String(a.timestamp || '') === String(b.timestamp || '') &&
+      String(a.time || '') === String(b.time || '') &&
+      Number(a.price ?? NaN) === Number(b.price ?? NaN)
+    );
   };
   
   // Get marker icon (context-aware: TP with net loss shows red)
@@ -25,6 +115,7 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
       exit_executed: '⚪',
       stop_loss_hit: '🔴',
       take_profit_hit: '💰',
+      iceberg_detected: '❄️',
       trailing_stop_updated: '📍',
       session_started: '🏁',
       session_ended: '🏆',
@@ -34,9 +125,9 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
 
   const renderTitle = (marker) => {
     if (marker.marker_type === 'take_profit_hit' && marker.details?.pnl_pct !== undefined && marker.details.pnl_pct <= 0) {
-      return `${marker.title} (net loss)`;
+      return `${marker.title || 'Take Profit'} (net loss)`;
     }
-    return marker.title;
+    return marker.title || marker.marker_type || 'Decision';
   };
 
   const formatExitMetrics = (marker) => {
@@ -205,6 +296,25 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
     );
   };
   
+  const decisionMarkers = (markers || []).filter(isDecisionMarker);
+  const eventMarkers = (markers || []).filter((marker) => !isDecisionMarker(marker));
+  const visibleMarkers = listTab === 'decisions' ? decisionMarkers : eventMarkers;
+  const renderedMarkers = useMemo(() => [...visibleMarkers].reverse(), [visibleMarkers]);
+
+  useEffect(() => {
+    if (!selectedMarker) return;
+    for (let idx = 0; idx < renderedMarkers.length; idx += 1) {
+      const marker = renderedMarkers[idx];
+      if (!isSameMarker(selectedMarker, marker)) continue;
+      const key = getMarkerKey(marker, idx);
+      const node = itemRefs.current.get(key);
+      if (node && node.scrollIntoView) {
+        node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      break;
+    }
+  }, [selectedMarker, renderedMarkers, listTab]);
+
   if (!markers || markers.length === 0) {
     return (
       <div className="decision-list">
@@ -215,16 +325,68 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
       </div>
     );
   }
+
+  const selectedEventTime = toUnixSeconds(selectedMarker?.time ?? selectedMarker?.timestamp);
+  const selectedTicker = selectedMarker?.ticker ?? selectedMarker?.details?.ticker;
+  const selectedRunId = selectedMarker?.run_id ?? selectedMarker?.details?.run_id;
+  const selectedSignalType = selectedMarker?.details?.signal_type;
+  const detailMetadataEntries = Object.entries(selectedMarker?.details?.metadata || {})
+    .filter(([key]) => key !== 'patterns' && key !== 'layer_scores');
+  const detailCostEntries = Object.entries(selectedMarker?.details?.costs || {});
+  const knownTopLevelFields = new Set([
+    'id',
+    'title',
+    'description',
+    'marker_type',
+    'timestamp',
+    'time',
+    'price',
+    'side',
+    'strategy',
+    'regime',
+    'confidence',
+    'ticker',
+    'run_id',
+    'details',
+  ]);
+  const extraTopLevelEntries = Object.entries(selectedMarker || {})
+    .filter(([key, value]) => !knownTopLevelFields.has(key) && value !== null && value !== undefined);
   
   return (
     <>
+      <div className="decision-list-tabs">
+        <button
+          className={`decision-list-tab ${listTab === 'decisions' ? 'active' : ''}`}
+          onClick={() => setListTab('decisions')}
+        >
+          Decisions ({decisionMarkers.length})
+        </button>
+        <button
+          className={`decision-list-tab ${listTab === 'events' ? 'active' : ''}`}
+          onClick={() => setListTab('events')}
+        >
+          Events ({eventMarkers.length})
+        </button>
+      </div>
       <div className="decision-list">
-        {[...markers].reverse().map((marker, idx) => {
+        {visibleMarkers.length === 0 && (
+          <div className="empty-state">
+            <div className="icon">🗂️</div>
+            <p>{listTab === 'decisions' ? 'No trading decisions in this run yet.' : 'No non-decision events in this run yet.'}</p>
+          </div>
+        )}
+        {renderedMarkers.map((marker, idx) => {
           const exitMetrics = formatExitMetrics(marker);
+          const markerKey = getMarkerKey(marker, idx);
+          const selected = isSameMarker(selectedMarker, marker);
           return (
           <div
-            key={marker.id || `${marker.marker_type}-${marker.timestamp}-${idx}`}
-            className={`decision-item ${marker.marker_type} ${selectedMarker?.id === marker.id ? 'selected' : ''}`}
+            key={markerKey}
+            ref={(node) => {
+              if (node) itemRefs.current.set(markerKey, node);
+              else itemRefs.current.delete(markerKey);
+            }}
+            className={`decision-item ${marker.marker_type} ${selected ? 'selected' : ''}`}
             onClick={() => onSelectMarker(marker)}
           >
             <div className="decision-header">
@@ -234,7 +396,7 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
               <span className="decision-time">{formatTime(marker.timestamp)}</span>
             </div>
             <div className="decision-description">
-              {exitMetrics ? `Reason: ${marker.details?.exit_reason || 'n/a'}` : marker.description}
+              {exitMetrics ? `Reason: ${marker.details?.exit_reason || 'n/a'}` : (marker.description || 'No description')}
               {exitMetrics && (
                 <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: '0.78rem', fontWeight: 600 }}>
                   {exitMetrics}
@@ -264,187 +426,291 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
           <h4>
             {getMarkerIcon(selectedMarker)} {renderTitle(selectedMarker)}
           </h4>
-          <div className="detail-grid">
-            <div className="detail-item">
-              <span className="detail-label">Time</span>
-              <span className="detail-value">
-                {new Date(selectedMarker.timestamp).toLocaleString()}
-              </span>
-            </div>
-            <div className="detail-item">
-              <span className="detail-label">Price</span>
-              <span className="detail-value">
-                {selectedMarker.price != null ? `$${selectedMarker.price.toFixed(2)}` : 'N/A'}
-              </span>
-            </div>
-            {selectedMarker.strategy && (
-              <div className="detail-item">
-                <span className="detail-label">Strategy</span>
-                <span className="detail-value">{selectedMarker.strategy}</span>
-              </div>
-            )}
-            {selectedMarker.regime && (
-              <div className="detail-item">
-                <span className="detail-label">Regime</span>
-                <span className={`regime-badge ${selectedMarker.regime.toLowerCase()}`}>
-                  {selectedMarker.regime}
-                </span>
-              </div>
-            )}
-            {selectedMarker.confidence !== undefined && selectedMarker.confidence !== null && (
-              <div className="detail-item">
-                <span className="detail-label">Confidence</span>
-                <span className="detail-value">{selectedMarker.confidence.toFixed(0)}%</span>
-              </div>
-            )}
-            {renderLayerScoresDetails(
-              selectedMarker.details?.layer_scores || selectedMarker.details?.metadata?.layer_scores,
-              selectedMarker.details?.direction
-            )}
-            {/* Patterns list */}
-            {selectedMarker.details?.patterns && selectedMarker.details.patterns.length > 0 && (
-              <>
-                <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
-                  <span className="detail-label" style={{ fontWeight: 600 }}>Candlestick Patterns</span>
+          <div className="decision-detail-tabs">
+            <button
+              className={`decision-detail-tab ${detailTab === 'details' ? 'active' : ''}`}
+              onClick={() => setDetailTab('details')}
+            >
+              Details
+            </button>
+            <button
+              className={`decision-detail-tab ${detailTab === 'raw' ? 'active' : ''}`}
+              onClick={() => setDetailTab('raw')}
+            >
+              Raw
+            </button>
+          </div>
+          {detailTab === 'details' && (
+            <>
+              <div className="detail-grid">
+                <div className="detail-item">
+                  <span className="detail-label">Event Type</span>
+                  <span className="detail-value">{selectedMarker.marker_type || 'n/a'}</span>
                 </div>
-                {selectedMarker.details.patterns.map((pattern, pidx) => (
-                  <div className="detail-item" key={pidx} style={{ gridColumn: '1 / -1' }}>
-                    <span className="detail-label">
-                      {pattern.direction === 'bullish' ? '▲' : pattern.direction === 'bearish' ? '▼' : '◆'} {pattern.name}
+                {selectedMarker.id && (
+                  <div className="detail-item">
+                    <span className="detail-label">Event ID</span>
+                    <span className="detail-value">{selectedMarker.id}</span>
+                  </div>
+                )}
+                <div className="detail-item">
+                  <span className="detail-label">Time</span>
+                  <span className="detail-value">
+                    {selectedMarker.timestamp ? new Date(selectedMarker.timestamp).toLocaleString() : 'N/A'}
+                  </span>
+                </div>
+                {Number.isFinite(selectedEventTime) && (
+                  <div className="detail-item">
+                    <span className="detail-label">Time (Unix)</span>
+                    <span className="detail-value">{selectedEventTime.toFixed(3)}</span>
+                  </div>
+                )}
+                <div className="detail-item">
+                  <span className="detail-label">Price</span>
+                  <span className="detail-value">
+                    {formatPrice(selectedMarker.price)}
+                  </span>
+                </div>
+                {selectedMarker.side && (
+                  <div className="detail-item">
+                    <span className="detail-label">Side</span>
+                    <span className="detail-value">{String(selectedMarker.side).toUpperCase()}</span>
+                  </div>
+                )}
+                {selectedMarker.strategy && (
+                  <div className="detail-item">
+                    <span className="detail-label">Strategy</span>
+                    <span className="detail-value">{selectedMarker.strategy}</span>
+                  </div>
+                )}
+                {selectedTicker && (
+                  <div className="detail-item">
+                    <span className="detail-label">Ticker</span>
+                    <span className="detail-value">{selectedTicker}</span>
+                  </div>
+                )}
+                {selectedRunId && (
+                  <div className="detail-item">
+                    <span className="detail-label">Run ID</span>
+                    <span className="detail-value">{selectedRunId}</span>
+                  </div>
+                )}
+                {selectedSignalType && (
+                  <div className="detail-item">
+                    <span className="detail-label">Signal Type</span>
+                    <span className="detail-value">{selectedSignalType}</span>
+                  </div>
+                )}
+                {selectedMarker.regime && (
+                  <div className="detail-item">
+                    <span className="detail-label">Regime</span>
+                    <span className={`regime-badge ${selectedMarker.regime.toLowerCase()}`}>
+                      {selectedMarker.regime}
                     </span>
+                  </div>
+                )}
+                {selectedMarker.confidence !== undefined && selectedMarker.confidence !== null && (
+                  <div className="detail-item">
+                    <span className="detail-label">Confidence</span>
+                    <span className="detail-value">{Number(selectedMarker.confidence).toFixed(0)}%</span>
+                  </div>
+                )}
+                {renderLayerScoresDetails(
+                  selectedMarker.details?.layer_scores || selectedMarker.details?.metadata?.layer_scores,
+                  selectedMarker.details?.direction
+                )}
+                {detailMetadataEntries.length > 0 && (
+                  <>
+                    <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
+                      <span className="detail-label" style={{ fontWeight: 600 }}>Metadata</span>
+                    </div>
+                    {detailMetadataEntries.map(([key, value]) => (
+                      <div className="detail-item" key={`meta-${key}`} style={{ gridColumn: '1 / -1' }}>
+                        <span className="detail-label">{key}</span>
+                        <span className="detail-value" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                          {formatGenericValue(value)}
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {detailCostEntries.length > 0 && (
+                  <>
+                    <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
+                      <span className="detail-label" style={{ fontWeight: 600 }}>Cost Breakdown</span>
+                    </div>
+                    {detailCostEntries.map(([key, value]) => (
+                      <div className="detail-item" key={`cost-${key}`}>
+                        <span className="detail-label">{key}</span>
+                        <span className="detail-value">{formatGenericValue(value)}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {/* Patterns list */}
+                {selectedMarker.details?.patterns && selectedMarker.details.patterns.length > 0 && (
+                  <>
+                    <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
+                      <span className="detail-label" style={{ fontWeight: 600 }}>Candlestick Patterns</span>
+                    </div>
+                    {selectedMarker.details.patterns.map((pattern, pidx) => (
+                      <div className="detail-item" key={pidx} style={{ gridColumn: '1 / -1' }}>
+                        <span className="detail-label">
+                          {pattern.direction === 'bullish' ? '▲' : pattern.direction === 'bearish' ? '▼' : '◆'} {pattern.name}
+                        </span>
+                        <span className="detail-value">
+                          Strength: {Number(pattern.strength || 0).toFixed(0)}
+                          {pattern.metadata?.volume_confirmed ? ' | Vol ✓' : ''}
+                          {pattern.metadata?.trend_aligned ? ' | Trend ✓' : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {/* Patterns from metadata (for entry markers) */}
+                {selectedMarker.details?.metadata?.patterns && selectedMarker.details.metadata.patterns.length > 0 && !selectedMarker.details?.patterns && (
+                  <>
+                    <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
+                      <span className="detail-label" style={{ fontWeight: 600 }}>Triggering Patterns</span>
+                    </div>
+                    {selectedMarker.details.metadata.patterns.map((pattern, pidx) => (
+                      <div className="detail-item" key={pidx} style={{ gridColumn: '1 / -1' }}>
+                        <span className="detail-label">
+                          {pattern.direction === 'bullish' ? '▲' : pattern.direction === 'bearish' ? '▼' : '◆'} {pattern.name}
+                        </span>
+                        <span className="detail-value">Strength: {Number(pattern.strength || 0).toFixed(0)}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {selectedMarker.details?.pnl_pct !== undefined && selectedMarker.details?.pnl_pct !== null && (
+                  <div className="detail-item">
+                    <span className="detail-label">PnL</span>
+                    <span className={`detail-value ${(selectedMarker.details.pnl_pct || 0) >= 0 ? 'positive' : 'negative'}`}>
+                      {(selectedMarker.details.pnl_pct || 0) >= 0 ? '+' : ''}{Number(selectedMarker.details.pnl_pct || 0).toFixed(2)}%
+                    </span>
+                  </div>
+                )}
+                {selectedMarker.details?.pnl_usd !== undefined && selectedMarker.details?.pnl_usd !== null && (
+                  <div className="detail-item">
+                    <span className="detail-label">PnL $</span>
+                    <span className={`detail-value ${(selectedMarker.details.pnl_usd || 0) >= 0 ? 'positive' : 'negative'}`}>
+                      {(selectedMarker.details.pnl_usd || 0) >= 0 ? '+' : ''}${Number(selectedMarker.details.pnl_usd || 0).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                {selectedMarker.details?.cost_usd !== undefined && selectedMarker.details?.cost_usd !== null && (
+                  <div className="detail-item">
+                    <span className="detail-label">Costs</span>
                     <span className="detail-value">
-                      Strength: {Number(pattern.strength || 0).toFixed(0)}
-                      {pattern.metadata?.volume_confirmed ? ' | Vol ✓' : ''}
-                      {pattern.metadata?.trend_aligned ? ' | Trend ✓' : ''}
+                      ${Number(selectedMarker.details.cost_usd || 0).toFixed(2)}
+                      {selectedMarker.details.cost_pct !== undefined && selectedMarker.details.cost_pct !== null
+                        ? ` (${Number(selectedMarker.details.cost_pct).toFixed(2)}%)`
+                        : ''}
                     </span>
                   </div>
-                ))}
-              </>
-            )}
-            {/* Patterns from metadata (for entry markers) */}
-            {selectedMarker.details?.metadata?.patterns && selectedMarker.details.metadata.patterns.length > 0 && !selectedMarker.details?.patterns && (
-              <>
-                <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
-                  <span className="detail-label" style={{ fontWeight: 600 }}>Triggering Patterns</span>
-                </div>
-                {selectedMarker.details.metadata.patterns.map((pattern, pidx) => (
-                  <div className="detail-item" key={pidx} style={{ gridColumn: '1 / -1' }}>
-                    <span className="detail-label">
-                      {pattern.direction === 'bullish' ? '▲' : pattern.direction === 'bearish' ? '▼' : '◆'} {pattern.name}
-                    </span>
-                    <span className="detail-value">Strength: {Number(pattern.strength || 0).toFixed(0)}</span>
+                )}
+                {selectedMarker.details?.position_notional_usd !== undefined && selectedMarker.details?.position_notional_usd !== null && (
+                  <div className="detail-item">
+                    <span className="detail-label">Notional</span>
+                    <span className="detail-value">${Number(selectedMarker.details.position_notional_usd || 0).toFixed(2)}</span>
                   </div>
-                ))}
-              </>
-            )}
-            {selectedMarker.details?.pnl_pct !== undefined && selectedMarker.details?.pnl_pct !== null && (
-              <div className="detail-item">
-                <span className="detail-label">PnL</span>
-                <span className={`detail-value ${(selectedMarker.details.pnl_pct || 0) >= 0 ? 'positive' : 'negative'}`}>
-                  {(selectedMarker.details.pnl_pct || 0) >= 0 ? '+' : ''}{Number(selectedMarker.details.pnl_pct || 0).toFixed(2)}%
-                </span>
-              </div>
-            )}
-            {selectedMarker.details?.pnl_usd !== undefined && selectedMarker.details?.pnl_usd !== null && (
-              <div className="detail-item">
-                <span className="detail-label">PnL $</span>
-                <span className={`detail-value ${(selectedMarker.details.pnl_usd || 0) >= 0 ? 'positive' : 'negative'}`}>
-                  {(selectedMarker.details.pnl_usd || 0) >= 0 ? '+' : ''}${Number(selectedMarker.details.pnl_usd || 0).toFixed(2)}
-                </span>
-              </div>
-            )}
-            {selectedMarker.details?.cost_usd !== undefined && selectedMarker.details?.cost_usd !== null && (
-              <div className="detail-item">
-                <span className="detail-label">Costs</span>
-                <span className="detail-value">
-                  ${Number(selectedMarker.details.cost_usd || 0).toFixed(2)}
-                  {selectedMarker.details.cost_pct !== undefined && selectedMarker.details.cost_pct !== null
-                    ? ` (${Number(selectedMarker.details.cost_pct).toFixed(2)}%)`
-                    : ''}
-                </span>
-              </div>
-            )}
-            {selectedMarker.details?.position_notional_usd !== undefined && selectedMarker.details?.position_notional_usd !== null && (
-              <div className="detail-item">
-                <span className="detail-label">Notional</span>
-                <span className="detail-value">${Number(selectedMarker.details.position_notional_usd || 0).toFixed(2)}</span>
-              </div>
-            )}
-            {selectedMarker.details?.gross_pnl_pct !== undefined && selectedMarker.details?.gross_pnl_pct !== null && (
-              <div className="detail-item">
-                <span className="detail-label">Gross PnL</span>
-                <span className={`detail-value ${(selectedMarker.details.gross_pnl_pct || 0) >= 0 ? 'positive' : 'negative'}`}>
-                  {(selectedMarker.details.gross_pnl_pct || 0) >= 0 ? '+' : ''}{Number(selectedMarker.details.gross_pnl_pct || 0).toFixed(2)}%
-                </span>
-              </div>
-            )}
-            {/* Dynamic Details Rendering */}
-            {selectedMarker.details && Object.entries(selectedMarker.details).map(([key, value]) => {
-              // Skip fields already handled or internal
-              if ([
-                'schema_version',
-                'pnl_pct',
-                'pnl_dollars',
-                'pnl_usd',
-                'gross_pnl_pct',
-                'gross_pnl_dollars',
-                'cost_usd',
-                'cost_pct',
-                'position_notional_usd',
-                'costs',
-                'patterns',
-                'direction',
-                'layer_scores',
-                'metadata',
-                'stop_loss',
-                'take_profit',
-                'exit_reason',
-                'signal_type',
-                'ticker',
-                'run_id'
-              ].includes(key)) return null;
-              if (value === null || value === undefined) return null;
-              
-              // Format labels
-              const label = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-              
-              // Format values
-              let displayValue = value;
-              if (typeof value === 'number') {
-                if (key.includes('pct') || key.includes('ratio')) displayValue = value.toFixed(2) + (key.includes('pct') ? '%' : '');
-                else if (key.includes('price') || key.includes('vwap') || key.includes('atr')) displayValue = value.toFixed(2);
-                else displayValue = value.toFixed(2);
-              } else if (typeof value === 'object') {
-                // Render objects (e.g., costs) as a compact string
-                displayValue = Object.entries(value)
-                  .map(([k, v]) => `${k}: ${typeof v === 'number' ? v.toFixed(4) : v}`)
-                  .join(', ');
-              }
-              
-              return (
-                <div className="detail-item" key={key}>
-                  <span className="detail-label">{label}</span>
-                  <span className="detail-value">{displayValue}</span>
-                </div>
-              );
-            })}
-            
-            {selectedMarker.details?.stop_loss && (
-              <div className="detail-item">
-                <span className="detail-label">Stop Loss</span>
-                <span className="detail-value">${selectedMarker.details.stop_loss.toFixed(2)}</span>
-              </div>
-            )}
-            {selectedMarker.details?.take_profit && (
-              <div className="detail-item">
-                <span className="detail-label">Take Profit</span>
-                <span className="detail-value">${selectedMarker.details.take_profit.toFixed(2)}</span>
-              </div>
-            )}
-           </div>
-          <p style={{ marginTop: 'var(--spacing-md)', color: 'var(--text-secondary)' }}>
-            {selectedMarker.description}
-          </p>
+                )}
+                {selectedMarker.details?.gross_pnl_pct !== undefined && selectedMarker.details?.gross_pnl_pct !== null && (
+                  <div className="detail-item">
+                    <span className="detail-label">Gross PnL</span>
+                    <span className={`detail-value ${(selectedMarker.details.gross_pnl_pct || 0) >= 0 ? 'positive' : 'negative'}`}>
+                      {(selectedMarker.details.gross_pnl_pct || 0) >= 0 ? '+' : ''}{Number(selectedMarker.details.gross_pnl_pct || 0).toFixed(2)}%
+                    </span>
+                  </div>
+                )}
+                {extraTopLevelEntries.length > 0 && (
+                  <>
+                    <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)' }}>
+                      <span className="detail-label" style={{ fontWeight: 600 }}>Event Fields</span>
+                    </div>
+                    {extraTopLevelEntries.map(([key, value]) => (
+                      <div className="detail-item" key={`extra-${key}`} style={{ gridColumn: '1 / -1' }}>
+                        <span className="detail-label">{key}</span>
+                        <span className="detail-value" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                          {formatGenericValue(value)}
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {/* Dynamic Details Rendering */}
+                {selectedMarker.details && Object.entries(selectedMarker.details).map(([key, value]) => {
+                  // Skip fields already handled or internal
+                  if ([
+                    'schema_version',
+                    'pnl_pct',
+                    'pnl_dollars',
+                    'pnl_usd',
+                    'gross_pnl_pct',
+                    'gross_pnl_dollars',
+                    'cost_usd',
+                    'cost_pct',
+                    'position_notional_usd',
+                    'costs',
+                    'patterns',
+                    'direction',
+                    'layer_scores',
+                    'metadata',
+                    'stop_loss',
+                    'take_profit',
+                    'exit_reason',
+                    'signal_type',
+                    'ticker',
+                    'run_id'
+                  ].includes(key)) return null;
+                  if (value === null || value === undefined) return null;
+                  
+                  // Format labels
+                  const label = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                  
+                  // Format values
+                  let displayValue = value;
+                  if (typeof value === 'number') {
+                    if (key.includes('pct') || key.includes('ratio')) displayValue = value.toFixed(2) + (key.includes('pct') ? '%' : '');
+                    else if (key.includes('price') || key.includes('vwap') || key.includes('atr')) displayValue = value.toFixed(2);
+                    else displayValue = value.toFixed(2);
+                  } else if (typeof value === 'object') {
+                    // Render objects (e.g., costs) as a compact string
+                    displayValue = Object.entries(value)
+                      .map(([k, v]) => `${k}: ${typeof v === 'number' ? v.toFixed(4) : v}`)
+                      .join(', ');
+                  }
+                  
+                  return (
+                    <div className="detail-item" key={key}>
+                      <span className="detail-label">{label}</span>
+                      <span className="detail-value">{displayValue}</span>
+                    </div>
+                  );
+                })}
+                
+                {selectedMarker.details?.stop_loss && (
+                  <div className="detail-item">
+                    <span className="detail-label">Stop Loss</span>
+                    <span className="detail-value">${selectedMarker.details.stop_loss.toFixed(2)}</span>
+                  </div>
+                )}
+                {selectedMarker.details?.take_profit && (
+                  <div className="detail-item">
+                    <span className="detail-label">Take Profit</span>
+                    <span className="detail-value">${selectedMarker.details.take_profit.toFixed(2)}</span>
+                  </div>
+                )}
+               </div>
+              <p style={{ marginTop: 'var(--spacing-md)', color: 'var(--text-secondary)' }}>
+                {selectedMarker.description || 'No additional description.'}
+              </p>
+            </>
+          )}
+          {detailTab === 'raw' && (
+            <pre className="decision-raw-json">{JSON.stringify(selectedMarker, null, 2)}</pre>
+          )}
         </div>
       )}
     </>

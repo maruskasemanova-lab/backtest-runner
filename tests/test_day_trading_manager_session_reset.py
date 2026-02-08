@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -61,3 +62,48 @@ def test_get_or_create_session_clears_stale_trade_index_for_replay() -> None:
 
     assert key in manager.sessions
     assert key not in manager.last_trade_bar_index
+
+
+def test_cold_start_each_day_uses_full_reset_for_new_session() -> None:
+    class _StubOrchestrator:
+        def __init__(self):
+            self.full_reset_calls = 0
+            self.new_session_calls = 0
+            self.config = type("Cfg", (), {"use_evidence_engine": False})()
+
+        def full_reset(self):
+            self.full_reset_calls += 1
+
+        def new_session(self):
+            self.new_session_calls += 1
+
+        def update_bar(self, _bar):
+            return None
+
+    manager = DayTradingManager(regime_detection_minutes=5)
+    manager.orchestrator = _StubOrchestrator()
+    manager.set_run_defaults("run-a", "MU", cold_start_each_day=True)
+
+    bar_payload = {
+        "open": 100.0,
+        "high": 101.0,
+        "low": 99.5,
+        "close": 100.5,
+        "volume": 1000.0,
+    }
+
+    manager.process_bar(
+        "run-a",
+        "MU",
+        datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc),
+        bar_payload,
+    )
+    manager.process_bar(
+        "run-a",
+        "MU",
+        datetime(2026, 2, 4, 14, 30, tzinfo=timezone.utc),
+        bar_payload,
+    )
+
+    assert manager.orchestrator.full_reset_calls == 2
+    assert manager.orchestrator.new_session_calls == 0
