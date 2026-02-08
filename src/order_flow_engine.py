@@ -1,37 +1,59 @@
 """
 Order-flow feature engine built on raw MBP-10 data.
+
+L2 Feature Definitions (l2fv-1.0)
+=================================
+Field Units & Semantics:
+- l2_delta: shares (buy_volume - sell_volume)
+- l2_imbalance: ratio [-1,1] = delta / volume (size-weighted)
+- l2_book_pressure: ratio [-1,1] = (bid_depth - ask_depth) / total_depth
+- l2_book_pressure_delta: ratio = book_pressure[t] - book_pressure[t-1]
+
+Aggressor Classification Priority:
+1. side field from source ("B" = buy aggressor, "A" = sell aggressor)
+2. price >= ask -> buy; price <= bid -> sell
+3. price vs mid: price >= mid -> buy; price < mid -> sell
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
 from .l2_data_manager import L2DataManager
 
+# Schema version for L2 feature vector contract
+L2_SCHEMA_VERSION = "l2fv-1.0"
+
 
 @dataclass
 class OrderFlowSnapshot:
-    # Existing flow metrics
+    """Snapshot of order-flow metrics for a single minute bar."""
+    # Existing flow metrics (units: shares)
     delta: float
     cumulative_delta: float
-    imbalance: float
-    signed_aggression: float
-    absorption_rate: float
+    imbalance: float  # ratio [-1, 1]
+    signed_aggression: float  # alias for imbalance
+    absorption_rate: float  # [0, 1]
 
     # Book-pressure metrics
-    bid_depth_total: float
-    ask_depth_total: float
-    book_pressure: float
-    book_pressure_change: float
-    top_heavy_bid: float
-    top_heavy_ask: float
+    bid_depth_total: float  # shares
+    ask_depth_total: float  # shares
+    book_pressure: float  # ratio [-1, 1]
+    book_pressure_delta: float  # ratio (change vs previous bar)
+    top_heavy_bid: float  # ratio [0, 1]
+    top_heavy_ask: float  # ratio [0, 1]
 
     # Divergence / acceleration
     delta_price_divergence: float
-    delta_acceleration: float
+    delta_acceleration: float  # shares
+
+    # Quality metrics
+    trade_ticks: int = 0
+    book_updates: int = 0
+    quality_flags: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -132,9 +154,10 @@ class OrderFlowEngine:
                 "bid_depth_total": bid_depth_total,
                 "ask_depth_total": ask_depth_total,
                 "book_pressure": book_pressure,
-                "book_pressure_change": 0.0,
+                "book_pressure_delta": 0.0,
                 "top_heavy_bid": top_heavy_bid,
                 "top_heavy_ask": top_heavy_ask,
+                "book_updates": len(group),
             }
             pressure_keys.append(minute_key)
 
@@ -142,7 +165,7 @@ class OrderFlowEngine:
         prev_pressure = 0.0
         for idx, minute_key in enumerate(pressure_keys):
             current = float(out[minute_key].get("book_pressure", 0.0))
-            out[minute_key]["book_pressure_change"] = current - prev_pressure if idx > 0 else 0.0
+            out[minute_key]["book_pressure_delta"] = current - prev_pressure if idx > 0 else 0.0
             prev_pressure = current
 
         stats["depth_minutes"] = len(out)
@@ -221,6 +244,7 @@ class OrderFlowEngine:
                 "buy_volume": buy_volume,
                 "sell_volume": sell_volume,
                 "volume": total_volume,
+                "trade_ticks": len(group),
             }
             minute_keys.append(minute_key)
 
@@ -258,15 +282,19 @@ class OrderFlowEngine:
                 bid_depth_total=float(book.get("bid_depth_total", 0.0)),
                 ask_depth_total=float(book.get("ask_depth_total", 0.0)),
                 book_pressure=float(book.get("book_pressure", 0.0)),
-                book_pressure_change=float(book.get("book_pressure_change", 0.0)),
+                book_pressure_delta=float(book.get("book_pressure_delta", 0.0)),
                 top_heavy_bid=float(book.get("top_heavy_bid", 0.0)),
                 top_heavy_ask=float(book.get("top_heavy_ask", 0.0)),
                 delta_price_divergence=float(trade.get("delta_price_divergence", 0.0)),
                 delta_acceleration=delta_acceleration,
+                trade_ticks=int(trade.get("trade_ticks", 0)),
+                book_updates=int(book.get("book_updates", 0)),
             )
 
             feature_map[minute_key] = {
-                # Existing payload fields
+                # Schema version
+                "l2_schema_version": L2_SCHEMA_VERSION,
+                # Existing payload fields (units: shares)
                 "l2_delta": snapshot.delta,
                 "l2_buy_volume": float(trade.get("buy_volume", 0.0)),
                 "l2_sell_volume": float(trade.get("sell_volume", 0.0)),
@@ -278,14 +306,23 @@ class OrderFlowEngine:
                 "l2_cumulative_delta": snapshot.cumulative_delta,
                 "l2_delta_price_divergence": snapshot.delta_price_divergence,
                 "l2_delta_acceleration": snapshot.delta_acceleration,
-                # New book fields
+                # Book fields
                 "l2_bid_depth_total": snapshot.bid_depth_total,
                 "l2_ask_depth_total": snapshot.ask_depth_total,
                 "l2_book_pressure": snapshot.book_pressure,
-                "l2_book_pressure_change": snapshot.book_pressure_change,
+                "l2_book_pressure_delta": snapshot.book_pressure_delta,
                 "l2_top_heavy_bid": snapshot.top_heavy_bid,
                 "l2_top_heavy_ask": snapshot.top_heavy_ask,
+                # Quality metrics
+                "l2_quality_trade_ticks": snapshot.trade_ticks,
+                "l2_quality_book_updates": snapshot.book_updates,
             }
+
+        # Calculate coverage ratio
+        expected_minutes = int((end_dt_utc - start_dt_utc).total_seconds() / 60)
+        coverage_ratio = len(feature_map) / expected_minutes if expected_minutes > 0 else 0.0
+        for minute_key in feature_map:
+            feature_map[minute_key]["l2_quality_coverage_ratio"] = coverage_ratio
 
         stats = {
             "has_l2": bool(feature_map),

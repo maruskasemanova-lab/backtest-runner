@@ -6,15 +6,15 @@ const MU_FLOW_PRESET = {
   regime_detection_minutes: 15,
   trailing_stop_pct: null,
   account_size_usd: 10000,
+  comparable_mode: true,
+  cold_start_each_day: true,
+  auto_save_checkpoint: false,
   l2_only: false,
   l2_confirm_enabled: true,
-  l2_min_delta: 0,
   l2_min_imbalance: 0.0,
-  l2_min_iceberg_bias: 0.0,
-  l2_lookback_bars: 3,
-  l2_min_participation_ratio: 0.0,
   l2_min_directional_consistency: 0.0,
   l2_min_signed_aggression: 0.0,
+  l2_lookback_bars: 3,
 };
 
 function RunConfig({ onStart, isRunning, onTickerChange }) {
@@ -31,6 +31,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     checkpoint_path: null,
     auto_save_checkpoint: true,
     cold_start_each_day: false,
+    comparable_mode: false,
   });
 
   const [loading, setLoading] = useState(false);
@@ -198,13 +199,19 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     setError(null);
 
     try {
+      const comparableMode = !!config.comparable_mode;
       const payload = {
         ...config,
-        checkpoint_path: useWarmStart ? (config.checkpoint_path || "").trim() || null : null,
-        auto_save_checkpoint: !!config.auto_save_checkpoint,
+        comparable_mode: comparableMode,
+        cold_start_each_day: comparableMode ? true : !!config.cold_start_each_day,
+        checkpoint_path: comparableMode
+          ? null
+          : (useWarmStart ? (config.checkpoint_path || "").trim() || null : null),
+        auto_save_checkpoint: comparableMode ? false : !!config.auto_save_checkpoint,
       };
-      if (useWarmStart && !payload.checkpoint_path) {
-        throw new Error("Warm start is enabled, but no checkpoint is selected.");
+      if (!comparableMode && useWarmStart && !payload.checkpoint_path) {
+        // No checkpoint available - proceed with cold start (no blocking)
+        console.info("Warm start enabled but no checkpoint selected, proceeding with cold start.");
       }
       await onStart(payload);
     } catch (err) {
@@ -300,7 +307,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
           <div className="form-group">
             <label>Start Mode</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {useWarmStart ? "Warm Start" : "Cold Start"}
+              {config.comparable_mode ? "Comparable (day-isolated cold)" : (useWarmStart ? "Warm Start" : "Cold Start")}
             </div>
           </div>
           <div className="form-group">
@@ -312,7 +319,13 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
           <div className="form-group">
             <label>Cold Start Each Day</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {config.cold_start_each_day ? "Enabled" : "Disabled"}
+              {(config.cold_start_each_day || config.comparable_mode) ? "Enabled" : "Disabled"}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Comparable Mode</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {config.comparable_mode ? "Enabled" : "Disabled"}
             </div>
           </div>
         </div>
@@ -494,6 +507,27 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               Choose how each run should initialize learning state.
             </div>
 
+            <label className="field-row">
+              <span>Comparable Mode (day-isolated parity)</span>
+              <input
+                type="checkbox"
+                checked={!!config.comparable_mode}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  handleChange("comparable_mode", enabled);
+                  if (enabled) {
+                    setUseWarmStart(false);
+                    handleChange("cold_start_each_day", true);
+                    handleChange("auto_save_checkpoint", false);
+                    handleChange("checkpoint_path", null);
+                  }
+                }}
+              />
+            </label>
+            <div className="preset-copy">
+              Isolates each market day (including L2 feature build) so range runs match day-by-day audit behavior.
+            </div>
+
             <div className="form-group" style={{ marginBottom: "var(--spacing-sm)" }}>
               <label style={{ marginBottom: "8px" }}>Start Mode</label>
               <div style={{ display: "grid", gap: "8px" }}>
@@ -503,7 +537,9 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
                     type="radio"
                     name="start_mode"
                     checked={!useWarmStart}
-                    onChange={() => setUseWarmStart(false)}
+                    onChange={() => {
+                      setUseWarmStart(false);
+                    }}
                   />
                 </label>
                 <label className="field-row">
@@ -512,8 +548,10 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
                     type="radio"
                     name="start_mode"
                     checked={useWarmStart}
+                    disabled={!!config.comparable_mode}
                     onChange={() => {
                       setUseWarmStart(true);
+                      handleChange("comparable_mode", false);
                       handleChange("cold_start_each_day", false);
                       if (!config.checkpoint_path && checkpointCatalog.length > 0) {
                         handleChange("checkpoint_path", checkpointCatalog[0].path || null);
@@ -528,8 +566,8 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               <span>Cold Start Each Day (range runs)</span>
               <input
                 type="checkbox"
-                checked={!!config.cold_start_each_day}
-                disabled={useWarmStart}
+                checked={!!config.cold_start_each_day || !!config.comparable_mode}
+                disabled={useWarmStart || !!config.comparable_mode}
                 onChange={(e) => handleChange("cold_start_each_day", e.target.checked)}
               />
             </label>
@@ -541,12 +579,13 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               <span>Auto-save Checkpoint After Run</span>
               <input
                 type="checkbox"
-                checked={!!config.auto_save_checkpoint}
+                checked={!!config.auto_save_checkpoint && !config.comparable_mode}
+                disabled={!!config.comparable_mode}
                 onChange={(e) => handleChange("auto_save_checkpoint", e.target.checked)}
               />
             </label>
 
-            {useWarmStart && (
+            {useWarmStart && !config.comparable_mode && (
               <div className="form-group">
                 <label htmlFor="checkpoint_path">Checkpoint</label>
                 <select
@@ -564,7 +603,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               </div>
             )}
 
-            {useWarmStart && (
+            {useWarmStart && !config.comparable_mode && (
               <div className="form-group">
                 <label htmlFor="checkpoint_path_custom">Custom Checkpoint Path</label>
                 <input
@@ -581,7 +620,7 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
               type="button"
               className="btn btn-secondary"
               onClick={handleSaveCheckpointNow}
-              disabled={checkpointSaving}
+              disabled={checkpointSaving || !!config.comparable_mode}
               style={{ width: "100%" }}
             >
               {checkpointSaving ? "Saving checkpoint..." : "Save Checkpoint Now"}
@@ -615,16 +654,6 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
           {config.l2_confirm_enabled && (
             <>
               <div className="form-group">
-                <label htmlFor="l2_min_delta">L2 Min Delta</label>
-                <input
-                  id="l2_min_delta"
-                  type="number"
-                  step="100"
-                  value={config.l2_min_delta}
-                  onChange={(e) => handleChange("l2_min_delta", Number(e.target.value))}
-                />
-              </div>
-              <div className="form-group">
                 <label htmlFor="l2_min_imbalance">L2 Min Imbalance</label>
                 <input
                   id="l2_min_imbalance"
@@ -654,28 +683,6 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
                   onChange={(e) =>
                     handleChange("l2_min_directional_consistency", Number(e.target.value))
                   }
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="l2_min_participation_ratio">L2 Min Participation Ratio</label>
-                <input
-                  id="l2_min_participation_ratio"
-                  type="number"
-                  step="0.01"
-                  value={config.l2_min_participation_ratio}
-                  onChange={(e) =>
-                    handleChange("l2_min_participation_ratio", Number(e.target.value))
-                  }
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="l2_min_iceberg_bias">L2 Min Iceberg Bias</label>
-                <input
-                  id="l2_min_iceberg_bias"
-                  type="number"
-                  step="0.01"
-                  value={config.l2_min_iceberg_bias}
-                  onChange={(e) => handleChange("l2_min_iceberg_bias", Number(e.target.value))}
                 />
               </div>
               <div className="form-group">

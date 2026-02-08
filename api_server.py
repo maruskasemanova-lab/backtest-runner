@@ -6,6 +6,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Union
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -57,6 +58,7 @@ connected_clients: List[WebSocket] = []
 databento_svc = DatabentoService()
 STRATEGY_OVERRIDES_PATH = Path(__file__).parent / "strategy_overrides.json"
 AOS_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "aos_config.json"
+MARKET_TZ = ZoneInfo("America/New_York")
 
 
 def _load_strategy_overrides() -> Dict[str, Any]:
@@ -466,6 +468,65 @@ def _attach_l2_features(
     )
 
 
+def _normalize_l2_feature_map_for_market_day_sessions(
+    feature_map: Dict[int, Dict[str, float]],
+    bars: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Normalize day-scoped L2 fields per ET market day using the bar timeline.
+
+    This keeps the single-pass L2 build fast while removing cross-day carryover
+    (e.g., cumulative delta, delta acceleration, book pressure change) so
+    multi-day range runs remain comparable to isolated day-by-day cold runs.
+    """
+    if not feature_map or not bars:
+        return {"sessionized_days": 0, "sessionized_minutes": 0}
+
+    day_to_minute_keys: Dict[str, set[int]] = {}
+    for bar in bars:
+        ts_raw = bar.get("timestamp")
+        if ts_raw is None:
+            continue
+        try:
+            ts_utc = _to_utc_datetime(ts_raw)
+        except Exception:
+            continue
+        minute_key = int(ts_utc.timestamp() // 60)
+        if minute_key not in feature_map:
+            continue
+        day_key = ts_utc.astimezone(MARKET_TZ).date().isoformat()
+        day_to_minute_keys.setdefault(day_key, set()).add(minute_key)
+
+    sessionized_minutes = 0
+    for minute_keys in day_to_minute_keys.values():
+        ordered_keys = sorted(minute_keys)
+        running_cumulative = 0.0
+        prev_delta = 0.0
+        prev_book_pressure: Optional[float] = None
+        for minute_key in ordered_keys:
+            feats = feature_map.get(minute_key)
+            if not isinstance(feats, dict):
+                continue
+            delta = float(feats.get("l2_delta", 0.0) or 0.0)
+            book_pressure = float(feats.get("l2_book_pressure", 0.0) or 0.0)
+
+            running_cumulative += delta
+            feats["l2_cumulative_delta"] = running_cumulative
+            feats["l2_delta_acceleration"] = delta - prev_delta
+            feats["l2_book_pressure_delta"] = (
+                0.0 if prev_book_pressure is None else (book_pressure - prev_book_pressure)
+            )
+
+            prev_delta = delta
+            prev_book_pressure = book_pressure
+            sessionized_minutes += 1
+
+    return {
+        "sessionized_days": len(day_to_minute_keys),
+        "sessionized_minutes": sessionized_minutes,
+    }
+
+
 # ============ Pydantic Models ============
 class StartRunRequest(BaseModel):
     run_id: str
@@ -501,6 +562,7 @@ class StartRunRequest(BaseModel):
     l2_min_directional_consistency: float = 0.0
     l2_min_signed_aggression: float = 0.0
     cold_start_each_day: bool = False
+    comparable_mode: bool = False
     # Checkpoint: warm-start from a previous backtest's learning state
     checkpoint_path: Optional[str] = None
     auto_save_checkpoint: bool = True
@@ -647,6 +709,8 @@ async def update_aos_config(request: AOSUpdateRequest):
 async def start_run(request: StartRunRequest):
     """Start a new backtest run."""
     ticker = request.ticker.upper()
+    comparable_mode = bool(request.comparable_mode)
+    effective_cold_start_each_day = bool(request.cold_start_each_day or comparable_mode)
 
     # Resolve date range
     if request.date_from and request.date_to:
@@ -671,7 +735,8 @@ async def start_run(request: StartRunRequest):
 
     # Orchestrator state reset: cold start (full) or warm start (session-only).
     checkpoint_loaded = None
-    if request.checkpoint_path:
+    use_checkpoint = bool(request.checkpoint_path) and not comparable_mode
+    if use_checkpoint:
         # Warm start: reset only per-session state, then load checkpoint
         orchestrator_reset = await _reset_remote_orchestrator_state_scoped(
             request.strategy_api_url, scope="session"
@@ -682,6 +747,10 @@ async def start_run(request: StartRunRequest):
     else:
         # Cold start (default): full reset for deterministic backtests
         orchestrator_reset = await _reset_remote_orchestrator_state(request.strategy_api_url)
+        if comparable_mode and request.checkpoint_path:
+            logger.info(
+                "Comparable mode ignores checkpoint_path and always starts from a cold state."
+            )
 
     # Defensive cleanup in strategy API for reruns with the same run_id+ticker.
     await _clear_remote_strategy_sessions(request.strategy_api_url, request.run_id, ticker)
@@ -818,6 +887,9 @@ async def start_run(request: StartRunRequest):
         "bars_after_filter": len(bars),
     }
     use_l2 = bool(requested_l2_only or requested_l2_confirm)
+    l2_sessionized_by_market_day = bool(
+        comparable_mode and (range_start != range_end or bool(request.date_from and request.date_to))
+    )
     if use_l2:
         # Expand slightly to include last bar bucket in inclusive range.
         first_ts_utc = _to_utc_datetime(bars[0]["timestamp"])
@@ -827,6 +899,13 @@ async def start_run(request: StartRunRequest):
             start_dt_utc=first_ts_utc,
             end_dt_utc=last_ts_utc,
         )
+        if l2_sessionized_by_market_day:
+            build_stats.update(
+                _normalize_l2_feature_map_for_market_day_sessions(
+                    feature_map=feature_map,
+                    bars=bars,
+                )
+            )
         l2_stats.update(build_stats)
         bars, attach_stats = _attach_l2_features(bars, feature_map, l2_only=requested_l2_only)
         l2_stats.update(attach_stats)
@@ -875,7 +954,7 @@ async def start_run(request: StartRunRequest):
         l2_min_participation_ratio=l2_min_participation_ratio,
         l2_min_directional_consistency=l2_min_directional_consistency,
         l2_min_signed_aggression=l2_min_signed_aggression,
-        cold_start_each_day=request.cold_start_each_day,
+        cold_start_each_day=effective_cold_start_each_day,
     )
 
     if not bars:
@@ -952,7 +1031,7 @@ async def start_run(request: StartRunRequest):
     runner.on_decision(on_decision)
     
     # Store checkpoint auto-save metadata on runner for use after run_all
-    runner._checkpoint_auto_save = request.auto_save_checkpoint
+    runner._checkpoint_auto_save = bool(request.auto_save_checkpoint and not comparable_mode)
     runner._checkpoint_strategy_url = request.strategy_api_url
     runner._checkpoint_loaded = checkpoint_loaded
 
@@ -979,6 +1058,7 @@ async def start_run(request: StartRunRequest):
             "l2_min_participation_ratio": l2_min_participation_ratio,
             "l2_min_directional_consistency": l2_min_directional_consistency,
             "l2_min_signed_aggression": l2_min_signed_aggression,
+            "sessionized_by_market_day": l2_sessionized_by_market_day,
         },
         "execution_config": {
             "account_size_usd": request.account_size_usd,
@@ -993,7 +1073,8 @@ async def start_run(request: StartRunRequest):
             "adverse_flow_exit_enabled": request.adverse_flow_exit_enabled,
             "adverse_flow_threshold": request.adverse_flow_threshold,
             "adverse_flow_min_hold_bars": request.adverse_flow_min_hold_bars,
-            "cold_start_each_day": bool(request.cold_start_each_day),
+            "cold_start_each_day": effective_cold_start_each_day,
+            "comparable_mode": comparable_mode,
         },
         "first_bar": bars[0] if bars else None,
         "last_bar": bars[-1] if bars else None
@@ -1160,6 +1241,67 @@ async def get_processed_bars(run_id: str, ticker: str, date: str):
         "total_bars": len(runner.bars)
     }
 
+
+@app.get("/api/run/{run_id}/{ticker}/{date}/bar-details/{minute_key}")
+async def get_bar_details(run_id: str, ticker: str, date: str, minute_key: int):
+    """Get 1-second intrabar frames for a specific minute bar.
+    
+    Args:
+        run_id: The backtest run ID
+        ticker: Stock ticker symbol
+        date: Date in YYYY-MM-DD format
+        minute_key: Unix timestamp of the minute bar start (in seconds)
+    
+    Returns:
+        1-second frames with book/trade features for frontend visualization
+    """
+    from datetime import timezone
+    from src.l2_data_manager import L2DataManager
+    from src.intrabar_frame_builder import IntrabarFrameBuilder
+    
+    run_key = f"{run_id}:{ticker}:{date}"
+    
+    if run_key not in active_runners:
+        raise HTTPException(404, f"Run not found: {run_key}")
+    
+    # Convert minute_key to datetime
+    minute_start = datetime.fromtimestamp(minute_key, tz=timezone.utc)
+    minute_end = minute_start.replace(second=59, microsecond=999999)
+    
+    # Get L2 data manager (reuse if possible)
+    manager = L2DataManager()
+    builder = IntrabarFrameBuilder(manager=manager)
+    
+    try:
+        frames = builder.build_frames(ticker, minute_start, minute_end)
+        
+        if frames.empty:
+            return {
+                "minute_key": minute_key,
+                "ticker": ticker,
+                "frames": [],
+                "stats": {"has_data": False, "seconds": 0}
+            }
+        
+        # Convert to list of dicts for JSON serialization
+        # Convert timestamps to ISO strings
+        frames["ts_sec"] = frames["ts_sec"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        records = frames.to_dict(orient="records")
+        
+        return {
+            "minute_key": minute_key,
+            "ticker": ticker,
+            "frames": records,
+            "stats": {
+                "has_data": True,
+                "seconds": len(records),
+                "coverage_ratio": float(frames["coverage_ratio"].iloc[0]) if "coverage_ratio" in frames.columns else 0.0,
+                "total_trade_ticks": int(frames["trade_ticks_sec"].sum()) if "trade_ticks_sec" in frames.columns else 0,
+                "total_book_updates": int(frames["book_updates_sec"].sum()) if "book_updates_sec" in frames.columns else 0,
+            }
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Failed to load bar details: {str(e)}")
 
 @app.get("/api/run/{run_id}/{ticker}/{date}/markers")
 async def get_markers(run_id: str, ticker: str, date: str, marker_type: Optional[str] = None):

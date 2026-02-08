@@ -90,6 +90,31 @@ class L2DataManager:
             print(f"No L2 data found for {ticker} ({start_date} to {end_date})")
             return None
 
+        # Check cache before reading files
+        if ticker in self.data:
+            cached_df = self.data[ticker]
+            if not cached_df.empty:
+                try:
+                    # Convert query dates to timezone-aware UTC constraints
+                    q_start = pd.to_datetime(start_date).tz_localize("UTC") if pd.to_datetime(start_date).tz is None else pd.to_datetime(start_date).tz_convert("UTC")
+                    # Set end date to end of day if it's just a date string, to ensure full coverage check
+                    q_end = pd.to_datetime(end_date)
+                    if q_end.tz is None:
+                        q_end = q_end.replace(hour=23, minute=59, second=59, microsecond=999999).tz_localize("UTC")
+                    else:
+                         q_end = q_end.tz_convert("UTC")
+
+                    if len(cached_df) > 0:
+                        c_min = cached_df.index.min()
+                        c_max = cached_df.index.max()
+                        
+                        # Relaxed check: valid if we cover the requested range
+                        if c_min <= q_start and c_max >= q_end:
+                             print(f"Using cached L2 data for {ticker} ({len(cached_df)} rows)")
+                             return cached_df
+                except Exception as e:
+                     print(f"Cache check failed: {e}")
+
         try:
             frames = []
             print(f"Loading L2 data from {len(matched_files)} file(s) for {ticker}...")
@@ -108,11 +133,17 @@ class L2DataManager:
                 return None
 
             if len(frames) == 1:
-                merged = frames[0].sort_index()
+                merged = frames[0]
             else:
                 merged = pd.concat(frames, axis=0)
-                merged = merged.sort_index()
-                merged = merged[~merged.index.duplicated(keep='last')]
+
+            merged = merged.sort_index()
+
+            # Keep behavior consistent between single-day and multi-day loads:
+            # remove only exact duplicate records from overlapping imports, but
+            # preserve distinct events that legitimately share the same timestamp.
+            dedupe_mask = ~merged.reset_index().duplicated(keep="last")
+            merged = merged.loc[dedupe_mask.to_numpy()]
 
             self.data[ticker] = merged
             print(f"Loaded {len(merged)} rows for {ticker}")
@@ -442,3 +473,38 @@ class L2DataManager:
         Returns the order book (MBP) at a specific timestamp.
         """
         pass
+
+    def get_intrabar_frames(
+        self,
+        ticker: str,
+        start_time,
+        end_time,
+    ):
+        """
+        Get 1-second intrabar frames for visualization.
+        
+        Args:
+            ticker: Stock ticker
+            start_time: Start time (datetime or ISO string)
+            end_time: End time (datetime or ISO string)
+            
+        Returns:
+            pd.DataFrame with 1-second features
+        """
+        from .intrabar_frame_builder import IntrabarFrameBuilder
+        
+        # Normalize times
+        if isinstance(start_time, str):
+            start_time = pd.to_datetime(start_time)
+        if isinstance(end_time, str):
+            end_time = pd.to_datetime(end_time)
+            
+        if start_time.tzinfo is None:
+            from datetime import timezone
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        if end_time.tzinfo is None:
+            from datetime import timezone
+            end_time = end_time.replace(tzinfo=timezone.utc)
+        
+        builder = IntrabarFrameBuilder(manager=self)
+        return builder.build_frames(ticker, start_time, end_time)

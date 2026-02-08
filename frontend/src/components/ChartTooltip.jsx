@@ -69,6 +69,50 @@ function ChartTooltip({ marker, visible, x, y }) {
     }
   };
   
+  // Recursive function to render values
+  const renderValue = (val, keyPrefix = '') => {
+    if (val === null || val === undefined) return 'N/A';
+    
+    if (typeof val === 'object' && !Array.isArray(val)) {
+      if (Object.keys(val).length === 0) return '{}';
+      
+      return (
+        <div className="object-container">
+          {Object.entries(val).map(([k, v]) => (
+            <div key={`${keyPrefix}-${k}`} className="object-row">
+              <span className="object-key">{k}:</span>
+              <div className="nested-object">
+                {renderValue(v, `${keyPrefix}-${k}`)}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    
+    if (Array.isArray(val)) {
+      if (val.length === 0) return '[]';
+      return (
+        <div className="object-container">
+          {val.map((v, i) => (
+             <div key={`${keyPrefix}-${i}`} className="object-row">
+              <span className="object-key">[{i}]:</span>
+               <div className="nested-object">
+                 {renderValue(v, `${keyPrefix}-${i}`)}
+               </div>
+             </div>
+          ))}
+        </div>
+      );
+    }
+    
+    if (typeof val === 'number') {
+      return Math.abs(val) < 0.01 ? val.toFixed(6) : val.toFixed(4);
+    }
+    
+    return String(val);
+  };
+
   // Render entry marker details
   const renderEntryDetails = () => {
     if (!details) return null;
@@ -122,9 +166,7 @@ function ChartTooltip({ marker, visible, x, y }) {
                 <div key={key} className="tooltip-meta-row">
                   <span className="tooltip-meta-key">{key}:</span>
                   <span className="tooltip-meta-value">
-                    {typeof value === 'number' 
-                      ? (Math.abs(value) < 0.01 ? value.toFixed(6) : value.toFixed(4))
-                      : String(value)}
+                    {renderValue(value, key)}
                   </span>
                 </div>
               ))}
@@ -257,13 +299,35 @@ function ChartTooltip({ marker, visible, x, y }) {
           border: 1px solid rgba(15, 23, 42, 0.12);
           border-radius: 8px;
           padding: 12px;
-          min-width: 280px;
-          max-width: 350px;
+          min-width: 320px;
+          max-width: 400px;
+          max-height: 500px;
+          overflow-y: auto;
           box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
           z-index: 1000;
           font-size: 13px;
           color: #1b1a19;
           backdrop-filter: blur(10px);
+          overscroll-behavior: contain;
+        }
+
+        /* Scrollbar styling */
+        .chart-tooltip::-webkit-scrollbar {
+          width: 6px;
+        }
+        
+        .chart-tooltip::-webkit-scrollbar-track {
+          background: rgba(0, 0, 0, 0.05);
+          border-radius: 3px;
+        }
+        
+        .chart-tooltip::-webkit-scrollbar-thumb {
+          background: rgba(0, 0, 0, 0.2);
+          border-radius: 3px;
+        }
+        
+        .chart-tooltip::-webkit-scrollbar-thumb:hover {
+          background: rgba(0, 0, 0, 0.3);
         }
         
         .tooltip-header {
@@ -273,6 +337,12 @@ function ChartTooltip({ marker, visible, x, y }) {
           margin-bottom: 10px;
           padding-bottom: 8px;
           border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+          position: sticky;
+          top: -12px;
+          background: rgba(255, 255, 255, 0.95);
+          z-index: 1;
+          margin-top: -12px;
+          padding-top: 12px;
         }
         
         .tooltip-title {
@@ -296,18 +366,23 @@ function ChartTooltip({ marker, visible, x, y }) {
         .tooltip-row {
           display: flex;
           justify-content: space-between;
-          align-items: center;
+          align-items: flex-start;
+          gap: 10px;
         }
         
         .tooltip-label {
           color: #6b655c;
           font-size: 12px;
+          white-space: nowrap;
+          flex-shrink: 0;
         }
         
         .tooltip-value {
           color: #1b1a19;
           font-weight: 500;
           font-family: var(--font-mono);
+          text-align: right;
+          word-break: break-word;
         }
         
         .tooltip-value.positive {
@@ -332,6 +407,13 @@ function ChartTooltip({ marker, visible, x, y }) {
           border-top: 1px solid rgba(15, 23, 42, 0.08);
         }
         
+        .tooltip-section-title {
+          font-weight: 600;
+          color: #4b5563;
+          margin-bottom: 5px;
+          font-size: 12px;
+        }
+        
         .tooltip-reasoning {
           margin-top: 6px;
           padding: 8px;
@@ -340,6 +422,37 @@ function ChartTooltip({ marker, visible, x, y }) {
           font-size: 11px;
           line-height: 1.4;
           color: #5c574f;
+        }
+        
+        .object-container {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          width: 100%;
+        }
+
+        .object-row {
+          display: flex;
+          flex-direction: column;
+          border-left: 2px solid rgba(15, 23, 42, 0.1);
+          padding-left: 8px;
+          margin-bottom: 4px;
+        }
+
+        .object-key {
+          font-size: 11px;
+          color: #6b7280;
+          font-weight: 500;
+        }
+
+        .object-value {
+          font-family: var(--font-mono);
+          font-size: 11px;
+          color: #374151;
+        }
+
+        .nested-object {
+          margin-left: 4px;
         }
         
         .tooltip-metadata {

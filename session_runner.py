@@ -31,6 +31,7 @@ class RunConfig:
 class SessionRunner:
     """Runs a trading session by feeding bars to the strategy evaluator."""
     L2_PAYLOAD_KEYS = (
+        "l2_schema_version",
         "l2_delta",
         "l2_buy_volume",
         "l2_sell_volume",
@@ -39,10 +40,13 @@ class SessionRunner:
         "l2_bid_depth_total",
         "l2_ask_depth_total",
         "l2_book_pressure",
-        "l2_book_pressure_change",
+        "l2_book_pressure_delta",
         "l2_iceberg_buy_count",
         "l2_iceberg_sell_count",
         "l2_iceberg_bias",
+        "l2_quality_coverage_ratio",
+        "l2_quality_trade_ticks",
+        "l2_quality_book_updates",
     )
     
     def __init__(self, config: RunConfig):

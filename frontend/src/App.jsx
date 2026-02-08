@@ -8,6 +8,7 @@ import RunConfig from './components/RunConfig';
 import StrategySettings from './components/StrategySettings';
 import MultiLayerSettings from './components/MultiLayerSettings';
 import DataManager from './components/DataManager';
+import IntrabarPanel from './components/IntrabarPanel';
 
 const toUnixSeconds = (value) => {
   if (value === null || value === undefined) return null;
@@ -129,6 +130,7 @@ function App() {
   const [markers, setMarkers] = useState([]);
   const [selectedMarker, setSelectedMarker] = useState(null);
   const [currentBar, setCurrentBar] = useState(null);
+  const [selectedIntrabar, setSelectedIntrabar] = useState(null);
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [strategyApiUrl, setStrategyApiUrl] = useState("http://localhost:8001");
   
@@ -162,63 +164,128 @@ function App() {
   
   // WebSocket
   const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const isMountedRef = useRef(true); // Track mount status
   const activeRunId = runKey ? String(runKey).split(':')[0] : null;
   const activeRunTicker = runKey ? String(runKey).split(':')[1] : null;
-  
-  // Connect WebSocket
+
+  // Track mount status
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Connect WebSocket - dependent only on hostname
   useEffect(() => {
     const connectWs = () => {
+      // Avoid multiple connections
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      console.log('Connecting WebSocket...');
+      // Clean up existing closed/closing socket just in case
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch(e) {}
+        wsRef.current = null;
+      }
+
       const ws = new WebSocket(`ws://${window.location.hostname}:8002/ws/live`);
+      wsRef.current = ws;
       
       ws.onopen = () => {
+        if (!isMountedRef.current) {
+            ws.close();
+            return;
+        }
         console.log('WebSocket connected');
         setIsConnected(true);
-        if (activeRunId) {
-          ws.send(JSON.stringify({ type: 'subscribe', run_id: activeRunId }));
-        }
+        // Subscription will be handled by the other useEffect
       };
       
       ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        const msgRunId = data?.run_id ? String(data.run_id) : null;
-        const msgTicker = data?.ticker ? String(data.ticker).toUpperCase() : null;
-        const currentTicker = activeRunTicker ? String(activeRunTicker).toUpperCase() : null;
-
-        // Backend broadcasts all runs; ignore frames that do not belong to the active run.
-        if (activeRunId && msgRunId && msgRunId !== activeRunId) return;
-        if (currentTicker && msgTicker && msgTicker !== currentTicker) return;
-        
-        if (data.type === 'bar') {
-          handleNewBar(data.bar);
-        } else if (data.type === 'decision') {
-          handleNewDecision(data.marker);
-        } else if (data.type === 'download_progress') {
-          setDownloadProgress(data);
+        if (!isMountedRef.current) return;
+        try {
+            const data = JSON.parse(event.data);
+            handleWsMessage(data);
+        } catch (err) {
+            console.error("Failed to parse WS message:", err);
         }
       };
       
       ws.onclose = () => {
+        if (!isMountedRef.current) return;
         console.log('WebSocket disconnected');
         setIsConnected(false);
+        wsRef.current = null;
+        
         // Reconnect after 3 seconds
-        setTimeout(connectWs, 3000);
+        if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = setTimeout(connectWs, 3000);
       };
       
       ws.onerror = (error) => {
         console.error('WebSocket error:', error);
+        // Do not agressively close here, let onclose handle it or browser handle it
       };
-      
-      wsRef.current = ws;
     };
     
     connectWs();
     
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      // In Strict Mode, we DO NOT want to close the socket immediately if we just opened it.
+      // But we must clean up if we are truly unmounting.
+      // We can check if we are unmounting by using the ref, but the ref cleanup runs after this?
+      // Actually, simple ref-based protection in onopen/onmessage is enough for safety.
+      // For the socket itself:
+      if (wsRef.current && isMountedRef.current === false) { 
+         // Only close if we are sure we are unmounting (ref should be false by now? No, ref cleanup runs before or same time?)
+         // React effects cleanup runs before the next effect or on unmount.
+         // Let's just rely on the fact that if we re-run, we check readyState.
+         wsRef.current.close();
+         wsRef.current = null;
       }
     };
-  }, [runKey, activeRunId, activeRunTicker]);
+  }, []); // Empty dependency array - connect once on mount
+
+  // Handle subscriptions when activeRunId changes or socket connects
+  useEffect(() => {
+     const subscribe = () => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && activeRunId) {
+            console.log(`Subscribing to run: ${activeRunId}`);
+            wsRef.current.send(JSON.stringify({ type: 'subscribe', run_id: activeRunId }));
+        }
+     };
+
+     // Subscribe immediately if open, or wait for connection
+     if (isConnected) {
+         subscribe();
+     } else {
+         // The onopen handler in the connection effect could handle this, 
+         // but since we split them, we can just watch isConnected here.
+     }
+  }, [activeRunId, isConnected]);
+
+  const handleWsMessage = useCallback((data) => {
+    const msgRunId = data?.run_id ? String(data.run_id) : null;
+    const msgTicker = data?.ticker ? String(data.ticker).toUpperCase() : null;
+    const currentTicker = activeRunTicker ? String(activeRunTicker).toUpperCase() : null;
+
+    // Backend broadcasts all runs; ignore frames that do not belong to the active run.
+    if (activeRunId && msgRunId && msgRunId !== activeRunId) return;
+    if (currentTicker && msgTicker && msgTicker !== currentTicker) return;
+    
+    if (data.type === 'bar') {
+      handleNewBar(data.bar);
+    } else if (data.type === 'decision') {
+      handleNewDecision(data.marker);
+    } else if (data.type === 'download_progress') {
+      setDownloadProgress(data);
+    }
+  }, [activeRunId, activeRunTicker]);
   
   // Handle new bar from WebSocket
   const handleNewBar = useCallback((bar) => {
@@ -818,6 +885,7 @@ function App() {
                   markers={filteredMarkers}
                   icebergs={filteredIcebergs}
                   onMarkerClick={handleMarkerClick}
+                  onBarClick={setSelectedIntrabar}
                   selectedMarker={selectedMarker}
                   chartState={chartState}
                   onChartStateChange={handleChartStateChange}
@@ -861,6 +929,16 @@ function App() {
                 <div className="bar-stat-label">Close</div>
               </div>
             </div>
+          )}
+          {/* Intrabar Panel - shown when a bar is clicked */}
+          {selectedIntrabar && runKey && (
+            <IntrabarPanel
+              runId={runKey.split(':')[0]}
+              ticker={runKey.split(':')[1]}
+              date={runKey.split(':')[2]}
+              selectedBar={selectedIntrabar}
+              onClose={() => setSelectedIntrabar(null)}
+            />
           )}
         </section>
         

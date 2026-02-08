@@ -37,7 +37,7 @@ const toIsoTimestamp = (value) => {
   return new Date(seconds * 1000).toISOString();
 };
 
-function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMarker, chartState, onChartStateChange, l2Data, priceRange, onPriceRangeChange }) {
+function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, selectedMarker, chartState, onChartStateChange, l2Data, priceRange, onPriceRangeChange }) {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -577,6 +577,18 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
     const handleClick = (param) => {
       setTooltip((prev) => ({ ...prev, visible: false }));
 
+      // Always call onBarClick if we have a valid time (for intrabar panel)
+      if (param?.time && onBarClick) {
+        const barTime = toUnixSeconds(param.time);
+        if (Number.isFinite(barTime)) {
+          // Find the bar data for this time
+          const bar = bars?.find(b => Math.floor(b.time) === Math.floor(barTime));
+          if (bar) {
+            onBarClick(bar);
+          }
+        }
+      }
+
       if (!param?.time || markerTimeMap.size === 0) return;
 
       const marker = resolveMarkerForClick(param);
@@ -609,7 +621,7 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, selectedMark
         // Ignore cleanup errors
       }
     };
-  }, [clickableMarkers, onMarkerClick]);
+  }, [clickableMarkers, onMarkerClick, onBarClick, bars]);
 
   // Update markers (Decisions + Delta/CVD + Icebergs)
   useEffect(() => {
