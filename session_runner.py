@@ -3,12 +3,13 @@ Session Runner - Orchestrates the connection between data source and strategy ev
 """
 import asyncio
 import aiohttp
-from datetime import datetime, time
-from typing import Dict, Any, List, Optional
+from datetime import datetime, time, timedelta, timezone
+from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field
 import logging
 
 from decision_tracker import DecisionTracker, MarkerType
+from performance_tracker import PerformanceTracker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SessionRunner")
@@ -24,6 +25,7 @@ class RunConfig:
     date_to: Optional[str] = None
     strategy_api_url: str = "http://localhost:8001"
     regime_detection_minutes: int = 15
+    intrabar_execution_recalc_1s: bool = False
     auto_close_eod: bool = True
     eod_close_time: time = field(default_factory=lambda: time(15, 55))
 
@@ -51,11 +53,12 @@ class SessionRunner:
     
     def __init__(self, config: RunConfig):
         self.config = config
-        self.tracker = DecisionTracker(
+        self.decision_tracker = DecisionTracker(
             run_id=config.run_id,
             ticker=config.ticker,
             date=config.date
         )
+        self.perf_tracker = PerformanceTracker()
         
         # State
         self.current_bar_index = 0
@@ -66,10 +69,14 @@ class SessionRunner:
         self.phase = "INITIALIZED"
         self.last_response: Optional[Dict[str, Any]] = None
         self.session_summary: Optional[Dict[str, Any]] = None
-        self._session_end_marker_emitted = False
+        self._session_end_marker_keys: Set[str] = set()
+        self._position_active: bool = False
+        self._pending_entry: bool = False
 
         # Cross-asset reference bars (e.g. QQQ), keyed by ISO timestamp
         self.ref_bars_map: Dict[str, Dict[str, Any]] = {}
+        self.l2_manager: Optional[Any] = None
+        self._intrabar_quote_cache: Dict[int, Optional[List[Dict[str, float]]]] = {}
 
         # Callbacks for real-time updates
         self._on_bar_callbacks: List[callable] = []
@@ -109,8 +116,122 @@ class SessionRunner:
         """Load bars for the session."""
         self.bars = bars
         self.current_bar_index = 0
-        self._session_end_marker_emitted = False
+        self._session_end_marker_keys.clear()
+        self._position_active = False
+        self._pending_entry = False
+        self._intrabar_quote_cache.clear()
         logger.info(f"Loaded {len(bars)} bars for session")
+
+    @staticmethod
+    def _to_utc_datetime(value: Any) -> datetime:
+        """Normalize timestamp-like values to timezone-aware UTC datetime."""
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            raw = str(value)
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    def _should_attach_intrabar_quotes(self, include_pending_entry: bool = False) -> bool:
+        return (
+            bool(self.config.intrabar_execution_recalc_1s)
+            and bool(self.l2_manager is not None)
+            and (self._position_active or self._pending_entry or include_pending_entry)
+        )
+
+    def _load_intrabar_quotes(self, timestamp: datetime) -> Optional[List[Dict[str, float]]]:
+        """
+        Load compact 1-second bid/ask quotes for one minute.
+
+        Returns cached payload format:
+          [{"s": second, "bid": top_bid_px, "ask": top_ask_px}, ...]
+        """
+        if self.l2_manager is None:
+            return None
+
+        ts_utc = self._to_utc_datetime(timestamp)
+        minute_start = ts_utc.replace(second=0, microsecond=0)
+        minute_key = int(minute_start.timestamp())
+        if minute_key in self._intrabar_quote_cache:
+            return self._intrabar_quote_cache[minute_key]
+
+        minute_end = minute_start + timedelta(seconds=59, microseconds=999999)
+        try:
+            frames = self.l2_manager.get_intrabar_frames(
+                ticker=self.config.ticker,
+                start_time=minute_start,
+                end_time=minute_end,
+            )
+        except Exception as exc:
+            logger.debug(f"Intrabar quote load failed for {self.config.ticker} @ {minute_start}: {exc}")
+            self._intrabar_quote_cache[minute_key] = None
+            return None
+
+        if frames is None or len(frames) == 0:
+            self._intrabar_quote_cache[minute_key] = None
+            return None
+
+        quote_rows: List[Dict[str, float]] = []
+        for _, row in frames.iterrows():
+            if not bool(row.get("has_book_coverage", False)):
+                continue
+
+            try:
+                bid = float(row.get("top_bid_px", 0.0) or 0.0)
+                ask = float(row.get("top_ask_px", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+
+            if bid <= 0.0 and ask <= 0.0:
+                continue
+
+            ts_sec = row.get("ts_sec")
+            try:
+                sec_dt = self._to_utc_datetime(ts_sec)
+                second = int(sec_dt.second)
+            except Exception:
+                continue
+
+            quote_rows.append(
+                {
+                    "s": second,
+                    "bid": round(bid, 6),
+                    "ask": round(ask, 6),
+                }
+            )
+
+        quote_rows.sort(key=lambda item: item["s"])
+        cached = quote_rows if quote_rows else None
+        self._intrabar_quote_cache[minute_key] = cached
+        return cached
+
+    def _update_execution_state(self, response: Dict[str, Any]) -> None:
+        """Track whether next bar needs execution-level intrabar payload."""
+        action = str(response.get("action", "") or "")
+        opened = "position_opened" in response
+        closed = (
+            "position_closed" in response
+            or action.startswith("position_closed_")
+            or action == "max_loss_stop"
+            or action == "session_ended"
+        )
+
+        if opened:
+            self._position_active = True
+        if closed:
+            self._position_active = False
+
+        queued = bool(response.get("queued_for_next_bar")) or action == "signal_queued"
+        if queued:
+            self._pending_entry = True
+
+        if response.get("phase") == "END_OF_DAY":
+            self._position_active = False
+            self._pending_entry = False
     
     async def step(self, notify: bool = True) -> Dict[str, Any]:
         """Process the next bar and return the result.
@@ -149,7 +270,7 @@ class SessionRunner:
         
         # First bar - add session start marker
         if self.current_bar_index == 0:
-            marker = self.tracker.add_session_start(
+            marker = self.decision_tracker.add_session_start(
                 timestamp=timestamp,
                 bar_index=0,
                 price=bar['close']
@@ -157,6 +278,10 @@ class SessionRunner:
             await self._notify_decision(marker.to_dict())
         
         # Send to strategy API
+        consume_pending_entry = self._pending_entry
+        if consume_pending_entry:
+            # Pending signal is consumed at this bar open (fill or reject).
+            self._pending_entry = False
         payload = {
             "run_id": self.config.run_id,
             "ticker": self.config.ticker,
@@ -171,6 +296,11 @@ class SessionRunner:
         for l2_key in self.L2_PAYLOAD_KEYS:
             if l2_key in bar:
                 payload[l2_key] = bar.get(l2_key)
+
+        if self._should_attach_intrabar_quotes(include_pending_entry=consume_pending_entry):
+            intrabar_quotes = self._load_intrabar_quotes(timestamp)
+            if intrabar_quotes:
+                payload["intrabar_quotes_1s"] = intrabar_quotes
 
         # Attach cross-asset reference bar if available
         ts_key = (timestamp.isoformat() if hasattr(timestamp, 'isoformat')
@@ -192,6 +322,8 @@ class SessionRunner:
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
+                        if consume_pending_entry:
+                            self._pending_entry = True
                         return {
                             "success": False,
                             "error": f"API error {resp.status}: {error_text}",
@@ -200,6 +332,8 @@ class SessionRunner:
                     
                     result = await resp.json()
         except aiohttp.ClientError as e:
+            if consume_pending_entry:
+                self._pending_entry = True
             return {
                 "success": False,
                 "error": f"Connection error: {str(e)}",
@@ -208,6 +342,7 @@ class SessionRunner:
         
         # Update phase
         self.phase = result.get('phase', self.phase)
+        self._update_execution_state(result)
         
         # Process decision markers from response
         await self._process_decision_markers(result, bar, timestamp)
@@ -236,7 +371,7 @@ class SessionRunner:
             regime = response.get('regime')
             if regime:
                 explanation = self._generate_regime_explanation(response)
-                marker = self.tracker.add_regime_detected(
+                marker = self.decision_tracker.add_regime_detected(
                     timestamp=timestamp,
                     bar_index=self.current_bar_index,
                     price=bar['close'],
@@ -249,7 +384,7 @@ class SessionRunner:
                 # Also add strategy selected marker for this day
                 strategy = self._extract_strategy_label(response)
                 if strategy:
-                    marker = self.tracker.add_strategy_selected(
+                    marker = self.decision_tracker.add_strategy_selected(
                         timestamp=timestamp,
                         bar_index=self.current_bar_index,
                         price=bar['close'],
@@ -271,7 +406,7 @@ class SessionRunner:
                     "indicators": regime_indicators,
                 }
                 explanation = f"Intraday refresh: {self._generate_regime_explanation(update_payload)}"
-                marker = self.tracker.add_regime_detected(
+                marker = self.decision_tracker.add_regime_detected(
                     timestamp=timestamp,
                     bar_index=self.current_bar_index,
                     price=bar['close'],
@@ -286,7 +421,7 @@ class SessionRunner:
                 or self._extract_strategy_label(response)
             )
             if strategy and regime:
-                marker = self.tracker.add_strategy_selected(
+                marker = self.decision_tracker.add_strategy_selected(
                     timestamp=timestamp,
                     bar_index=self.current_bar_index,
                     price=bar['close'],
@@ -296,40 +431,10 @@ class SessionRunner:
                 )
                 await self._notify_decision(marker.to_dict())
         
-        # Candlestick pattern markers are relevant only for multi-layer engine.
-        # Evidence engine can still internally consume pattern evidence, but we
-        # avoid emitting standalone "Pattern" log entries to keep the sidebar
-        # aligned with the selected decision mode.
-        patterns = response.get('patterns_detected', [])
-        layer_scores = response.get('layer_scores')
-        engine_name = ""
-        if isinstance(layer_scores, dict):
-            engine_name = str(layer_scores.get("engine", "")).strip().lower()
-        show_pattern_marker = not engine_name.startswith("evidence")
-
-        if patterns and show_pattern_marker:
-            # Determine dominant direction
-            bullish = [p for p in patterns if p.get('direction') == 'bullish']
-            bearish = [p for p in patterns if p.get('direction') == 'bearish']
-            if len(bullish) >= len(bearish):
-                direction = 'bullish' if bullish else 'neutral'
-            else:
-                direction = 'bearish'
-
-            marker = self.tracker.add_pattern_detected(
-                timestamp=timestamp,
-                bar_index=self.current_bar_index,
-                price=bar['close'],
-                patterns=patterns,
-                direction=direction,
-                layer_scores=layer_scores,
-            )
-            await self._notify_decision(marker.to_dict())
-
         # Signals generated
         signals = response.get('signals', [])
         for signal in signals:
-            marker = self.tracker.add_signal(
+            marker = self.decision_tracker.add_signal(
                 timestamp=timestamp,
                 bar_index=self.current_bar_index,
                 price=signal.get('price', bar['close']),
@@ -353,7 +458,7 @@ class SessionRunner:
             confidence = pos.get('confidence', signal_data.get('confidence', 50))
             metadata = pos.get('metadata', signal_data.get('metadata', {}))
             
-            marker = self.tracker.add_entry(
+            marker = self.decision_tracker.add_entry(
                 timestamp=timestamp,
                 bar_index=self.current_bar_index,
                 price=pos.get('entry_price', bar['close']),
@@ -373,7 +478,7 @@ class SessionRunner:
         # Trades closed
         if 'position_closed' in response:
             pos = response['position_closed']
-            marker = self.tracker.add_exit(
+            marker = self.decision_tracker.add_exit(
                 timestamp=timestamp,
                 bar_index=self.current_bar_index,
                 price=pos.get('exit_price', bar['close']),
@@ -404,21 +509,49 @@ class SessionRunner:
             )
             await self._notify_decision(marker.to_dict())
 
+            # Record in Performance Tracker
+            self.perf_tracker.record_trade(
+                strategy=pos.get('strategy', 'unknown'),
+                regime=pos.get('regime', 'unknown'),
+                ticker=self.config.ticker,
+                date=self.config.date,
+                side=pos.get('side', 'long'),
+                entry_price=pos.get('entry_price', 0.0),
+                exit_price=pos.get('exit_price', bar['close']),
+                entry_time=pos.get('entry_time', ''),
+                exit_time=timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
+                pnl_pct=pos.get('pnl_pct', 0.0),
+                pnl_dollars=pos.get('pnl_dollars', 0.0),
+                gross_pnl_pct=pos.get('gross_pnl_pct', 0.0),
+                total_costs=pos.get('total_costs', 0.0),
+                exit_reason=pos.get('exit_reason', 'unknown'),
+                bars_held=pos.get('bars_held', 0),
+                flow_strategy=pos.get('flow_strategy', False),
+                book_pressure_confirmed=pos.get('book_pressure_confirmed'),
+                book_pressure_avg=pos.get('book_pressure_avg'),
+                book_pressure_trend=pos.get('book_pressure_trend'),
+                signed_aggression=pos.get('signed_aggression')
+            )
+
         # Session ended
         if (
-            not self._session_end_marker_emitted
-            and response.get('phase') == 'END_OF_DAY'
-            and 'session_summary' in response
+            response.get('phase') == 'END_OF_DAY'
+            and isinstance(response.get('session_summary'), dict)
         ):
             self.session_summary = response['session_summary']
-            marker = self.tracker.add_session_end(
-                timestamp=timestamp,
-                bar_index=self.current_bar_index,
-                price=bar['close'],
-                summary=self.session_summary
+            marker_key = str(
+                self.session_summary.get("date")
+                or (timestamp.date().isoformat() if hasattr(timestamp, "date") else timestamp)
             )
-            self._session_end_marker_emitted = True
-            await self._notify_decision(marker.to_dict())
+            if marker_key not in self._session_end_marker_keys:
+                marker = self.decision_tracker.add_session_end(
+                    timestamp=timestamp,
+                    bar_index=self.current_bar_index,
+                    price=bar['close'],
+                    summary=self.session_summary
+                )
+                self._session_end_marker_keys.add(marker_key)
+                await self._notify_decision(marker.to_dict())
 
     @staticmethod
     def _extract_strategy_label(response: Dict[str, Any]) -> Optional[str]:
@@ -565,16 +698,16 @@ class SessionRunner:
             "phase": self.phase,
             "is_running": self.is_running,
             "is_paused": self.is_paused,
-            "markers_count": len(self.tracker.markers)
+            "markers_count": len(self.decision_tracker.markers)
         }
     
     def get_markers(self) -> List[Dict[str, Any]]:
         """Get all decision markers."""
-        return self.tracker.get_markers()
+        return self.decision_tracker.get_markers()
     
     def get_chart_annotations(self) -> List[Dict[str, Any]]:
         """Get markers formatted for chart display."""
-        return self.tracker.get_chart_annotations()
+        return self.decision_tracker.get_chart_annotations()
     
     def get_processed_bars(self) -> List[Dict[str, Any]]:
         """Get all bars processed so far."""
@@ -582,6 +715,7 @@ class SessionRunner:
     
     def get_summary(self) -> Dict[str, Any]:
         """Get session summary."""
+        summary = self._build_session_summary()
         return {
             "run_id": self.config.run_id,
             "ticker": self.config.ticker,
@@ -589,6 +723,98 @@ class SessionRunner:
             "total_bars": len(self.bars),
             "processed_bars": self.current_bar_index,
             "phase": self.phase,
-            "markers": self.tracker.get_markers(),
-            "session_summary": self.session_summary
+            "markers": self.decision_tracker.get_markers(),
+            "session_summary": summary
         }
+
+    def _build_session_summary(self) -> Optional[Dict[str, Any]]:
+        """
+        Build a run-level summary that stays accurate for date ranges.
+
+        Strategy API's session_summary can represent the most recent (or first)
+        market day only, so we recompute core totals from recorded closed trades.
+        """
+        base_summary = dict(self.session_summary) if isinstance(self.session_summary, dict) else {}
+        overall = self.perf_tracker.get_overall_stats()
+        total_trades = int(overall.get("total_trades", 0) or 0)
+        if total_trades <= 0:
+            if base_summary:
+                base_summary.setdefault("run_id", self.config.run_id)
+                base_summary.setdefault("ticker", self.config.ticker)
+                base_summary.setdefault("date", self.config.date)
+                base_summary["bars_processed"] = self.current_bar_index
+                return base_summary
+            return None
+
+        trades = self.perf_tracker.get_all_trades()
+        pnl_pct_values = [float(t.pnl_pct) for t in trades]
+        pnl_dollar_values = [float(t.pnl_dollars) for t in trades]
+        total_pnl_dollars = float(overall.get("total_pnl_dollars", 0.0) or 0.0)
+        total_costs = float(overall.get("total_costs", 0.0) or 0.0)
+
+        gross_wins = sum(x for x in pnl_dollar_values if x > 0)
+        gross_losses = abs(sum(x for x in pnl_dollar_values if x <= 0))
+        profit_factor_dollars = (gross_wins / gross_losses) if gross_losses > 0 else float("inf")
+
+        running = 0.0
+        peak = 0.0
+        max_drawdown_dollars = 0.0
+        for pnl in pnl_dollar_values:
+            running += pnl
+            peak = max(peak, running)
+            max_drawdown_dollars = max(max_drawdown_dollars, peak - running)
+
+        merged = {
+            "ticker": self.config.ticker,
+            "date": self.config.date,
+            "run_id": self.config.run_id,
+            "regime": base_summary.get("regime") or (self.last_response or {}).get("regime"),
+            "micro_regime": base_summary.get("micro_regime") or (self.last_response or {}).get("micro_regime"),
+            "strategy": base_summary.get("strategy") or (self.last_response or {}).get("strategy"),
+            "total_trades": total_trades,
+            "winning_trades": int(overall.get("winning_trades", 0) or 0),
+            "losing_trades": int(overall.get("losing_trades", 0) or 0),
+            "win_rate": float(overall.get("win_rate", 0.0) or 0.0),
+            "trades": [t.to_dict() for t in trades],
+            "total_pnl_pct": round(float(overall.get("total_pnl_pct", 0.0) or 0.0), 4),
+            "avg_pnl_pct": round(float(overall.get("avg_trade_pnl", 0.0) or 0.0), 4),
+            "total_pnl_dollars": round(total_pnl_dollars, 4),
+            "avg_pnl_dollars": round(total_pnl_dollars / total_trades, 4),
+            "total_costs": round(total_costs, 4),
+            "best_trade": round(max(pnl_pct_values), 4),
+            "worst_trade": round(min(pnl_pct_values), 4),
+            "profit_factor_dollars": (
+                "inf" if profit_factor_dollars == float("inf") else round(profit_factor_dollars, 4)
+            ),
+            "max_drawdown_dollars": round(max_drawdown_dollars, 4),
+            "bars_processed": self.current_bar_index,
+            "pre_market_bars": base_summary.get("pre_market_bars", 0),
+            "regime_history": list(base_summary.get("regime_history", [])),
+            "success": total_pnl_dollars > 0.0,
+        }
+        return merged
+
+    def save_reports(self, output_dir: str):
+        """Save performance report and trades."""
+        import json
+        from pathlib import Path
+        out_path = Path(output_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Save performance data
+        perf_path = out_path / "performance_data.json"
+        self.perf_tracker.save(str(perf_path))
+        logger.info(f"Saved performance data to {perf_path}")
+
+        # Save trades CSV
+        csv_path = out_path / "trades.csv"
+        self.perf_tracker.export_csv(str(csv_path))
+        logger.info(f"Saved trades CSV to {csv_path}")
+
+        # Save session summary JSON
+        summary_path = out_path / "session_summary.json"
+        with open(summary_path, 'w') as f:
+            json.dump(self.get_summary(), f, indent=2, default=str)
+        logger.info(f"Saved session summary to {summary_path}")

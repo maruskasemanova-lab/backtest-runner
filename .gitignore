@@ -7,6 +7,7 @@ __pycache__/
 !.claude/commands/
 !.claude/commands/**
 .claude/settings.local.json
+.codex/
 
 # Runtime logs
 *.log
@@ -41,3 +42,6 @@ mu_phase_*.csv
 
 # Frontend build output
 frontend/dist/
+
+# Generated runtime reports
+reports/

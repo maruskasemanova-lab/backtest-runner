@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -26,7 +26,7 @@
     {
       "id": "orchestration",
       "title": "Run Orchestration API",
-      "mission": "Own run lifecycle, API contracts, and integration to strategy service.",
+      "mission": "Own run lifecycle, API contracts, data routing, and integration to strategy service.",
       "depends_on": [
         "strategy-engine",
         "data-l2",
@@ -40,66 +40,137 @@
         "api_server.py",
         "session_runner.py",
         "data_loader.py",
+        "available_data.py",
+        "decision_tracker.py",
+        "performance_tracker.py",
         "src/config_io.py",
-        "src/l2_feature_service.py"
+        "src/system_settings.py",
+        "src/databento_service.py",
+        "src/databento_live.py"
       ],
       "change_checks": [
         "Keep API contracts backward compatible where possible.",
         "Always preserve no-lookahead semantics in bar stepping.",
+        "Keep comparable_mode and checkpoint behavior deterministic.",
         "Update tests for request model changes."
+      ],
+      "critical_invariants": [
+        "Runner must never use future bars when building payloads.",
+        "Run key identity remains run_id:ticker:date_or_range.",
+        "Runner -> strategy config passthrough keeps explicit execution defaults.",
+        "Comparable mode must force cold start and ignore checkpoint warm-start."
+      ],
+      "tests": [
+        "tests/test_no_lookahead.py",
+        "tests/test_session_runner_markers.py",
+        "tests/test_decision_tracker_schema_v2.py",
+        "tests/test_data_loader_path_resolution.py",
+        "tests/test_day_trading_manager_session_reset.py"
       ]
     },
     {
       "id": "strategy-engine",
       "title": "Flow Strategy Engine",
-      "mission": "Own regime detection, signal generation, position management, and execution realism.",
+      "mission": "Own regime detection, signal generation, position management, learning components, and execution realism.",
       "depends_on": [
         "orchestration",
         "data-l2"
       ],
       "entrypoints": [
         "../market_regime_detection/api_server.py",
-        "../market_regime_detection/src/day_trading_manager.py"
+        "../market_regime_detection/src/day_trading_manager.py",
+        "../market_regime_detection/src/trading_orchestrator.py"
       ],
       "files": [
         "../market_regime_detection/api_server.py",
+        "../market_regime_detection/src/api_models.py",
         "../market_regime_detection/src/day_trading_manager.py",
         "../market_regime_detection/src/multi_layer_decision.py",
+        "../market_regime_detection/src/trading_orchestrator.py",
+        "../market_regime_detection/src/feature_store.py",
+        "../market_regime_detection/src/ensemble_combiner.py",
+        "../market_regime_detection/src/edge_monitor.py",
+        "../market_regime_detection/src/checkpoint.py",
+        "../market_regime_detection/src/adaptive_regime.py",
+        "../market_regime_detection/src/position_sizing.py",
+        "../market_regime_detection/src/evidence_decision.py",
         "../market_regime_detection/src/strategy_factory.py",
         "../market_regime_detection/src/strategies/base_strategy.py",
         "../market_regime_detection/src/strategies/momentum_flow.py",
         "../market_regime_detection/src/strategies/absorption_reversal.py",
-        "../market_regime_detection/src/strategies/exhaustion_fade.py"
+        "../market_regime_detection/src/strategies/exhaustion_fade.py",
+        "../market_regime_detection/src/strategies/trailing_stop.py"
       ],
       "change_checks": [
         "No same-bar signal execution (signal bar index must be < entry bar index).",
         "Risk/execution changes must be reflected in config endpoints and tests.",
-        "Keep flow metrics no-lookahead (past/current bars only)."
+        "Keep flow metrics no-lookahead (past/current bars only).",
+        "Session reset scope (session vs full) must remain explicit and test-covered."
+      ],
+      "critical_invariants": [
+        "Signal generation and execution must remain no-lookahead.",
+        "Position sizing and fill simulation must respect configured risk caps.",
+        "Checkpoint save/load must preserve learning state version compatibility.",
+        "Run defaults must apply deterministically per run/ticker/date context."
+      ],
+      "tests": [
+        "tests/test_execution_realism.py",
+        "tests/test_multilayer_strategy_only_threshold.py",
+        "tests/test_multilayer_weight_source.py",
+        "tests/test_day_trading_manager_atr_fallback.py",
+        "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_trading_orchestrator_reset.py",
+        "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_checkpoint.py",
+        "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_adaptive_regime.py",
+        "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_feature_store.py",
+        "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_edge_monitor.py",
+        "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_ensemble_combiner.py"
       ]
     },
     {
       "id": "data-l2",
       "title": "L2 Data & Features",
-      "mission": "Own L2 acquisition, conversion, minute alignment, and flow-feature extraction.",
+      "mission": "Own L2 acquisition, conversion, minute alignment, intrabar frames, and flow-feature extraction.",
       "depends_on": [
         "orchestration",
         "strategy-engine"
       ],
       "entrypoints": [
         "src/l2_data_manager.py",
-        "src/l2_feature_service.py"
+        "src/l2_feature_service.py",
+        "src/order_flow_engine.py",
+        "src/intrabar_frame_builder.py"
       ],
       "files": [
         "src/l2_data_manager.py",
         "src/l2_feature_service.py",
+        "src/order_flow_engine.py",
+        "src/intrabar_frame_builder.py",
+        "src/l2_feature_aggregator.py",
+        "src/run_artifact_store.py",
+        "src/databento_service.py",
         "scripts/download_l2_data.py",
         "scripts/convert_l2_to_parquet.py",
-        "scripts/verify_l2_data.py"
+        "scripts/verify_l2_data.py",
+        "docs/L2_DEFINITIONS.md"
       ],
       "change_checks": [
         "Preserve timezone normalization to UTC.",
         "Do not leak future L2 events into current bar features.",
-        "Keep feature names consistent with strategy API payload."
+        "Keep feature names consistent with strategy API payload.",
+        "Coverage and sanity flags must remain machine-readable."
+      ],
+      "critical_invariants": [
+        "L2 minute aggregation uses only events within the same minute window.",
+        "Sessionized cumulative metrics must reset per market day when requested.",
+        "Intrabar 1s artifacts must preserve schema version metadata.",
+        "Feature fields consumed by strategy API remain stable and documented."
+      ],
+      "tests": [
+        "tests/test_l2_feature_aggregator.py",
+        "tests/test_intrabar_frame_builder.py",
+        "tests/test_api_server_l2_sessionized.py",
+        "tests/test_databento_daily_coverage.py",
+        "tests/test_databento_ohlcv_effective_range.py"
       ]
     },
     {
@@ -122,13 +193,27 @@
         "performance_tracker.py",
         "oos_validator.py",
         "monte_carlo.py",
-        "tests/test_wfo_optimizer.py",
-        "tests/test_performance_tracker_time_buckets.py"
+        "tuning_runner.py",
+        "aos_walk_forward.py",
+        "aos_optimizer.py",
+        "run_strategy_test.py",
+        "batch_runner.py"
       ],
       "change_checks": [
         "Score by executed strategy, not selected_strategy label.",
         "Keep strict chronological split for hold-out testing.",
-        "Report regime/hour/weekday breakdowns."
+        "Report regime/hour/weekday breakdowns.",
+        "Monte Carlo risk gate behavior must be deterministic with seed control."
+      ],
+      "critical_invariants": [
+        "Train/validation/test chronology must never be shuffled for OOS reports.",
+        "Optimization grids and evaluated overrides must remain auditable.",
+        "Performance accounting must include costs consistently.",
+        "Risk threshold checks must produce machine-checkable pass/fail outputs."
+      ],
+      "tests": [
+        "tests/test_wfo_optimizer.py",
+        "tests/test_performance_tracker_time_buckets.py"
       ]
     },
     {
@@ -148,12 +233,28 @@
         "frontend/src/components/CandlestickChart.jsx",
         "frontend/src/components/DecisionPanel.jsx",
         "frontend/src/components/SessionSummary.jsx",
-        "frontend/src/components/RunConfig.jsx"
+        "frontend/src/components/RunConfig.jsx",
+        "frontend/src/components/PlaybackControls.jsx",
+        "frontend/src/components/DataManager.jsx",
+        "frontend/src/components/AdaptiveStrategyStudio.jsx",
+        "frontend/src/components/StrategySettings.jsx",
+        "frontend/src/components/AOSOptimizations.jsx",
+        "frontend/src/components/IntrabarPanel.jsx"
       ],
       "change_checks": [
         "Any API payload change must include frontend compatibility check.",
         "Keep desktop/mobile rendering stable.",
-        "Preserve marker semantics (signal queued, position opened/closed)."
+        "Preserve marker semantics (signal queued, position opened/closed).",
+        "Live playback controls must remain consistent with backend state endpoints."
+      ],
+      "critical_invariants": [
+        "UI marker timeline must preserve backend event ordering.",
+        "Schema changes in run/session endpoints require explicit UI fallback behavior.",
+        "Chart annotations and session summary must remain backward compatible.",
+        "Data manager operations must not block core playback controls."
+      ],
+      "tests": [
+        "frontend/manual-smoke: start run -> play/pause/step -> markers -> summary"
       ]
     }
   ]

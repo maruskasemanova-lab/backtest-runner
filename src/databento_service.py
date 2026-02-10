@@ -326,11 +326,11 @@ class DatabentoService:
         preferred_file = self._preferred_entry_file(entry)
         preferred_path = self._resolve_entry_path(preferred_file)
         if not preferred_path or not preferred_path.exists():
-            return start_date, end_date
+            return "", ""
 
         actual = self._infer_ohlcv_et_range_from_path(preferred_path)
         if actual is None:
-            return start_date, end_date
+            return "", ""
         return actual
 
     def scan_existing_files(self) -> List[CatalogEntry]:
@@ -520,6 +520,11 @@ class DatabentoService:
             start_date, end_date = self._effective_entry_range(entry)
 
             if schema.startswith("ohlcv-"):
+                if not (
+                    self._is_valid_iso_date(start_date)
+                    and self._is_valid_iso_date(end_date)
+                ):
+                    continue
                 tickers.add(ticker)
                 if ticker not in date_ranges:
                     date_ranges[ticker] = {
@@ -600,6 +605,11 @@ class DatabentoService:
             entry_end = str(entry.get("end_date", ""))
             if schema_lower.startswith("ohlcv-"):
                 entry_start, entry_end = self._effective_entry_range(entry)
+                if not (
+                    self._is_valid_iso_date(entry_start)
+                    and self._is_valid_iso_date(entry_end)
+                ):
+                    continue
             if not self._range_overlaps(entry_start, entry_end, day, day):
                 continue
 
@@ -660,6 +670,11 @@ class DatabentoService:
             if not entry_schema.startswith(schema_prefix.lower()):
                 continue
             entry_start, entry_end = self._effective_entry_range(entry)
+            if entry_schema.startswith("ohlcv-") and not (
+                self._is_valid_iso_date(entry_start)
+                and self._is_valid_iso_date(entry_end)
+            ):
+                continue
             if not self._range_overlaps(entry_start, entry_end, start_date, end_date):
                 continue
 

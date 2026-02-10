@@ -20,6 +20,10 @@ class NoLookaheadInvariantTests(unittest.TestCase):
             max_trades_per_day=5,
             trade_cooldown_bars=0,
         )
+        manager._load_aos_config = lambda: None  # type: ignore[attr-defined]
+        manager._select_strategies = lambda session: ["mean_reversion"]  # type: ignore[attr-defined]
+        manager._required_confirming_sources = lambda session, bar_time: 1  # type: ignore[attr-defined]
+        manager.orchestrator.evidence_engine.combiner._min_confirming = 1
         manager.ticker_params["NVDA"] = {"time_filter_enabled": False, "trading_hours": None}
 
         # Keep only one deterministic strategy for test stability.
@@ -47,6 +51,9 @@ class NoLookaheadInvariantTests(unittest.TestCase):
                 take_profit=current_price * 1.01,
                 trailing_stop=False,
                 reasoning="unit-test scripted signal",
+                metadata={
+                    "layer_scores": {"confirming_sources": 3},
+                },
             )
 
         manager.strategies["mean_reversion"].generate_signal = scripted_signal
@@ -54,8 +61,7 @@ class NoLookaheadInvariantTests(unittest.TestCase):
         start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)  # 09:30 ET
         prices = [100.00, 100.05, 100.20, 101.30, 101.10, 101.00]
 
-        # First bar initializes session; then force pattern detector to no-op
-        # so scripted signal path is deterministic in this unit test.
+        # First bar initializes session.
         manager.process_bar(
             run_id="lookahead-test",
             ticker="NVDA",
@@ -71,13 +77,8 @@ class NoLookaheadInvariantTests(unittest.TestCase):
         )
         session = manager.get_session("lookahead-test", "NVDA", "2026-02-03")
         self.assertIsNotNone(session)
+        session.orchestrator.evidence_engine.combiner._min_confirming = 1
         manager.ticker_params["NVDA"] = {"time_filter_enabled": False, "trading_hours": None}
-        session.multi_layer.require_pattern = False
-        session.multi_layer.pattern_detector.detect = lambda ohlcv, indicators=None: []
-        # Use legacy multi-layer engine for this test (evidence engine needs
-        # multiple confirming sources that scripted data cannot provide).
-        if session.orchestrator:
-            session.orchestrator.config.use_evidence_engine = False
 
         for idx, close in enumerate(prices[1:], start=1):
             ts = start + timedelta(minutes=idx)

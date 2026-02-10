@@ -166,6 +166,7 @@ def main() -> None:
             f"Risk flag: P95 max drawdown ${stats['p95_drawdown_dollars']:.2f} "
             f"is above ${float(args.max_p95_drawdown_dollars):.2f}"
         )
+        raise SystemExit(2)
     else:
         print(
             f"Risk flag: P95 max drawdown ${stats['p95_drawdown_dollars']:.2f} "

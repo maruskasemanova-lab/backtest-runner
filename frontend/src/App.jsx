@@ -6,9 +6,10 @@ import DecisionPanel from './components/DecisionPanel';
 import SessionSummary from './components/SessionSummary';
 import RunConfig from './components/RunConfig';
 import StrategySettings from './components/StrategySettings';
-import MultiLayerSettings from './components/MultiLayerSettings';
 import DataManager from './components/DataManager';
 import IntrabarPanel from './components/IntrabarPanel';
+import AdaptiveStrategyStudio from './components/AdaptiveStrategyStudio';
+import AdaptiveTuner from './components/AdaptiveTuner';
 
 const toUnixSeconds = (value) => {
   if (value === null || value === undefined) return null;
@@ -123,6 +124,7 @@ function App() {
   // Run state
   const [runKey, setRunKey] = useState(null);
   const [runState, setRunState] = useState(null);
+  const [effectiveExecutionConfig, setEffectiveExecutionConfig] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   
   // Data
@@ -135,7 +137,7 @@ function App() {
   const [strategyApiUrl, setStrategyApiUrl] = useState("http://localhost:8001");
   
   // View navigation
-  const [activeView, setActiveView] = useState("backtest"); // "backtest" or "data-manager"
+  const [activeView, setActiveView] = useState("backtest"); // "backtest" | "data-manager" | "adaptive-studio" | "adaptive-tuner"
   const [downloadProgress, setDownloadProgress] = useState(null);
 
   // L2 Data
@@ -522,6 +524,7 @@ function App() {
       const data = await resp.json();
       const key = data.run_key;
       setRunKey(key);
+      setEffectiveExecutionConfig(data.execution_config || null);
       
       // Reset state
       setBars([]);
@@ -604,13 +607,19 @@ function App() {
         speedParam = speed;
       }
       
-      await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/play`, {
+      const response = await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/play`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ speed_ms: speedParam })
       });
+      if (!response.ok) {
+        setIsPlaying(false);
+        console.error('Play request failed:', response.status, response.statusText);
+        return;
+      }
       setIsPlaying(true);
     } catch (error) {
+      setIsPlaying(false);
       console.error('Play error:', error);
     }
   };
@@ -639,9 +648,27 @@ function App() {
 
     let cancelled = false;
     const pollState = async () => {
+      if (cancelled) return;
       try {
         const resp = await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/state`);
-        if (!resp.ok) return;
+        if (!resp.ok) {
+          if (resp.status === 404) {
+            if (!cancelled) {
+              cancelled = true;
+              setIsPlaying(false);
+              setRunState((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  is_running: false
+                };
+              });
+            }
+            return;
+          }
+          console.warn('State poll failed:', resp.status, resp.statusText);
+          return;
+        }
         const state = await resp.json();
         if (cancelled) return;
         setRunState(state);
@@ -649,6 +676,9 @@ function App() {
           setIsPlaying(false);
         }
       } catch (error) {
+        if (!cancelled) {
+          setIsPlaying(false);
+        }
         console.error('State poll error:', error);
       }
     };
@@ -687,6 +717,7 @@ function App() {
       });
       setRunKey(null);
       setRunState(null);
+      setEffectiveExecutionConfig(null);
       setBars([]);
       setMarkers([]);
       setSelectedMarker(null);
@@ -747,6 +778,18 @@ function App() {
           >
             Data Manager
           </button>
+          <button
+            className={`nav-tab ${activeView === 'adaptive-studio' ? 'active' : ''}`}
+            onClick={() => setActiveView('adaptive-studio')}
+          >
+            Adaptive Studio
+          </button>
+          <button
+            className={`nav-tab ${activeView === 'adaptive-tuner' ? 'active' : ''}`}
+            onClick={() => setActiveView('adaptive-tuner')}
+          >
+            Adaptive Tuner
+          </button>
         </nav>
         <div className="connection-status">
           <span className={`status-dot ${isConnected ? 'connected' : ''}`}></span>
@@ -757,6 +800,18 @@ function App() {
       {/* Main Content */}
       {activeView === 'data-manager' ? (
         <DataManager downloadProgress={downloadProgress} />
+      ) : activeView === 'adaptive-studio' ? (
+        <AdaptiveStrategyStudio
+          selectedTicker={selectedTicker}
+          onTickerChange={setSelectedTicker}
+          strategyApiUrl={strategyApiUrl}
+        />
+      ) : activeView === 'adaptive-tuner' ? (
+        <AdaptiveTuner
+          selectedTicker={selectedTicker}
+          onTickerChange={setSelectedTicker}
+          strategyApiUrl={strategyApiUrl}
+        />
       ) : (
       <main className="app-content">
         {/* Left Sidebar */}
@@ -766,14 +821,12 @@ function App() {
             onStart={handleStartRun} 
             isRunning={!!runKey}
             onTickerChange={setSelectedTicker}
+            effectiveExecutionConfig={effectiveExecutionConfig}
           />
 
           {/* Strategy Settings */}
           <StrategySettings apiUrl={strategyApiUrl} selectedTicker={selectedTicker} />
 
-          {/* Multi-Layer Decision Engine */}
-          <MultiLayerSettings apiUrl={strategyApiUrl} />
-          
           {/* Playback Controls */}
           {runKey && (
             <PlaybackControls

@@ -9,10 +9,25 @@ function StrategySettings({ apiUrl, selectedTicker }) {
   const [tickerPresets, setTickerPresets] = useState({});
   const [presetsLoaded, setPresetsLoaded] = useState(false);
   const [showCoreOnly, setShowCoreOnly] = useState(true);
+  const [comboProfiles, setComboProfiles] = useState([]);
+  const [comboActiveProfileId, setComboActiveProfileId] = useState("");
+  const [comboSelectedProfileId, setComboSelectedProfileId] = useState("");
+  const [comboProfileName, setComboProfileName] = useState("");
+  const [comboLoading, setComboLoading] = useState(false);
+  const [comboBusy, setComboBusy] = useState(false);
+  const [comboError, setComboError] = useState(null);
+  const [comboNotice, setComboNotice] = useState(null);
 
   const resolvedUrl =
     apiUrl ||
     `http://${window.location.hostname}:8001`;
+
+  const formatTimestamp = (value) => {
+    if (!value) return "-";
+    const parsed = Date.parse(value);
+    if (Number.isNaN(parsed)) return String(value);
+    return new Date(parsed).toLocaleString();
+  };
 
   const fetchStrategies = async () => {
     if (!resolvedUrl) return null;
@@ -29,6 +44,137 @@ function StrategySettings({ apiUrl, selectedTicker }) {
       return null;
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchStrategyCombos = useCallback(
+    async (ticker) => {
+      const upperTicker = String(ticker || "").toUpperCase().trim();
+      if (!upperTicker) {
+        setComboProfiles([]);
+        setComboActiveProfileId("");
+        setComboSelectedProfileId("");
+        setComboError(null);
+        return null;
+      }
+      setComboLoading(true);
+      setComboError(null);
+      try {
+        const resp = await fetch(`/api/strategy-combos/${upperTicker}`);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const payload = await resp.json();
+        const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+        const activeId = String(payload?.active_profile_id || "").trim();
+        setComboProfiles(profiles);
+        setComboActiveProfileId(activeId);
+        setComboSelectedProfileId((prev) => {
+          const prevId = String(prev || "").trim();
+          if (prevId && profiles.some((profile) => String(profile?.profile_id || "") === prevId)) {
+            return prevId;
+          }
+          if (activeId) return activeId;
+          const firstId = String(profiles[0]?.profile_id || "").trim();
+          return firstId;
+        });
+        return payload;
+      } catch (err) {
+        console.error("Failed to load strategy combos:", err);
+        setComboError(`Failed to load strategy combinations: ${err.message}`);
+        setComboProfiles([]);
+        setComboActiveProfileId("");
+        setComboSelectedProfileId("");
+        return null;
+      } finally {
+        setComboLoading(false);
+      }
+    },
+    []
+  );
+
+  const captureCurrentCombo = async () => {
+    const upperTicker = String(selectedTicker || "").toUpperCase().trim();
+    if (!upperTicker) return;
+    setComboBusy(true);
+    setComboError(null);
+    setComboNotice(null);
+    try {
+      const resp = await fetch("/api/strategy-combos/capture", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: upperTicker,
+          profile_name: comboProfileName || null,
+          strategy_api_url: resolvedUrl,
+          set_active: true,
+        }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data?.detail || `HTTP ${resp.status}`);
+      }
+      const payload = await resp.json();
+      const capturedId = String(payload?.profile?.profile_id || "").trim();
+      setComboNotice(
+        capturedId
+          ? `Captured combo ${capturedId} for ${upperTicker}.`
+          : `Captured strategy combination for ${upperTicker}.`
+      );
+      if (capturedId) {
+        setComboSelectedProfileId(capturedId);
+      }
+      await fetchStrategyCombos(upperTicker);
+      window.dispatchEvent(
+        new CustomEvent("strategy-combo-updated", {
+          detail: { ticker: upperTicker, active_profile_id: capturedId || null },
+        })
+      );
+    } catch (err) {
+      setComboError(`Failed to capture strategy combination: ${err.message}`);
+    } finally {
+      setComboBusy(false);
+    }
+  };
+
+  const applySelectedCombo = async () => {
+    const upperTicker = String(selectedTicker || "").toUpperCase().trim();
+    const profileId = String(comboSelectedProfileId || "").trim();
+    if (!upperTicker || !profileId) return;
+    setComboBusy(true);
+    setComboError(null);
+    setComboNotice(null);
+    try {
+      const resp = await fetch("/api/strategy-combos/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: upperTicker,
+          profile_id: profileId,
+          strategy_api_url: resolvedUrl,
+          apply_now: true,
+        }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data?.detail || `HTTP ${resp.status}`);
+      }
+      const payload = await resp.json();
+      const appliedCount = Number(payload?.apply_result?.applied_count || 0);
+      const failedCount = Number(payload?.apply_result?.failed_count || 0);
+      setComboNotice(
+        `Applied combo ${profileId} (${appliedCount} strategies updated${failedCount ? `, ${failedCount} failed` : ""}).`
+      );
+      await Promise.all([fetchStrategyCombos(upperTicker), fetchStrategies()]);
+      window.dispatchEvent(
+        new CustomEvent("strategy-combo-updated", {
+          detail: { ticker: upperTicker, active_profile_id: profileId },
+        })
+      );
+    } catch (err) {
+      setComboError(`Failed to apply strategy combination: ${err.message}`);
+    } finally {
+      setComboBusy(false);
     }
   };
 
@@ -161,6 +307,21 @@ function StrategySettings({ apiUrl, selectedTicker }) {
       setShowCoreOnly(false);
     }
   }, [selectedTicker]);
+
+  useEffect(() => {
+    const upperTicker = String(selectedTicker || "").toUpperCase().trim();
+    if (!upperTicker) {
+      setComboProfiles([]);
+      setComboActiveProfileId("");
+      setComboSelectedProfileId("");
+      setComboProfileName("");
+      setComboNotice(null);
+      setComboError(null);
+      return;
+    }
+    setComboProfileName((prev) => prev || `${upperTicker}-combo`);
+    fetchStrategyCombos(upperTicker);
+  }, [fetchStrategyCombos, selectedTicker]);
 
   useEffect(() => {
     fetchStrategies();
@@ -335,6 +496,16 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     return entries;
   }, [strategies, selectedTicker, showCoreOnly, flowCoreSet]);
 
+  const selectedComboProfile = useMemo(() => {
+    const selectedId = String(comboSelectedProfileId || "").trim();
+    if (!selectedId) return null;
+    return (
+      comboProfiles.find(
+        (profile) => String(profile?.profile_id || "").trim() === selectedId
+      ) || null
+    );
+  }, [comboProfiles, comboSelectedProfileId]);
+
   return (
     <div className="card">
       <div className="card-header">
@@ -356,6 +527,100 @@ function StrategySettings({ apiUrl, selectedTicker }) {
         </div>
       </div>
       <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        {!!selectedTicker && (
+          <div className="preset-box">
+            <div className="preset-header">
+              <span className="preset-title">Strategy Combination Profiles ({selectedTicker})</span>
+              <button
+                className="btn btn-secondary"
+                onClick={() => fetchStrategyCombos(selectedTicker)}
+                disabled={comboLoading || comboBusy}
+              >
+                {comboLoading ? "Loading..." : "Reload"}
+              </button>
+            </div>
+            <div className="preset-copy">
+              Ulož aktuálne nastavenia stratégií ako kombináciu parametrov, potom ju aktivuj a použi aj v Adaptive Studiu/backteste.
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="combo_profile_name">New Combination Name</label>
+              <input
+                id="combo_profile_name"
+                type="text"
+                value={comboProfileName}
+                onChange={(e) => setComboProfileName(e.target.value)}
+                placeholder={`${selectedTicker}-combo`}
+                disabled={comboBusy}
+              />
+            </div>
+
+            <button
+              className="btn btn-primary"
+              onClick={captureCurrentCombo}
+              disabled={comboBusy || comboLoading || !selectedTicker}
+              style={{ width: "100%" }}
+            >
+              {comboBusy ? "Working..." : "Capture Current Strategy Settings"}
+            </button>
+
+            <div className="form-group">
+              <label htmlFor="combo_profile_select">Saved Combinations</label>
+              <select
+                id="combo_profile_select"
+                value={comboSelectedProfileId}
+                onChange={(e) => setComboSelectedProfileId(e.target.value)}
+                disabled={comboBusy || comboLoading || !comboProfiles.length}
+              >
+                {!comboProfiles.length && <option value="">No combinations yet</option>}
+                {comboProfiles.map((profile, idx) => {
+                  const profileId = String(profile?.profile_id || "");
+                  const strategyCount = Object.keys(profile?.strategy_params || {}).length;
+                  const activeSuffix =
+                    profileId && profileId === comboActiveProfileId ? " (active)" : "";
+                  return (
+                    <option key={profileId || `combo-${idx}`} value={profileId}>
+                      {`${profile?.profile_name || profileId} | ${strategyCount} strategies | ${formatTimestamp(profile?.updated_at || profile?.created_at)}${activeSuffix}`}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <button
+              className="btn btn-secondary"
+              onClick={applySelectedCombo}
+              disabled={
+                comboBusy ||
+                comboLoading ||
+                !comboSelectedProfileId ||
+                comboSelectedProfileId === comboActiveProfileId
+              }
+              style={{ width: "100%" }}
+            >
+              {comboBusy ? "Working..." : "Apply Selected Combination"}
+            </button>
+
+            <div className="preset-copy">
+              Active combination: {comboActiveProfileId || "none"}
+            </div>
+            {selectedComboProfile && (
+              <div className="preset-copy">
+                Selected contains {Object.keys(selectedComboProfile.strategy_params || {}).length} strategies.
+              </div>
+            )}
+            {comboError && (
+              <div style={{ color: "var(--accent-red)", fontSize: "0.8rem" }}>
+                {comboError}
+              </div>
+            )}
+            {comboNotice && (
+              <div style={{ color: "var(--accent-blue)", fontSize: "0.8rem" }}>
+                {comboNotice}
+              </div>
+            )}
+          </div>
+        )}
         {error && (
           <div style={{ color: "var(--accent-red)", fontSize: "0.85rem" }}>{error}</div>
         )}

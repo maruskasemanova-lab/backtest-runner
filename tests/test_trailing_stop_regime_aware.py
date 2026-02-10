@@ -131,6 +131,23 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         )
         session.bars.append(bar2)
         manager._update_trailing_from_close(session, pos, bar2)
+
+        # Still too early because break-even enforces a minimum hold.
+        self.assertFalse(pos.trailing_activation_pnl_met)
+        self.assertFalse(pos.break_even_stop_active)
+
+        # Third bar keeps profit and satisfies min-hold, so break-even can engage.
+        bar3 = BarData(
+            timestamp=start + timedelta(minutes=3),
+            open=100.50,
+            high=100.70,
+            low=100.30,
+            close=100.55,
+            volume=10_000.0,
+            vwap=100.4,
+        )
+        session.bars.append(bar3)
+        manager._update_trailing_from_close(session, pos, bar3)
         
         # Should now have triggered break-even
         self.assertTrue(pos.trailing_activation_pnl_met)
@@ -163,13 +180,42 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         session.bars.append(bar1)
         manager._update_trailing_from_close(session, pos, bar1)
         
-        # Verify break-even was set
+        # Min-hold guard: break-even should not activate immediately.
+        self.assertFalse(pos.break_even_stop_active)
+
+        bar1b = BarData(
+            timestamp=start + timedelta(minutes=2),
+            open=100.50,
+            high=100.80,
+            low=100.40,
+            close=100.65,
+            volume=10_000.0,
+            vwap=100.45,
+        )
+        session.bars.append(bar1b)
+        manager._update_trailing_from_close(session, pos, bar1b)
+
+        self.assertFalse(pos.break_even_stop_active)
+
+        bar1c = BarData(
+            timestamp=start + timedelta(minutes=3),
+            open=100.65,
+            high=100.95,
+            low=100.55,
+            close=100.75,
+            volume=10_000.0,
+            vwap=100.6,
+        )
+        session.bars.append(bar1c)
+        manager._update_trailing_from_close(session, pos, bar1c)
+
+        # Verify break-even was eventually set
         self.assertTrue(pos.break_even_stop_active)
         self.assertGreater(pos.stop_loss, original_stop)
         
         # Now with higher price, trailing should engage
         bar2 = BarData(
-            timestamp=start + timedelta(minutes=2),
+            timestamp=start + timedelta(minutes=4),
             open=100.50,
             high=101.50,
             low=100.50,
@@ -307,6 +353,30 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         )
         session.bars.append(bar)
         manager._update_trailing_from_close(session, pos, bar)
+
+        bar2 = BarData(
+            timestamp=start + timedelta(minutes=2),
+            open=99.5,
+            high=99.8,
+            low=99.2,
+            close=99.45,
+            volume=10_000.0,
+            vwap=99.5,
+        )
+        session.bars.append(bar2)
+        manager._update_trailing_from_close(session, pos, bar2)
+
+        bar3 = BarData(
+            timestamp=start + timedelta(minutes=3),
+            open=99.45,
+            high=99.7,
+            low=99.1,
+            close=99.35,
+            volume=10_000.0,
+            vwap=99.4,
+        )
+        session.bars.append(bar3)
+        manager._update_trailing_from_close(session, pos, bar3)
         
         # Break-even should have activated
         self.assertTrue(pos.trailing_activation_pnl_met)
@@ -321,6 +391,42 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         self.assertGreater(pos.stop_loss, pos.entry_price)
         # Be stop should be lower (more protective) than original stop
         self.assertLess(pos.stop_loss, original_stop)
+
+    def test_trailing_widens_for_high_confirmation_signals(self):
+        """High-confirmation entries should get wider trailing room."""
+        manager, session = self._build_manager_session(regime=Regime.TRENDING)
+        start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
+
+        low_signal = Signal(
+            strategy_name="MomentumFlow",
+            signal_type=SignalType.BUY,
+            price=100.0,
+            timestamp=start,
+            confidence=80.0,
+            stop_loss=99.0,
+            take_profit=103.0,
+            trailing_stop=True,
+            trailing_stop_pct=0.9,
+            metadata={"layer_scores": {"confirming_sources": 2}},
+            reasoning="low-confirm",
+        )
+        high_signal = Signal(
+            strategy_name="MomentumFlow",
+            signal_type=SignalType.BUY,
+            price=100.0,
+            timestamp=start,
+            confidence=80.0,
+            stop_loss=99.0,
+            take_profit=103.0,
+            trailing_stop=True,
+            trailing_stop_pct=0.9,
+            metadata={"layer_scores": {"confirming_sources": 5}},
+            reasoning="high-confirm",
+        )
+
+        low_pct = manager._effective_trailing_stop_pct(session, low_signal)
+        high_pct = manager._effective_trailing_stop_pct(session, high_signal)
+        self.assertGreater(high_pct, low_pct)
 
     def test_short_stop_exit_has_negative_pnl(self):
         """Verify SHORT stopped out at stop_loss results in NEGATIVE PnL."""

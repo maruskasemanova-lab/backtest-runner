@@ -6,6 +6,16 @@ const MU_FLOW_PRESET = {
   regime_detection_minutes: 15,
   trailing_stop_pct: null,
   account_size_usd: 10000,
+  risk_per_trade_pct: 1.0,
+  max_position_notional_pct: 100.0,
+  max_fill_participation_rate: 0.2,
+  min_fill_ratio: 0.35,
+  time_exit_bars: 40,
+  adverse_flow_exit_enabled: true,
+  adverse_flow_threshold: 0.12,
+  adverse_flow_min_hold_bars: 3,
+  stop_loss_mode: "capped",
+  fixed_stop_loss_pct: 0.5,
   comparable_mode: true,
   cold_start_each_day: true,
   auto_save_checkpoint: false,
@@ -15,9 +25,121 @@ const MU_FLOW_PRESET = {
   l2_min_directional_consistency: 0.0,
   l2_min_signed_aggression: 0.0,
   l2_lookback_bars: 3,
+  strategy_selection_mode: "adaptive_top_n",
+  max_active_strategies: 3,
 };
 
-function RunConfig({ onStart, isRunning, onTickerChange }) {
+const toFiniteNumberOrNull = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const toHoursText = (hours) => {
+  if (!Array.isArray(hours) || hours.length === 0) return "";
+  return hours.join(",");
+};
+
+const parseTradingHoursText = (text) => {
+  if (!text || !text.trim()) return [];
+  const parts = text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const hours = [];
+  for (const part of parts) {
+    const value = Number(part);
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0 || value > 23) {
+      throw new Error("Trading hours must be comma-separated integers in range 0-23.");
+    }
+    hours.push(value);
+  }
+  return Array.from(new Set(hours)).sort((a, b) => a - b);
+};
+
+const normalizeStrategySelectionMode = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "all_enabled" ? "all_enabled" : "adaptive_top_n";
+};
+
+const parseMaxActiveStrategies = (value, fallback = 3) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+    return fallback;
+  }
+  return Math.max(1, Math.min(20, parsed));
+};
+
+const ACTIVE_PROFILE_SENTINEL = "__ACTIVE__";
+
+const formatProfileTimestamp = (value) => {
+  if (!value) return "-";
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return String(value);
+  return new Date(parsed).toLocaleString();
+};
+
+const formatAdaptiveProfileCandidate = (candidate) => {
+  if (!candidate || typeof candidate !== "object") return "candidate unavailable";
+  const mode = normalizeStrategySelectionMode(candidate.strategy_selection_mode);
+  const topN = parseMaxActiveStrategies(candidate.max_active_strategies, 3);
+  const hysteresis = Number.isFinite(Number(candidate.min_active_bars_before_switch))
+    ? Math.max(0, Number(candidate.min_active_bars_before_switch))
+    : 0;
+  const cooldown = Number.isFinite(Number(candidate.switch_cooldown_bars))
+    ? Math.max(0, Number(candidate.switch_cooldown_bars))
+    : 0;
+  const flowBias = candidate.flow_bias_enabled ? "flow-bias on" : "flow-bias off";
+  return `${mode === "all_enabled" ? "all enabled" : `adaptive top-${topN}`} | hysteresis ${hysteresis} | cooldown ${cooldown} | ${flowBias}`;
+};
+
+const formatAdaptiveProfileLabel = (profile) => {
+  const profileId = String(profile?.profile_id || "profile");
+  const score = Number(profile?.score || 0).toFixed(4);
+  const stamp = formatProfileTimestamp(profile?.created_at);
+  return `${profileId} | score ${score} | ${stamp}`;
+};
+
+const normalizeAosTickerConfig = (payload) => {
+  const raw = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  const params =
+    raw.params && typeof raw.params === "object" && !Array.isArray(raw.params) ? raw.params : {};
+
+  const tradingHours = Array.isArray(raw.trading_hours)
+    ? raw.trading_hours
+        .map((h) => Number(h))
+        .filter((h) => Number.isFinite(h) && Number.isInteger(h) && h >= 0 && h <= 23)
+    : [];
+
+  const longOnly =
+    typeof raw.long_only === "boolean"
+      ? raw.long_only
+      : (typeof params.long_only === "boolean" ? params.long_only : false);
+
+  const trailingStopPct =
+    toFiniteNumberOrNull(raw.trailing_stop_pct) ?? toFiniteNumberOrNull(params.trailing_stop_pct);
+
+  const timeFilterEnabled =
+    typeof raw.time_filter_enabled === "boolean"
+      ? raw.time_filter_enabled
+      : tradingHours.length > 0;
+  const strategySelectionMode = normalizeStrategySelectionMode(raw.strategy_selection_mode);
+  const maxActiveStrategies = parseMaxActiveStrategies(raw.max_active_strategies, 3);
+
+  return {
+    raw,
+    form: {
+      time_filter_enabled: timeFilterEnabled,
+      trading_hours_text: toHoursText(tradingHours),
+      long_only: longOnly,
+      trailing_stop_pct: trailingStopPct === null ? "" : String(trailingStopPct),
+      strategy_selection_mode: strategySelectionMode,
+      max_active_strategies: String(maxActiveStrategies),
+    },
+  };
+};
+
+function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfig }) {
   const [availableData, setAvailableData] = useState(null);
   const [config, setConfig] = useState({
     run_id: `backtest-${Date.now()}`,
@@ -27,11 +149,23 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     date_to: "",
     data_file: null,
     strategy_api_url: `http://${window.location.hostname}:8001`,
+    risk_per_trade_pct: 1.0,
+    max_position_notional_pct: 100.0,
+    max_fill_participation_rate: 0.2,
+    min_fill_ratio: 0.35,
+    time_exit_bars: 40,
+    adverse_flow_exit_enabled: true,
+    adverse_flow_threshold: 0.12,
+    adverse_flow_min_hold_bars: 3,
+    stop_loss_mode: "strategy",
+    fixed_stop_loss_pct: 0.0,
     ...MU_FLOW_PRESET,
     checkpoint_path: null,
     auto_save_checkpoint: true,
     cold_start_each_day: false,
     comparable_mode: false,
+    strategy_selection_mode: "adaptive_top_n",
+    max_active_strategies: 3,
   });
 
   const [loading, setLoading] = useState(false);
@@ -41,6 +175,25 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
   const [checkpointLoading, setCheckpointLoading] = useState(false);
   const [checkpointSaving, setCheckpointSaving] = useState(false);
   const [checkpointMessage, setCheckpointMessage] = useState(null);
+  const [aosLoading, setAosLoading] = useState(false);
+  const [aosSaving, setAosSaving] = useState(false);
+  const [aosError, setAosError] = useState(null);
+  const [aosTickerConfig, setAosTickerConfig] = useState({});
+  const [aosControls, setAosControls] = useState({
+    time_filter_enabled: false,
+    trading_hours_text: "",
+    long_only: false,
+    trailing_stop_pct: "",
+    strategy_selection_mode: "adaptive_top_n",
+    max_active_strategies: "3",
+  });
+  const [adaptiveProfilesLoading, setAdaptiveProfilesLoading] = useState(false);
+  const [adaptiveProfilesError, setAdaptiveProfilesError] = useState(null);
+  const [adaptiveProfiles, setAdaptiveProfiles] = useState([]);
+  const [activeAdaptiveProfileId, setActiveAdaptiveProfileId] = useState("");
+  const [selectedAdaptiveProfileId, setSelectedAdaptiveProfileId] = useState(
+    ACTIVE_PROFILE_SENTINEL
+  );
 
   const strategyApiBase = (config.strategy_api_url || "").replace(/\/+$/, "");
 
@@ -82,6 +235,152 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     } finally {
       setCheckpointLoading(false);
     }
+  };
+
+  const fetchTickerAosConfig = async (ticker) => {
+    if (!ticker) return;
+    setAosLoading(true);
+    setAosError(null);
+
+    try {
+      const resp = await fetch(`/api/aos-config/${ticker}`);
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const payload = await resp.json();
+      const normalized = normalizeAosTickerConfig(payload);
+      setAosTickerConfig(normalized.raw);
+      setAosControls(normalized.form);
+      return normalized.raw;
+    } catch (err) {
+      console.error("Failed to fetch AOS config:", err);
+      setAosError("Failed to load AOS settings for selected ticker.");
+      setAosTickerConfig({});
+      setAosControls({
+        time_filter_enabled: false,
+        trading_hours_text: "",
+        long_only: false,
+        trailing_stop_pct: "",
+        strategy_selection_mode: "adaptive_top_n",
+        max_active_strategies: "3",
+      });
+      return null;
+    } finally {
+      setAosLoading(false);
+    }
+  };
+
+  const fetchAdaptiveProfiles = async (ticker) => {
+    const upperTicker = String(ticker || "").trim().toUpperCase();
+    if (!upperTicker) return null;
+    setAdaptiveProfilesLoading(true);
+    setAdaptiveProfilesError(null);
+    try {
+      const resp = await fetch(`/api/adaptive-tuner/options/${upperTicker}`);
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const payload = await resp.json();
+      const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+      const activeProfileId = String(payload?.active_profile_id || "").trim();
+      const knownIds = new Set(
+        profiles
+          .map((profile) => String(profile?.profile_id || "").trim())
+          .filter(Boolean)
+      );
+
+      setAdaptiveProfiles(profiles);
+      setActiveAdaptiveProfileId(activeProfileId);
+      setSelectedAdaptiveProfileId((prev) => {
+        const prevId = String(prev || "").trim();
+        if (prevId && prevId !== ACTIVE_PROFILE_SENTINEL && knownIds.has(prevId)) {
+          return prevId;
+        }
+        return ACTIVE_PROFILE_SENTINEL;
+      });
+      return payload;
+    } catch (err) {
+      console.error("Failed to fetch adaptive profiles:", err);
+      setAdaptiveProfilesError("Failed to load adaptive tuned profiles.");
+      setAdaptiveProfiles([]);
+      setActiveAdaptiveProfileId("");
+      setSelectedAdaptiveProfileId(ACTIVE_PROFILE_SENTINEL);
+      return null;
+    } finally {
+      setAdaptiveProfilesLoading(false);
+    }
+  };
+
+  const applyAdaptiveProfile = async (ticker, profileId) => {
+    const upperTicker = String(ticker || "").trim().toUpperCase();
+    const targetProfileId = String(profileId || "").trim();
+    if (!upperTicker || !targetProfileId) return null;
+    const resp = await fetch("/api/adaptive-tuner/profiles/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: upperTicker, profile_id: targetProfileId }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data?.detail || `HTTP ${resp.status}`);
+    }
+    return await resp.json();
+  };
+
+  const persistTickerAosConfig = async (ticker) => {
+    if (!ticker) return null;
+
+    const hours = aosControls.time_filter_enabled
+      ? parseTradingHoursText(aosControls.trading_hours_text)
+      : [];
+    const trailingStopPct =
+      toFiniteNumberOrNull(aosControls.trailing_stop_pct) ??
+      toFiniteNumberOrNull(aosTickerConfig?.trailing_stop_pct) ??
+      toFiniteNumberOrNull(aosTickerConfig?.params?.trailing_stop_pct);
+
+    if (toFiniteNumberOrNull(aosControls.trailing_stop_pct) === null && aosControls.trailing_stop_pct !== "") {
+      throw new Error("AOS trailing stop must be a valid number.");
+    }
+    const strategySelectionMode = normalizeStrategySelectionMode(aosControls.strategy_selection_mode);
+    const maxActiveStrategies = parseMaxActiveStrategies(
+      aosControls.max_active_strategies,
+      parseMaxActiveStrategies(aosTickerConfig?.max_active_strategies, 3)
+    );
+
+    const current = aosTickerConfig && typeof aosTickerConfig === "object" ? aosTickerConfig : {};
+    const currentParams =
+      current.params && typeof current.params === "object" && !Array.isArray(current.params)
+        ? current.params
+        : {};
+
+    const nextConfig = {
+      ...current,
+      time_filter_enabled: !!aosControls.time_filter_enabled,
+      trading_hours: hours,
+      long_only: !!aosControls.long_only,
+      trailing_stop_pct: trailingStopPct,
+      strategy_selection_mode: strategySelectionMode,
+      max_active_strategies: maxActiveStrategies,
+      params: {
+        ...currentParams,
+        long_only: !!aosControls.long_only,
+        trailing_stop_pct: trailingStopPct,
+      },
+    };
+
+    const resp = await fetch("/api/aos-config/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker,
+        config: nextConfig,
+      }),
+    });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
+    return nextConfig;
   };
 
   const handleSaveCheckpointNow = async () => {
@@ -182,6 +481,30 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [strategyApiBase]);
 
+  useEffect(() => {
+    if (!config.ticker) {
+      setAosTickerConfig({});
+      setAosControls({
+        time_filter_enabled: false,
+        trading_hours_text: "",
+        long_only: false,
+        trailing_stop_pct: "",
+        strategy_selection_mode: "adaptive_top_n",
+        max_active_strategies: "3",
+      });
+      setAosError(null);
+      setAdaptiveProfiles([]);
+      setActiveAdaptiveProfileId("");
+      setSelectedAdaptiveProfileId(ACTIVE_PROFILE_SENTINEL);
+      setAdaptiveProfilesError(null);
+      return;
+    }
+
+    fetchTickerAosConfig(config.ticker);
+    fetchAdaptiveProfiles(config.ticker);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.ticker]);
+
   const getDateRange = () => {
     if (!availableData || !config.ticker) {
       return { min: null, max: null };
@@ -200,9 +523,65 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
 
     try {
       const comparableMode = !!config.comparable_mode;
+      const stopLossMode = String(config.stop_loss_mode || "strategy").toLowerCase();
+      const fixedStopLossPct = Math.max(0, Number(config.fixed_stop_loss_pct || 0));
+      let runtimeAosConfig = null;
+      if (stopLossMode !== "strategy" && fixedStopLossPct <= 0) {
+        throw new Error("Fixed stop-loss % must be > 0 when stop mode is fixed or capped.");
+      }
+
+      if (config.ticker) {
+        setAosSaving(true);
+        setAosError(null);
+        try {
+          const savedAos = await persistTickerAosConfig(config.ticker);
+          if (savedAos) {
+            runtimeAosConfig = savedAos;
+            setAosTickerConfig(savedAos);
+          }
+        } catch (aosErr) {
+          throw new Error(`Failed to save AOS settings: ${aosErr.message}`);
+        } finally {
+          setAosSaving(false);
+        }
+
+        const selectedProfileId =
+          selectedAdaptiveProfileId === ACTIVE_PROFILE_SENTINEL
+            ? ""
+            : String(selectedAdaptiveProfileId || "").trim();
+        if (selectedProfileId) {
+          try {
+            await applyAdaptiveProfile(config.ticker, selectedProfileId);
+            setActiveAdaptiveProfileId(selectedProfileId);
+            const refreshedAos = await fetchTickerAosConfig(config.ticker);
+            if (refreshedAos) {
+              runtimeAosConfig = refreshedAos;
+              setAosTickerConfig(refreshedAos);
+            }
+            await fetchAdaptiveProfiles(config.ticker);
+          } catch (profileErr) {
+            throw new Error(`Failed to apply adaptive profile: ${profileErr.message}`);
+          }
+        }
+      }
+
+      const effectiveStrategySelectionMode = normalizeStrategySelectionMode(
+        runtimeAosConfig?.strategy_selection_mode || aosControls.strategy_selection_mode
+      );
+      const effectiveMaxActiveStrategies = parseMaxActiveStrategies(
+        runtimeAosConfig?.max_active_strategies ?? aosControls.max_active_strategies,
+        3
+      );
+
       const payload = {
         ...config,
+        stop_loss_mode: stopLossMode,
+        fixed_stop_loss_pct: fixedStopLossPct,
+        strategy_selection_mode: effectiveStrategySelectionMode,
+        max_active_strategies: effectiveMaxActiveStrategies,
         comparable_mode: comparableMode,
+        // Strategy overrides are used as FE defaults; do not re-apply them at run start.
+        apply_ticker_overrides_on_start: false,
         cold_start_each_day: comparableMode ? true : !!config.cold_start_each_day,
         checkpoint_path: comparableMode
           ? null
@@ -223,6 +602,10 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
 
   const handleChange = (field, value) => {
     setConfig((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleAosControlChange = (field, value) => {
+    setAosControls((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleDateFromChange = (value) => {
@@ -267,7 +650,71 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
     }
   };
 
+  const handleReloadAosAndProfiles = async () => {
+    if (!config.ticker) return;
+    await Promise.all([
+      fetchTickerAosConfig(config.ticker),
+      fetchAdaptiveProfiles(config.ticker),
+    ]);
+  };
+
   const dateRange = getDateRange();
+  const effectiveConfig = effectiveExecutionConfig || {};
+  const hasEffectiveConfig = !!effectiveExecutionConfig;
+  const activeRiskPerTradePct = Number(
+    effectiveConfig.risk_per_trade_pct ?? config.risk_per_trade_pct ?? 0
+  );
+  const activeMaxPositionNotionalPct = Number(
+    effectiveConfig.max_position_notional_pct ?? config.max_position_notional_pct ?? 0
+  );
+  const activeMaxFillParticipationRate = Number(
+    effectiveConfig.max_fill_participation_rate ?? config.max_fill_participation_rate ?? 0
+  );
+  const activeMinFillRatio = Number(
+    effectiveConfig.min_fill_ratio ?? config.min_fill_ratio ?? 0
+  );
+  const activeTimeExitBars = Number(
+    effectiveConfig.time_exit_bars ?? config.time_exit_bars ?? 0
+  );
+  const activeAdverseFlowEnabled = Boolean(
+    effectiveConfig.adverse_flow_exit_enabled ?? config.adverse_flow_exit_enabled
+  );
+  const activeAdverseFlowThreshold = Number(
+    effectiveConfig.adverse_flow_threshold ?? config.adverse_flow_threshold ?? 0
+  );
+  const activeAdverseFlowMinHoldBars = Number(
+    effectiveConfig.adverse_flow_min_hold_bars ?? config.adverse_flow_min_hold_bars ?? 0
+  );
+  const activeStopLossMode = String(
+    effectiveConfig.stop_loss_mode ?? config.stop_loss_mode ?? "strategy"
+  );
+  const activeFixedStopLossPct = Number(
+    effectiveConfig.fixed_stop_loss_pct ?? config.fixed_stop_loss_pct ?? 0
+  );
+  const activeColdStartEachDay = Boolean(
+    effectiveConfig.cold_start_each_day ?? config.cold_start_each_day
+  );
+  const activeComparableMode = Boolean(
+    effectiveConfig.comparable_mode ?? config.comparable_mode
+  );
+  const activeStrategySelectionMode = normalizeStrategySelectionMode(
+    effectiveConfig.strategy_selection_mode ?? config.strategy_selection_mode
+  );
+  const activeMaxActiveStrategies = parseMaxActiveStrategies(
+    effectiveConfig.max_active_strategies ?? config.max_active_strategies,
+    3
+  );
+  const requestedAdaptiveProfileId =
+    selectedAdaptiveProfileId === ACTIVE_PROFILE_SENTINEL
+      ? ""
+      : String(selectedAdaptiveProfileId || "").trim();
+  const selectedAdaptiveProfile =
+    requestedAdaptiveProfileId
+      ? adaptiveProfiles.find(
+          (profile) => String(profile?.profile_id || "").trim() === requestedAdaptiveProfileId
+        ) || null
+      : null;
+  const effectiveAdaptiveProfileId = requestedAdaptiveProfileId || String(activeAdaptiveProfileId || "").trim();
 
   if (isRunning) {
     return (
@@ -299,15 +746,91 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
             </div>
           </div>
           <div className="form-group">
+            <label>Risk / Trade</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeRiskPerTradePct.toFixed(2)}%
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Max Position Notional</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeMaxPositionNotionalPct.toFixed(2)}%
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Max Fill Participation</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeMaxFillParticipationRate.toFixed(2)}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Min Fill Ratio</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeMinFillRatio.toFixed(2)}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Stop-Loss Mode</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeStopLossMode}
+              {(activeStopLossMode === "fixed" || activeStopLossMode === "capped") && (
+                <> ({activeFixedStopLossPct.toFixed(2)}%)</>
+              )}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Time Exit</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeTimeExitBars} bars
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Adverse Flow Exit</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeAdverseFlowEnabled ? "Enabled" : "Disabled"}
+            </div>
+          </div>
+          {activeAdverseFlowEnabled && (
+            <>
+              <div className="form-group">
+                <label>Adverse Flow Threshold</label>
+                <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+                  {activeAdverseFlowThreshold.toFixed(2)}
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Adverse Flow Min Hold</label>
+                <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+                  {activeAdverseFlowMinHoldBars} bars
+                </div>
+              </div>
+            </>
+          )}
+          <div className="form-group">
             <label>L2 Confirmation</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
               {config.l2_confirm_enabled ? "Enabled" : "Disabled"}
             </div>
           </div>
           <div className="form-group">
+            <label>Strategy Selection</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeStrategySelectionMode === "all_enabled" ? "all enabled strategies" : "adaptive top-N"}
+              {activeStrategySelectionMode !== "all_enabled" && <> ({activeMaxActiveStrategies})</>}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Adaptive Tuner Profile</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {effectiveAdaptiveProfileId || "none (using direct AOS settings)"}
+            </div>
+          </div>
+          <div className="form-group">
             <label>Start Mode</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {config.comparable_mode ? "Comparable (day-isolated cold)" : (useWarmStart ? "Warm Start" : "Cold Start")}
+              {activeComparableMode
+                ? "Comparable (day-isolated cold)"
+                : (useWarmStart ? "Warm Start" : "Cold Start")}
             </div>
           </div>
           <div className="form-group">
@@ -319,14 +842,19 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
           <div className="form-group">
             <label>Cold Start Each Day</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {(config.cold_start_each_day || config.comparable_mode) ? "Enabled" : "Disabled"}
+              {(activeColdStartEachDay || activeComparableMode) ? "Enabled" : "Disabled"}
             </div>
           </div>
           <div className="form-group">
             <label>Comparable Mode</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
-              {config.comparable_mode ? "Enabled" : "Disabled"}
+              {activeComparableMode ? "Enabled" : "Disabled"}
             </div>
+          </div>
+          <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: "4px" }}>
+            {hasEffectiveConfig
+              ? "Values shown are effective execution settings returned by backend."
+              : "Values shown are requested settings (backend effective settings unavailable)."}
           </div>
         </div>
       </div>
@@ -473,6 +1001,134 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
           </div>
 
           <div className="form-group">
+            <label htmlFor="risk_per_trade_pct">Risk Per Trade (%)</label>
+            <input
+              id="risk_per_trade_pct"
+              type="number"
+              min="0.1"
+              max="10"
+              step="0.1"
+              value={config.risk_per_trade_pct}
+              onChange={(e) => handleChange("risk_per_trade_pct", Number(e.target.value))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="max_position_notional_pct">Max Position Notional (%)</label>
+            <input
+              id="max_position_notional_pct"
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              value={config.max_position_notional_pct}
+              onChange={(e) => handleChange("max_position_notional_pct", Number(e.target.value))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="max_fill_participation_rate">Max Fill Participation (0-1)</label>
+            <input
+              id="max_fill_participation_rate"
+              type="number"
+              min="0.01"
+              max="1"
+              step="0.01"
+              value={config.max_fill_participation_rate}
+              onChange={(e) => handleChange("max_fill_participation_rate", Number(e.target.value))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="min_fill_ratio">Min Fill Ratio (0-1)</label>
+            <input
+              id="min_fill_ratio"
+              type="number"
+              min="0.01"
+              max="1"
+              step="0.01"
+              value={config.min_fill_ratio}
+              onChange={(e) => handleChange("min_fill_ratio", Number(e.target.value))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="stop_loss_mode">Stop-Loss Mode</label>
+            <select
+              id="stop_loss_mode"
+              value={config.stop_loss_mode}
+              onChange={(e) => handleChange("stop_loss_mode", e.target.value)}
+            >
+              <option value="strategy">strategy (use strategy stop)</option>
+              <option value="fixed">fixed (always fixed % stop)</option>
+              <option value="capped">capped (cap only wide stops)</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="fixed_stop_loss_pct">Fixed Stop-Loss (%)</label>
+            <input
+              id="fixed_stop_loss_pct"
+              type="number"
+              min="0"
+              max="5"
+              step="0.05"
+              value={config.fixed_stop_loss_pct}
+              onChange={(e) => handleChange("fixed_stop_loss_pct", Number(e.target.value))}
+              disabled={config.stop_loss_mode === "strategy"}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="time_exit_bars">Time Exit (bars)</label>
+            <input
+              id="time_exit_bars"
+              type="number"
+              min="1"
+              step="1"
+              value={config.time_exit_bars}
+              onChange={(e) => handleChange("time_exit_bars", Number(e.target.value))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="adverse_flow_threshold">Adverse Flow Threshold</label>
+            <input
+              id="adverse_flow_threshold"
+              type="number"
+              min="0.02"
+              max="1"
+              step="0.01"
+              value={config.adverse_flow_threshold}
+              onChange={(e) => handleChange("adverse_flow_threshold", Number(e.target.value))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="adverse_flow_min_hold_bars">Adverse Flow Min Hold (bars)</label>
+            <input
+              id="adverse_flow_min_hold_bars"
+              type="number"
+              min="1"
+              step="1"
+              value={config.adverse_flow_min_hold_bars}
+              onChange={(e) => handleChange("adverse_flow_min_hold_bars", Number(e.target.value))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="field-row" htmlFor="adverse_flow_exit_enabled">
+              <span>Adverse Flow Exit Enabled</span>
+              <input
+                id="adverse_flow_exit_enabled"
+                type="checkbox"
+                checked={!!config.adverse_flow_exit_enabled}
+                onChange={(e) => handleChange("adverse_flow_exit_enabled", e.target.checked)}
+              />
+            </label>
+          </div>
+
+          <div className="form-group">
             <label htmlFor="trailing_stop_pct">Global Trailing Stop (%)</label>
             <input
               id="trailing_stop_pct"
@@ -488,6 +1144,159 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
                 )
               }
             />
+          </div>
+
+          <div className="preset-box">
+            <div className="preset-header">
+              <span className="preset-title">AOS Runtime Settings ({config.ticker || "Ticker"})</span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleReloadAosAndProfiles}
+                disabled={aosLoading || adaptiveProfilesLoading || !config.ticker}
+                style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+              >
+                {aosLoading || adaptiveProfilesLoading ? "Loading..." : "Reload"}
+              </button>
+            </div>
+            <div className="preset-copy">
+              Tieto hodnoty sa načítajú z API a ukladajú pred štartom runu.
+            </div>
+
+            <label className="field-row" htmlFor="aos_time_filter_enabled">
+              <span>AOS Time Filter</span>
+              <input
+                id="aos_time_filter_enabled"
+                type="checkbox"
+                checked={!!aosControls.time_filter_enabled}
+                onChange={(e) => handleAosControlChange("time_filter_enabled", e.target.checked)}
+                disabled={aosLoading}
+              />
+            </label>
+
+            <div className="form-group">
+              <label htmlFor="aos_trading_hours">AOS Trading Hours (ET, comma-separated)</label>
+              <input
+                id="aos_trading_hours"
+                type="text"
+                value={aosControls.trading_hours_text}
+                onChange={(e) => handleAosControlChange("trading_hours_text", e.target.value)}
+                placeholder="15 or 9,10,15"
+                disabled={aosLoading}
+              />
+            </div>
+
+            <label className="field-row" htmlFor="aos_long_only">
+              <span>AOS Long Only</span>
+              <input
+                id="aos_long_only"
+                type="checkbox"
+                checked={!!aosControls.long_only}
+                onChange={(e) => handleAosControlChange("long_only", e.target.checked)}
+                disabled={aosLoading}
+              />
+            </label>
+
+            <div className="form-group">
+              <label htmlFor="aos_trailing_stop_pct">AOS Trailing Stop (%)</label>
+              <input
+                id="aos_trailing_stop_pct"
+                type="number"
+                min="0.1"
+                max="5"
+                step="0.1"
+                value={aosControls.trailing_stop_pct}
+                onChange={(e) => handleAosControlChange("trailing_stop_pct", e.target.value)}
+                disabled={aosLoading}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="aos_strategy_selection_mode">Strategy Selection Mode</label>
+              <select
+                id="aos_strategy_selection_mode"
+                value={aosControls.strategy_selection_mode}
+                onChange={(e) => handleAosControlChange("strategy_selection_mode", e.target.value)}
+                disabled={aosLoading}
+              >
+                <option value="adaptive_top_n">Adaptive Top-N</option>
+                <option value="all_enabled">All Enabled Strategies</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="aos_max_active_strategies">Max Active Strategies (adaptive mode)</label>
+              <input
+                id="aos_max_active_strategies"
+                type="number"
+                min="1"
+                max="20"
+                step="1"
+                value={aosControls.max_active_strategies}
+                onChange={(e) => handleAosControlChange("max_active_strategies", e.target.value)}
+                disabled={aosLoading || aosControls.strategy_selection_mode === "all_enabled"}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="aos_adaptive_profile">Adaptive Tuned Profile (for this run)</label>
+              <select
+                id="aos_adaptive_profile"
+                value={selectedAdaptiveProfileId}
+                onChange={(e) => setSelectedAdaptiveProfileId(e.target.value)}
+                disabled={aosLoading || adaptiveProfilesLoading || !config.ticker}
+              >
+                <option value={ACTIVE_PROFILE_SENTINEL}>
+                  Use active profile from AOS
+                  {activeAdaptiveProfileId ? ` (${activeAdaptiveProfileId})` : " (none)"}
+                </option>
+                {adaptiveProfiles
+                  .filter((profile) => String(profile?.profile_id || "").trim())
+                  .map((profile, idx) => {
+                  const profileId = String(profile?.profile_id || "").trim();
+                  return (
+                    <option key={profileId || `profile-${idx}`} value={profileId}>
+                      {formatAdaptiveProfileLabel(profile)}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+            <div className="preset-copy">
+              Zvolený profil prepíše adaptive selection parametre pre ďalší run a nastaví sa ako aktívny v AOS.
+            </div>
+            {selectedAdaptiveProfile && (
+              <div className="preset-copy">
+                Candidate: {formatAdaptiveProfileCandidate(selectedAdaptiveProfile.candidate)}
+              </div>
+            )}
+
+            {aosError && (
+              <div
+                style={{
+                  color: "var(--accent-red)",
+                  fontSize: "0.8rem",
+                  background: "rgba(239, 68, 68, 0.1)",
+                  padding: "var(--spacing-xs)",
+                  borderRadius: "var(--border-radius-sm)",
+                }}
+              >
+                {aosError}
+              </div>
+            )}
+            {adaptiveProfilesError && (
+              <div
+                style={{
+                  color: "var(--accent-red)",
+                  fontSize: "0.8rem",
+                  background: "rgba(239, 68, 68, 0.1)",
+                  padding: "var(--spacing-xs)",
+                  borderRadius: "var(--border-radius-sm)",
+                }}
+              >
+                {adaptiveProfilesError}
+              </div>
+            )}
           </div>
 
           <div className="preset-box">
@@ -716,10 +1525,18 @@ function RunConfig({ onStart, isRunning, onTickerChange }) {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={loading || !config.ticker || !config.date_from || !config.date_to}
+            disabled={
+              loading ||
+              aosLoading ||
+              aosSaving ||
+              adaptiveProfilesLoading ||
+              !config.ticker ||
+              !config.date_from ||
+              !config.date_to
+            }
             style={{ width: "100%", marginTop: "var(--spacing-sm)" }}
           >
-            {loading ? "Starting..." : "Start Backtest"}
+            {loading ? "Starting..." : (aosSaving ? "Saving AOS..." : "Start Backtest")}
           </button>
         </form>
       </div>

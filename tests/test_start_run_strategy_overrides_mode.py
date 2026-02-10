@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+from pathlib import Path
+import sys
+
+
+_API_SERVER_PATH = Path(__file__).resolve().parents[1] / "api_server.py"
+_PROJECT_ROOT = str(_API_SERVER_PATH.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+_API_SERVER_SPEC = importlib.util.spec_from_file_location("api_server_module", _API_SERVER_PATH)
+assert _API_SERVER_SPEC is not None and _API_SERVER_SPEC.loader is not None
+api_server = importlib.util.module_from_spec(_API_SERVER_SPEC)
+_API_SERVER_SPEC.loader.exec_module(api_server)
+
+
+class _DummyDiscovery:
+    def get_files_for_range(self, *args, **kwargs):
+        return []
+
+
+class _DummyRunner:
+    def __init__(self, config):
+        self.config = config
+        self.is_running = False
+        self.is_paused = False
+        self.last_run_speed = None
+
+    def load_bars(self, bars):
+        self._bars = list(bars)
+
+    def on_bar(self, _cb):
+        return None
+
+    def on_decision(self, _cb):
+        return None
+
+    def get_state(self):
+        return {"phase": "IDLE"}
+
+
+def _patch_start_run_dependencies(monkeypatch, apply_calls, *, apply_aos_result=None, configure_spy=None):
+    async def _noop_async(*args, **kwargs):
+        return None
+
+    async def _reset_full(*args, **kwargs):
+        return {"success": True, "scope": "all"}
+
+    async def _apply_aos(*args, **kwargs):
+        return dict(apply_aos_result or {})
+
+    async def _configure(*args, **kwargs):
+        if configure_spy is not None:
+            configure_spy["kwargs"] = dict(kwargs)
+        return None
+
+    async def _record_apply(*args, **kwargs):
+        apply_calls["count"] += 1
+        return None
+
+    monkeypatch.setattr(api_server, "SessionRunner", _DummyRunner)
+    monkeypatch.setattr(api_server, "_reset_remote_orchestrator_state", _reset_full)
+    monkeypatch.setattr(api_server, "_clear_remote_strategy_sessions", _noop_async)
+    monkeypatch.setattr(api_server, "_configure_session", _configure)
+    monkeypatch.setattr(api_server, "_apply_aos_optimizations", _apply_aos)
+    monkeypatch.setattr(api_server, "_apply_strategy_overrides", _record_apply)
+    monkeypatch.setattr(api_server, "get_discovery", lambda: _DummyDiscovery())
+    monkeypatch.setattr(api_server.databento_svc, "scan_existing_files", lambda: None)
+    monkeypatch.setattr(api_server.databento_svc, "get_files_for_range", lambda **kwargs: [])
+    monkeypatch.setattr(api_server.databento_svc, "list_catalog", lambda **kwargs: [])
+
+
+def test_start_run_applies_ticker_overrides_by_default(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    _patch_start_run_dependencies(monkeypatch, apply_calls)
+
+    request = api_server.StartRunRequest(
+        run_id="test-default-overrides",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        assert result["strategy_overrides_applied"] is True
+        assert apply_calls["count"] == 1
+    finally:
+        api_server.active_runners.clear()
+
+
+def test_start_run_can_skip_ticker_overrides(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    _patch_start_run_dependencies(monkeypatch, apply_calls)
+
+    request = api_server.StartRunRequest(
+        run_id="test-skip-overrides",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+        apply_ticker_overrides_on_start=False,
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        assert result["strategy_overrides_applied"] is False
+        assert apply_calls["count"] == 0
+    finally:
+        api_server.active_runners.clear()
+
+
+def test_start_run_uses_aos_strategy_selection_defaults(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    configure_spy = {}
+    _patch_start_run_dependencies(
+        monkeypatch,
+        apply_calls,
+        apply_aos_result={"strategy_selection_mode": "all_enabled", "max_active_strategies": 9},
+        configure_spy=configure_spy,
+    )
+
+    request = api_server.StartRunRequest(
+        run_id="test-selection-defaults",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        assert configure_spy["kwargs"]["strategy_selection_mode"] == "all_enabled"
+        assert configure_spy["kwargs"]["max_active_strategies"] == 9
+        assert result["execution_config"]["strategy_selection_mode"] == "all_enabled"
+        assert result["execution_config"]["max_active_strategies"] == 9
+    finally:
+        api_server.active_runners.clear()
+
+
+def test_start_run_strategy_selection_request_overrides_aos(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    configure_spy = {}
+    _patch_start_run_dependencies(
+        monkeypatch,
+        apply_calls,
+        apply_aos_result={"strategy_selection_mode": "adaptive_top_n", "max_active_strategies": 3},
+        configure_spy=configure_spy,
+    )
+
+    request = api_server.StartRunRequest(
+        run_id="test-selection-override",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+        strategy_selection_mode="all_enabled",
+        max_active_strategies=12,
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        assert configure_spy["kwargs"]["strategy_selection_mode"] == "all_enabled"
+        assert configure_spy["kwargs"]["max_active_strategies"] == 12
+        assert result["execution_config"]["strategy_selection_mode"] == "all_enabled"
+        assert result["execution_config"]["max_active_strategies"] == 12
+    finally:
+        api_server.active_runners.clear()

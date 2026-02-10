@@ -50,7 +50,10 @@
       ],
       "min_confidence": 55.0,
       "max_daily_trades": 3,
-      "notes": "LONG ONLY (shorts lose $233) | Time: 15:00 | Trail: 2.0%"
+      "notes": "LONG ONLY (shorts lose $233) | Time: 15:00 | Trail: 2.0%",
+      "trailing_stop_pct": 2.0,
+      "long_only": true,
+      "time_filter_enabled": true
     },
     "TSLA": {
       "strategy": "momentum",
@@ -69,7 +72,11 @@
       ],
       "min_confidence": 70.0,
       "max_daily_trades": 2,
-      "notes": "Only trade strong trends, high confidence required"
+      "notes": "Only trade strong trends, high confidence required",
+      "trailing_stop_pct": 1.5,
+      "long_only": false,
+      "trading_hours": [],
+      "time_filter_enabled": false
     },
     "AAPL": {
       "strategy": "vwap_magnet",
@@ -89,7 +96,11 @@
       "avoid_days": [],
       "min_confidence": 55.0,
       "max_daily_trades": 4,
-      "notes": "Low volatility, tighter params OK"
+      "notes": "Low volatility, tighter params OK",
+      "trailing_stop_pct": 0.6,
+      "long_only": false,
+      "trading_hours": [],
+      "time_filter_enabled": false
     },
     "AMD": {
       "strategy": "momentum",
@@ -108,25 +119,52 @@
         "Friday"
       ],
       "min_confidence": 60.0,
-      "max_daily_trades": 3
+      "max_daily_trades": 3,
+      "trailing_stop_pct": 1.2,
+      "long_only": false,
+      "trading_hours": [],
+      "time_filter_enabled": false
     },
     "GOOGL": {
-      "strategy": "mean_reversion",
+      "strategy": "momentum_flow",
       "params": {
-        "entry_deviation_pct": 0.8,
-        "volume_stop_pct": 0.8,
-        "trailing_stop_pct": 0.5,
-        "min_confidence": 60.0
+        "min_signed_aggression": 0.06,
+        "min_directional_consistency": 0.5,
+        "min_imbalance": 0.025,
+        "min_sweep_intensity": 0.07,
+        "min_book_pressure": 0,
+        "min_confidence": 58,
+        "atr_stop_multiplier": 1.8,
+        "rr_ratio": 2.2,
+        "trailing_stop_pct": 0.9
       },
-      "backup_strategy": "vwap_magnet",
+      "backup_strategy": "absorption_reversal",
       "regime_filter": [
+        "TRENDING",
         "MIXED",
         "CHOPPY"
       ],
       "avoid_days": [],
-      "min_confidence": 55.0,
+      "long_only": false,
+      "min_confidence": 58,
       "max_daily_trades": 3,
-      "notes": "Low volatility, mean reversion works well"
+      "l2": {
+        "l2_only": true,
+        "confirm_enabled": true,
+        "min_delta": 1000,
+        "min_imbalance": 0.1,
+        "min_iceberg_bias": 0,
+        "lookback_bars": 3,
+        "min_participation_ratio": 0.1,
+        "min_directional_consistency": 0.5,
+        "min_signed_aggression": 0.1
+      },
+      "notes": "Evidence-based GOOGL profile with flow-only strategy stack and default L2-only gating.",
+      "trailing_stop_pct": 0.9,
+      "strategy_selection_mode": "adaptive_top_n",
+      "max_active_strategies": 3,
+      "trading_hours": [],
+      "time_filter_enabled": false
     },
     "META": {
       "strategy": "pullback",
@@ -144,7 +182,11 @@
       ],
       "avoid_days": [],
       "min_confidence": 60.0,
-      "max_daily_trades": 3
+      "max_daily_trades": 3,
+      "trailing_stop_pct": 0.8,
+      "long_only": false,
+      "trading_hours": [],
+      "time_filter_enabled": false
     },
     "MSFT": {
       "strategy": "mean_reversion",
@@ -162,7 +204,11 @@
       "avoid_days": [],
       "min_confidence": 55.0,
       "max_daily_trades": 3,
-      "notes": "Low volatility, similar to GOOGL"
+      "notes": "Low volatility, similar to GOOGL",
+      "trailing_stop_pct": 0.5,
+      "long_only": false,
+      "trading_hours": [],
+      "time_filter_enabled": false
     },
     "MU": {
       "strategy": "momentum_flow",
@@ -175,7 +221,8 @@
         "min_confidence": 58,
         "atr_stop_multiplier": 1.8,
         "rr_ratio": 2.2,
-        "trailing_stop_pct": 0.9
+        "trailing_stop_pct": 0.9,
+        "long_only": false
       },
       "backup_strategy": "absorption_reversal",
       "regime_filter": [
@@ -206,7 +253,119 @@
         "min_signed_aggression": 0.12
       },
       "notes": "Flow-first MU profile with stricter L2 conviction gates (imbalance/aggression >= 0.12) to cut low-quality microstructure noise entries.",
-      "trailing_stop_pct": 2
+      "trailing_stop_pct": 0.9,
+      "strategy_selection_mode": "all_enabled",
+      "max_active_strategies": 1,
+      "trading_hours": [],
+      "time_filter_enabled": false,
+      "adaptive": {
+        "flow_bias_enabled": true,
+        "use_ohlcv_fallbacks": true,
+        "flow_bias_strategies": [
+          "momentum_flow",
+          "absorption_reversal",
+          "exhaustion_fade"
+        ],
+        "regime_preferences": {
+          "TRENDING": [
+            "momentum_flow",
+            "momentum",
+            "pullback",
+            "gap_liquidity",
+            "volume_profile",
+            "vwap_magnet"
+          ],
+          "CHOPPY": [
+            "absorption_reversal",
+            "exhaustion_fade",
+            "mean_reversion",
+            "vwap_magnet",
+            "volume_profile"
+          ],
+          "MIXED": [
+            "exhaustion_fade",
+            "absorption_reversal",
+            "volume_profile",
+            "gap_liquidity",
+            "mean_reversion",
+            "vwap_magnet",
+            "rotation"
+          ]
+        },
+        "micro_regime_preferences": {
+          "TRENDING_UP": [
+            "momentum_flow",
+            "momentum",
+            "pullback",
+            "gap_liquidity"
+          ],
+          "TRENDING_DOWN": [
+            "momentum_flow",
+            "momentum",
+            "gap_liquidity",
+            "pullback"
+          ],
+          "CHOPPY": [
+            "absorption_reversal",
+            "exhaustion_fade",
+            "mean_reversion",
+            "vwap_magnet"
+          ],
+          "ABSORPTION": [
+            "absorption_reversal",
+            "exhaustion_fade",
+            "vwap_magnet"
+          ],
+          "BREAKOUT": [
+            "momentum_flow",
+            "momentum",
+            "gap_liquidity"
+          ],
+          "MIXED": [
+            "exhaustion_fade",
+            "volume_profile",
+            "rotation"
+          ]
+        },
+        "version": 1,
+        "min_active_bars_before_switch": 2,
+        "switch_cooldown_bars": 0
+      },
+      "adaptive_tuner_profiles": [
+        {
+          "profile_id": "0e99cecbc0e0",
+          "created_at": "2026-02-09T19:39:06.198643Z",
+          "ticker": "MU",
+          "adaptive_version": 1,
+          "method": "random",
+          "score_metric": "pnl_pct",
+          "score": -0.0182,
+          "date_from": "2026-02-03",
+          "date_to": "2026-02-03",
+          "evaluated_days": 1,
+          "l2_required": true,
+          "l2_only": false,
+          "candidate": {
+            "strategy_selection_mode": "all_enabled",
+            "max_active_strategies": 1,
+            "min_active_bars_before_switch": 2,
+            "switch_cooldown_bars": 0,
+            "flow_bias_enabled": true,
+            "use_ohlcv_fallbacks": true
+          },
+          "metrics": {
+            "valid_days": 1,
+            "total_days": 1,
+            "total_trades": 1,
+            "total_pnl_pct": -0.0182,
+            "avg_pnl_pct": -0.0182,
+            "total_pnl_dollars": -0.8528,
+            "avg_pnl_dollars": -0.8528,
+            "avg_win_rate_pct": 0
+          }
+        }
+      ],
+      "active_adaptive_tuner_profile_id": "0e99cecbc0e0"
     },
     "AMZN": {
       "strategy": "pullback",
@@ -224,7 +383,11 @@
       ],
       "avoid_days": [],
       "min_confidence": 55.0,
-      "max_daily_trades": 3
+      "max_daily_trades": 3,
+      "trailing_stop_pct": 0.8,
+      "long_only": false,
+      "trading_hours": [],
+      "time_filter_enabled": false
     }
   },
   "risk_management": {

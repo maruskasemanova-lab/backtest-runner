@@ -18,7 +18,6 @@ class MarkerType(str, Enum):
     STOP_LOSS_HIT = "stop_loss_hit"
     TAKE_PROFIT_HIT = "take_profit_hit"
     TRAILING_STOP_UPDATED = "trailing_stop_updated"
-    PATTERN_DETECTED = "pattern_detected"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
 
@@ -313,116 +312,6 @@ class DecisionTracker:
         self.markers.append(marker)
         return marker
     
-    def add_pattern_detected(
-        self,
-        timestamp: datetime,
-        bar_index: int,
-        price: float,
-        patterns: List[Dict[str, Any]],
-        direction: str,
-        layer_scores: Dict[str, Any] = None
-    ) -> DecisionMarker:
-        """Record candlestick pattern detection (Layer 1)."""
-        pattern_names = [p.get('name', '?') for p in patterns]
-        best_strength = max((p.get('strength', 0) for p in patterns), default=0)
-
-        description_parts = [f"Detected: {', '.join(pattern_names)}"]
-        description_parts.append(f"Direction: {direction}")
-        description_parts.append(f"Best strength: {best_strength:.0f}")
-        if layer_scores:
-            def _as_float(value: Any, default: float = 0.0) -> float:
-                try:
-                    if value is None:
-                        return default
-                    return float(value)
-                except (TypeError, ValueError):
-                    return default
-
-            pattern_score = _as_float(layer_scores.get("pattern_score", 0.0))
-            pattern_threshold = _as_float(
-                layer_scores.get("pattern_threshold", layer_scores.get("threshold", 65)),
-                65.0,
-            )
-            trade_gate_threshold = _as_float(
-                layer_scores.get("trade_gate_threshold", layer_scores.get("threshold", 65)),
-                65.0,
-            )
-            threshold_used = _as_float(layer_scores.get("threshold_used", layer_scores.get("threshold", 65)), 65.0)
-            threshold_reason = layer_scores.get("threshold_used_reason")
-            combined_raw = _as_float(layer_scores.get("combined_raw", layer_scores.get("combined_score", 0.0)))
-            combined_norm = layer_scores.get("combined_norm_0_100")
-            pattern_confirmation = bool(layer_scores.get("pattern_confirmation", pattern_score > 0))
-            pattern_direction = layer_scores.get("pattern_direction", direction)
-            l2_coverage_ratio = layer_scores.get("l2_coverage_ratio")
-
-            effective_strategy_weight = layer_scores.get("effective_strategy_weight")
-            if effective_strategy_weight is None:
-                weights_snapshot = layer_scores.get("weights_snapshot")
-                if isinstance(weights_snapshot, dict):
-                    effective_strategy_weight = weights_snapshot.get("strategy_weight")
-            if effective_strategy_weight is None:
-                effective_strategy_weight = layer_scores.get("strategy_weight")
-            effective_strategy_weight = _as_float(effective_strategy_weight, -1.0)
-            if effective_strategy_weight < 0:
-                effective_strategy_weight = None
-
-            strategy_weight_source = layer_scores.get("strategy_weight_source")
-            if strategy_weight_source is None and effective_strategy_weight is not None:
-                strategy_weight_source = "legacy"
-
-            if not pattern_confirmation and pattern_score == 0 and (
-                pattern_direction == "neutral" or threshold_reason == "no_pattern_confirmation"
-            ):
-                description_parts.append(
-                    f"Pattern score=0.0 (neutral pattern -> forced to 0, th={pattern_threshold:.1f})"
-                )
-            elif pattern_score >= pattern_threshold:
-                description_parts.append(
-                    f"Pattern score={pattern_score:.1f} >= {pattern_threshold:.1f} ({'confirm' if pattern_confirmation else 'no_confirm'})"
-                )
-            else:
-                description_parts.append(
-                    f"Pattern score={pattern_score:.1f} < {pattern_threshold:.1f} ({'confirm' if pattern_confirmation else 'no_confirm'})"
-                )
-            if threshold_reason:
-                description_parts.append(
-                    f"Gate: used={threshold_used:.1f} (trade_th={trade_gate_threshold:.1f}, reason={threshold_reason})"
-                )
-            else:
-                description_parts.append(f"Gate: used={threshold_used:.1f} (trade_th={trade_gate_threshold:.1f})")
-            if combined_norm is not None:
-                description_parts.append(f"Combined: raw={combined_raw:.1f} | norm={float(combined_norm):.1f}/100")
-            else:
-                description_parts.append(f"Combined: raw={combined_raw:.1f}")
-            if effective_strategy_weight is not None:
-                weight_part = f"Weights: effective_strategy_weight={effective_strategy_weight:.2f}"
-                if strategy_weight_source:
-                    weight_part += f" | source={strategy_weight_source}"
-                if l2_coverage_ratio is not None:
-                    weight_part += f" | l2_coverage={_as_float(l2_coverage_ratio):.2f}"
-                description_parts.append(weight_part)
-            if not pattern_confirmation:
-                description_parts.append("Pattern confirmation: no")
-
-        marker = DecisionMarker(
-            id=self._generate_id(),
-            timestamp=timestamp,
-            bar_index=bar_index,
-            marker_type=MarkerType.PATTERN_DETECTED,
-            title=f"Pattern: {pattern_names[0]}" if pattern_names else "Pattern",
-            description=" | ".join(description_parts),
-            price=price,
-            side="long" if direction == "bullish" else ("short" if direction == "bearish" else None),
-            confidence=best_strength,
-            details={
-                "patterns": patterns,
-                "direction": direction,
-                "layer_scores": layer_scores or {},
-            }
-        )
-        self.markers.append(marker)
-        return marker
-
     def add_session_start(
         self,
         timestamp: datetime,
@@ -512,7 +401,6 @@ class DecisionTracker:
             MarkerType.STOP_LOSS_HIT: "#ef4444",  # red
             MarkerType.TAKE_PROFIT_HIT: "#22c55e",  # green
             MarkerType.TRAILING_STOP_UPDATED: "#06b6d4",  # cyan
-            MarkerType.PATTERN_DETECTED: "#e879f9",  # fuchsia
             MarkerType.SESSION_STARTED: "#3b82f6",  # blue
             MarkerType.SESSION_ENDED: "#3b82f6",  # blue
         }
@@ -529,7 +417,6 @@ class DecisionTracker:
             MarkerType.STOP_LOSS_HIT: "arrowDown",
             MarkerType.TAKE_PROFIT_HIT: "arrowDown",
             MarkerType.TRAILING_STOP_UPDATED: "circle",
-            MarkerType.PATTERN_DETECTED: "square",
             MarkerType.SESSION_STARTED: "circle",
             MarkerType.SESSION_ENDED: "circle",
         }
@@ -537,7 +424,7 @@ class DecisionTracker:
     
     def _get_marker_position(self, marker: DecisionMarker) -> str:
         """Get position (aboveBar/belowBar) for marker."""
-        if marker.marker_type in [MarkerType.ENTRY_EXECUTED, MarkerType.SIGNAL_GENERATED, MarkerType.PATTERN_DETECTED]:
+        if marker.marker_type in [MarkerType.ENTRY_EXECUTED, MarkerType.SIGNAL_GENERATED]:
             return "belowBar" if marker.side == "long" else "aboveBar"
         elif marker.marker_type in [MarkerType.EXIT_EXECUTED, MarkerType.STOP_LOSS_HIT, MarkerType.TAKE_PROFIT_HIT]:
             return "aboveBar" if marker.side == "long" else "belowBar"

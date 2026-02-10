@@ -54,6 +54,8 @@ For structured Claude/Codex work on large changes, use:
 
 - `BMAD_QUICKSTART.md`
 - `bmad/README.md`
+- `docs/llm/README.md`
+- official BMAD install in `_bmad/` with `/bmad-help`
 
 Refresh domain context packs:
 
@@ -61,10 +63,27 @@ Refresh domain context packs:
 python3 scripts/generate_context_pack.py
 ```
 
-Optional official BMAD bootstrap:
+Validate LLM context consistency:
+
+```bash
+python3 scripts/validate_llm_context.py
+```
+
+Generated assets include:
+
+- `bmad/context/generated/00-machine-index.json`
+- `bmad/context/generated/00-endpoint-map.md`
+
+Bootstrap/refresh full BMAD-METHOD:
 
 ```bash
 ./scripts/bootstrap_bmad.sh
+```
+
+Run Codex with project-local BMAD prompts:
+
+```bash
+./scripts/codex-project.sh
 ```
 
 ## Architecture

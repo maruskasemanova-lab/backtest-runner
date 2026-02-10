@@ -6,7 +6,6 @@ const DECISION_MARKER_TYPES = new Set([
   'stop_loss_hit',
   'take_profit_hit',
   'signal_generated',
-  'pattern_detected',
   'trailing_stop_updated',
 ]);
 
@@ -97,6 +96,87 @@ const renderValue = (val, keyPrefix = '') => {
   return <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9em' }}>{String(val)}</span>;
 };
 
+const firstFinite = (...values) => {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return null;
+};
+
+const extractL2Diagnostics = (marker, details, metadata) => {
+  const detailsLayer = details?.layer_scores || {};
+  const metadataLayer = metadata?.layer_scores || {};
+  const detailsIndicators = details?.indicators || {};
+  const metadataIndicators = metadata?.indicators || {};
+  const markerIndicators = marker?.indicators || {};
+  const detailsFlow = details?.flow_metrics || {};
+  const metadataFlow = metadata?.flow_metrics || {};
+
+  const flowScore = firstFinite(
+    detailsLayer.flow_score,
+    metadataLayer.flow_score,
+    detailsIndicators.flow_score,
+    metadataIndicators.flow_score,
+    markerIndicators.flow_score,
+    detailsFlow.flow_score,
+    metadataFlow.flow_score
+  );
+  const signedAggression = firstFinite(
+    detailsLayer.signed_aggression,
+    metadataLayer.signed_aggression,
+    detailsIndicators.signed_aggression,
+    metadataIndicators.signed_aggression,
+    markerIndicators.signed_aggression,
+    detailsFlow.signed_aggression,
+    metadataFlow.signed_aggression
+  );
+  const absorptionRate = firstFinite(
+    detailsLayer.absorption_rate,
+    metadataLayer.absorption_rate,
+    detailsIndicators.absorption_rate,
+    metadataIndicators.absorption_rate,
+    markerIndicators.absorption_rate,
+    detailsFlow.absorption_rate,
+    metadataFlow.absorption_rate
+  );
+  const largeTraderActivity = firstFinite(
+    detailsLayer.large_trader_activity,
+    metadataLayer.large_trader_activity,
+    detailsIndicators.large_trader_activity,
+    metadataIndicators.large_trader_activity,
+    markerIndicators.large_trader_activity,
+    detailsFlow.large_trader_activity,
+    metadataFlow.large_trader_activity
+  );
+  const vwapExecutionFlow = firstFinite(
+    detailsLayer.vwap_execution_flow,
+    metadataLayer.vwap_execution_flow,
+    detailsIndicators.vwap_execution_flow,
+    metadataIndicators.vwap_execution_flow,
+    markerIndicators.vwap_execution_flow,
+    detailsFlow.vwap_execution_flow,
+    metadataFlow.vwap_execution_flow
+  );
+
+  const hasAny = [
+    flowScore,
+    signedAggression,
+    absorptionRate,
+    largeTraderActivity,
+    vwapExecutionFlow,
+  ].some((value) => value !== null);
+
+  return {
+    hasAny,
+    flowScore,
+    signedAggression,
+    absorptionRate,
+    largeTraderActivity,
+    vwapExecutionFlow,
+  };
+};
+
 function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
   const [detailTab, setDetailTab] = useState('details');
   const [listTab, setListTab] = useState('decisions');
@@ -155,7 +235,6 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
       regime_detected: '🎯',
       strategy_selected: '📋',
       signal_generated: '📊',
-      pattern_detected: '🕯️',
       entry_executed: '🟢',
       exit_executed: '⚪',
       stop_loss_hit: '🔴',
@@ -240,6 +319,7 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
   // Prepare metadata for rendering
   const details = selectedMarker?.details || {};
   const metadata = details.metadata || {};
+  const l2Diagnostics = extractL2Diagnostics(selectedMarker, details, metadata);
   
   // Helper to render sections
   const renderSectionHeader = (title) => (
@@ -297,19 +377,6 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
                 <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: '0.78rem', fontWeight: 600 }}>
                   {exitMetrics}
                 </div>
-              )}
-              {marker.marker_type === 'pattern_detected' && marker.details?.direction && (
-                <span style={{
-                  marginLeft: 8,
-                  padding: '1px 6px',
-                  borderRadius: 3,
-                  fontSize: '0.75em',
-                  fontWeight: 600,
-                  background: marker.details.direction === 'bullish' ? 'rgba(34,197,94,0.15)' : marker.details.direction === 'bearish' ? 'rgba(239,68,68,0.15)' : 'rgba(100,116,139,0.15)',
-                  color: marker.details.direction === 'bullish' ? 'var(--accent-green)' : marker.details.direction === 'bearish' ? 'var(--accent-red)' : 'var(--text-secondary)',
-                }}>
-                  {marker.details.direction === 'bullish' ? '▲ BULL' : marker.details.direction === 'bearish' ? '▼ BEAR' : '◆ NEUTRAL'}
-                </span>
               )}
             </div>
           </div>
@@ -452,6 +519,42 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
                         <span className="detail-value">${Number(v).toFixed(4)}</span>
                       </div>
                     ))}
+                  </>
+                )}
+
+                {l2Diagnostics.hasAny && (
+                  <>
+                    {renderSectionHeader("L2 Diagnostics")}
+                    <div className="detail-item">
+                      <span className="detail-label">Flow Score</span>
+                      <span className="detail-value">
+                        {l2Diagnostics.flowScore != null ? l2Diagnostics.flowScore.toFixed(1) : "n/a"}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">Signed Aggression</span>
+                      <span className="detail-value">
+                        {l2Diagnostics.signedAggression != null ? l2Diagnostics.signedAggression.toFixed(3) : "n/a"}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">Absorption Rate</span>
+                      <span className="detail-value">
+                        {l2Diagnostics.absorptionRate != null ? l2Diagnostics.absorptionRate.toFixed(3) : "n/a"}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">Large Trader Activity</span>
+                      <span className="detail-value">
+                        {l2Diagnostics.largeTraderActivity != null ? l2Diagnostics.largeTraderActivity.toFixed(3) : "n/a"}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">VWAP Execution Flow</span>
+                      <span className="detail-value">
+                        {l2Diagnostics.vwapExecutionFlow != null ? l2Diagnostics.vwapExecutionFlow.toFixed(3) : "n/a"}
+                      </span>
+                    </div>
                   </>
                 )}
 

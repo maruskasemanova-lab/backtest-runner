@@ -20,18 +20,46 @@ Own playback UI, chart rendering, and operational diagnostics.
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `frontend/src/App.jsx` | yes | 599 | `583f2bc 2026-02-06` |
-| `frontend/src/components/CandlestickChart.jsx` | yes | 612 | `583f2bc 2026-02-06` |
-| `frontend/src/components/DecisionPanel.jsx` | yes | 283 | `583f2bc 2026-02-06` |
+| `frontend/src/App.jsx` | yes | 1020 | `5ba62b7 2026-02-08` |
+| `frontend/src/components/CandlestickChart.jsx` | yes | 773 | `5ba62b7 2026-02-08` |
+| `frontend/src/components/DecisionPanel.jsx` | yes | 607 | `5ba62b7 2026-02-08` |
 | `frontend/src/components/SessionSummary.jsx` | yes | 99 | `36d343c 2026-02-03` |
-| `frontend/src/components/RunConfig.jsx` | yes | 353 | `583f2bc 2026-02-06` |
+| `frontend/src/components/RunConfig.jsx` | yes | 1547 | `5ba62b7 2026-02-08` |
+| `frontend/src/components/PlaybackControls.jsx` | yes | 187 | `36d343c 2026-02-03` |
+| `frontend/src/components/DataManager.jsx` | yes | 696 | `baf7110 2026-02-07` |
+| `frontend/src/components/AdaptiveStrategyStudio.jsx` | yes | 1323 | `-` |
+| `frontend/src/components/StrategySettings.jsx` | yes | 697 | `baf7110 2026-02-07` |
+| `frontend/src/components/AOSOptimizations.jsx` | yes | 237 | `583f2bc 2026-02-06` |
+| `frontend/src/components/IntrabarPanel.jsx` | yes | 186 | `5ba62b7 2026-02-08` |
 
 ## Change Checks
 
 - Any API payload change must include frontend compatibility check.
 - Keep desktop/mobile rendering stable.
 - Preserve marker semantics (signal queued, position opened/closed).
+- Live playback controls must remain consistent with backend state endpoints.
+
+## Critical Invariants
+
+- UI marker timeline must preserve backend event ordering.
+- Schema changes in run/session endpoints require explicit UI fallback behavior.
+- Chart annotations and session summary must remain backward compatible.
+- Data manager operations must not block core playback controls.
+
+## Test Targets
+
+- `frontend/manual-smoke: start run -> play/pause/step -> markers -> summary`
+
+## Key Symbols
+
+- (no Python symbols discovered in mapped files)
+
+## Endpoint Summary
+
+| Method | Path | Handler | File |
+|---|---|---|---|
+| `-` | `-` | `-` | `-` |
 
 ## Prompt Primer
 
-Load this file plus `bmad/context/generated/00-index.md`, then keep edits scoped to the file inventory unless interface changes are explicitly required.
+Load this domain pack with `bmad/context/generated/00-index.md` and `bmad/context/generated/00-machine-index.json`, then keep edits scoped to mapped files unless interface changes are explicit.

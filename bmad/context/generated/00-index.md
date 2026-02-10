@@ -26,8 +26,13 @@ CSV/Parquet -> DataLoader -> SessionRunner -> POST /api/session/bar -> DayTradin
 | `optimization-validation` | Optimization & Validation | `bmad/context/generated/optimization-validation.md` |
 | `frontend` | Frontend | `bmad/context/generated/frontend.md` |
 
+## Generated Assets
+
+- `bmad/context/generated/00-machine-index.json` (symbols + routes)
+- `bmad/context/generated/00-endpoint-map.md` (global endpoint catalog)
+
 ## How To Use
 
 - Pick one primary domain for the task.
-- Load that domain pack and keep changes local first.
-- If cross-domain edits are needed, list impacted contracts explicitly.
+- Load the primary domain pack plus `00-machine-index.json`.
+- Keep changes local first; list contract deltas when crossing domains.
