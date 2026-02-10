@@ -1,46 +1,113 @@
 # BMAD Quickstart For This Project
 
-This project uses a lightweight BMAD adaptation for brownfield work.
+This repository uses a hybrid setup:
 
-## 1) Optional: Install official BMAD assets
+- Full BMAD-METHOD in `_bmad/` (official workflows, agents, `/bmad-help`)
+- Project-specific BMAD context in `bmad/` (domain maps, generated packs, custom loop commands)
+
+## 1) Install or refresh full BMAD-METHOD
 
 From repo root:
 
 ```bash
-npx bmad-method install
+./scripts/bootstrap_bmad.sh
 ```
 
-If you use Claude Code, select Claude support during install.
+This installs/upgrades BMAD-METHOD for Claude Code and keeps project custom commands.
 
-## 2) Use the project BMAD map
+## 2) Use official BMAD guidance when you want standard flow
 
-Generate context packs:
+Important: slash commands (`/bmad-help`, `/bmad-bmm-*`) are entered inside the IDE chat input (Claude/Codex), not directly in `zsh`.
+
+- `/bmad-help` for context-aware next-step guidance
+- `/bmad-agent-bmm-analyst`, `/bmad-agent-bmm-dev`, etc. for role-based execution
+- `/bmad-bmm-*` commands for direct workflow execution
+
+## 3) Use project custom loop when you want lightweight brownfield execution
+
+- `/bmad-system-map` to route to the right project domain
+- `/bmad-next` to pick next prioritized backlog story
+- `/bmad-plan` to build a focused plan/story
+- `/bmad-implement` to execute and test
+- `/bmad-review` for regression/risk pass
+
+## 3.1) Run BMAD through Codex
+
+Start Codex with project-local prompts:
+
+```bash
+./scripts/codex-project.sh
+```
+
+Then in Codex chat input use:
+
+- `/bmad-help`
+- `/bmad-bmm-*` workflows
+- `/bmad-agent-bmm-*` agents
+
+Do not run `/bmad-help` directly in `zsh`.
+
+If you use Codex Desktop app launched from Applications, sync to global prompts too and restart the app:
+
+```bash
+./scripts/sync_codex_prompts.sh --global
+```
+
+Then use `/bmad-help` in the desktop chat input.
+
+## 3.2) Run BMAD through Claude
+
+Claude commands are in `.claude/commands` and should be invoked with `bmad-*` names:
+
+- `/bmad-help`
+- `/bmad-system-map`
+- `/bmad-plan`
+- `/bmad-implement`
+- `/bmad-review`
+
+If command names ever appear without `bmad-` prefix after an upgrade, normalize them again:
+
+```bash
+./scripts/sync_claude_bmad_names.sh
+```
+
+## 4) Regenerate project context assets
 
 ```bash
 python3 scripts/generate_context_pack.py
 ```
 
-Read:
+This refreshes:
 
 - `bmad/context/generated/00-index.md`
-- one domain pack matching your task
+- `bmad/context/generated/<domain>.md`
+- `bmad/context/generated/00-machine-index.json`
+- `bmad/context/generated/00-endpoint-map.md`
 
-## 3) Run Claude command workflow
+## 5) Validate project context integrity
 
-- `/bmad-system-map` to route to correct domain
-- `/bmad-next` to pick next prioritized backlog story
-- `/bmad-plan` to build task plan/story
-- `/bmad-implement` to execute and test
-- `/bmad-review` for regression/risk pass
+```bash
+python3 scripts/validate_llm_context.py
+```
 
-## 4) Keep context in sync
+Stricter mode:
 
-After structural/API ownership changes:
+```bash
+python3 scripts/validate_llm_context.py --strict
+```
 
-1. Update `bmad/context/component-map.json`
-2. Re-run `python3 scripts/generate_context_pack.py`
+## 6) Required load order for project context
 
-## 5) Backlog source of truth
+1. `docs/llm/README.md`
+2. `docs/llm/functionality-map.md`
+3. `docs/llm/api-contracts.md`
+4. `docs/llm/invariants-and-validation.md`
+5. `bmad/context/generated/00-index.md`
+6. primary `bmad/context/generated/<domain>.md`
+7. `bmad/context/generated/00-machine-index.json`
+8. `bmad/context/generated/00-endpoint-map.md`
+
+## 7) Backlog source of truth
 
 - Human view: `bmad/backlog/epic-tracks.md`
 - Machine view: `bmad/backlog/story-board.json`

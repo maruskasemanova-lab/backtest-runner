@@ -3,14 +3,25 @@ Route this task to the right project domain before coding.
 Input task:
 $ARGUMENTS
 
+Required context files:
+1. `bmad/context/generated/00-index.md`
+2. `bmad/context/generated/00-machine-index.json`
+3. Relevant domain pack in `bmad/context/generated/<domain>.md`
+
 Process:
-1. Read `bmad/context/generated/00-index.md`.
-2. Pick exactly one primary domain pack.
-3. List secondary domains only if interface changes are required.
-4. Return:
-   - `primary_domain`
-   - `primary_pack`
-   - `files_to_read_first` (max 8)
-   - `cross_domain_risks`
+1. Pick exactly one primary domain pack.
+2. List secondary domains only if interface changes are required.
+3. Return schema-first output:
+
+```yaml
+primary_domain: <domain-id>
+primary_pack: bmad/context/generated/<domain>.md
+files_to_read_first:
+  - <path>
+secondary_domains:
+  - <domain-id>
+cross_domain_risks:
+  - <risk>
+```
 
 If unclear, propose two possible domains and the deciding question.

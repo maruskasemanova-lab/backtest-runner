@@ -10,7 +10,23 @@ Review priorities (in order):
 4. API contract breaks (runner <-> strategy API <-> frontend)
 5. Missing tests
 
-Output format:
-- Findings (severity ordered) with file references
-- Open questions
-- Suggested fixes
+Required context files:
+1. `bmad/context/generated/00-index.md`
+2. `bmad/context/generated/00-machine-index.json`
+3. Relevant domain packs in `bmad/context/generated/<domain>.md`
+
+Output format (schema-first):
+
+```yaml
+primary_domain: <domain-id>
+secondary_domains:
+  - <domain-id>
+findings:
+  - severity: <P0|P1|P2|P3>
+    file: <path>
+    issue: <description>
+open_questions:
+  - <question>
+suggested_fixes:
+  - <fix>
+```

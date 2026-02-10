@@ -5,14 +5,25 @@ $ARGUMENTS
 
 Required steps:
 1. Read `bmad/context/generated/00-index.md`.
-2. Read the selected domain pack from `bmad/context/generated/`.
-3. Produce:
-   - problem statement
-   - assumptions
-   - implementation steps
-   - validation steps (tests/commands)
-   - rollback strategy
-4. Keep the plan tied to concrete file paths.
+2. Read `bmad/context/generated/00-machine-index.json`.
+3. Read the selected domain pack from `bmad/context/generated/<domain>.md`.
+4. Produce schema-first plan:
+
+```yaml
+primary_domain: <domain-id>
+primary_pack: bmad/context/generated/<domain>.md
+problem: <problem-statement>
+assumptions:
+  - <assumption>
+implementation_steps:
+  - <step>
+validation_steps:
+  - <test-or-command>
+rollback_strategy:
+  - <rollback-step>
+```
+
+5. Keep the plan tied to concrete file paths.
 
 Constraint:
 - Avoid cross-domain edits unless contract changes are explicitly stated.
