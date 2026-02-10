@@ -47,6 +47,7 @@ Compatibility notes:
 
 - marker schema changes require frontend compatibility checks.
 - summary fields are consumed by reports and regression workflows.
+- `total_pnl_pct` in runner summary is normalized from `total_pnl_dollars / account_size_usd` to keep percent and dollar PnL directionally consistent.
 
 ### `GET /api/aos-config` / `GET /api/aos-config/{ticker}` / `POST /api/aos-config/update`
 
@@ -104,9 +105,11 @@ Important request fields (`POST /api/adaptive-tuner/run`):
 - tuner mode: `method` (`grid|random|optuna`) and `n_trials`
 - scoring: `score_metric` (`pnl_pct|pnl_dollars|win_rate|trade_adjusted`)
 - reproducibility: `seed`
-- compatibility: `adaptive_version` (currently only `1`)
+- compatibility: `adaptive_version` (`1` = flat tuning, `2` = multi-dimensional vector discovery)
 - persistence: `persist_best` (when true, best candidate is saved into `aos_config.json`)
 - L2 gating: `l2_required` (restrict evaluated dates to OHLCV+L2 overlap), `l2_confirm_enabled`, `l2_only`
+- quick approximation: `quick_mode`, `quick_max_days`, `quick_trial_boost`
+  - when enabled, tuner samples representative days from eligible range and scales trial budget by multiplier for faster broad screening
 - optional v1 search-space fields:
   - `selection_modes`
   - `max_active_options`
@@ -118,7 +121,7 @@ Important request fields (`POST /api/adaptive-tuner/run`):
 Important response fields:
 
 - `POST /api/adaptive-tuner/run`: `job_id`, `status`, tuned date range metadata
-- `GET /api/adaptive-tuner/{job_id}`: full job object including `effective_dates`, `progress`, `trials`, `best_trial`, and completion/error metadata
+- `GET /api/adaptive-tuner/{job_id}`: full job object including `source_effective_dates`, sampled `effective_dates`, `trial_budget`, `progress`, `trials`, `best_trial`, and completion/error metadata
 - `GET /api/adaptive-tuner`: reverse-chronological list of job objects (bounded by `limit`)
 
 ## Strategy API (Port 8001) - Key Contracts

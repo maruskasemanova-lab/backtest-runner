@@ -21,15 +21,15 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `api_server.py` | yes | 2938 | `5ba62b7 2026-02-08` |
-| `session_runner.py` | yes | 820 | `5ba62b7 2026-02-08` |
+| `api_server.py` | yes | 4296 | `64da33c 2026-02-10` |
+| `session_runner.py` | yes | 828 | `64da33c 2026-02-10` |
 | `data_loader.py` | yes | 300 | `baf7110 2026-02-07` |
 | `available_data.py` | yes | 224 | `baf7110 2026-02-07` |
-| `decision_tracker.py` | yes | 440 | `baf7110 2026-02-07` |
+| `decision_tracker.py` | yes | 440 | `64da33c 2026-02-10` |
 | `performance_tracker.py` | yes | 822 | `13f270b 2026-02-06` |
-| `src/config_io.py` | yes | 28 | `baf7110 2026-02-07` |
+| `src/config_io.py` | yes | 28 | `64da33c 2026-02-10` |
 | `src/system_settings.py` | yes | 172 | `baf7110 2026-02-07` |
-| `src/databento_service.py` | yes | 1106 | `baf7110 2026-02-07` |
+| `src/databento_service.py` | yes | 1106 | `64da33c 2026-02-10` |
 | `src/databento_live.py` | yes | 107 | `baf7110 2026-02-07` |
 
 ## Change Checks
@@ -66,14 +66,14 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `function` `_normalize_bool_options` (line 107)
 - `function` `_normalize_int_options` (line 121)
 - `function` `_normalize_mode_options` (line 141)
-- `function` `_iter_date_strings` (line 156)
-- `function` `_as_iso_day_set` (line 172)
-- `function` `_resolve_l2_tuning_dates` (line 186)
-- ... 92 more symbols
+- `function` `_normalize_float_options` (line 156)
+- `function` `_normalize_strategy_sets` (line 181)
+- `function` `_normalize_regime_filter_sets` (line 208)
+- ... 107 more symbols
 
 ### `session_runner.py`
 - `class` `RunConfig` (line 19)
-- `class` `SessionRunner` (line 33)
+- `class` `SessionRunner` (line 34)
 
 ### `data_loader.py`
 - `class` `DataLoader` (line 15)

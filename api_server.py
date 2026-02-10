@@ -153,6 +153,120 @@ def _normalize_mode_options(values: Optional[List[str]]) -> List[str]:
     return normalized or defaults
 
 
+def _normalize_float_options(
+    values: Optional[List[float]],
+    default: List[float],
+    *,
+    min_value: float = 0.0,
+    max_value: float = 1_000_000.0,
+) -> List[float]:
+    if not isinstance(values, list) or not values:
+        return list(default)
+    normalized = []
+    seen = set()
+    for value in values:
+        try:
+            current = float(value)
+        except (TypeError, ValueError):
+            current = default[0] if default else 0.0
+        current = max(min_value, min(max_value, current))
+        rounded = round(current, 6)
+        if rounded in seen:
+            continue
+        seen.add(rounded)
+        normalized.append(rounded)
+    return normalized or list(default)
+
+
+def _normalize_strategy_sets(
+    raw_sets: Optional[List[List[str]]],
+    enabled_strategies: List[str],
+) -> List[List[str]]:
+    """Normalize strategy sets for v2 search. Returns list of sorted strategy lists."""
+    if not isinstance(raw_sets, list) or not raw_sets:
+        # Default: each single strategy + the full enabled set
+        defaults = [[s] for s in enabled_strategies]
+        if len(enabled_strategies) > 1:
+            defaults.append(sorted(enabled_strategies))
+        return defaults or [["momentum_flow"]]
+    normalized = []
+    seen = set()
+    for strategy_set in raw_sets:
+        if not isinstance(strategy_set, list) or not strategy_set:
+            continue
+        cleaned = sorted(set(str(s).strip().lower() for s in strategy_set if str(s).strip()))
+        if not cleaned:
+            continue
+        key = tuple(cleaned)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(cleaned)
+    return normalized or [[s] for s in enabled_strategies] or [["momentum_flow"]]
+
+
+def _normalize_regime_filter_sets(
+    raw_sets: Optional[List[List[str]]],
+) -> List[List[str]]:
+    """Normalize regime filter sets for v2 search."""
+    valid_regimes = {"TRENDING", "CHOPPY", "MIXED"}
+    defaults = [
+        ["TRENDING"],
+        ["TRENDING", "MIXED"],
+        ["TRENDING", "MIXED", "CHOPPY"],
+    ]
+    if not isinstance(raw_sets, list) or not raw_sets:
+        return defaults
+    normalized = []
+    seen = set()
+    for regime_set in raw_sets:
+        if not isinstance(regime_set, list) or not regime_set:
+            continue
+        cleaned = sorted(set(str(r).strip().upper() for r in regime_set if str(r).strip().upper() in valid_regimes))
+        if not cleaned:
+            continue
+        key = tuple(cleaned)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(cleaned)
+    return normalized or defaults
+
+
+def _normalize_time_window_sets(
+    raw_sets: Optional[List[List[int]]],
+) -> List[List[int]]:
+    """Normalize time window sets for v2 search.
+
+    Each set is a list of allowed trading hours (0-23).
+    Default windows: morning-only, extended morning, full day.
+    """
+    defaults = [
+        [9, 10],           # Morning momentum only
+        [9, 10, 11, 12],   # Morning session
+        [9, 10, 11, 12, 13, 14, 15],  # Full trading day (no filter)
+    ]
+    if not isinstance(raw_sets, list) or not raw_sets:
+        return defaults
+    normalized = []
+    seen = set()
+    for tw in raw_sets:
+        if not isinstance(tw, list) or not tw:
+            continue
+        cleaned = sorted(set(
+            h for h in (int(x) for x in tw if isinstance(x, (int, float)))
+            if 0 <= h <= 23
+        ))
+        if not cleaned:
+            continue
+        key = tuple(cleaned)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(cleaned)
+    return normalized or defaults
+
+
 def _iter_date_strings(date_from: str, date_to: str) -> List[str]:
     try:
         start_dt = datetime.strptime(date_from, "%Y-%m-%d")
@@ -210,6 +324,45 @@ def _resolve_l2_tuning_dates(
     l2_days = _as_iso_day_set(l2_cov.get("covered_days", []))
     overlap_days = sorted(ohlcv_days.intersection(l2_days))
     return overlap_days
+
+
+def _sample_evenly_spaced_days(days: List[str], *, max_days: int) -> List[str]:
+    """Pick a representative subset of ISO days while preserving chronology."""
+    ordered_days = sorted(_as_iso_day_set(days))
+    if not ordered_days:
+        return []
+    max_days = _normalize_clamped_int(max_days, default=2, min_value=1, max_value=30)
+    if len(ordered_days) <= max_days:
+        return ordered_days
+    if max_days == 1:
+        return [ordered_days[len(ordered_days) // 2]]
+
+    picks = []
+    for idx in range(max_days):
+        # Spread picks across the full range and preserve endpoints.
+        raw_index = round(idx * (len(ordered_days) - 1) / (max_days - 1))
+        picks.append(ordered_days[int(raw_index)])
+    return sorted(set(picks))
+
+
+def _resolve_tuner_trial_budget(
+    *,
+    requested_trials: Any,
+    default_trials: int,
+    quick_mode: bool,
+    quick_trial_boost: Any,
+    max_trials: int = 400,
+) -> Dict[str, int]:
+    requested = _normalize_clamped_int(
+        requested_trials, default=default_trials, min_value=1, max_value=max_trials
+    )
+    boost = 1
+    if quick_mode:
+        boost = _normalize_clamped_int(
+            quick_trial_boost, default=3, min_value=1, max_value=10
+        )
+    effective = min(max_trials, requested * boost)
+    return {"requested": requested, "boost": boost, "effective": effective}
 
 
 def _covered_days_for_schema(ticker: str, schema: str) -> List[str]:
@@ -421,6 +574,13 @@ def _build_tuner_profile_entry(
         "evaluated_days": len(dates),
         "l2_required": bool(request.l2_required),
         "l2_only": bool(request.l2_only),
+        "quick_mode": bool(request.quick_mode),
+        "quick_max_days": _normalize_clamped_int(
+            request.quick_max_days, default=2, min_value=1, max_value=30
+        ),
+        "quick_trial_boost": _normalize_clamped_int(
+            request.quick_trial_boost, default=3, min_value=1, max_value=10
+        ),
         "candidate": dict(best_candidate) if isinstance(best_candidate, dict) else {},
         "metrics": dict(metrics) if isinstance(metrics, dict) else {},
     }
@@ -517,6 +677,86 @@ def _compute_tuner_score(
     if total_trades <= 0:
         return base - 1.0
     return base
+
+
+def _compute_tuner_score_robust(
+    day_results: List[Dict[str, Any]],
+) -> float:
+    """Robust scoring that penalizes overfit by requiring consistency across days.
+
+    Components:
+    1. Consistency penalty: high day-to-day PnL variance = overfit
+    2. Win-rate floor: < 40% overall → heavy penalty
+    3. Positive-day ratio: must be profitable on ≥50% of days
+    4. Trade-count normalization: don't reward raw trade count
+    """
+    valid = [d for d in day_results if d.get("success")]
+    if not valid:
+        return -1_000_000.0
+
+    n_days = len(valid)
+    daily_pnl = [float(d.get("pnl_pct", 0.0)) for d in valid]
+    daily_trades = [int(d.get("trades", 0)) for d in valid]
+    daily_wr = [float(d.get("win_rate_pct", 0.0)) for d in valid]
+
+    total_trades = sum(daily_trades)
+    if total_trades <= 0:
+        return -1.0
+
+    # — Average daily PnL (base metric) —
+    avg_pnl = sum(daily_pnl) / n_days
+
+    # — 1. Consistency factor (coefficient of variation penalty) —
+    # Low CV = consistent across days = likely real edge
+    # High CV = volatile across days = likely noise
+    mean_abs = max(abs(avg_pnl), 0.001)
+    variance = sum((p - avg_pnl) ** 2 for p in daily_pnl) / n_days
+    std_dev = variance ** 0.5
+    cv = std_dev / mean_abs  # coefficient of variation
+    consistency = 1.0 / (1.0 + cv)  # 0→1, higher = more consistent
+
+    # — 2. Win-rate quality gate —
+    total_wins = sum(
+        max(0, int(d.get("trades", 0)) * float(d.get("win_rate_pct", 0.0)) / 100.0)
+        for d in valid
+    )
+    overall_wr = total_wins / total_trades if total_trades > 0 else 0.0
+    if overall_wr < 0.40:
+        quality_gate = 0.3  # heavy penalty for low win-rate
+    elif overall_wr < 0.50:
+        quality_gate = 0.7
+    else:
+        quality_gate = 1.0
+
+    # — 3. Positive-day ratio —
+    positive_days = sum(1 for p in daily_pnl if p > 0)
+    positive_ratio = positive_days / n_days
+    if positive_ratio < 0.50:
+        # Profitable on fewer than half the days → likely noise
+        day_penalty = 0.5
+    else:
+        day_penalty = 1.0
+
+    # — 4. Trade-count normalization —
+    # Penalize excessive trading (>2 trades/day average → diminishing returns)
+    avg_trades_per_day = total_trades / n_days
+    if avg_trades_per_day > 3.0:
+        trade_norm = 1.0 - min(0.3, (avg_trades_per_day - 3.0) * 0.05)
+    else:
+        trade_norm = 1.0
+
+    # — 5. Min-trade gate —
+    # Too few trades = edge is too rare to be statistically reliable
+    if avg_trades_per_day < 1.5:
+        trade_scarcity = 0.5
+    elif avg_trades_per_day < 1.0:
+        trade_scarcity = 0.25
+    else:
+        trade_scarcity = 1.0
+
+    # — Final robust score —
+    score = avg_pnl * consistency * quality_gate * day_penalty * trade_norm * trade_scarcity
+    return round(score, 6)
 
 
 async def _apply_strategy_overrides(strategy_api_url: str, ticker: str) -> None:
@@ -1118,21 +1358,58 @@ class AdaptiveTunerRequest(BaseModel):
     strategy_api_url: str = "http://localhost:8001"
     method: str = "grid"  # grid | random | optuna
     n_trials: int = 16
-    score_metric: str = "pnl_pct"  # pnl_pct | pnl_dollars | win_rate | trade_adjusted
+    score_metric: str = "pnl_pct"  # pnl_pct | pnl_dollars | win_rate | trade_adjusted | robust
     seed: int = 42
-    adaptive_version: int = 1
+    adaptive_version: int = 1  # 1 = flat search, 2 = multi-dimensional vector discovery
     persist_best: bool = False
     allow_mock_data: bool = False
     comparable_mode: bool = True
     l2_required: bool = False
     l2_confirm_enabled: bool = True
     l2_only: bool = False
+    # Quick approximate mode: tune on sampled days and expand trial budget.
+    quick_mode: bool = False
+    quick_max_days: int = 2
+    quick_trial_boost: int = 3
+    # --- V1 search dimensions ---
     selection_modes: Optional[List[str]] = None
     max_active_options: Optional[List[int]] = None
     min_active_bars_options: Optional[List[int]] = None
     switch_cooldown_bars_options: Optional[List[int]] = None
     flow_bias_options: Optional[List[bool]] = None
     ohlcv_fallback_options: Optional[List[bool]] = None
+    # --- V2 multi-dimensional vector search dimensions ---
+    # Strategy dimension: sets of strategies to evaluate
+    strategy_sets: Optional[List[List[str]]] = None
+    # L2 threshold dimension
+    l2_min_delta_options: Optional[List[float]] = None
+    l2_min_imbalance_options: Optional[List[float]] = None
+    l2_min_signed_aggression_options: Optional[List[float]] = None
+    l2_min_directional_consistency_options: Optional[List[float]] = None
+    l2_min_participation_ratio_options: Optional[List[float]] = None
+    l2_lookback_bars_options: Optional[List[int]] = None
+    # Regime dimension: sets of allowed regimes
+    regime_filter_sets: Optional[List[List[str]]] = None
+    # Evidence engine dimension
+    base_threshold_options: Optional[List[float]] = None
+    min_confirming_sources_options: Optional[List[int]] = None
+    # Per-strategy parameter tuning dimension
+    min_confidence_options: Optional[List[float]] = None
+    atr_stop_multiplier_options: Optional[List[float]] = None
+    rr_ratio_options: Optional[List[float]] = None
+    # Time-of-day dimension: sets of allowed trading hours (list of lists of ints, e.g. [[9,10],[9,10,11,12,13,14,15]])
+    time_window_sets: Optional[List[List[int]]] = None
+    # Flow-informed exit thresholds (v2)
+    adverse_flow_consistency_options: Optional[List[float]] = None
+    adverse_book_pressure_options: Optional[List[float]] = None
+    # Exit parameter dims (v2)
+    time_exit_bars_options: Optional[List[int]] = None
+    trailing_stop_pct_options: Optional[List[float]] = None
+    # Neighborhood search: half candidates are baseline perturbations
+    neighborhood_search: bool = False
+    # V2 analysis options
+    include_vector_analysis: bool = True
+    min_trades_per_vector: int = 3
 
 
 class AdaptiveTunerProfileApplyRequest(BaseModel):
@@ -1383,14 +1660,17 @@ async def _evaluate_adaptive_tuner_candidate(
                 active_runners.pop(run_key, None)
 
     avg_win_rate_pct = (total_win_rate_pct / valid_days) if valid_days > 0 else 0.0
-    score = _compute_tuner_score(
-        score_metric=request.score_metric,
-        total_pnl_pct=total_pnl_pct,
-        total_pnl_dollars=total_pnl_dollars,
-        avg_win_rate_pct=avg_win_rate_pct,
-        total_trades=total_trades,
-        valid_days=valid_days,
-    )
+    if str(request.score_metric or "").strip().lower() == "robust":
+        score = _compute_tuner_score_robust(day_results)
+    else:
+        score = _compute_tuner_score(
+            score_metric=request.score_metric,
+            total_pnl_pct=total_pnl_pct,
+            total_pnl_dollars=total_pnl_dollars,
+            avg_win_rate_pct=avg_win_rate_pct,
+            total_trades=total_trades,
+            valid_days=valid_days,
+        )
     return {
         "trial_index": trial_index,
         "candidate": candidate,
@@ -1410,6 +1690,1016 @@ async def _evaluate_adaptive_tuner_candidate(
     }
 
 
+# ============ V2 Multi-Dimensional Vector Discovery ============
+
+
+def _build_v2_search_space(
+    request: AdaptiveTunerRequest,
+    ticker_config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build multi-dimensional search space from request options + AOS ticker config defaults."""
+    # Extract existing ticker config values for defaults
+    l2_cfg = ticker_config.get("l2", {}) if isinstance(ticker_config.get("l2"), dict) else {}
+    existing_regime_filter = ticker_config.get("regime_filter", [])
+    if not isinstance(existing_regime_filter, list):
+        existing_regime_filter = ["TRENDING", "MIXED", "CHOPPY"]
+
+    # Determine enabled strategies from ticker config
+    enabled_strategies = []
+    strategy_name = ticker_config.get("strategy", "")
+    if isinstance(strategy_name, str) and strategy_name.strip():
+        enabled_strategies.append(strategy_name.strip().lower())
+    backup = ticker_config.get("backup_strategy", "")
+    if isinstance(backup, str) and backup.strip():
+        backup_lower = backup.strip().lower()
+        if backup_lower not in enabled_strategies:
+            enabled_strategies.append(backup_lower)
+    if not enabled_strategies:
+        enabled_strategies = ["momentum_flow"]
+
+    # V1 adaptive dimensions (included in v2 for completeness)
+    v1_space = _build_adaptive_tuner_search_space(request)
+
+    return {
+        # V1 dimensions
+        **v1_space,
+        # Strategy dimension
+        "strategy_sets": _normalize_strategy_sets(
+            request.strategy_sets, enabled_strategies
+        ),
+        # L2 threshold dimensions
+        "l2_min_delta": _normalize_float_options(
+            request.l2_min_delta_options,
+            default=[float(l2_cfg.get("min_delta", 500)), 1000, 2000, 5000],
+            min_value=0.0,
+            max_value=100_000.0,
+        ),
+        "l2_min_imbalance": _normalize_float_options(
+            request.l2_min_imbalance_options,
+            default=[0.05, float(l2_cfg.get("min_imbalance", 0.12)), 0.20, 0.35],
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "l2_min_signed_aggression": _normalize_float_options(
+            request.l2_min_signed_aggression_options,
+            default=[0.05, float(l2_cfg.get("min_signed_aggression", 0.12)), 0.20, 0.35],
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "l2_min_directional_consistency": _normalize_float_options(
+            request.l2_min_directional_consistency_options,
+            default=[0.3, float(l2_cfg.get("min_directional_consistency", 0.5)), 0.7],
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        # Regime dimension
+        "regime_filter_sets": _normalize_regime_filter_sets(request.regime_filter_sets),
+        # Evidence engine dimensions
+        "base_threshold": _normalize_float_options(
+            request.base_threshold_options,
+            default=[45.0, 50.0, 55.0, 60.0, 65.0],
+            min_value=0.0,
+            max_value=100.0,
+        ),
+        "min_confirming_sources": _normalize_int_options(
+            request.min_confirming_sources_options,
+            default=[1, 2, 3],
+            min_value=1,
+            max_value=5,
+        ),
+        # Per-strategy parameter dimensions
+        "min_confidence": _normalize_float_options(
+            request.min_confidence_options,
+            default=[50.0, 55.0, 60.0, 65.0],
+            min_value=30.0,
+            max_value=90.0,
+        ),
+        "atr_stop_multiplier": _normalize_float_options(
+            request.atr_stop_multiplier_options,
+            default=[0.7, 1.0, 1.3, 1.8],
+            min_value=0.3,
+            max_value=4.0,
+        ),
+        "rr_ratio": _normalize_float_options(
+            request.rr_ratio_options,
+            default=[1.5, 2.0, 2.5, 3.0],
+            min_value=1.0,
+            max_value=5.0,
+        ),
+        # Time-of-day dimension
+        "time_window_sets": _normalize_time_window_sets(request.time_window_sets),
+        # Flow exit dims
+        "adverse_flow_consistency": _normalize_float_options(
+            request.adverse_flow_consistency_options,
+            default=[0.35, 0.45, 0.55],
+            min_value=0.1,
+            max_value=0.9,
+        ),
+        "adverse_book_pressure": _normalize_float_options(
+            request.adverse_book_pressure_options,
+            default=[0.10, 0.15, 0.22],
+            min_value=0.05,
+            max_value=0.5,
+        ),
+        # Exit param dims
+        "time_exit_bars": _normalize_int_options(
+            request.time_exit_bars_options,
+            default=[15, 25, 35, 50],
+            min_value=5,
+            max_value=120,
+        ),
+        "trailing_stop_pct": _normalize_float_options(
+            request.trailing_stop_pct_options,
+            default=[0.4, 0.6, 0.8, 1.0, 1.3],
+            min_value=0.1,
+            max_value=3.0,
+        ),
+    }
+
+
+def _v2_candidate_key(candidate: Dict[str, Any]) -> tuple:
+    """Create a hashable key for v2 candidate deduplication."""
+    strategy_key = tuple(sorted(candidate.get("enabled_strategies", [])))
+    regime_key = tuple(sorted(candidate.get("regime_filter", [])))
+    return (
+        strategy_key,
+        regime_key,
+        candidate.get("l2_min_delta"),
+        candidate.get("l2_min_imbalance"),
+        candidate.get("l2_min_signed_aggression"),
+        candidate.get("l2_min_directional_consistency"),
+        candidate.get("base_threshold"),
+        candidate.get("min_confirming_sources"),
+        candidate.get("min_confidence"),
+        candidate.get("atr_stop_multiplier"),
+        candidate.get("rr_ratio"),
+        tuple(sorted(candidate.get("trading_hours", []) or [])),
+        candidate.get("adverse_flow_consistency"),
+        candidate.get("adverse_book_pressure"),
+        candidate.get("time_exit_bars"),
+        candidate.get("trailing_stop_pct"),
+        _normalize_strategy_selection_mode(candidate.get("strategy_selection_mode")),
+        candidate.get("flow_bias_enabled"),
+    )
+
+
+def _build_v2_random_candidates(
+    search_space: Dict[str, Any],
+    *,
+    n_trials: int,
+    seed: int,
+    neighborhood_search: bool = False,
+) -> List[Dict[str, Any]]:
+    """Build random candidates sampling across all v2 dimensions."""
+    rng = random.Random(seed)
+    attempts = 0
+    max_attempts = max(500, n_trials * 30)
+    candidates: List[Dict[str, Any]] = []
+    seen = set()
+
+    # Build baseline anchor (first value of each dimension)
+    baseline = _build_v2_baseline_candidate(search_space)
+
+    # If neighborhood_search, split: N/2 perturbed + N/2 random
+    n_neighborhood = (n_trials // 2) if neighborhood_search else 0
+    n_random = n_trials - n_neighborhood
+
+    # --- Phase 1: neighborhood candidates (perturb 1-2 dims from baseline) ---
+    perturbable_dims = [
+        "l2_min_delta", "l2_min_imbalance", "l2_min_signed_aggression",
+        "l2_min_directional_consistency", "base_threshold", "min_confirming_sources",
+        "min_confidence", "atr_stop_multiplier", "rr_ratio",
+        "adverse_flow_consistency", "adverse_book_pressure",
+        "time_exit_bars", "trailing_stop_pct",
+    ]
+    list_dims = ["strategy_sets", "regime_filter_sets", "time_window_sets"]
+
+    neighbor_attempts = 0
+    while len(candidates) < n_neighborhood and neighbor_attempts < max_attempts:
+        neighbor_attempts += 1
+        candidate = dict(baseline)  # start from baseline
+        # Pick 1 or 2 dims to perturb
+        n_perturb = rng.choice([1, 1, 1, 2])  # bias toward single-dim changes
+        dims_to_change = rng.sample(
+            perturbable_dims + list_dims,
+            min(n_perturb, len(perturbable_dims) + len(list_dims)),
+        )
+        for dim in dims_to_change:
+            if dim == "strategy_sets":
+                candidate["enabled_strategies"] = list(rng.choice(search_space["strategy_sets"]))
+            elif dim == "regime_filter_sets":
+                candidate["regime_filter"] = list(rng.choice(search_space["regime_filter_sets"]))
+            elif dim == "time_window_sets":
+                candidate["trading_hours"] = list(rng.choice(search_space["time_window_sets"]))
+            elif dim in search_space:
+                candidate[dim] = rng.choice(search_space[dim])
+        key = _v2_candidate_key(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(candidate)
+
+    # --- Phase 2: random candidates (exploration) ---
+    while len(candidates) < n_trials and attempts < max_attempts:
+        attempts += 1
+        strategy_set = rng.choice(search_space["strategy_sets"])
+        regime_set = rng.choice(search_space["regime_filter_sets"])
+
+        candidate = {
+            # V1 adaptive dims
+            "strategy_selection_mode": rng.choice(search_space["strategy_selection_mode"]),
+            "max_active_strategies": rng.choice(search_space["max_active_strategies"]),
+            "min_active_bars_before_switch": rng.choice(search_space["min_active_bars_before_switch"]),
+            "switch_cooldown_bars": rng.choice(search_space["switch_cooldown_bars"]),
+            "flow_bias_enabled": rng.choice(search_space["flow_bias_enabled"]),
+            "use_ohlcv_fallbacks": rng.choice(search_space["use_ohlcv_fallbacks"]),
+            # V2 strategy dim
+            "enabled_strategies": list(strategy_set),
+            # V2 L2 dims
+            "l2_min_delta": rng.choice(search_space["l2_min_delta"]),
+            "l2_min_imbalance": rng.choice(search_space["l2_min_imbalance"]),
+            "l2_min_signed_aggression": rng.choice(search_space["l2_min_signed_aggression"]),
+            "l2_min_directional_consistency": rng.choice(search_space["l2_min_directional_consistency"]),
+            # V2 regime dim
+            "regime_filter": list(regime_set),
+            # V2 evidence dims
+            "base_threshold": rng.choice(search_space["base_threshold"]),
+            "min_confirming_sources": rng.choice(search_space["min_confirming_sources"]),
+            # V2 per-strategy param dims
+            "min_confidence": rng.choice(search_space["min_confidence"]),
+            "atr_stop_multiplier": rng.choice(search_space["atr_stop_multiplier"]),
+            "rr_ratio": rng.choice(search_space["rr_ratio"]),
+            # V2 time-of-day dim
+            "trading_hours": list(rng.choice(search_space["time_window_sets"])),
+            # V2 flow exit dims
+            "adverse_flow_consistency": rng.choice(search_space["adverse_flow_consistency"]),
+            "adverse_book_pressure": rng.choice(search_space["adverse_book_pressure"]),
+            # V2 exit dims
+            "time_exit_bars": rng.choice(search_space["time_exit_bars"]),
+            "trailing_stop_pct": rng.choice(search_space["trailing_stop_pct"]),
+        }
+        key = _v2_candidate_key(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(candidate)
+    return candidates
+
+
+def _build_v2_baseline_candidate(
+    search_space: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build a baseline candidate using the first (default) value of each dimension."""
+    def _first(key: str):
+        vals = search_space.get(key, [])
+        return vals[0] if vals else None
+
+    return {
+        "strategy_selection_mode": _first("strategy_selection_mode"),
+        "max_active_strategies": _first("max_active_strategies"),
+        "min_active_bars_before_switch": _first("min_active_bars_before_switch"),
+        "switch_cooldown_bars": _first("switch_cooldown_bars"),
+        "flow_bias_enabled": _first("flow_bias_enabled"),
+        "use_ohlcv_fallbacks": _first("use_ohlcv_fallbacks"),
+        "enabled_strategies": list(search_space["strategy_sets"][0]) if search_space.get("strategy_sets") else [],
+        "l2_min_delta": _first("l2_min_delta"),
+        "l2_min_imbalance": _first("l2_min_imbalance"),
+        "l2_min_signed_aggression": _first("l2_min_signed_aggression"),
+        "l2_min_directional_consistency": _first("l2_min_directional_consistency"),
+        "regime_filter": list(search_space["regime_filter_sets"][0]) if search_space.get("regime_filter_sets") else [],
+        "base_threshold": _first("base_threshold"),
+        "min_confirming_sources": _first("min_confirming_sources"),
+        "min_confidence": _first("min_confidence"),
+        "atr_stop_multiplier": _first("atr_stop_multiplier"),
+        "rr_ratio": _first("rr_ratio"),
+        "trading_hours": list(search_space["time_window_sets"][0]) if search_space.get("time_window_sets") else [],
+        "adverse_flow_consistency": _first("adverse_flow_consistency"),
+        "adverse_book_pressure": _first("adverse_book_pressure"),
+        "time_exit_bars": _first("time_exit_bars"),
+        "trailing_stop_pct": _first("trailing_stop_pct"),
+    }
+
+
+def _build_v2_candidate_config(
+    ticker_config: Dict[str, Any],
+    candidate: Dict[str, Any],
+    adaptive_version: int,
+) -> Dict[str, Any]:
+    """Apply all v2 candidate dimensions to ticker config."""
+    # Start with v1 adaptive config
+    cfg = _build_adaptive_candidate_config(ticker_config, candidate, adaptive_version)
+
+    # -- Strategy dimension: set primary & backup strategies --
+    enabled = candidate.get("enabled_strategies", [])
+    if isinstance(enabled, list) and enabled:
+        cfg["strategy"] = str(enabled[0])
+        if len(enabled) > 1:
+            cfg["backup_strategy"] = str(enabled[1])
+        else:
+            cfg["backup_strategy"] = ""
+
+    # -- L2 dimension: inject L2 threshold overrides --
+    l2_cfg = cfg.get("l2", {})
+    if not isinstance(l2_cfg, dict):
+        l2_cfg = {}
+    l2_keys = [
+        ("l2_min_delta", "min_delta"),
+        ("l2_min_imbalance", "min_imbalance"),
+        ("l2_min_signed_aggression", "min_signed_aggression"),
+        ("l2_min_directional_consistency", "min_directional_consistency"),
+    ]
+    for candidate_key, config_key in l2_keys:
+        val = candidate.get(candidate_key)
+        if val is not None:
+            try:
+                l2_cfg[config_key] = float(val)
+            except (TypeError, ValueError):
+                pass
+    cfg["l2"] = l2_cfg
+
+    # -- Regime dimension: override regime_filter --
+    regime_filter = candidate.get("regime_filter")
+    if isinstance(regime_filter, list) and regime_filter:
+        cfg["regime_filter"] = list(regime_filter)
+
+    # -- Evidence dimension: store in adaptive config for strategy API to read --
+    adaptive_cfg = cfg.get("adaptive", {})
+    if not isinstance(adaptive_cfg, dict):
+        adaptive_cfg = {}
+    base_thresh = candidate.get("base_threshold")
+    if base_thresh is not None:
+        try:
+            adaptive_cfg["evidence_base_threshold"] = float(base_thresh)
+        except (TypeError, ValueError):
+            pass
+    min_sources = candidate.get("min_confirming_sources")
+    if min_sources is not None:
+        try:
+            adaptive_cfg["evidence_min_confirming_sources"] = int(min_sources)
+        except (TypeError, ValueError):
+            pass
+    cfg["adaptive"] = adaptive_cfg
+
+    # -- Per-strategy parameter overrides (applied globally to all enabled strategies) --
+    strategy_param_overrides: Dict[str, Any] = {}
+    for param_key in ("min_confidence", "atr_stop_multiplier", "rr_ratio"):
+        val = candidate.get(param_key)
+        if val is not None:
+            try:
+                strategy_param_overrides[param_key] = float(val)
+            except (TypeError, ValueError):
+                pass
+    if strategy_param_overrides:
+        cfg["v2_strategy_param_overrides"] = strategy_param_overrides
+
+    # -- Time-of-day dimension: inject trading_hours --
+    trading_hours = candidate.get("trading_hours")
+    if isinstance(trading_hours, list) and trading_hours:
+        cfg["trading_hours"] = [int(h) for h in trading_hours]
+        cfg["time_filter_enabled"] = True
+    else:
+        # No time restriction for this candidate
+        cfg["time_filter_enabled"] = False
+
+    # -- Flow exit thresholds --
+    adv_consistency = candidate.get("adverse_flow_consistency")
+    if adv_consistency is not None:
+        cfg["adverse_flow_consistency_threshold"] = float(adv_consistency)
+    adv_book = candidate.get("adverse_book_pressure")
+    if adv_book is not None:
+        cfg["adverse_book_pressure_threshold"] = float(adv_book)
+
+    # -- Exit parameter dims --
+    te_bars = candidate.get("time_exit_bars")
+    if te_bars is not None:
+        cfg["time_exit_bars"] = int(te_bars)
+    ts_pct = candidate.get("trailing_stop_pct")
+    if ts_pct is not None:
+        # Store globally; strategies will read from v2_strategy_param_overrides
+        overrides = cfg.get("v2_strategy_param_overrides", {})
+        overrides["trailing_stop_pct"] = float(ts_pct)
+        cfg["v2_strategy_param_overrides"] = overrides
+
+    return cfg
+
+
+async def _evaluate_v2_candidate(
+    *,
+    job_id: str,
+    ticker: str,
+    dates: List[str],
+    trial_index: int,
+    candidate: Dict[str, Any],
+    request: AdaptiveTunerRequest,
+) -> Dict[str, Any]:
+    """Evaluate a v2 candidate — same as v1 but with enriched metrics and v2 config injection."""
+    total_pnl_pct = 0.0
+    total_pnl_dollars = 0.0
+    total_win_rate_pct = 0.0
+    total_trades = 0
+    valid_days = 0
+    day_results: List[Dict[str, Any]] = []
+
+    for day_idx, date in enumerate(dates):
+        run_id = f"adaptive-v2-{job_id[:8]}-{trial_index}-{day_idx}"
+        run_request = StartRunRequest(
+            run_id=run_id,
+            ticker=ticker,
+            date=date,
+            strategy_api_url=request.strategy_api_url,
+            allow_mock_data=bool(request.allow_mock_data),
+            comparable_mode=bool(request.comparable_mode),
+            apply_ticker_overrides_on_start=False,
+            l2_confirm_enabled=bool(request.l2_confirm_enabled),
+            l2_only=bool(request.l2_only),
+            intrabar_execution_recalc_1s=False,
+            strategy_selection_mode=_normalize_strategy_selection_mode(
+                candidate.get("strategy_selection_mode")
+            ),
+            max_active_strategies=_normalize_clamped_int(
+                candidate.get("max_active_strategies"), default=3, min_value=1, max_value=20
+            ),
+        )
+        run_key: Optional[str] = None
+        try:
+            start_result = await start_run(run_request)
+            run_key = str(start_result.get("run_key", ""))
+            runner = active_runners.get(run_key)
+            if runner is None:
+                raise RuntimeError(f"Runner not found for key {run_key}")
+
+            # Push per-strategy param overrides (v2) before running the backtest
+            v2_param_overrides = {}
+            for pkey in ("min_confidence", "atr_stop_multiplier", "rr_ratio", "trailing_stop_pct"):
+                pval = candidate.get(pkey)
+                if pval is not None:
+                    try:
+                        v2_param_overrides[pkey] = float(pval)
+                    except (TypeError, ValueError):
+                        pass
+            if v2_param_overrides:
+                enabled_strats = candidate.get("enabled_strategies", [])
+                if isinstance(enabled_strats, list) and enabled_strats:
+                    param_map = {
+                        str(s).strip(): dict(v2_param_overrides) for s in enabled_strats if s
+                    }
+                    if param_map:
+                        try:
+                            await _apply_strategy_param_map(request.strategy_api_url, param_map)
+                        except Exception:
+                            pass  # best-effort
+
+            await runner.run_all(speed_ms=0)
+            summary_payload = runner.get_summary()
+            session_summary = summary_payload.get("session_summary") if isinstance(summary_payload, dict) else None
+            summary = session_summary if isinstance(session_summary, dict) else {}
+            pnl_pct = float(summary.get("total_pnl_pct", 0.0) or 0.0)
+            pnl_dollars = float(summary.get("total_pnl_dollars", 0.0) or 0.0)
+            win_rate_pct = float(summary.get("win_rate", 0.0) or 0.0)
+            trades = int(summary.get("total_trades", 0) or 0)
+            total_pnl_pct += pnl_pct
+            total_pnl_dollars += pnl_dollars
+            total_win_rate_pct += win_rate_pct
+            total_trades += trades
+            valid_days += 1
+            day_results.append({
+                "date": date,
+                "success": True,
+                "pnl_pct": pnl_pct,
+                "pnl_dollars": pnl_dollars,
+                "win_rate_pct": win_rate_pct,
+                "trades": trades,
+            })
+        except HTTPException as exc:
+            day_results.append({
+                "date": date,
+                "success": False,
+                "error": f"HTTP {exc.status_code}: {exc.detail}",
+            })
+        except Exception as exc:
+            day_results.append({
+                "date": date,
+                "success": False,
+                "error": str(exc),
+            })
+        finally:
+            if run_key:
+                active_runners.pop(run_key, None)
+
+    avg_win_rate_pct = (total_win_rate_pct / valid_days) if valid_days > 0 else 0.0
+    if str(request.score_metric or "").strip().lower() == "robust":
+        # 3-fold temporal cross-validation: score = average of validation-fold scores
+        # This prevents candidates from winning on lucky day subsets
+        successful_results = [d for d in day_results if d.get("success")]
+        n_successful = len(successful_results)
+        if n_successful >= 3:
+            fold_size = max(1, n_successful // 3)
+            val_scores = []
+            for fold_idx in range(3):
+                fold_start = fold_idx * fold_size
+                fold_end = fold_start + fold_size if fold_idx < 2 else n_successful
+                val_fold = successful_results[fold_start:fold_end]
+                if val_fold:
+                    val_scores.append(_compute_tuner_score_robust(val_fold))
+            score = sum(val_scores) / len(val_scores) if val_scores else -1_000_000.0
+        else:
+            # Too few days for CV — use direct score but with heavy penalty
+            score = _compute_tuner_score_robust(day_results) * 0.5
+    else:
+        score = _compute_tuner_score(
+            score_metric=request.score_metric,
+            total_pnl_pct=total_pnl_pct,
+            total_pnl_dollars=total_pnl_dollars,
+            avg_win_rate_pct=avg_win_rate_pct,
+            total_trades=total_trades,
+            valid_days=valid_days,
+        )
+    return {
+        "trial_index": trial_index,
+        "candidate": candidate,
+        "score": round(float(score), 6),
+        "metrics": {
+            "valid_days": valid_days,
+            "total_days": len(dates),
+            "total_trades": total_trades,
+            "total_pnl_pct": round(total_pnl_pct, 4),
+            "avg_pnl_pct": round((total_pnl_pct / valid_days), 4) if valid_days > 0 else 0.0,
+            "total_pnl_dollars": round(total_pnl_dollars, 4),
+            "avg_pnl_dollars": round((total_pnl_dollars / valid_days), 4) if valid_days > 0 else 0.0,
+            "avg_win_rate_pct": round(avg_win_rate_pct, 4),
+        },
+        # V2 enriched metadata
+        "vector_dimensions": {
+            "enabled_strategies": candidate.get("enabled_strategies", []),
+            "regime_filter": candidate.get("regime_filter", []),
+            "l2_min_imbalance": candidate.get("l2_min_imbalance"),
+            "l2_min_signed_aggression": candidate.get("l2_min_signed_aggression"),
+            "base_threshold": candidate.get("base_threshold"),
+            "min_confirming_sources": candidate.get("min_confirming_sources"),
+        },
+        "day_results": day_results,
+        "completed_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def _analyze_vectors(
+    trials: List[Dict[str, Any]],
+    *,
+    min_trades: int = 3,
+) -> Dict[str, Any]:
+    """Analyze trial results to discover dimension importance & surprising vectors."""
+    if not trials:
+        return {"dimension_importance": {}, "top_interactions": [], "surprising_vectors": []}
+
+    # Filter to valid trials with sufficient trades
+    valid_trials = [
+        t for t in trials
+        if isinstance(t, dict)
+        and float(t.get("score", -1e12)) > -999_999
+        and int(t.get("metrics", {}).get("total_trades", 0)) >= min_trades
+    ]
+    if len(valid_trials) < 2:
+        return {"dimension_importance": {}, "top_interactions": [], "surprising_vectors": []}
+
+    scores = [float(t["score"]) for t in valid_trials]
+    overall_mean = sum(scores) / len(scores)
+    total_variance = sum((s - overall_mean) ** 2 for s in scores) / len(scores)
+    if total_variance < 1e-12:
+        return {"dimension_importance": {}, "top_interactions": [], "surprising_vectors": []}
+
+    # --- Dimension importance: variance explained by each dimension ---
+    dimension_extractors = {
+        "strategy_set": lambda c: str(sorted(c.get("enabled_strategies", []))),
+        "l2_thresholds": lambda c: f"{c.get('l2_min_imbalance', 0):.3f}|{c.get('l2_min_signed_aggression', 0):.3f}",
+        "regime_filter": lambda c: str(sorted(c.get("regime_filter", []))),
+        "evidence_params": lambda c: f"{c.get('base_threshold', 50)}|{c.get('min_confirming_sources', 2)}",
+        "v1_adaptive": lambda c: f"{c.get('strategy_selection_mode')}|{c.get('flow_bias_enabled')}",
+    }
+
+    dim_importance = {}
+    for dim_name, extractor in dimension_extractors.items():
+        groups: Dict[str, List[float]] = {}
+        for trial in valid_trials:
+            candidate = trial.get("candidate", {})
+            group_key = extractor(candidate)
+            groups.setdefault(group_key, []).append(float(trial["score"]))
+
+        if len(groups) < 2:
+            dim_importance[dim_name] = 0.0
+            continue
+
+        # Between-group variance (variance of group means)
+        group_means = [sum(vals) / len(vals) for vals in groups.values()]
+        between_var = sum((gm - overall_mean) ** 2 for gm in group_means) / len(group_means)
+        dim_importance[dim_name] = round(min(1.0, between_var / total_variance), 4)
+
+    # Normalize importance to sum to 1.0
+    total_imp = sum(dim_importance.values())
+    if total_imp > 0:
+        dim_importance = {k: round(v / total_imp, 4) for k, v in dim_importance.items()}
+
+    # --- Top interaction effects (pairwise) ---
+    dim_names = list(dimension_extractors.keys())
+    interactions = []
+    for i in range(len(dim_names)):
+        for j in range(i + 1, len(dim_names)):
+            d1, d2 = dim_names[i], dim_names[j]
+            ext1, ext2 = dimension_extractors[d1], dimension_extractors[d2]
+            groups: Dict[str, List[float]] = {}
+            for trial in valid_trials:
+                candidate = trial.get("candidate", {})
+                combo_key = f"{ext1(candidate)}||{ext2(candidate)}"
+                groups.setdefault(combo_key, []).append(float(trial["score"]))
+            if len(groups) < 2:
+                continue
+            group_means = [sum(v) / len(v) for v in groups.values()]
+            between_var = sum((gm - overall_mean) ** 2 for gm in group_means) / len(group_means)
+            effect = round(min(1.0, between_var / total_variance), 4) if total_variance > 0 else 0.0
+            interactions.append({"dims": [d1, d2], "effect_size": effect})
+    interactions.sort(key=lambda x: x["effect_size"], reverse=True)
+
+    # --- Surprising vectors: high score from non-obvious configs ---
+    score_std = (total_variance ** 0.5) if total_variance > 0 else 1.0
+    threshold = overall_mean + score_std  # above 1 std is "surprising"
+    surprising = []
+    for trial in valid_trials:
+        trial_score = float(trial["score"])
+        if trial_score < threshold:
+            continue
+        candidate = trial.get("candidate", {})
+        strategies = candidate.get("enabled_strategies", [])
+        regime = candidate.get("regime_filter", [])
+
+        # Build description
+        desc_parts = []
+        if strategies:
+            desc_parts.append("+".join(strategies))
+        if regime:
+            desc_parts.append(f"regime={','.join(regime)}")
+        l2_imb = candidate.get("l2_min_imbalance")
+        if l2_imb is not None:
+            desc_parts.append(f"l2_imb={l2_imb:.2f}")
+        base_t = candidate.get("base_threshold")
+        if base_t is not None:
+            desc_parts.append(f"ev_thresh={base_t:.0f}")
+
+        surprising.append({
+            "description": " | ".join(desc_parts) if desc_parts else "unknown",
+            "score": trial_score,
+            "z_score": round((trial_score - overall_mean) / score_std, 2),
+            "trial_index": trial.get("trial_index"),
+            "candidate": candidate,
+        })
+    surprising.sort(key=lambda x: x["score"], reverse=True)
+
+    # --- Strategy correlation / diversity scoring ---
+    # Group strategies into families to detect correlated vs diversified vectors.
+    STRATEGY_FAMILY = {
+        "MomentumFlow": "trend-follow",
+        "Momentum": "trend-follow",
+        "Pullback": "trend-follow",
+        "MeanReversion": "reversal",
+        "AbsorptionReversal": "reversal",
+        "ExhaustionFade": "reversal",
+        "VWAPMagnet": "reversal",
+        "VolumeProfile": "level-based",
+        "GapLiquidity": "level-based",
+        "Rotation": "sector",
+        "IcebergDefense": "institutional",
+    }
+    for vec in surprising:
+        strategies = vec.get("candidate", {}).get("enabled_strategies", [])
+        families = set()
+        for s in strategies:
+            fam = STRATEGY_FAMILY.get(s)
+            if fam:
+                families.add(fam)
+        n_families = len(families)
+        n_strategies = max(len(strategies), 1)
+
+        # Diversity score: 0.0 (all same family) to 1.0 (max diversity)
+        if n_strategies <= 1:
+            diversity = 0.5  # neutral for single-strategy vectors
+        else:
+            diversity = round(min(1.0, n_families / max(n_strategies, 1) * 1.5), 3)
+
+        # Apply penalty/bonus to the score
+        if n_families == 1 and n_strategies > 1:
+            # All strategies in one family → correlation penalty
+            vec["score"] = round(vec["score"] * 0.85, 4)
+            vec["correlation_note"] = "Same-family penalty applied (×0.85)"
+        elif n_families >= 3:
+            # Good diversification → bonus
+            vec["score"] = round(vec["score"] * 1.10, 4)
+            vec["correlation_note"] = "Multi-family bonus applied (×1.10)"
+
+        vec["diversity_score"] = diversity
+        vec["n_families"] = n_families
+        vec["strategy_families"] = sorted(families)
+
+    # Re-sort after correlation adjustments
+    surprising.sort(key=lambda x: x["score"], reverse=True)
+
+    return {
+        "dimension_importance": dim_importance,
+        "top_interactions": interactions[:5],
+        "surprising_vectors": surprising[:10],
+        "stats": {
+            "total_valid_trials": len(valid_trials),
+            "overall_mean_score": round(overall_mean, 4),
+            "score_std": round(score_std, 4),
+        },
+    }
+
+
+async def _run_v2_adaptive_tuner_job(
+    job_id: str,
+    request: AdaptiveTunerRequest,
+    dates: List[str],
+) -> None:
+    """Run a v2 multi-dimensional adaptive tuner job."""
+    job = adaptive_tuner_jobs.get(job_id)
+    if not job:
+        return
+
+    ticker = str(request.ticker or "").upper().strip()
+    trial_budget = _resolve_tuner_trial_budget(
+        requested_trials=request.n_trials,
+        default_trials=32,
+        quick_mode=bool(request.quick_mode),
+        quick_trial_boost=request.quick_trial_boost,
+        max_trials=400,
+    )
+    n_trials = trial_budget["effective"]
+
+    async with adaptive_tuner_lock:
+        original_config = _load_aos_config()
+        original_ticker_config = copy.deepcopy(
+            original_config.get("tickers", {}).get(ticker, {})
+        )
+        cfg_work = copy.deepcopy(original_config)
+        if "tickers" not in cfg_work or not isinstance(cfg_work.get("tickers"), dict):
+            cfg_work["tickers"] = {}
+
+        search_space = _build_v2_search_space(request, original_ticker_config)
+
+        # V2 only supports random and optuna (grid is infeasible)
+        method = str(request.method or "random").strip().lower()
+        if method == "grid":
+            method = "random"
+            job.setdefault("notes", []).append(
+                "Grid search is not feasible for v2 multi-dimensional space; using random sampling."
+            )
+        method_used = method
+
+        job["started_at"] = datetime.utcnow().isoformat() + "Z"
+        job["status"] = "running"
+        job["progress"] = {"completed_trials": 0, "total_trials": 0, "method": method}
+        job["trials"] = []
+        job["best_trial"] = None
+        job["trial_budget"] = trial_budget
+        job["search_space_summary"] = {
+            "strategy_sets_count": len(search_space.get("strategy_sets", [])),
+            "l2_options": {
+                "min_delta": len(search_space.get("l2_min_delta", [])),
+                "min_imbalance": len(search_space.get("l2_min_imbalance", [])),
+                "min_signed_aggression": len(search_space.get("l2_min_signed_aggression", [])),
+            },
+            "regime_filter_sets_count": len(search_space.get("regime_filter_sets", [])),
+            "evidence_options": {
+                "base_threshold": len(search_space.get("base_threshold", [])),
+                "min_confirming_sources": len(search_space.get("min_confirming_sources", [])),
+            },
+        }
+        if bool(request.quick_mode) and trial_budget["boost"] > 1:
+            job.setdefault("notes", []).append(
+                "Quick mode trial boost applied: "
+                f"{trial_budget['requested']} -> {trial_budget['effective']} "
+                f"(x{trial_budget['boost']})."
+            )
+
+        try:
+            optuna_module = None
+            if method == "optuna":
+                try:
+                    import optuna as _optuna  # type: ignore
+                    optuna_module = _optuna
+                except Exception:
+                    optuna_module = None
+                    job.setdefault("notes", []).append(
+                        "Optuna is not installed; fallback to random search."
+                    )
+
+            if optuna_module is None:
+                # Random sampling
+                method_used = "random"
+                candidates = _build_v2_random_candidates(
+                    search_space, n_trials=n_trials, seed=request.seed,
+                    neighborhood_search=bool(request.neighborhood_search),
+                )
+                job["progress"]["total_trials"] = len(candidates)
+
+                for idx, candidate in enumerate(candidates, start=1):
+                    next_ticker_cfg = _build_v2_candidate_config(
+                        original_ticker_config, candidate, request.adaptive_version
+                    )
+                    cfg_work["tickers"][ticker] = next_ticker_cfg
+                    if not _save_aos_config(cfg_work):
+                        raise RuntimeError("Failed to save temporary AOS config for v2 tuner trial")
+
+                    result = await _evaluate_v2_candidate(
+                        job_id=job_id,
+                        ticker=ticker,
+                        dates=dates,
+                        trial_index=idx,
+                        candidate=candidate,
+                        request=request,
+                    )
+                    job["trials"].append(result)
+                    current_best = job.get("best_trial")
+                    if (
+                        not isinstance(current_best, dict)
+                        or float(result["score"]) > float(current_best.get("score", -1e12))
+                    ):
+                        job["best_trial"] = result
+                    job["progress"]["completed_trials"] = idx
+            else:
+                # Optuna TPE sampling for v2
+                method_used = "optuna"
+                sampler = optuna_module.samplers.TPESampler(seed=request.seed)
+                study = optuna_module.create_study(direction="maximize", sampler=sampler)
+                job["progress"]["total_trials"] = n_trials
+
+                for idx in range(1, n_trials + 1):
+                    trial = study.ask()
+                    ss_idx = trial.suggest_int("strategy_set_idx", 0, len(search_space["strategy_sets"]) - 1)
+                    rf_idx = trial.suggest_int("regime_filter_idx", 0, len(search_space["regime_filter_sets"]) - 1)
+                    candidate = {
+                        "strategy_selection_mode": trial.suggest_categorical(
+                            "strategy_selection_mode", search_space["strategy_selection_mode"]
+                        ),
+                        "max_active_strategies": trial.suggest_int(
+                            "max_active_strategies",
+                            min(search_space["max_active_strategies"]),
+                            max(search_space["max_active_strategies"]),
+                        ),
+                        "min_active_bars_before_switch": trial.suggest_int(
+                            "min_active_bars_before_switch",
+                            min(search_space["min_active_bars_before_switch"]),
+                            max(search_space["min_active_bars_before_switch"]),
+                        ),
+                        "switch_cooldown_bars": trial.suggest_int(
+                            "switch_cooldown_bars",
+                            min(search_space["switch_cooldown_bars"]),
+                            max(search_space["switch_cooldown_bars"]),
+                        ),
+                        "flow_bias_enabled": trial.suggest_categorical(
+                            "flow_bias_enabled", search_space["flow_bias_enabled"]
+                        ),
+                        "use_ohlcv_fallbacks": trial.suggest_categorical(
+                            "use_ohlcv_fallbacks", search_space["use_ohlcv_fallbacks"]
+                        ),
+                        "enabled_strategies": list(search_space["strategy_sets"][ss_idx]),
+                        "l2_min_delta": trial.suggest_categorical(
+                            "l2_min_delta", search_space["l2_min_delta"]
+                        ),
+                        "l2_min_imbalance": trial.suggest_categorical(
+                            "l2_min_imbalance", search_space["l2_min_imbalance"]
+                        ),
+                        "l2_min_signed_aggression": trial.suggest_categorical(
+                            "l2_min_signed_aggression", search_space["l2_min_signed_aggression"]
+                        ),
+                        "l2_min_directional_consistency": trial.suggest_categorical(
+                            "l2_min_directional_consistency", search_space["l2_min_directional_consistency"]
+                        ),
+                        "regime_filter": list(search_space["regime_filter_sets"][rf_idx]),
+                        "base_threshold": trial.suggest_categorical(
+                            "base_threshold", search_space["base_threshold"]
+                        ),
+                        "min_confirming_sources": trial.suggest_int(
+                            "min_confirming_sources",
+                            min(search_space["min_confirming_sources"]),
+                            max(search_space["min_confirming_sources"]),
+                        ),
+                    }
+
+                    next_ticker_cfg = _build_v2_candidate_config(
+                        original_ticker_config, candidate, request.adaptive_version
+                    )
+                    cfg_work["tickers"][ticker] = next_ticker_cfg
+                    if not _save_aos_config(cfg_work):
+                        raise RuntimeError("Failed to save temporary AOS config for v2 tuner trial")
+
+                    result = await _evaluate_v2_candidate(
+                        job_id=job_id,
+                        ticker=ticker,
+                        dates=dates,
+                        trial_index=idx,
+                        candidate=candidate,
+                        request=request,
+                    )
+                    score = float(result["score"])
+                    study.tell(trial, score)
+                    job["trials"].append(result)
+                    current_best = job.get("best_trial")
+                    if (
+                        not isinstance(current_best, dict)
+                        or score > float(current_best.get("score", -1e12))
+                    ):
+                        job["best_trial"] = result
+                    job["progress"]["completed_trials"] = idx
+
+            # --- Vector Analysis ---
+            vector_analysis = {}
+            if request.include_vector_analysis:
+                vector_analysis = _analyze_vectors(
+                    job.get("trials", []),
+                    min_trades=max(1, request.min_trades_per_vector),
+                )
+                job["vector_analysis"] = vector_analysis
+
+            # --- Save results ---
+            best_trial = job.get("best_trial")
+            final_config = copy.deepcopy(original_config)
+            if "tickers" not in final_config or not isinstance(final_config.get("tickers"), dict):
+                final_config["tickers"] = {}
+
+            updated_ticker_cfg = copy.deepcopy(original_ticker_config)
+            saved_profile = None
+            if isinstance(best_trial, dict):
+                saved_profile = _build_tuner_profile_entry(
+                    ticker=ticker,
+                    request=request,
+                    method_used=method_used,
+                    dates=dates,
+                    best_trial=best_trial,
+                )
+                # Attach vector analysis to the profile
+                if vector_analysis:
+                    saved_profile["vector_analysis"] = vector_analysis
+
+                existing_profiles = _normalize_tuner_profiles(
+                    updated_ticker_cfg.get("adaptive_tuner_profiles", [])
+                )
+                existing_profiles.insert(0, saved_profile)
+                updated_ticker_cfg["adaptive_tuner_profiles"] = existing_profiles[:30]
+
+                if request.persist_best:
+                    best_candidate = best_trial.get("candidate", {})
+                    updated_ticker_cfg = _build_v2_candidate_config(
+                        updated_ticker_cfg,
+                        best_candidate if isinstance(best_candidate, dict) else {},
+                        request.adaptive_version,
+                    )
+                    updated_ticker_cfg["active_adaptive_tuner_profile_id"] = saved_profile["profile_id"]
+                    job.setdefault("notes", []).append(
+                        "Best v2 vector candidate was persisted to aos_config.json."
+                    )
+                elif saved_profile:
+                    updated_ticker_cfg["active_adaptive_tuner_profile_id"] = str(
+                        updated_ticker_cfg.get("active_adaptive_tuner_profile_id", "")
+                    ).strip() or saved_profile["profile_id"]
+
+            final_config["tickers"][ticker] = updated_ticker_cfg
+            if not _save_aos_config(final_config):
+                raise RuntimeError("Failed to save final v2 AOS tuner result")
+
+            job["status"] = "completed"
+            job["method_used"] = method_used
+            job["finished_at"] = datetime.utcnow().isoformat() + "Z"
+            job["summary"] = {
+                "ticker": ticker,
+                "date_from": dates[0] if dates else request.date_from,
+                "date_to": dates[-1] if dates else request.date_to,
+                "evaluated_days": len(dates),
+                "source_effective_days": int(job.get("source_effective_days", len(dates)) or len(dates)),
+                "trials": int(job["progress"].get("completed_trials", 0)),
+                "best_score": float(best_trial.get("score", 0.0)) if isinstance(best_trial, dict) else None,
+                "score_metric": request.score_metric,
+                "adaptive_version": request.adaptive_version,
+                "persist_best": bool(request.persist_best),
+                "l2_required": bool(request.l2_required),
+                "l2_only": bool(request.l2_only),
+                "quick_mode": bool(request.quick_mode),
+                "quick_max_days": _normalize_clamped_int(
+                    request.quick_max_days, default=2, min_value=1, max_value=30
+                ),
+                "quick_trial_boost": trial_budget["boost"],
+                "requested_trials": trial_budget["requested"],
+                "effective_trial_budget": trial_budget["effective"],
+            }
+            if saved_profile:
+                job["saved_profile"] = {
+                    "profile_id": saved_profile.get("profile_id"),
+                    "created_at": saved_profile.get("created_at"),
+                }
+        except Exception as exc:
+            _save_aos_config(original_config)
+            job["status"] = "failed"
+            job["error"] = str(exc)
+            job["finished_at"] = datetime.utcnow().isoformat() + "Z"
+
+
 async def _run_adaptive_tuner_job(
     job_id: str,
     request: AdaptiveTunerRequest,
@@ -1424,7 +2714,14 @@ async def _run_adaptive_tuner_job(
     method = str(request.method or "grid").strip().lower()
     if method not in {"grid", "random", "optuna"}:
         method = "grid"
-    n_trials = _normalize_clamped_int(request.n_trials, default=16, min_value=1, max_value=400)
+    trial_budget = _resolve_tuner_trial_budget(
+        requested_trials=request.n_trials,
+        default_trials=16,
+        quick_mode=bool(request.quick_mode),
+        quick_trial_boost=request.quick_trial_boost,
+        max_trials=400,
+    )
+    n_trials = trial_budget["effective"]
 
     async with adaptive_tuner_lock:
         original_config = _load_aos_config()
@@ -1440,6 +2737,13 @@ async def _run_adaptive_tuner_job(
         job["progress"] = {"completed_trials": 0, "total_trials": 0, "method": method}
         job["trials"] = []
         job["best_trial"] = None
+        job["trial_budget"] = trial_budget
+        if bool(request.quick_mode) and trial_budget["boost"] > 1:
+            job.setdefault("notes", []).append(
+                "Quick mode trial boost applied: "
+                f"{trial_budget['requested']} -> {trial_budget['effective']} "
+                f"(x{trial_budget['boost']})."
+            )
 
         try:
             optuna_module = None
@@ -1607,6 +2911,7 @@ async def _run_adaptive_tuner_job(
                 "date_from": dates[0] if dates else request.date_from,
                 "date_to": dates[-1] if dates else request.date_to,
                 "evaluated_days": len(dates),
+                "source_effective_days": int(job.get("source_effective_days", len(dates)) or len(dates)),
                 "trials": int(job["progress"].get("completed_trials", 0)),
                 "best_score": float(best_trial.get("score", 0.0)) if isinstance(best_trial, dict) else None,
                 "score_metric": request.score_metric,
@@ -1614,6 +2919,13 @@ async def _run_adaptive_tuner_job(
                 "persist_best": bool(request.persist_best),
                 "l2_required": bool(request.l2_required),
                 "l2_only": bool(request.l2_only),
+                "quick_mode": bool(request.quick_mode),
+                "quick_max_days": _normalize_clamped_int(
+                    request.quick_max_days, default=2, min_value=1, max_value=30
+                ),
+                "quick_trial_boost": trial_budget["boost"],
+                "requested_trials": trial_budget["requested"],
+                "effective_trial_budget": trial_budget["effective"],
             }
             if saved_profile:
                 job["saved_profile"] = {
@@ -1848,11 +3160,15 @@ async def apply_adaptive_tuner_profile(request: AdaptiveTunerProfileApplyRequest
         default=1,
         max_value=10,
     ) or 1
-    updated_cfg = _build_adaptive_candidate_config(
-        ticker_cfg,
-        best_candidate if isinstance(best_candidate, dict) else {},
-        adaptive_version=adaptive_version,
-    )
+    safe_candidate = best_candidate if isinstance(best_candidate, dict) else {}
+    if adaptive_version >= 2:
+        updated_cfg = _build_v2_candidate_config(
+            ticker_cfg, safe_candidate, adaptive_version=adaptive_version,
+        )
+    else:
+        updated_cfg = _build_adaptive_candidate_config(
+            ticker_cfg, safe_candidate, adaptive_version=adaptive_version,
+        )
     updated_cfg["adaptive_tuner_profiles"] = profiles
     updated_cfg["active_adaptive_tuner_profile_id"] = profile_id
     config["tickers"][ticker] = updated_cfg
@@ -1870,12 +3186,13 @@ async def apply_adaptive_tuner_profile(request: AdaptiveTunerProfileApplyRequest
 
 @app.post("/api/adaptive-tuner/run")
 async def run_adaptive_tuner(request: AdaptiveTunerRequest):
-    """Start an adaptive-tuner job (v1) and return a job id for polling."""
+    """Start an adaptive-tuner job (v1 or v2) and return a job id for polling."""
     ticker = str(request.ticker or "").upper().strip()
     if not ticker:
         raise HTTPException(400, "ticker is required")
-    if _normalize_non_negative_int(request.adaptive_version, default=1, max_value=10) != 1:
-        raise HTTPException(400, "Only adaptive version 1 is supported by this tuner.")
+    version = _normalize_non_negative_int(request.adaptive_version, default=1, max_value=10)
+    if version not in (1, 2):
+        raise HTTPException(400, "Only adaptive versions 1 and 2 are supported by this tuner.")
 
     # Validate requested dates early and resolve L2-filtered dates if required.
     requested_dates = _iter_date_strings(request.date_from, request.date_to)
@@ -1893,11 +3210,27 @@ async def run_adaptive_tuner(request: AdaptiveTunerRequest):
             "No eligible dates found for adaptive tuning in the requested range."
             " Check OHLCV/L2 coverage for this ticker.",
         )
+    source_effective_dates = list(effective_dates)
+
+    quick_mode = bool(request.quick_mode)
+    quick_max_days = _normalize_clamped_int(
+        request.quick_max_days, default=2, min_value=1, max_value=30
+    )
+    quick_trial_boost = _normalize_clamped_int(
+        request.quick_trial_boost, default=3, min_value=1, max_value=10
+    )
+    if quick_mode:
+        effective_dates = _sample_evenly_spaced_days(effective_dates, max_days=quick_max_days)
+        if not effective_dates:
+            raise HTTPException(
+                400,
+                "Quick mode could not find representative dates in requested range.",
+            )
 
     job_id = uuid4().hex
-    method = str(request.method or "grid").strip().lower()
+    method = str(request.method or ("random" if version == 2 else "grid")).strip().lower()
     if method not in {"grid", "random", "optuna"}:
-        method = "grid"
+        method = "random" if version == 2 else "grid"
 
     adaptive_tuner_jobs[job_id] = {
         "job_id": job_id,
@@ -1910,22 +3243,46 @@ async def run_adaptive_tuner(request: AdaptiveTunerRequest):
         "notes": [],
         "requested_date_from": request.date_from,
         "requested_date_to": request.date_to,
+        "source_effective_dates": source_effective_dates,
+        "source_effective_date_from": source_effective_dates[0] if source_effective_dates else None,
+        "source_effective_date_to": source_effective_dates[-1] if source_effective_dates else None,
+        "source_effective_days": len(source_effective_dates),
         "effective_dates": effective_dates,
         "effective_date_from": effective_dates[0] if effective_dates else None,
         "effective_date_to": effective_dates[-1] if effective_dates else None,
+        "effective_days": len(effective_dates),
+        "quick_mode": quick_mode,
+        "quick_max_days": quick_max_days,
+        "quick_trial_boost": quick_trial_boost,
+        "adaptive_version": version,
     }
-    asyncio.create_task(_run_adaptive_tuner_job(job_id, request, effective_dates))
+    if quick_mode:
+        adaptive_tuner_jobs[job_id]["notes"].append(
+            "Quick mode enabled: sampled "
+            f"{len(effective_dates)}/{len(source_effective_dates)} days; "
+            f"trial budget multiplier x{quick_trial_boost}."
+        )
+
+    if version == 2:
+        asyncio.create_task(_run_v2_adaptive_tuner_job(job_id, request, effective_dates))
+    else:
+        asyncio.create_task(_run_adaptive_tuner_job(job_id, request, effective_dates))
+
     return {
         "job_id": job_id,
         "status": "queued",
         "ticker": ticker,
         "date_from": request.date_from,
         "date_to": request.date_to,
-        "adaptive_version": 1,
+        "adaptive_version": version,
         "effective_days": len(effective_dates),
+        "source_effective_days": len(source_effective_dates),
         "effective_date_from": effective_dates[0] if effective_dates else None,
         "effective_date_to": effective_dates[-1] if effective_dates else None,
         "l2_required": bool(request.l2_required),
+        "quick_mode": quick_mode,
+        "quick_max_days": quick_max_days,
+        "quick_trial_boost": quick_trial_boost,
     }
 
 
@@ -2279,6 +3636,7 @@ async def start_run(request: StartRunRequest):
         date_from=range_start,
         date_to=range_end,
         strategy_api_url=request.strategy_api_url,
+        account_size_usd=request.account_size_usd,
         regime_detection_minutes=request.regime_detection_minutes,
         intrabar_execution_recalc_1s=effective_intrabar_execution_recalc_1s,
     )

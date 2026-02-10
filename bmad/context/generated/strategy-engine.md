@@ -21,23 +21,23 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 809 | `cf2281d 2026-02-08` |
-| `../market_regime_detection/src/api_models.py` | yes | 94 | `d33cc78 2026-02-07` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 4072 | `73e4e50 2026-02-08` |
-| `../market_regime_detection/src/multi_layer_decision.py` | yes | 60 | `cf2281d 2026-02-08` |
-| `../market_regime_detection/src/trading_orchestrator.py` | yes | 464 | `cf2281d 2026-02-08` |
+| `../market_regime_detection/api_server.py` | yes | 809 | `5e15927 2026-02-10` |
+| `../market_regime_detection/src/api_models.py` | yes | 94 | `5e15927 2026-02-10` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 4102 | `5e15927 2026-02-10` |
+| `../market_regime_detection/src/multi_layer_decision.py` | yes | 60 | `5e15927 2026-02-10` |
+| `../market_regime_detection/src/trading_orchestrator.py` | yes | 464 | `5e15927 2026-02-10` |
 | `../market_regime_detection/src/feature_store.py` | yes | 871 | `cf2281d 2026-02-08` |
-| `../market_regime_detection/src/ensemble_combiner.py` | yes | 446 | `73e4e50 2026-02-08` |
+| `../market_regime_detection/src/ensemble_combiner.py` | yes | 446 | `5e15927 2026-02-10` |
 | `../market_regime_detection/src/edge_monitor.py` | yes | 364 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/checkpoint.py` | yes | 284 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/adaptive_regime.py` | yes | 400 | `cf2281d 2026-02-08` |
 | `../market_regime_detection/src/position_sizing.py` | yes | 145 | `d33cc78 2026-02-07` |
-| `../market_regime_detection/src/evidence_decision.py` | yes | 532 | `73e4e50 2026-02-08` |
-| `../market_regime_detection/src/strategy_factory.py` | yes | 35 | `7e5a643 2026-02-06` |
-| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 288 | `73e4e50 2026-02-08` |
-| `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 171 | `73e4e50 2026-02-08` |
-| `../market_regime_detection/src/strategies/absorption_reversal.py` | yes | 172 | `73e4e50 2026-02-08` |
-| `../market_regime_detection/src/strategies/exhaustion_fade.py` | yes | 173 | `73e4e50 2026-02-08` |
+| `../market_regime_detection/src/evidence_decision.py` | yes | 532 | `5e15927 2026-02-10` |
+| `../market_regime_detection/src/strategy_factory.py` | yes | 37 | `7e5a643 2026-02-06` |
+| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 355 | `73e4e50 2026-02-08` |
+| `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 172 | `73e4e50 2026-02-08` |
+| `../market_regime_detection/src/strategies/absorption_reversal.py` | yes | 173 | `73e4e50 2026-02-08` |
+| `../market_regime_detection/src/strategies/exhaustion_fade.py` | yes | 174 | `73e4e50 2026-02-08` |
 | `../market_regime_detection/src/strategies/trailing_stop.py` | yes | 301 | `94c21fc 2026-02-01` |
 
 ## Change Checks
@@ -157,7 +157,7 @@ Own regime detection, signal generation, position management, learning component
 - `class` `EvidenceDecisionEngine` (line 48)
 
 ### `../market_regime_detection/src/strategy_factory.py`
-- `function` `build_strategy_registry` (line 21)
+- `function` `build_strategy_registry` (line 22)
 
 ### `../market_regime_detection/src/strategies/base_strategy.py`
 - `class` `SignalType` (line 11)

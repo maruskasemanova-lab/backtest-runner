@@ -64,14 +64,14 @@ def test_compute_tuner_score_penalizes_zero_trades() -> None:
     assert score == pytest.approx(0.0)
 
 
-def test_run_adaptive_tuner_rejects_non_v1() -> None:
-    request = _base_request(adaptive_version=2)
+def test_run_adaptive_tuner_rejects_unsupported_version() -> None:
+    request = _base_request(adaptive_version=3)
 
     with pytest.raises(api_server.HTTPException) as exc:
         asyncio.run(api_server.run_adaptive_tuner(request))
 
     assert exc.value.status_code == 400
-    assert "version 1" in str(exc.value.detail).lower()
+    assert "versions 1 and 2" in str(exc.value.detail).lower()
 
 
 def test_run_adaptive_tuner_creates_job_and_schedules_worker(monkeypatch) -> None:
@@ -130,6 +130,39 @@ def test_resolve_l2_tuning_dates_intersection(monkeypatch) -> None:
     assert dates == ["2026-02-04", "2026-02-05"]
 
 
+def test_sample_evenly_spaced_days() -> None:
+    days = [
+        "2026-02-01",
+        "2026-02-02",
+        "2026-02-03",
+        "2026-02-04",
+        "2026-02-05",
+    ]
+    sampled = api_server._sample_evenly_spaced_days(days, max_days=2)
+    assert sampled == ["2026-02-01", "2026-02-05"]
+
+    sampled_mid = api_server._sample_evenly_spaced_days(days, max_days=1)
+    assert sampled_mid == ["2026-02-03"]
+
+
+def test_resolve_tuner_trial_budget_quick_mode() -> None:
+    standard = api_server._resolve_tuner_trial_budget(
+        requested_trials=16,
+        default_trials=16,
+        quick_mode=False,
+        quick_trial_boost=3,
+    )
+    assert standard == {"requested": 16, "boost": 1, "effective": 16}
+
+    quick = api_server._resolve_tuner_trial_budget(
+        requested_trials=16,
+        default_trials=16,
+        quick_mode=True,
+        quick_trial_boost=4,
+    )
+    assert quick == {"requested": 16, "boost": 4, "effective": 64}
+
+
 def test_run_adaptive_tuner_requires_overlap_when_l2_required(monkeypatch) -> None:
     def _empty_cov(*args, **kwargs):
         return {"covered_days": []}
@@ -140,6 +173,53 @@ def test_run_adaptive_tuner_requires_overlap_when_l2_required(monkeypatch) -> No
         asyncio.run(api_server.run_adaptive_tuner(request))
     assert exc.value.status_code == 400
     assert "no eligible dates" in str(exc.value.detail).lower()
+
+
+def test_run_adaptive_tuner_quick_mode_samples_dates_and_sets_metadata(monkeypatch) -> None:
+    api_server.adaptive_tuner_jobs.clear()
+    scheduled = []
+
+    class _FakeUUID:
+        hex = "quickjob789"
+
+    def _fake_create_task(coro):
+        scheduled.append(coro)
+
+        class _Task:
+            def cancel(self):
+                return True
+
+        return _Task()
+
+    monkeypatch.setattr(api_server, "uuid4", lambda: _FakeUUID())
+    monkeypatch.setattr(api_server.asyncio, "create_task", _fake_create_task)
+
+    request = _base_request(
+        method="random",
+        quick_mode=True,
+        quick_max_days=2,
+        quick_trial_boost=4,
+        date_from="2026-02-01",
+        date_to="2026-02-05",
+    )
+    result = asyncio.run(api_server.run_adaptive_tuner(request))
+
+    assert result["job_id"] == "quickjob789"
+    assert result["quick_mode"] is True
+    assert result["source_effective_days"] == 5
+    assert result["effective_days"] == 2
+
+    job = api_server.adaptive_tuner_jobs["quickjob789"]
+    assert job["quick_mode"] is True
+    assert job["quick_max_days"] == 2
+    assert job["quick_trial_boost"] == 4
+    assert job["source_effective_days"] == 5
+    assert len(job["source_effective_dates"]) == 5
+    assert job["effective_dates"] == ["2026-02-01", "2026-02-05"]
+    assert len(scheduled) == 1
+
+    scheduled[0].close()
+    api_server.adaptive_tuner_jobs.clear()
 
 
 def test_apply_adaptive_tuner_profile_updates_aos_config(monkeypatch, tmp_path) -> None:
@@ -187,3 +267,365 @@ def test_apply_adaptive_tuner_profile_updates_aos_config(monkeypatch, tmp_path) 
     assert mu_cfg["adaptive"]["switch_cooldown_bars"] == 2
     assert mu_cfg["adaptive"]["flow_bias_enabled"] is False
     assert mu_cfg["active_adaptive_tuner_profile_id"] == "p123"
+
+
+# ============ V2 Multi-Dimensional Vector Discovery Tests ============
+
+
+def _base_v2_request(**overrides):
+    payload = {
+        "ticker": "MU",
+        "date_from": "2026-02-03",
+        "date_to": "2026-02-05",
+        "strategy_api_url": "http://localhost:8001",
+        "method": "random",
+        "adaptive_version": 2,
+    }
+    payload.update(overrides)
+    return api_server.AdaptiveTunerRequest(**payload)
+
+
+def _ticker_config():
+    return {
+        "strategy": "momentum_flow",
+        "backup_strategy": "absorption_reversal",
+        "regime_filter": ["TRENDING", "MIXED"],
+        "l2": {
+            "min_delta": 800,
+            "min_imbalance": 0.15,
+            "min_signed_aggression": 0.10,
+            "min_directional_consistency": 0.55,
+        },
+        "adaptive": {
+            "version": 1,
+            "flow_bias_enabled": True,
+            "use_ohlcv_fallbacks": True,
+        },
+    }
+
+
+def test_v2_build_search_space_defaults() -> None:
+    request = _base_v2_request()
+    space = api_server._build_v2_search_space(request, _ticker_config())
+
+    # V1 dims should still be present
+    assert "strategy_selection_mode" in space
+    assert "flow_bias_enabled" in space
+
+    # V2 strategy sets should include individual + combo
+    assert "strategy_sets" in space
+    strategy_sets = space["strategy_sets"]
+    assert isinstance(strategy_sets, list)
+    assert len(strategy_sets) >= 2  # at least momentum_flow alone + both combined
+    assert ["momentum_flow"] in strategy_sets
+
+    # L2 options should use ticker config defaults
+    assert "l2_min_imbalance" in space
+    assert 0.15 in space["l2_min_imbalance"]  # from ticker config
+
+    assert "l2_min_signed_aggression" in space
+
+    # Regime filter sets populated
+    assert "regime_filter_sets" in space
+    assert len(space["regime_filter_sets"]) >= 2
+
+    # Evidence options
+    assert "base_threshold" in space
+    assert "min_confirming_sources" in space
+    assert 2 in space["min_confirming_sources"]
+
+
+def test_v2_build_search_space_custom_options() -> None:
+    request = _base_v2_request(
+        strategy_sets=[["momentum_flow"], ["exhaustion_fade", "pullback"]],
+        l2_min_imbalance_options=[0.08, 0.20, 0.40],
+        regime_filter_sets=[["TRENDING"], ["CHOPPY", "MIXED"]],
+        base_threshold_options=[40.0, 55.0, 70.0],
+        min_confirming_sources_options=[1, 3],
+    )
+    space = api_server._build_v2_search_space(request, _ticker_config())
+
+    assert len(space["strategy_sets"]) == 2
+    assert ["momentum_flow"] in space["strategy_sets"]
+    assert sorted(["exhaustion_fade", "pullback"]) in space["strategy_sets"]
+
+    assert space["l2_min_imbalance"] == [0.08, 0.20, 0.40]
+    assert len(space["regime_filter_sets"]) == 2
+    assert space["base_threshold"] == [40.0, 55.0, 70.0]
+    assert space["min_confirming_sources"] == [1, 3]
+
+
+def test_v2_candidate_config_injects_all_dimensions() -> None:
+    candidate = {
+        "strategy_selection_mode": "all_enabled",
+        "max_active_strategies": 4,
+        "min_active_bars_before_switch": 2,
+        "switch_cooldown_bars": 3,
+        "flow_bias_enabled": False,
+        "use_ohlcv_fallbacks": True,
+        "enabled_strategies": ["exhaustion_fade", "pullback"],
+        "l2_min_delta": 2000.0,
+        "l2_min_imbalance": 0.25,
+        "l2_min_signed_aggression": 0.30,
+        "l2_min_directional_consistency": 0.6,
+        "regime_filter": ["TRENDING", "CHOPPY"],
+        "base_threshold": 60.0,
+        "min_confirming_sources": 3,
+    }
+    cfg = api_server._build_v2_candidate_config(_ticker_config(), candidate, 2)
+
+    # Strategy dimension
+    assert cfg["strategy"] == "exhaustion_fade"
+    assert cfg["backup_strategy"] == "pullback"
+
+    # L2 dimension
+    assert cfg["l2"]["min_delta"] == 2000.0
+    assert cfg["l2"]["min_imbalance"] == 0.25
+    assert cfg["l2"]["min_signed_aggression"] == 0.30
+    assert cfg["l2"]["min_directional_consistency"] == 0.6
+
+    # Regime dimension
+    assert cfg["regime_filter"] == ["TRENDING", "CHOPPY"]
+
+    # Evidence dimension
+    assert cfg["adaptive"]["evidence_base_threshold"] == 60.0
+    assert cfg["adaptive"]["evidence_min_confirming_sources"] == 3
+
+    # V1 dims still applied
+    assert cfg["strategy_selection_mode"] == "all_enabled"
+    assert cfg["max_active_strategies"] == 4
+    assert cfg["adaptive"]["flow_bias_enabled"] is False
+    assert cfg["adaptive"]["version"] == 2
+
+
+def test_v2_analyze_vectors_dimension_importance() -> None:
+    trials = [
+        {
+            "score": 5.0,
+            "metrics": {"total_trades": 10},
+            "candidate": {
+                "enabled_strategies": ["momentum_flow"],
+                "regime_filter": ["TRENDING"],
+                "l2_min_imbalance": 0.10,
+                "l2_min_signed_aggression": 0.10,
+                "base_threshold": 50,
+                "min_confirming_sources": 2,
+                "strategy_selection_mode": "all_enabled",
+                "flow_bias_enabled": True,
+            },
+        },
+        {
+            "score": 1.0,
+            "metrics": {"total_trades": 8},
+            "candidate": {
+                "enabled_strategies": ["absorption_reversal"],
+                "regime_filter": ["CHOPPY"],
+                "l2_min_imbalance": 0.30,
+                "l2_min_signed_aggression": 0.30,
+                "base_threshold": 65,
+                "min_confirming_sources": 1,
+                "strategy_selection_mode": "adaptive_top_n",
+                "flow_bias_enabled": False,
+            },
+        },
+        {
+            "score": 4.0,
+            "metrics": {"total_trades": 6},
+            "candidate": {
+                "enabled_strategies": ["momentum_flow"],
+                "regime_filter": ["TRENDING"],
+                "l2_min_imbalance": 0.20,
+                "l2_min_signed_aggression": 0.20,
+                "base_threshold": 55,
+                "min_confirming_sources": 2,
+                "strategy_selection_mode": "all_enabled",
+                "flow_bias_enabled": True,
+            },
+        },
+        {
+            "score": -0.5,
+            "metrics": {"total_trades": 5},
+            "candidate": {
+                "enabled_strategies": ["absorption_reversal"],
+                "regime_filter": ["CHOPPY", "MIXED"],
+                "l2_min_imbalance": 0.10,
+                "l2_min_signed_aggression": 0.10,
+                "base_threshold": 50,
+                "min_confirming_sources": 3,
+                "strategy_selection_mode": "adaptive_top_n",
+                "flow_bias_enabled": False,
+            },
+        },
+    ]
+    analysis = api_server._analyze_vectors(trials, min_trades=3)
+
+    assert "dimension_importance" in analysis
+    dim_imp = analysis["dimension_importance"]
+    assert len(dim_imp) == 5
+    # Sum should be ~1.0
+    total = sum(dim_imp.values())
+    assert abs(total - 1.0) < 0.02, f"importance sum {total} not near 1.0"
+
+    assert "top_interactions" in analysis
+    assert isinstance(analysis["top_interactions"], list)
+
+    assert "surprising_vectors" in analysis
+    assert "stats" in analysis
+    assert analysis["stats"]["total_valid_trials"] == 4
+
+
+def test_v2_analyze_vectors_interaction_effects() -> None:
+    # Create trials with known interaction: strategy + regime combo matters
+    trials = []
+    for i, (strat, regime, score) in enumerate([
+        (["momentum_flow"], ["TRENDING"], 8.0),
+        (["momentum_flow"], ["CHOPPY"], 1.0),
+        (["absorption_reversal"], ["TRENDING"], 2.0),
+        (["absorption_reversal"], ["CHOPPY"], 7.0),
+    ]):
+        trials.append({
+            "score": score,
+            "metrics": {"total_trades": 10},
+            "candidate": {
+                "enabled_strategies": strat,
+                "regime_filter": regime,
+                "l2_min_imbalance": 0.15,
+                "l2_min_signed_aggression": 0.15,
+                "base_threshold": 50,
+                "min_confirming_sources": 2,
+                "strategy_selection_mode": "all_enabled",
+                "flow_bias_enabled": True,
+            },
+        })
+    analysis = api_server._analyze_vectors(trials, min_trades=3)
+
+    interactions = analysis["top_interactions"]
+    assert len(interactions) > 0
+    # The top interaction should involve strategy_set and regime_filter
+    top = interactions[0]
+    assert "strategy_set" in top["dims"] or "regime_filter" in top["dims"]
+    assert top["effect_size"] > 0
+
+
+def test_v2_backward_compatible_with_v1() -> None:
+    """V1 request should still work exactly as before."""
+    request = _base_request(adaptive_version=1)
+    space = api_server._build_adaptive_tuner_search_space(request)
+    assert "strategy_selection_mode" in space
+    assert "max_active_strategies" in space
+    # V2-only keys should NOT be in v1 search space
+    assert "strategy_sets" not in space
+    assert "regime_filter_sets" not in space
+
+
+def test_v2_run_adaptive_tuner_creates_v2_job(monkeypatch) -> None:
+    api_server.adaptive_tuner_jobs.clear()
+    scheduled = []
+
+    class _FakeUUID:
+        hex = "v2job456"
+
+    def _fake_create_task(coro):
+        scheduled.append(coro)
+
+        class _Task:
+            def cancel(self):
+                return True
+
+        return _Task()
+
+    monkeypatch.setattr(api_server, "uuid4", lambda: _FakeUUID())
+    monkeypatch.setattr(api_server.asyncio, "create_task", _fake_create_task)
+
+    request = _base_v2_request(method="random")
+    result = asyncio.run(api_server.run_adaptive_tuner(request))
+
+    assert result["job_id"] == "v2job456"
+    assert result["status"] == "queued"
+    assert result["adaptive_version"] == 2
+    assert result["effective_days"] == 3
+    assert "v2job456" in api_server.adaptive_tuner_jobs
+    job = api_server.adaptive_tuner_jobs["v2job456"]
+    assert job["adaptive_version"] == 2
+    assert job["progress"]["method"] == "random"
+    assert len(scheduled) == 1
+
+    scheduled[0].close()
+    api_server.adaptive_tuner_jobs.clear()
+
+
+def test_v2_random_candidates_deduplicate() -> None:
+    request = _base_v2_request()
+    space = api_server._build_v2_search_space(request, _ticker_config())
+    candidates = api_server._build_v2_random_candidates(space, n_trials=20, seed=42)
+
+    keys = set()
+    for c in candidates:
+        key = api_server._v2_candidate_key(c)
+        assert key not in keys, f"Duplicate candidate found: {key}"
+        keys.add(key)
+
+    assert len(candidates) <= 20
+    assert len(candidates) > 0
+    # Every candidate should have v2 keys
+    for c in candidates:
+        assert "enabled_strategies" in c
+        assert "regime_filter" in c
+        assert "l2_min_imbalance" in c
+        assert "base_threshold" in c
+
+
+def test_v2_profile_shape() -> None:
+    """Profile entry should contain adaptive_version=2 when built from v2 request."""
+    request = _base_v2_request()
+    best_trial = {
+        "score": 3.5,
+        "candidate": {
+            "enabled_strategies": ["momentum_flow"],
+            "regime_filter": ["TRENDING"],
+            "l2_min_imbalance": 0.12,
+            "base_threshold": 55.0,
+        },
+        "metrics": {"total_trades": 15, "avg_pnl_pct": 1.2},
+    }
+    profile = api_server._build_tuner_profile_entry(
+        ticker="MU",
+        request=request,
+        method_used="random",
+        dates=["2026-02-03", "2026-02-04"],
+        best_trial=best_trial,
+    )
+    assert profile["adaptive_version"] == 2
+    assert profile["ticker"] == "MU"
+    assert profile["method"] == "random"
+    assert profile["candidate"]["enabled_strategies"] == ["momentum_flow"]
+    assert profile["quick_mode"] is False
+
+
+def test_normalize_float_options() -> None:
+    result = api_server._normalize_float_options(
+        [0.05, 0.2, 0.2, -1.0, 5.0],
+        default=[0.1],
+        min_value=0.0,
+        max_value=1.0,
+    )
+    assert result == [0.05, 0.2, 0.0, 1.0]
+
+
+def test_normalize_strategy_sets() -> None:
+    result = api_server._normalize_strategy_sets(
+        [["Momentum_Flow"], ["absorption_reversal", "MOMENTUM_FLOW"]],
+        enabled_strategies=["momentum_flow"],
+    )
+    assert ["momentum_flow"] in result
+    assert sorted(["absorption_reversal", "momentum_flow"]) in result
+    assert len(result) == 2
+
+
+def test_normalize_regime_filter_sets() -> None:
+    result = api_server._normalize_regime_filter_sets(
+        [["trending"], ["CHOPPY", "invalid", "MIXED"]],
+    )
+    assert ["TRENDING"] in result
+    assert sorted(["CHOPPY", "MIXED"]) in result
+    assert len(result) == 2

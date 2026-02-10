@@ -26,7 +26,7 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 | `walk_forward_runner.py` | yes | 447 | `13f270b 2026-02-06` |
 | `performance_tracker.py` | yes | 822 | `13f270b 2026-02-06` |
 | `oos_validator.py` | yes | 187 | `13f270b 2026-02-06` |
-| `monte_carlo.py` | yes | 178 | `13f270b 2026-02-06` |
+| `monte_carlo.py` | yes | 178 | `64da33c 2026-02-10` |
 | `tuning_runner.py` | yes | 340 | `583f2bc 2026-02-06` |
 | `aos_walk_forward.py` | yes | 585 | `13f270b 2026-02-06` |
 | `aos_optimizer.py` | yes | 572 | `9249b8b 2026-02-05` |

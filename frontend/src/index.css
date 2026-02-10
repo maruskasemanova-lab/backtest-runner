@@ -2146,3 +2146,242 @@ body {
   color: var(--text-muted);
   font-weight: 500;
 }
+
+/* ============ V2 Vector Analysis ============ */
+
+.v2-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #7c3aed, #6366f1);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.v2-vector-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.v2-vector-tag {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  background: rgba(124, 58, 237, 0.06);
+  color: #7c3aed;
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.v2-search-space {
+  border-color: rgba(124, 58, 237, 0.2);
+  background: linear-gradient(
+    160deg,
+    rgba(124, 58, 237, 0.04) 0%,
+    rgba(99, 102, 241, 0.04) 100%
+  );
+}
+
+.v2-search-space h3 {
+  color: #7c3aed;
+}
+
+.v2-base-params {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  padding: 8px;
+  margin-top: 4px;
+}
+
+.v2-base-params summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.v2-base-params[open] summary {
+  margin-bottom: 8px;
+}
+
+.field-hint {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* Vector Analysis Panel */
+
+.vector-analysis-panel {
+  border-color: rgba(124, 58, 237, 0.25);
+  background: linear-gradient(
+    160deg,
+    rgba(124, 58, 237, 0.06) 0%,
+    rgba(99, 102, 241, 0.04) 100%
+  );
+}
+
+.vector-analysis-panel h3 {
+  color: #7c3aed;
+}
+
+.vector-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vector-subsection h4 {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+/* Dimension Importance Bars */
+
+.vector-importance-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vector-bar-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 52px;
+  align-items: center;
+  gap: 8px;
+}
+
+.vector-bar-label {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.vector-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.vector-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7c3aed, #6366f1);
+  transition: width 0.3s ease;
+  min-width: 2px;
+}
+
+.vector-bar-value {
+  font-size: 0.72rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+/* Interactions List */
+
+.vector-interactions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vector-interaction-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 6px 10px;
+  font-size: 0.76rem;
+}
+
+.interaction-dims {
+  color: var(--text-primary);
+  font-weight: 600;
+  flex: 1;
+}
+
+.interaction-effect {
+  color: #7c3aed;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.72rem;
+}
+
+.interaction-count {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+/* Surprising Vectors Table */
+
+.vector-surprising-table-wrap {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 220px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.vector-surprising-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+}
+
+.vector-surprising-table th,
+.vector-surprising-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.vector-surprising-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(247, 243, 236, 0.95);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.vector-surprising-table td.z-high {
+  color: #7c3aed;
+  font-weight: 700;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.field-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-blue);
+}

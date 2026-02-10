@@ -211,7 +211,7 @@
       "time_filter_enabled": false
     },
     "MU": {
-      "strategy": "momentum_flow",
+      "strategy": "momentum",
       "params": {
         "min_signed_aggression": 0.06,
         "min_directional_consistency": 0.5,
@@ -224,11 +224,9 @@
         "trailing_stop_pct": 0.9,
         "long_only": false
       },
-      "backup_strategy": "absorption_reversal",
+      "backup_strategy": "",
       "regime_filter": [
-        "TRENDING",
-        "MIXED",
-        "CHOPPY"
+        "TRENDING"
       ],
       "avoid_days": [],
       "long_only": false,
@@ -243,95 +241,286 @@
         "volume_confirm_ratio": 1.15
       },
       "l2": {
-        "confirm_enabled": true,
-        "min_delta": 1000,
-        "min_imbalance": 0.12,
-        "min_iceberg_bias": 0,
-        "lookback_bars": 3,
-        "min_participation_ratio": 0.12,
-        "min_directional_consistency": 0.5,
-        "min_signed_aggression": 0.12
+        "min_delta": 3000.0,
+        "min_imbalance": 0.05,
+        "min_signed_aggression": 0.03,
+        "min_directional_consistency": 0.3
       },
       "notes": "Flow-first MU profile with stricter L2 conviction gates (imbalance/aggression >= 0.12) to cut low-quality microstructure noise entries.",
       "trailing_stop_pct": 0.9,
       "strategy_selection_mode": "all_enabled",
-      "max_active_strategies": 1,
-      "trading_hours": [],
-      "time_filter_enabled": false,
+      "max_active_strategies": 3,
+      "trading_hours": [
+        9,
+        10,
+        11,
+        12
+      ],
+      "time_filter_enabled": true,
       "adaptive": {
+        "version": 2,
         "flow_bias_enabled": true,
-        "use_ohlcv_fallbacks": true,
-        "flow_bias_strategies": [
-          "momentum_flow",
-          "absorption_reversal",
-          "exhaustion_fade"
-        ],
-        "regime_preferences": {
-          "TRENDING": [
-            "momentum_flow",
-            "momentum",
-            "pullback",
-            "gap_liquidity",
-            "volume_profile",
-            "vwap_magnet"
-          ],
-          "CHOPPY": [
-            "absorption_reversal",
-            "exhaustion_fade",
-            "mean_reversion",
-            "vwap_magnet",
-            "volume_profile"
-          ],
-          "MIXED": [
-            "exhaustion_fade",
-            "absorption_reversal",
-            "volume_profile",
-            "gap_liquidity",
-            "mean_reversion",
-            "vwap_magnet",
-            "rotation"
-          ]
-        },
-        "micro_regime_preferences": {
-          "TRENDING_UP": [
-            "momentum_flow",
-            "momentum",
-            "pullback",
-            "gap_liquidity"
-          ],
-          "TRENDING_DOWN": [
-            "momentum_flow",
-            "momentum",
-            "gap_liquidity",
-            "pullback"
-          ],
-          "CHOPPY": [
-            "absorption_reversal",
-            "exhaustion_fade",
-            "mean_reversion",
-            "vwap_magnet"
-          ],
-          "ABSORPTION": [
-            "absorption_reversal",
-            "exhaustion_fade",
-            "vwap_magnet"
-          ],
-          "BREAKOUT": [
-            "momentum_flow",
-            "momentum",
-            "gap_liquidity"
-          ],
-          "MIXED": [
-            "exhaustion_fade",
-            "volume_profile",
-            "rotation"
-          ]
-        },
-        "version": 1,
-        "min_active_bars_before_switch": 2,
-        "switch_cooldown_bars": 0
+        "use_ohlcv_fallbacks": false,
+        "min_active_bars_before_switch": 0,
+        "switch_cooldown_bars": 8,
+        "evidence_base_threshold": 50.0,
+        "evidence_min_confirming_sources": 2
       },
       "adaptive_tuner_profiles": [
+        {
+          "profile_id": "ae4ad07b15f8",
+          "created_at": "2026-02-10T12:00:08.271797Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "random",
+          "score_metric": "trade_adjusted",
+          "score": 0.4357,
+          "date_from": "2026-01-02",
+          "date_to": "2026-01-28",
+          "evaluated_days": 2,
+          "l2_required": true,
+          "l2_only": true,
+          "quick_mode": true,
+          "quick_max_days": 2,
+          "quick_trial_boost": 3,
+          "candidate": {
+            "strategy_selection_mode": "all_enabled",
+            "max_active_strategies": 3,
+            "min_active_bars_before_switch": 4,
+            "switch_cooldown_bars": 8,
+            "flow_bias_enabled": false,
+            "use_ohlcv_fallbacks": true,
+            "enabled_strategies": [
+              "absorption_reversal",
+              "mean_reversion"
+            ],
+            "l2_min_delta": 5000.0,
+            "l2_min_imbalance": 0.18,
+            "l2_min_signed_aggression": 0.05,
+            "l2_min_directional_consistency": 0.45,
+            "regime_filter": [
+              "MIXED",
+              "TRENDING"
+            ],
+            "base_threshold": 60.0,
+            "min_confirming_sources": 2
+          },
+          "metrics": {
+            "valid_days": 2,
+            "total_days": 2,
+            "total_trades": 6,
+            "total_pnl_pct": -0.3286,
+            "avg_pnl_pct": -0.1643,
+            "total_pnl_dollars": -40.3561,
+            "avg_pnl_dollars": -20.178,
+            "avg_win_rate_pct": 83.335
+          },
+          "vector_analysis": {
+            "dimension_importance": {
+              "strategy_set": 0.2762,
+              "l2_thresholds": 0.242,
+              "regime_filter": 0.0507,
+              "evidence_params": 0.1548,
+              "v1_adaptive": 0.2762
+            },
+            "top_interactions": [
+              {
+                "dims": [
+                  "strategy_set",
+                  "l2_thresholds"
+                ],
+                "effect_size": 1.0
+              },
+              {
+                "dims": [
+                  "strategy_set",
+                  "evidence_params"
+                ],
+                "effect_size": 1.0
+              },
+              {
+                "dims": [
+                  "strategy_set",
+                  "v1_adaptive"
+                ],
+                "effect_size": 1.0
+              },
+              {
+                "dims": [
+                  "l2_thresholds",
+                  "regime_filter"
+                ],
+                "effect_size": 1.0
+              },
+              {
+                "dims": [
+                  "l2_thresholds",
+                  "evidence_params"
+                ],
+                "effect_size": 1.0
+              }
+            ],
+            "surprising_vectors": [
+              {
+                "description": "absorption_reversal+mean_reversion | regime=MIXED,TRENDING | l2_imb=0.18 | ev_thresh=60",
+                "score": 0.4357,
+                "z_score": 1.69,
+                "trial_index": 1,
+                "candidate": {
+                  "strategy_selection_mode": "all_enabled",
+                  "max_active_strategies": 3,
+                  "min_active_bars_before_switch": 4,
+                  "switch_cooldown_bars": 8,
+                  "flow_bias_enabled": false,
+                  "use_ohlcv_fallbacks": true,
+                  "enabled_strategies": [
+                    "absorption_reversal",
+                    "mean_reversion"
+                  ],
+                  "l2_min_delta": 5000.0,
+                  "l2_min_imbalance": 0.18,
+                  "l2_min_signed_aggression": 0.05,
+                  "l2_min_directional_consistency": 0.45,
+                  "regime_filter": [
+                    "MIXED",
+                    "TRENDING"
+                  ],
+                  "base_threshold": 60.0,
+                  "min_confirming_sources": 2
+                }
+              },
+              {
+                "description": "exhaustion_fade | regime=TRENDING | l2_imb=0.12 | ev_thresh=60",
+                "score": 0.3661,
+                "z_score": 1.19,
+                "trial_index": 13,
+                "candidate": {
+                  "strategy_selection_mode": "all_enabled",
+                  "max_active_strategies": 2,
+                  "min_active_bars_before_switch": 4,
+                  "switch_cooldown_bars": 4,
+                  "flow_bias_enabled": false,
+                  "use_ohlcv_fallbacks": true,
+                  "enabled_strategies": [
+                    "exhaustion_fade"
+                  ],
+                  "l2_min_delta": 3000.0,
+                  "l2_min_imbalance": 0.12,
+                  "l2_min_signed_aggression": 0.08,
+                  "l2_min_directional_consistency": 0.2,
+                  "regime_filter": [
+                    "TRENDING"
+                  ],
+                  "base_threshold": 60.0,
+                  "min_confirming_sources": 2
+                }
+              }
+            ],
+            "stats": {
+              "total_valid_trials": 10,
+              "overall_mean_score": 0.1979,
+              "score_std": 0.1408
+            }
+          }
+        },
+        {
+          "profile_id": "8d570e438021",
+          "created_at": "2026-02-10T10:57:26.221422Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "random",
+          "score_metric": "pnl_pct",
+          "score": -0.006067,
+          "date_from": "2026-02-03",
+          "date_to": "2026-02-05",
+          "evaluated_days": 3,
+          "l2_required": true,
+          "l2_only": true,
+          "candidate": {
+            "strategy_selection_mode": "all_enabled",
+            "max_active_strategies": 2,
+            "min_active_bars_before_switch": 2,
+            "switch_cooldown_bars": 1,
+            "flow_bias_enabled": true,
+            "use_ohlcv_fallbacks": true,
+            "enabled_strategies": [
+              "momentum_flow"
+            ],
+            "l2_min_delta": 5000,
+            "l2_min_imbalance": 0.05,
+            "l2_min_signed_aggression": 0.05,
+            "l2_min_directional_consistency": 0.3,
+            "regime_filter": [
+              "TRENDING"
+            ],
+            "base_threshold": 50.0,
+            "min_confirming_sources": 1
+          },
+          "metrics": {
+            "valid_days": 3,
+            "total_days": 3,
+            "total_trades": 1,
+            "total_pnl_pct": -0.0182,
+            "avg_pnl_pct": -0.0061,
+            "total_pnl_dollars": -0.8528,
+            "avg_pnl_dollars": -0.2843,
+            "avg_win_rate_pct": 0.0
+          },
+          "vector_analysis": {
+            "dimension_importance": {},
+            "top_interactions": [],
+            "surprising_vectors": []
+          }
+        },
+        {
+          "profile_id": "499fb0048851",
+          "created_at": "2026-02-10T10:49:00.437239Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "random",
+          "score_metric": "pnl_pct",
+          "score": -1.0,
+          "date_from": "2026-02-03",
+          "date_to": "2026-02-05",
+          "evaluated_days": 3,
+          "l2_required": true,
+          "l2_only": true,
+          "candidate": {
+            "strategy_selection_mode": "all_enabled",
+            "max_active_strategies": 2,
+            "min_active_bars_before_switch": 2,
+            "switch_cooldown_bars": 1,
+            "flow_bias_enabled": true,
+            "use_ohlcv_fallbacks": true,
+            "enabled_strategies": [
+              "momentum_flow"
+            ],
+            "l2_min_delta": 5000,
+            "l2_min_imbalance": 0.05,
+            "l2_min_signed_aggression": 0.05,
+            "l2_min_directional_consistency": 0.3,
+            "regime_filter": [
+              "TRENDING"
+            ],
+            "base_threshold": 50.0,
+            "min_confirming_sources": 1
+          },
+          "metrics": {
+            "valid_days": 3,
+            "total_days": 3,
+            "total_trades": 0,
+            "total_pnl_pct": 0.0,
+            "avg_pnl_pct": 0.0,
+            "total_pnl_dollars": 0.0,
+            "avg_pnl_dollars": 0.0,
+            "avg_win_rate_pct": 0.0
+          },
+          "vector_analysis": {
+            "dimension_importance": {},
+            "top_interactions": [],
+            "surprising_vectors": []
+          }
+        },
         {
           "profile_id": "0e99cecbc0e0",
           "created_at": "2026-02-09T19:39:06.198643Z",
@@ -365,7 +554,16 @@
           }
         }
       ],
-      "active_adaptive_tuner_profile_id": "0e99cecbc0e0"
+      "active_adaptive_tuner_profile_id": "8d570e438021",
+      "v2_strategy_param_overrides": {
+        "min_confidence": 55.0,
+        "atr_stop_multiplier": 1.6,
+        "rr_ratio": 1.6,
+        "trailing_stop_pct": 0.6
+      },
+      "adverse_flow_consistency_threshold": 0.15,
+      "adverse_book_pressure_threshold": 0.15,
+      "time_exit_bars": 35
     },
     "AMZN": {
       "strategy": "pullback",

@@ -55,6 +55,7 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 - `walk_forward_runner.py`: date-range simulation + report generation.
 - `monte_carlo.py`: drawdown distribution/risk gate from trade PnL sequences.
 - Runner adaptive tuner (`POST /api/adaptive-tuner/run`): date-range candidate search for Adaptive Studio v1 controls with grid/random/optuna modes, optional L2-only date filtering, and optional best-candidate persistence.
+- Runner adaptive tuner quick mode: optional approximate tuning path that samples representative days and boosts trial budget so more candidate combinations can be screened faster.
 
 ## Frontend Behavioral Ownership
 
@@ -65,5 +66,6 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 - `StrategySettings.jsx`: strategy toggles + per-strategy parameter editing with capture/apply strategy-combination profiles per ticker.
 - `AdaptiveStrategyStudio.jsx`: adaptive selection-flow editor (saved to `aos_config.json` via `/api/aos-config/update` and applied on next run) with tuned-profile list/load/apply actions and strategy-combination-aware recomposition.
 - `AdaptiveTuner.jsx`: adaptive v1 tuner UI tab with real OHLCV/L2 coverage ranges, date-range trial execution, scored candidate ranking, saved tuned profile list, and apply-to-backtest action.
+- `AdaptiveTuner.jsx` quick approximation controls: optional sampled-day tuning (`quick_mode`) with configurable `quick_max_days` and `quick_trial_boost`.
 
 For concrete file ownership and symbol inventory, use generated domain packs.

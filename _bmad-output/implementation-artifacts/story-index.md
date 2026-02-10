@@ -30,6 +30,7 @@ Generated on 2026-02-09 to provide an explicit story artifact index for workflow
 - `10-2-l2-coverage-tuning-and-profile-apply.md` - Status: done
 - `10-3-backtest-and-studio-profile-consumption.md` - Status: done
 - `11-1-strategy-combo-profiles-and-adaptive-recompose.md` - Status: done
+- `12-1-adaptive-tuner-quick-approx-mode.md` - Status: done
 
 ## Retrospectives
 

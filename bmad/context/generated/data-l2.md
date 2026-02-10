@@ -28,7 +28,7 @@ Own L2 acquisition, conversion, minute alignment, intrabar frames, and flow-feat
 | `src/intrabar_frame_builder.py` | yes | 314 | `5ba62b7 2026-02-08` |
 | `src/l2_feature_aggregator.py` | yes | 226 | `5ba62b7 2026-02-08` |
 | `src/run_artifact_store.py` | yes | 245 | `5ba62b7 2026-02-08` |
-| `src/databento_service.py` | yes | 1106 | `baf7110 2026-02-07` |
+| `src/databento_service.py` | yes | 1106 | `64da33c 2026-02-10` |
 | `scripts/download_l2_data.py` | yes | 69 | `583f2bc 2026-02-06` |
 | `scripts/convert_l2_to_parquet.py` | yes | 43 | `583f2bc 2026-02-06` |
 | `scripts/verify_l2_data.py` | yes | 31 | `583f2bc 2026-02-06` |

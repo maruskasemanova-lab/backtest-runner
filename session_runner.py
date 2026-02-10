@@ -24,6 +24,7 @@ class RunConfig:
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     strategy_api_url: str = "http://localhost:8001"
+    account_size_usd: float = 10_000.0
     regime_detection_minutes: int = 15
     intrabar_execution_recalc_1s: bool = False
     auto_close_eod: bool = True
@@ -751,6 +752,13 @@ class SessionRunner:
         pnl_dollar_values = [float(t.pnl_dollars) for t in trades]
         total_pnl_dollars = float(overall.get("total_pnl_dollars", 0.0) or 0.0)
         total_costs = float(overall.get("total_costs", 0.0) or 0.0)
+        account_size_usd = float(
+            base_summary.get("account_size_usd", self.config.account_size_usd) or 0.0
+        )
+        if account_size_usd > 0:
+            total_pnl_pct = (total_pnl_dollars / account_size_usd) * 100.0
+        else:
+            total_pnl_pct = float(overall.get("total_pnl_pct", 0.0) or 0.0)
 
         gross_wins = sum(x for x in pnl_dollar_values if x > 0)
         gross_losses = abs(sum(x for x in pnl_dollar_values if x <= 0))
@@ -776,8 +784,8 @@ class SessionRunner:
             "losing_trades": int(overall.get("losing_trades", 0) or 0),
             "win_rate": float(overall.get("win_rate", 0.0) or 0.0),
             "trades": [t.to_dict() for t in trades],
-            "total_pnl_pct": round(float(overall.get("total_pnl_pct", 0.0) or 0.0), 4),
-            "avg_pnl_pct": round(float(overall.get("avg_trade_pnl", 0.0) or 0.0), 4),
+            "total_pnl_pct": round(total_pnl_pct, 4),
+            "avg_pnl_pct": round(total_pnl_pct / total_trades, 4),
             "total_pnl_dollars": round(total_pnl_dollars, 4),
             "avg_pnl_dollars": round(total_pnl_dollars / total_trades, 4),
             "total_costs": round(total_costs, 4),

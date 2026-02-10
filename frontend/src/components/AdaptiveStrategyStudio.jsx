@@ -225,9 +225,9 @@ const formatProfileCandidate = (candidate) => {
   return `${mode === "all_enabled" ? "all enabled" : `adaptive top-${maxActive}`} | hysteresis ${hysteresis} | cooldown ${cooldown} | ${flowBias} | ${fallback}`;
 };
 
-const applyTunedCandidateToForm = (formState, candidate) => {
+const applyTunedCandidateToForm = (formState, candidate, strategyUniverse) => {
   const source = candidate && typeof candidate === "object" ? candidate : {};
-  return {
+  const base = {
     ...formState,
     strategy_selection_mode: normalizeMode(source.strategy_selection_mode),
     max_active_strategies: normalizeMaxActive(
@@ -245,6 +245,87 @@ const applyTunedCandidateToForm = (formState, candidate) => {
       normalizeNonNegativeInt(formState.switch_cooldown_bars, 0)
     ),
   };
+
+  // V2 recomposition: if candidate has enabled_strategies, recompose regime preferences
+  const enabled = source.enabled_strategies;
+  if (Array.isArray(enabled) && enabled.length > 0 && Array.isArray(strategyUniverse)) {
+    const enabledSet = new Set(
+      enabled.map((s) => canonicalizeStrategyName(s, strategyUniverse)).filter(Boolean)
+    );
+    const nextRegime = {};
+    MACRO_REGIMES.forEach((key) => {
+      nextRegime[key] = buildRecomposedList(
+        base.regime_preferences?.[key],
+        DEFAULT_REGIME_PREFERENCES[key],
+        enabledSet
+      );
+    });
+    const nextMicro = {};
+    MICRO_REGIMES.forEach((key) => {
+      nextMicro[key] = buildRecomposedList(
+        base.micro_regime_preferences?.[key],
+        DEFAULT_MICRO_PREFERENCES[key],
+        enabledSet
+      );
+    });
+    const nextFlowBias = buildRecomposedList(
+      base.flow_bias_strategies,
+      DEFAULT_FLOW_BIAS_STRATEGIES,
+      enabledSet
+    );
+    base.regime_preferences = nextRegime;
+    base.micro_regime_preferences = nextMicro;
+    base.flow_bias_strategies = nextFlowBias;
+    base.max_active_strategies = Math.max(1, Math.min(base.max_active_strategies, enabledSet.size));
+  }
+
+  return base;
+};
+
+/** Summarize a v2 candidate's vector config for display. */
+const formatV2VectorSummary = (candidate) => {
+  if (!candidate || typeof candidate !== "object") return null;
+  const parts = [];
+  const strategies = candidate.enabled_strategies;
+  if (Array.isArray(strategies) && strategies.length) {
+    parts.push(`Strategies: ${strategies.join(", ")}`);
+  }
+  const regime = candidate.regime_filter;
+  if (Array.isArray(regime) && regime.length) {
+    parts.push(`Regime: ${regime.join(", ")}`);
+  }
+  if (candidate.l2_min_imbalance != null) {
+    parts.push(`L2 imb: ${Number(candidate.l2_min_imbalance).toFixed(3)}`);
+  }
+  if (candidate.l2_min_delta != null) {
+    parts.push(`L2 delta: ${candidate.l2_min_delta}`);
+  }
+  if (candidate.base_threshold != null) {
+    parts.push(`Evidence thr: ${candidate.base_threshold}`);
+  }
+  if (candidate.min_confirming_sources != null) {
+    parts.push(`Min sources: ${candidate.min_confirming_sources}`);
+  }
+  if (candidate.min_confidence != null) {
+    parts.push(`Confidence: ${candidate.min_confidence}`);
+  }
+  if (candidate.atr_stop_multiplier != null) {
+    parts.push(`ATR stop: ${candidate.atr_stop_multiplier}`);
+  }
+  if (candidate.rr_ratio != null) {
+    parts.push(`R:R: ${candidate.rr_ratio}`);
+  }
+  const hours = candidate.trading_hours;
+  if (Array.isArray(hours) && hours.length) {
+    parts.push(`Hours: ${hours.join(",")}`);
+  }
+  if (candidate.adverse_flow_consistency != null) {
+    parts.push(`FlowExitCons: ${candidate.adverse_flow_consistency}`);
+  }
+  if (candidate.adverse_book_pressure != null) {
+    parts.push(`BookExitThr: ${candidate.adverse_book_pressure}`);
+  }
+  return parts.length ? parts : null;
 };
 
 const extractEnabledStrategiesFromCombo = (profile, strategyUniverse) => {
@@ -613,9 +694,11 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
       setError("Cannot load profile: candidate payload is missing.");
       return;
     }
+    const profileVersion = Number(profile?.adaptive_version || 1);
     setError(null);
-    setNotice(`Loaded profile ${profileId} into editor. Save if you want to persist these values.`);
-    setForm((prev) => applyTunedCandidateToForm(prev, candidate));
+    const versionLabel = profileVersion >= 2 ? ` (v2 vector)` : "";
+    setNotice(`Loaded profile ${profileId}${versionLabel} into editor. Save if you want to persist these values.`);
+    setForm((prev) => applyTunedCandidateToForm(prev, candidate, strategyUniverse));
     setIsDirty(true);
   };
 
@@ -960,7 +1043,7 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
             </div>
 
             <div className="adaptive-section">
-              <h3>Adaptive Tuned Profiles (v1)</h3>
+              <h3>Adaptive Tuned Profiles</h3>
               <div className="adaptive-preview-item">
                 <span>Active profile for backtest</span>
                 <strong>{activeProfileId || "none"}</strong>
@@ -980,7 +1063,12 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
                         key={profileId || `studio-profile-${idx}`}
                       >
                         <div className="tuner-profile-head">
-                          <strong>{profileId || "profile"}</strong>
+                          <strong>
+                            {profileId || "profile"}
+                            {Number(profile?.adaptive_version || 1) >= 2 && (
+                              <span className="v2-badge">v2</span>
+                            )}
+                          </strong>
                           <span>{formatProfileTimestamp(profile?.created_at)}</span>
                         </div>
                         <div className="tuner-profile-body">
@@ -990,6 +1078,16 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
                             {" -> "}
                             {profile?.date_to || "?"}
                           </div>
+                          {Number(profile?.adaptive_version || 1) >= 2 && (() => {
+                            const parts = formatV2VectorSummary(profile?.candidate);
+                            return parts ? (
+                              <div className="v2-vector-summary">
+                                {parts.map((part, pi) => (
+                                  <span key={pi} className="v2-vector-tag">{part}</span>
+                                ))}
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                         <div className="tuner-profile-actions">
                           <button

@@ -62,7 +62,12 @@ def test_session_end_marker_emitted_once_per_market_day() -> None:
 
 
 def test_summary_uses_recorded_trades_for_range_totals() -> None:
-    config = RunConfig(run_id="r1c", ticker="MU", date="2026-02-01_to_2026-02-05")
+    config = RunConfig(
+        run_id="r1c",
+        ticker="MU",
+        date="2026-02-01_to_2026-02-05",
+        account_size_usd=10_000.0,
+    )
     runner = SessionRunner(config)
     runner.current_bar_index = 123
     runner.session_summary = {
@@ -106,7 +111,55 @@ def test_summary_uses_recorded_trades_for_range_totals() -> None:
     assert summary["winning_trades"] == 1
     assert summary["losing_trades"] == 1
     assert summary["total_pnl_dollars"] == 5.0
+    assert summary["total_pnl_pct"] == 0.05
+    assert summary["avg_pnl_pct"] == 0.025
     assert summary["bars_processed"] == 123
+
+
+def test_summary_pnl_pct_sign_tracks_dollar_pnl() -> None:
+    config = RunConfig(
+        run_id="r1d",
+        ticker="MU",
+        date="2026-02-01_to_2026-02-05",
+        account_size_usd=10_000.0,
+    )
+    runner = SessionRunner(config)
+
+    # Intentional mismatch in trade-level percentages vs dollars.
+    runner.perf_tracker.record_trade(
+        strategy="MomentumFlow",
+        regime="TRENDING",
+        ticker="MU",
+        date=config.date,
+        side="long",
+        entry_price=100.0,
+        exit_price=101.0,
+        entry_time="2026-02-01T15:00:00+00:00",
+        exit_time="2026-02-01T15:05:00+00:00",
+        pnl_pct=1.0,
+        pnl_dollars=-20.0,
+        exit_reason="manual_close",
+    )
+    runner.perf_tracker.record_trade(
+        strategy="MomentumFlow",
+        regime="TRENDING",
+        ticker="MU",
+        date=config.date,
+        side="long",
+        entry_price=100.0,
+        exit_price=101.0,
+        entry_time="2026-02-02T15:00:00+00:00",
+        exit_time="2026-02-02T15:05:00+00:00",
+        pnl_pct=1.0,
+        pnl_dollars=-10.0,
+        exit_reason="manual_close",
+    )
+
+    summary = runner.get_summary()["session_summary"]
+    assert summary["total_pnl_dollars"] == -30.0
+    assert summary["total_pnl_pct"] == -0.3
+    assert summary["avg_pnl_pct"] == -0.15
+    assert summary["success"] is False
 
 
 def test_pattern_marker_skipped_for_evidence_engine() -> None:
