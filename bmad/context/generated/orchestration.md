@@ -21,8 +21,8 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `api_server.py` | yes | 4296 | `64da33c 2026-02-10` |
-| `session_runner.py` | yes | 828 | `64da33c 2026-02-10` |
+| `api_server.py` | yes | 4466 | `17d2b9d 2026-02-11` |
+| `session_runner.py` | yes | 828 | `17d2b9d 2026-02-11` |
 | `data_loader.py` | yes | 300 | `baf7110 2026-02-07` |
 | `available_data.py` | yes | 224 | `baf7110 2026-02-07` |
 | `decision_tracker.py` | yes | 440 | `64da33c 2026-02-10` |
@@ -69,7 +69,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `function` `_normalize_float_options` (line 156)
 - `function` `_normalize_strategy_sets` (line 181)
 - `function` `_normalize_regime_filter_sets` (line 208)
-- ... 107 more symbols
+- ... 111 more symbols
 
 ### `session_runner.py`
 - `class` `RunConfig` (line 19)

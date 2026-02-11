@@ -138,11 +138,9 @@
         "rr_ratio": 2.2,
         "trailing_stop_pct": 0.9
       },
-      "backup_strategy": "absorption_reversal",
+      "backup_strategy": "",
       "regime_filter": [
-        "TRENDING",
-        "MIXED",
-        "CHOPPY"
+        "TRENDING"
       ],
       "avoid_days": [],
       "long_only": false,
@@ -151,20 +149,43 @@
       "l2": {
         "l2_only": true,
         "confirm_enabled": true,
-        "min_delta": 1000,
-        "min_imbalance": 0.1,
+        "min_delta": 5000.0,
+        "min_imbalance": 0.03,
         "min_iceberg_bias": 0,
         "lookback_bars": 3,
         "min_participation_ratio": 0.1,
-        "min_directional_consistency": 0.5,
-        "min_signed_aggression": 0.1
+        "min_directional_consistency": 0.3,
+        "min_signed_aggression": 0.03
       },
       "notes": "Evidence-based GOOGL profile with flow-only strategy stack and default L2-only gating.",
       "trailing_stop_pct": 0.9,
       "strategy_selection_mode": "adaptive_top_n",
-      "max_active_strategies": 3,
-      "trading_hours": [],
-      "time_filter_enabled": false
+      "max_active_strategies": 1,
+      "trading_hours": [
+        9,
+        10,
+        11,
+        12
+      ],
+      "time_filter_enabled": true,
+      "adaptive": {
+        "version": 2,
+        "flow_bias_enabled": true,
+        "use_ohlcv_fallbacks": true,
+        "min_active_bars_before_switch": 0,
+        "switch_cooldown_bars": 0,
+        "evidence_base_threshold": 45.0,
+        "evidence_min_confirming_sources": 1
+      },
+      "v2_strategy_param_overrides": {
+        "min_confidence": 55.0,
+        "atr_stop_multiplier": 1.6,
+        "rr_ratio": 1.6,
+        "trailing_stop_pct": 0.6
+      },
+      "adverse_flow_consistency_threshold": 0.1,
+      "adverse_book_pressure_threshold": 0.1,
+      "time_exit_bars": 25
     },
     "META": {
       "strategy": "pullback",
@@ -268,6 +289,291 @@
       },
       "adaptive_tuner_profiles": [
         {
+          "profile_id": "4945d3447874",
+          "created_at": "2026-02-11T07:08:28.547956Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "runtime-profile-search",
+          "score_metric": "live_fe_runtime",
+          "score": 0.0,
+          "date_from": "2026-02-03",
+          "date_to": "2026-02-09",
+          "evaluated_days": 0,
+          "l2_required": true,
+          "l2_only": true,
+          "quick_mode": true,
+          "quick_max_days": 2,
+          "quick_trial_boost": 1,
+          "candidate": {
+            "strategy_selection_mode": "adaptive_top_n",
+            "max_active_strategies": 1,
+            "min_active_bars_before_switch": 4,
+            "switch_cooldown_bars": 8,
+            "flow_bias_enabled": false,
+            "use_ohlcv_fallbacks": true,
+            "enabled_strategies": [
+              "momentum_flow"
+            ],
+            "l2_min_delta": 2000.0,
+            "l2_min_imbalance": 0.03,
+            "l2_min_signed_aggression": 0.02,
+            "l2_min_directional_consistency": 0.3,
+            "regime_filter": [
+              "TRENDING",
+              "MIXED"
+            ],
+            "base_threshold": 50.0,
+            "min_confirming_sources": 2,
+            "min_confidence": 58.0,
+            "atr_stop_multiplier": 1.6,
+            "rr_ratio": 1.4,
+            "trading_hours": [
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "adverse_flow_consistency": 0.15,
+            "adverse_book_pressure": 0.12,
+            "time_exit_bars": 40,
+            "trailing_stop_pct": 0.5
+          }
+        },
+        {
+          "profile_id": "1812ae09c1c5",
+          "created_at": "2026-02-11T06:35:17.317449Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "runtime-profile-search",
+          "score_metric": "live_fe_runtime",
+          "score": 0.0,
+          "date_from": "2026-02-03",
+          "date_to": "2026-02-09",
+          "evaluated_days": 0,
+          "l2_required": true,
+          "l2_only": true,
+          "quick_mode": true,
+          "quick_max_days": 2,
+          "quick_trial_boost": 1,
+          "candidate": {
+            "strategy_selection_mode": "adaptive_top_n",
+            "max_active_strategies": 1,
+            "min_active_bars_before_switch": 2,
+            "switch_cooldown_bars": 8,
+            "flow_bias_enabled": false,
+            "use_ohlcv_fallbacks": true,
+            "enabled_strategies": [
+              "exhaustion_fade"
+            ],
+            "l2_min_delta": 500.0,
+            "l2_min_imbalance": 0.02,
+            "l2_min_signed_aggression": 0.03,
+            "l2_min_directional_consistency": 0.45,
+            "regime_filter": [
+              "TRENDING",
+              "MIXED",
+              "CHOPPY"
+            ],
+            "base_threshold": 42.0,
+            "min_confirming_sources": 2,
+            "min_confidence": 52.0,
+            "atr_stop_multiplier": 1.8,
+            "rr_ratio": 1.6,
+            "trading_hours": [
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "adverse_flow_consistency": 0.15,
+            "adverse_book_pressure": 0.15,
+            "time_exit_bars": 40,
+            "trailing_stop_pct": 0.6
+          }
+        },
+        {
+          "profile_id": "f9186ca9e965",
+          "created_at": "2026-02-11T06:08:43.430172Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "manual-select-from-two-stage",
+          "score_metric": "live_fe_runtime",
+          "score": 0.167,
+          "date_from": "2026-02-03",
+          "date_to": "2026-02-09",
+          "evaluated_days": 5,
+          "l2_required": true,
+          "l2_only": true,
+          "quick_mode": true,
+          "quick_max_days": 2,
+          "quick_trial_boost": 1,
+          "candidate": {
+            "strategy_selection_mode": "all_enabled",
+            "max_active_strategies": 1,
+            "min_active_bars_before_switch": 0,
+            "switch_cooldown_bars": 2,
+            "flow_bias_enabled": false,
+            "use_ohlcv_fallbacks": false,
+            "enabled_strategies": [
+              "exhaustion_fade"
+            ],
+            "l2_min_delta": 1000.0,
+            "l2_min_imbalance": 0.02,
+            "l2_min_signed_aggression": 0.08,
+            "l2_min_directional_consistency": 0.45,
+            "regime_filter": [
+              "TRENDING",
+              "MIXED"
+            ],
+            "base_threshold": 50.0,
+            "min_confirming_sources": 1,
+            "min_confidence": 58.0,
+            "atr_stop_multiplier": 1.6,
+            "rr_ratio": 1.6,
+            "trading_hours": [
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "adverse_flow_consistency": 0.15,
+            "adverse_book_pressure": 0.15,
+            "time_exit_bars": 25,
+            "trailing_stop_pct": 0.6
+          }
+        },
+        {
+          "profile_id": "ecd6b3e2d1f9",
+          "created_at": "2026-02-11T06:02:50.666094Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "two-stage-random-search",
+          "score_metric": "live_fe_runtime",
+          "score": 0.1670000000000016,
+          "date_from": "2026-02-03",
+          "date_to": "2026-02-09",
+          "evaluated_days": 5,
+          "l2_required": true,
+          "l2_only": true,
+          "quick_mode": true,
+          "quick_max_days": 2,
+          "quick_trial_boost": 1,
+          "candidate": {
+            "strategy_selection_mode": "adaptive_top_n",
+            "max_active_strategies": 1,
+            "min_active_bars_before_switch": 2,
+            "switch_cooldown_bars": 2,
+            "flow_bias_enabled": true,
+            "use_ohlcv_fallbacks": false,
+            "enabled_strategies": [
+              "momentum_flow"
+            ],
+            "l2_min_delta": 500.0,
+            "l2_min_imbalance": 0.08,
+            "l2_min_signed_aggression": 0.02,
+            "l2_min_directional_consistency": 0.2,
+            "regime_filter": [
+              "TRENDING"
+            ],
+            "base_threshold": 45.0,
+            "min_confirming_sources": 1,
+            "min_confidence": 52.0,
+            "atr_stop_multiplier": 1.8,
+            "rr_ratio": 1.6,
+            "trading_hours": [
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "adverse_flow_consistency": 0.1,
+            "adverse_book_pressure": 0.12,
+            "time_exit_bars": 40,
+            "trailing_stop_pct": 0.4
+          },
+          "metrics": {
+            "total_trades": 2,
+            "total_pnl_dollars": 13.567,
+            "total_pnl_pct": 0.1357,
+            "win_rate": 100.0
+          },
+          "source_note": "Retuned on current FE runtime settings with quick prefilter + full verification."
+        },
+        {
+          "profile_id": "c4bb2197e651",
+          "created_at": "2026-02-11T04:43:39.570688Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "random",
+          "score_metric": "robust",
+          "score": 0.004223,
+          "date_from": "2026-01-02",
+          "date_to": "2026-01-30",
+          "evaluated_days": 8,
+          "l2_required": true,
+          "l2_only": true,
+          "quick_mode": true,
+          "quick_max_days": 8,
+          "quick_trial_boost": 1,
+          "candidate": {
+            "strategy_selection_mode": "all_enabled",
+            "max_active_strategies": 3,
+            "min_active_bars_before_switch": 0,
+            "switch_cooldown_bars": 8,
+            "flow_bias_enabled": true,
+            "use_ohlcv_fallbacks": false,
+            "enabled_strategies": [
+              "momentum"
+            ],
+            "l2_min_delta": 3000,
+            "l2_min_imbalance": 0.05,
+            "l2_min_signed_aggression": 0.03,
+            "l2_min_directional_consistency": 0.3,
+            "regime_filter": [
+              "TRENDING"
+            ],
+            "base_threshold": 50,
+            "min_confirming_sources": 2,
+            "min_confidence": 55,
+            "atr_stop_multiplier": 1.6,
+            "rr_ratio": 1.6,
+            "trading_hours": [
+              9,
+              10,
+              11,
+              12
+            ],
+            "adverse_flow_consistency": 0.15,
+            "adverse_book_pressure": 0.15,
+            "time_exit_bars": 35,
+            "trailing_stop_pct": 0.6
+          },
+          "metrics": {
+            "valid_days": 5,
+            "total_days": 5,
+            "total_trades": 10,
+            "total_pnl_pct": 0.4272,
+            "avg_pnl_pct": 0.0854,
+            "total_pnl_dollars": 42.7241,
+            "avg_pnl_dollars": 8.5448,
+            "avg_win_rate_pct": 66.666
+          },
+          "source_artifact": "/private/tmp/mu_v2_cv_holdout_20260210_224524.json",
+          "source_note": "MU holdout best candidate (+42.7241) promoted to active profile by operator request."
+        },
+        {
           "profile_id": "ae4ad07b15f8",
           "created_at": "2026-02-10T12:00:08.271797Z",
           "ticker": "MU",
@@ -294,7 +600,7 @@
               "absorption_reversal",
               "mean_reversion"
             ],
-            "l2_min_delta": 5000.0,
+            "l2_min_delta": 5000,
             "l2_min_imbalance": 0.18,
             "l2_min_signed_aggression": 0.05,
             "l2_min_directional_consistency": 0.45,
@@ -302,7 +608,7 @@
               "MIXED",
               "TRENDING"
             ],
-            "base_threshold": 60.0,
+            "base_threshold": 60,
             "min_confirming_sources": 2
           },
           "metrics": {
@@ -329,35 +635,35 @@
                   "strategy_set",
                   "l2_thresholds"
                 ],
-                "effect_size": 1.0
+                "effect_size": 1
               },
               {
                 "dims": [
                   "strategy_set",
                   "evidence_params"
                 ],
-                "effect_size": 1.0
+                "effect_size": 1
               },
               {
                 "dims": [
                   "strategy_set",
                   "v1_adaptive"
                 ],
-                "effect_size": 1.0
+                "effect_size": 1
               },
               {
                 "dims": [
                   "l2_thresholds",
                   "regime_filter"
                 ],
-                "effect_size": 1.0
+                "effect_size": 1
               },
               {
                 "dims": [
                   "l2_thresholds",
                   "evidence_params"
                 ],
-                "effect_size": 1.0
+                "effect_size": 1
               }
             ],
             "surprising_vectors": [
@@ -377,7 +683,7 @@
                     "absorption_reversal",
                     "mean_reversion"
                   ],
-                  "l2_min_delta": 5000.0,
+                  "l2_min_delta": 5000,
                   "l2_min_imbalance": 0.18,
                   "l2_min_signed_aggression": 0.05,
                   "l2_min_directional_consistency": 0.45,
@@ -385,7 +691,7 @@
                     "MIXED",
                     "TRENDING"
                   ],
-                  "base_threshold": 60.0,
+                  "base_threshold": 60,
                   "min_confirming_sources": 2
                 }
               },
@@ -404,14 +710,14 @@
                   "enabled_strategies": [
                     "exhaustion_fade"
                   ],
-                  "l2_min_delta": 3000.0,
+                  "l2_min_delta": 3000,
                   "l2_min_imbalance": 0.12,
                   "l2_min_signed_aggression": 0.08,
                   "l2_min_directional_consistency": 0.2,
                   "regime_filter": [
                     "TRENDING"
                   ],
-                  "base_threshold": 60.0,
+                  "base_threshold": 60,
                   "min_confirming_sources": 2
                 }
               }
@@ -453,7 +759,7 @@
             "regime_filter": [
               "TRENDING"
             ],
-            "base_threshold": 50.0,
+            "base_threshold": 50,
             "min_confirming_sources": 1
           },
           "metrics": {
@@ -464,7 +770,7 @@
             "avg_pnl_pct": -0.0061,
             "total_pnl_dollars": -0.8528,
             "avg_pnl_dollars": -0.2843,
-            "avg_win_rate_pct": 0.0
+            "avg_win_rate_pct": 0
           },
           "vector_analysis": {
             "dimension_importance": {},
@@ -479,7 +785,7 @@
           "adaptive_version": 2,
           "method": "random",
           "score_metric": "pnl_pct",
-          "score": -1.0,
+          "score": -1,
           "date_from": "2026-02-03",
           "date_to": "2026-02-05",
           "evaluated_days": 3,
@@ -502,18 +808,18 @@
             "regime_filter": [
               "TRENDING"
             ],
-            "base_threshold": 50.0,
+            "base_threshold": 50,
             "min_confirming_sources": 1
           },
           "metrics": {
             "valid_days": 3,
             "total_days": 3,
             "total_trades": 0,
-            "total_pnl_pct": 0.0,
-            "avg_pnl_pct": 0.0,
-            "total_pnl_dollars": 0.0,
-            "avg_pnl_dollars": 0.0,
-            "avg_win_rate_pct": 0.0
+            "total_pnl_pct": 0,
+            "avg_pnl_pct": 0,
+            "total_pnl_dollars": 0,
+            "avg_pnl_dollars": 0,
+            "avg_win_rate_pct": 0
           },
           "vector_analysis": {
             "dimension_importance": {},
@@ -554,7 +860,7 @@
           }
         }
       ],
-      "active_adaptive_tuner_profile_id": "8d570e438021",
+      "active_adaptive_tuner_profile_id": "c4bb2197e651",
       "v2_strategy_param_overrides": {
         "min_confidence": 55.0,
         "atr_stop_multiplier": 1.6,

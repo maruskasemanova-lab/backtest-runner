@@ -24,11 +24,11 @@ Own playback UI, chart rendering, and operational diagnostics.
 | `frontend/src/components/CandlestickChart.jsx` | yes | 773 | `5ba62b7 2026-02-08` |
 | `frontend/src/components/DecisionPanel.jsx` | yes | 607 | `64da33c 2026-02-10` |
 | `frontend/src/components/SessionSummary.jsx` | yes | 99 | `36d343c 2026-02-03` |
-| `frontend/src/components/RunConfig.jsx` | yes | 1547 | `64da33c 2026-02-10` |
+| `frontend/src/components/RunConfig.jsx` | yes | 1364 | `64da33c 2026-02-10` |
 | `frontend/src/components/PlaybackControls.jsx` | yes | 187 | `36d343c 2026-02-03` |
 | `frontend/src/components/DataManager.jsx` | yes | 696 | `baf7110 2026-02-07` |
-| `frontend/src/components/AdaptiveStrategyStudio.jsx` | yes | 1421 | `64da33c 2026-02-10` |
-| `frontend/src/components/StrategySettings.jsx` | yes | 697 | `64da33c 2026-02-10` |
+| `frontend/src/components/AdaptiveStrategyStudio.jsx` | yes | 1442 | `17d2b9d 2026-02-11` |
+| `frontend/src/components/StrategySettings.jsx` | yes | 709 | `64da33c 2026-02-10` |
 | `frontend/src/components/AOSOptimizations.jsx` | yes | 237 | `64da33c 2026-02-10` |
 | `frontend/src/components/IntrabarPanel.jsx` | yes | 186 | `5ba62b7 2026-02-08` |
 

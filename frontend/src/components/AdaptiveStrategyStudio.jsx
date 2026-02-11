@@ -490,9 +490,30 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
           payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
 
         setRawTickerConfig(safePayload);
-        setForm(normalizeTickerAdaptiveForm(safePayload, strategyUniverse));
+        const baseForm = normalizeTickerAdaptiveForm(safePayload, strategyUniverse);
+        let nextForm = baseForm;
+        const [profilePayload] = await Promise.all([
+          loadProfileOptions(ticker),
+          loadComboOptions(ticker),
+        ]);
+        const activeProfileId = String(
+          profilePayload?.active_profile_id || safePayload?.active_adaptive_tuner_profile_id || ""
+        ).trim();
+        const activeProfile = Array.isArray(profilePayload?.profiles)
+          ? profilePayload.profiles.find(
+              (profile) => String(profile?.profile_id || "").trim() === activeProfileId
+            )
+          : null;
+        if (
+          activeProfile &&
+          activeProfile.candidate &&
+          typeof activeProfile.candidate === "object" &&
+          !Array.isArray(activeProfile.candidate)
+        ) {
+          nextForm = applyTunedCandidateToForm(baseForm, activeProfile.candidate, strategyUniverse);
+        }
+        setForm(nextForm);
         setIsDirty(false);
-        await Promise.all([loadProfileOptions(ticker), loadComboOptions(ticker)]);
       } catch (err) {
         console.error("Failed to load adaptive ticker config:", err);
         setError("Failed to load adaptive configuration for selected ticker.");

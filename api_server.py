@@ -860,6 +860,128 @@ async def _apply_active_strategy_combo(
     }
 
 
+def _normalize_strategy_key(name: Any) -> str:
+    text = str(name or "").strip().lower()
+    if not text:
+        return ""
+    return text.replace("-", "_").replace(" ", "_")
+
+
+def _resolve_active_adaptive_tuner_candidate(ticker_config: Dict[str, Any]) -> Dict[str, Any]:
+    active_profile_id = str(ticker_config.get("active_adaptive_tuner_profile_id", "")).strip()
+    if not active_profile_id:
+        return {}
+    profiles = _normalize_tuner_profiles(ticker_config.get("adaptive_tuner_profiles", []))
+    target_profile = next(
+        (profile for profile in profiles if str(profile.get("profile_id", "")).strip() == active_profile_id),
+        None,
+    )
+    if not isinstance(target_profile, dict):
+        return {}
+    candidate = target_profile.get("candidate")
+    if isinstance(candidate, dict):
+        return candidate
+    best_trial = target_profile.get("best_trial")
+    if isinstance(best_trial, dict) and isinstance(best_trial.get("candidate"), dict):
+        return best_trial.get("candidate", {})
+    return {}
+
+
+def _extract_profile_runtime_overrides(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(candidate, dict):
+        return {}
+    runtime: Dict[str, Any] = {}
+    runtime["strategy_selection_mode"] = _normalize_strategy_selection_mode(
+        candidate.get("strategy_selection_mode")
+    )
+    runtime["max_active_strategies"] = _normalize_clamped_int(
+        candidate.get("max_active_strategies"), default=3, min_value=1, max_value=20
+    )
+    try:
+        time_exit_bars = int(candidate.get("time_exit_bars"))
+        if time_exit_bars > 0:
+            runtime["time_exit_bars"] = time_exit_bars
+    except (TypeError, ValueError):
+        pass
+    for key in (
+        "l2_min_delta",
+        "l2_min_imbalance",
+        "l2_min_signed_aggression",
+        "l2_min_directional_consistency",
+        "l2_min_participation_ratio",
+        "l2_min_iceberg_bias",
+    ):
+        raw = candidate.get(key)
+        if raw is None:
+            continue
+        try:
+            runtime[key] = float(raw)
+        except (TypeError, ValueError):
+            continue
+    return runtime
+
+
+async def _apply_active_adaptive_tuner_profile(
+    strategy_api_url: str,
+    ticker_config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Keep strategy API aligned with active adaptive tuner profile candidate.
+
+    This avoids drift where stale strategy enabled flags from prior runs override
+    the profile-selected strategy set.
+    """
+    candidate = _resolve_active_adaptive_tuner_candidate(ticker_config)
+    if not candidate:
+        return {}
+
+    enabled_raw = candidate.get("enabled_strategies", [])
+    enabled_strategies = [str(s).strip() for s in enabled_raw if str(s).strip()]
+    if not enabled_strategies:
+        return {"candidate_applied": False, "reason": "candidate has no enabled_strategies"}
+
+    enabled_norm = {_normalize_strategy_key(s) for s in enabled_strategies}
+    result: Dict[str, Any] = {
+        "candidate_applied": True,
+        "enabled_strategies": enabled_strategies,
+        "runtime_overrides": _extract_profile_runtime_overrides(candidate),
+    }
+
+    try:
+        remote = await _fetch_remote_strategies(strategy_api_url)
+    except Exception as exc:
+        return {
+            **result,
+            "candidate_applied": False,
+            "error": f"failed to fetch remote strategies: {exc}",
+        }
+
+    # 1) Sync enabled/disabled flags for all remote strategies.
+    enable_map: Dict[str, Dict[str, Any]] = {}
+    for strategy_name in remote.keys():
+        normalized = _normalize_strategy_key(strategy_name)
+        enable_map[str(strategy_name)] = {"enabled": normalized in enabled_norm}
+    enable_apply = await _apply_strategy_param_map(strategy_api_url, enable_map)
+    result["enabled_sync"] = enable_apply
+
+    # 2) Apply v2 per-strategy params to enabled strategies.
+    v2_params: Dict[str, Any] = {}
+    for key in ("min_confidence", "atr_stop_multiplier", "rr_ratio", "trailing_stop_pct"):
+        raw = candidate.get(key)
+        if raw is None:
+            continue
+        try:
+            v2_params[key] = float(raw)
+        except (TypeError, ValueError):
+            continue
+    if v2_params:
+        param_map = {name: dict(v2_params) for name in enabled_strategies}
+        param_apply = await _apply_strategy_param_map(strategy_api_url, param_map)
+        result["v2_param_sync"] = param_apply
+
+    return result
+
+
 async def _apply_global_trailing(strategy_api_url: str, trailing_stop_pct: Optional[float]) -> None:
     if trailing_stop_pct is None:
         return
@@ -905,7 +1027,7 @@ async def _apply_aos_optimizations(strategy_api_url: str, ticker: str) -> Dict[s
     )
     if combo_applied:
         applied["strategy_combo"] = combo_applied
-    
+
     # Get the strategy name from AOS config
     strategy_name = ticker_config.get("strategy")
     params = dict(ticker_config.get("params", {}))
@@ -928,6 +1050,15 @@ async def _apply_aos_optimizations(strategy_api_url: str, ticker: str) -> Dict[s
 
     except Exception as e:
         logger.warning(f"AOS update error for {ticker}: {e}")
+
+    # Apply active adaptive tuner profile strategy sync after base AOS params so
+    # candidate-level per-strategy values win over legacy params from ticker_config.
+    adaptive_profile_applied = await _apply_active_adaptive_tuner_profile(
+        strategy_api_url=strategy_api_url,
+        ticker_config=ticker_config,
+    )
+    if adaptive_profile_applied:
+        applied["adaptive_profile"] = adaptive_profile_applied
     
     # Store time and directional filters for session to use
     applied["trading_hours"] = ticker_config.get("trading_hours")
@@ -3361,6 +3492,11 @@ async def start_run(request: StartRunRequest):
         await _apply_strategy_overrides(request.strategy_api_url, ticker)
     # Apply AOS optimizations (time filter, long_only, params)
     aos_applied = await _apply_aos_optimizations(request.strategy_api_url, ticker)
+    adaptive_profile_runtime = {}
+    if isinstance(aos_applied.get("adaptive_profile"), dict):
+        raw_runtime = aos_applied["adaptive_profile"].get("runtime_overrides")
+        if isinstance(raw_runtime, dict):
+            adaptive_profile_runtime = dict(raw_runtime)
     # Apply global trailing (best-effort, overrides per-ticker trailing)
     await _apply_global_trailing(request.strategy_api_url, request.trailing_stop_pct)
 
@@ -3437,7 +3573,13 @@ async def start_run(request: StartRunRequest):
 
     aos_l2_cfg = aos_applied.get("l2", {}) if isinstance(aos_applied.get("l2"), dict) else {}
 
-    def _pick_l2_float(request_value: Any, cfg_key: str) -> float:
+    def _pick_l2_float(request_value: Any, cfg_key: str, profile_key: str) -> float:
+        try:
+            profile_value = float(adaptive_profile_runtime.get(profile_key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            profile_value = 0.0
+        if abs(profile_value) > 1e-12:
+            return profile_value
         try:
             req = float(request_value)
         except (TypeError, ValueError):
@@ -3453,26 +3595,40 @@ async def start_run(request: StartRunRequest):
     requested_l2_confirm = bool(
         request.l2_confirm_enabled or bool(aos_l2_cfg.get("confirm_enabled", False))
     )
-    l2_min_delta = _pick_l2_float(request.l2_min_delta, "min_delta")
-    l2_min_imbalance = _pick_l2_float(request.l2_min_imbalance, "min_imbalance")
-    l2_min_iceberg_bias = _pick_l2_float(request.l2_min_iceberg_bias, "min_iceberg_bias")
+    l2_min_delta = _pick_l2_float(request.l2_min_delta, "min_delta", "l2_min_delta")
+    l2_min_imbalance = _pick_l2_float(request.l2_min_imbalance, "min_imbalance", "l2_min_imbalance")
+    l2_min_iceberg_bias = _pick_l2_float(
+        request.l2_min_iceberg_bias, "min_iceberg_bias", "l2_min_iceberg_bias"
+    )
     l2_min_participation_ratio = _pick_l2_float(
-        request.l2_min_participation_ratio, "min_participation_ratio"
+        request.l2_min_participation_ratio, "min_participation_ratio", "l2_min_participation_ratio"
     )
     l2_min_directional_consistency = _pick_l2_float(
-        request.l2_min_directional_consistency, "min_directional_consistency"
+        request.l2_min_directional_consistency,
+        "min_directional_consistency",
+        "l2_min_directional_consistency",
     )
     l2_min_signed_aggression = _pick_l2_float(
-        request.l2_min_signed_aggression, "min_signed_aggression"
+        request.l2_min_signed_aggression, "min_signed_aggression", "l2_min_signed_aggression"
     )
+    profile_strategy_selection_mode = str(
+        adaptive_profile_runtime.get("strategy_selection_mode", "")
+    ).strip().lower()
+    if profile_strategy_selection_mode not in {"adaptive_top_n", "all_enabled"}:
+        profile_strategy_selection_mode = ""
     requested_strategy_selection_mode = str(request.strategy_selection_mode or "").strip().lower()
     if requested_strategy_selection_mode not in {"adaptive_top_n", "all_enabled"}:
         requested_strategy_selection_mode = ""
     effective_strategy_selection_mode = (
-        requested_strategy_selection_mode
+        profile_strategy_selection_mode
+        or requested_strategy_selection_mode
         or str(aos_applied.get("strategy_selection_mode", "adaptive_top_n")).strip().lower()
         or "adaptive_top_n"
     )
+    try:
+        profile_max_active_strategies = int(adaptive_profile_runtime.get("max_active_strategies", 0))
+    except (TypeError, ValueError):
+        profile_max_active_strategies = 0
     try:
         requested_max_active_strategies = (
             int(request.max_active_strategies) if request.max_active_strategies is not None else 0
@@ -3484,9 +3640,23 @@ async def start_run(request: StartRunRequest):
     except (TypeError, ValueError):
         aos_max_active_strategies = 3
     effective_max_active_strategies = (
-        requested_max_active_strategies or aos_max_active_strategies or 3
+        profile_max_active_strategies
+        or requested_max_active_strategies
+        or aos_max_active_strategies
+        or 3
     )
     effective_max_active_strategies = max(1, min(20, effective_max_active_strategies))
+
+    try:
+        effective_time_exit_bars = int(request.time_exit_bars)
+    except (TypeError, ValueError):
+        effective_time_exit_bars = 40
+    try:
+        profile_time_exit_bars = int(adaptive_profile_runtime.get("time_exit_bars", 0))
+    except (TypeError, ValueError):
+        profile_time_exit_bars = 0
+    if profile_time_exit_bars > 0:
+        effective_time_exit_bars = profile_time_exit_bars
 
     # Keep request value unless left at default and AOS provides an override.
     if int(request.l2_lookback_bars) != 3:
@@ -3571,7 +3741,7 @@ async def start_run(request: StartRunRequest):
         enable_partial_take_profit=request.enable_partial_take_profit,
         partial_take_profit_rr=request.partial_take_profit_rr,
         partial_take_profit_fraction=request.partial_take_profit_fraction,
-        time_exit_bars=request.time_exit_bars,
+        time_exit_bars=effective_time_exit_bars,
         adverse_flow_exit_enabled=request.adverse_flow_exit_enabled,
         adverse_flow_threshold=request.adverse_flow_threshold,
         adverse_flow_min_hold_bars=request.adverse_flow_min_hold_bars,
@@ -3707,7 +3877,7 @@ async def start_run(request: StartRunRequest):
             "enable_partial_take_profit": request.enable_partial_take_profit,
             "partial_take_profit_rr": request.partial_take_profit_rr,
             "partial_take_profit_fraction": request.partial_take_profit_fraction,
-            "time_exit_bars": request.time_exit_bars,
+            "time_exit_bars": effective_time_exit_bars,
             "adverse_flow_exit_enabled": request.adverse_flow_exit_enabled,
             "adverse_flow_threshold": request.adverse_flow_threshold,
             "adverse_flow_min_hold_bars": request.adverse_flow_min_hold_bars,

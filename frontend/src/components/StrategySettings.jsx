@@ -29,7 +29,7 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     return new Date(parsed).toLocaleString();
   };
 
-  const fetchStrategies = async () => {
+  const fetchStrategies = useCallback(async () => {
     if (!resolvedUrl) return null;
     setLoading(true);
     setError(null);
@@ -45,7 +45,7 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [resolvedUrl]);
 
   const fetchStrategyCombos = useCallback(
     async (ticker) => {
@@ -325,8 +325,20 @@ function StrategySettings({ apiUrl, selectedTicker }) {
 
   useEffect(() => {
     fetchStrategies();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedUrl]);
+  }, [fetchStrategies]);
+
+  useEffect(() => {
+    const handleAdaptiveProfileUpdated = (event) => {
+      const ticker = String(event?.detail?.ticker || "").toUpperCase().trim();
+      const selected = String(selectedTicker || "").toUpperCase().trim();
+      if (!ticker || !selected || ticker !== selected) return;
+      fetchStrategies();
+    };
+    window.addEventListener("adaptive-profile-updated", handleAdaptiveProfileUpdated);
+    return () => {
+      window.removeEventListener("adaptive-profile-updated", handleAdaptiveProfileUpdated);
+    };
+  }, [fetchStrategies, selectedTicker]);
 
   const toggleStrategy = async (name, enabled) => {
     try {

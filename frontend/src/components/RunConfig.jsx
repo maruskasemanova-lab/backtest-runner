@@ -1,61 +1,4 @@
-import { useState, useEffect } from "react";
-
-const MU_FLOW_PRESET = {
-  // Keep FE defaults aligned with AOS tuning:
-  // zeros/nulls below intentionally defer to AOS values in backend.
-  regime_detection_minutes: 15,
-  trailing_stop_pct: null,
-  account_size_usd: 10000,
-  risk_per_trade_pct: 1.0,
-  max_position_notional_pct: 100.0,
-  max_fill_participation_rate: 0.2,
-  min_fill_ratio: 0.35,
-  time_exit_bars: 40,
-  adverse_flow_exit_enabled: true,
-  adverse_flow_threshold: 0.12,
-  adverse_flow_min_hold_bars: 3,
-  stop_loss_mode: "capped",
-  fixed_stop_loss_pct: 0.5,
-  comparable_mode: true,
-  cold_start_each_day: true,
-  auto_save_checkpoint: false,
-  l2_only: false,
-  l2_confirm_enabled: true,
-  l2_min_imbalance: 0.0,
-  l2_min_directional_consistency: 0.0,
-  l2_min_signed_aggression: 0.0,
-  l2_lookback_bars: 3,
-  strategy_selection_mode: "adaptive_top_n",
-  max_active_strategies: 3,
-};
-
-const toFiniteNumberOrNull = (value) => {
-  if (value === null || value === undefined || value === "") return null;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : null;
-};
-
-const toHoursText = (hours) => {
-  if (!Array.isArray(hours) || hours.length === 0) return "";
-  return hours.join(",");
-};
-
-const parseTradingHoursText = (text) => {
-  if (!text || !text.trim()) return [];
-  const parts = text
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const hours = [];
-  for (const part of parts) {
-    const value = Number(part);
-    if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0 || value > 23) {
-      throw new Error("Trading hours must be comma-separated integers in range 0-23.");
-    }
-    hours.push(value);
-  }
-  return Array.from(new Set(hours)).sort((a, b) => a - b);
-};
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const normalizeStrategySelectionMode = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -101,42 +44,7 @@ const formatAdaptiveProfileLabel = (profile) => {
 };
 
 const normalizeAosTickerConfig = (payload) => {
-  const raw = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
-  const params =
-    raw.params && typeof raw.params === "object" && !Array.isArray(raw.params) ? raw.params : {};
-
-  const tradingHours = Array.isArray(raw.trading_hours)
-    ? raw.trading_hours
-        .map((h) => Number(h))
-        .filter((h) => Number.isFinite(h) && Number.isInteger(h) && h >= 0 && h <= 23)
-    : [];
-
-  const longOnly =
-    typeof raw.long_only === "boolean"
-      ? raw.long_only
-      : (typeof params.long_only === "boolean" ? params.long_only : false);
-
-  const trailingStopPct =
-    toFiniteNumberOrNull(raw.trailing_stop_pct) ?? toFiniteNumberOrNull(params.trailing_stop_pct);
-
-  const timeFilterEnabled =
-    typeof raw.time_filter_enabled === "boolean"
-      ? raw.time_filter_enabled
-      : tradingHours.length > 0;
-  const strategySelectionMode = normalizeStrategySelectionMode(raw.strategy_selection_mode);
-  const maxActiveStrategies = parseMaxActiveStrategies(raw.max_active_strategies, 3);
-
-  return {
-    raw,
-    form: {
-      time_filter_enabled: timeFilterEnabled,
-      trading_hours_text: toHoursText(tradingHours),
-      long_only: longOnly,
-      trailing_stop_pct: trailingStopPct === null ? "" : String(trailingStopPct),
-      strategy_selection_mode: strategySelectionMode,
-      max_active_strategies: String(maxActiveStrategies),
-    },
-  };
+  return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
 };
 
 function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfig }) {
@@ -159,13 +67,18 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     adverse_flow_min_hold_bars: 3,
     stop_loss_mode: "strategy",
     fixed_stop_loss_pct: 0.0,
-    ...MU_FLOW_PRESET,
+    l2_only: false,
+    l2_confirm_enabled: true,
+    l2_min_imbalance: 0.0,
+    l2_min_directional_consistency: 0.0,
+    l2_min_signed_aggression: 0.0,
+    l2_lookback_bars: 3,
+    account_size_usd: 10000,
+    regime_detection_minutes: 15,
     checkpoint_path: null,
     auto_save_checkpoint: true,
     cold_start_each_day: false,
     comparable_mode: false,
-    strategy_selection_mode: "adaptive_top_n",
-    max_active_strategies: 3,
   });
 
   const [loading, setLoading] = useState(false);
@@ -176,17 +89,8 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const [checkpointSaving, setCheckpointSaving] = useState(false);
   const [checkpointMessage, setCheckpointMessage] = useState(null);
   const [aosLoading, setAosLoading] = useState(false);
-  const [aosSaving, setAosSaving] = useState(false);
   const [aosError, setAosError] = useState(null);
   const [aosTickerConfig, setAosTickerConfig] = useState({});
-  const [aosControls, setAosControls] = useState({
-    time_filter_enabled: false,
-    trading_hours_text: "",
-    long_only: false,
-    trailing_stop_pct: "",
-    strategy_selection_mode: "adaptive_top_n",
-    max_active_strategies: "3",
-  });
   const [adaptiveProfilesLoading, setAdaptiveProfilesLoading] = useState(false);
   const [adaptiveProfilesError, setAdaptiveProfilesError] = useState(null);
   const [adaptiveProfiles, setAdaptiveProfiles] = useState([]);
@@ -194,6 +98,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const [selectedAdaptiveProfileId, setSelectedAdaptiveProfileId] = useState(
     ACTIVE_PROFILE_SENTINEL
   );
+  const lastSyncedAdaptiveProfileRef = useRef("");
 
   const strategyApiBase = (config.strategy_api_url || "").replace(/\/+$/, "");
 
@@ -249,21 +154,12 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       }
       const payload = await resp.json();
       const normalized = normalizeAosTickerConfig(payload);
-      setAosTickerConfig(normalized.raw);
-      setAosControls(normalized.form);
-      return normalized.raw;
+      setAosTickerConfig(normalized);
+      return normalized;
     } catch (err) {
       console.error("Failed to fetch AOS config:", err);
-      setAosError("Failed to load AOS settings for selected ticker.");
+      setAosError("Failed to load AOS settings for selected ticker/profile.");
       setAosTickerConfig({});
-      setAosControls({
-        time_filter_enabled: false,
-        trading_hours_text: "",
-        long_only: false,
-        trailing_stop_pct: "",
-        strategy_selection_mode: "adaptive_top_n",
-        max_active_strategies: "3",
-      });
       return null;
     } finally {
       setAosLoading(false);
@@ -311,6 +207,75 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     }
   };
 
+  const normalizeStrategyKey = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/-/g, "_")
+      .replace(/\s+/g, "_");
+
+  const syncAdaptiveCandidateToStrategyApi = useCallback(
+    async (candidate) => {
+      if (!strategyApiBase) return;
+      if (!candidate || typeof candidate !== "object") return;
+      const enabledRaw = Array.isArray(candidate.enabled_strategies)
+        ? candidate.enabled_strategies
+        : [];
+      const enabledSet = new Set(
+        enabledRaw.map((name) => normalizeStrategyKey(name)).filter(Boolean)
+      );
+      if (!enabledSet.size) return;
+
+      const strategyResp = await fetch(`${strategyApiBase}/api/strategies`);
+      if (!strategyResp.ok) {
+        throw new Error(`Failed to fetch strategies: HTTP ${strategyResp.status}`);
+      }
+      const strategyMap = await strategyResp.json();
+      const strategyNames = Object.keys(strategyMap || {});
+      if (!strategyNames.length) return;
+
+      await Promise.all(
+        strategyNames.map((strategyName) =>
+          fetch(`${strategyApiBase}/api/strategies/update`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              strategy_name: strategyName,
+              params: { enabled: enabledSet.has(normalizeStrategyKey(strategyName)) },
+            }),
+          }).catch(() => null)
+        )
+      );
+
+      const v2Params = {};
+      ["min_confidence", "atr_stop_multiplier", "rr_ratio", "trailing_stop_pct"].forEach((key) => {
+        const raw = candidate[key];
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed)) {
+          v2Params[key] = parsed;
+        }
+      });
+
+      if (Object.keys(v2Params).length > 0) {
+        await Promise.all(
+          strategyNames
+            .filter((name) => enabledSet.has(normalizeStrategyKey(name)))
+            .map((strategyName) =>
+              fetch(`${strategyApiBase}/api/strategies/update`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  strategy_name: strategyName,
+                  params: v2Params,
+                }),
+              }).catch(() => null)
+            )
+        );
+      }
+    },
+    [strategyApiBase]
+  );
+
   const applyAdaptiveProfile = async (ticker, profileId) => {
     const upperTicker = String(ticker || "").trim().toUpperCase();
     const targetProfileId = String(profileId || "").trim();
@@ -325,62 +290,6 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       throw new Error(data?.detail || `HTTP ${resp.status}`);
     }
     return await resp.json();
-  };
-
-  const persistTickerAosConfig = async (ticker) => {
-    if (!ticker) return null;
-
-    const hours = aosControls.time_filter_enabled
-      ? parseTradingHoursText(aosControls.trading_hours_text)
-      : [];
-    const trailingStopPct =
-      toFiniteNumberOrNull(aosControls.trailing_stop_pct) ??
-      toFiniteNumberOrNull(aosTickerConfig?.trailing_stop_pct) ??
-      toFiniteNumberOrNull(aosTickerConfig?.params?.trailing_stop_pct);
-
-    if (toFiniteNumberOrNull(aosControls.trailing_stop_pct) === null && aosControls.trailing_stop_pct !== "") {
-      throw new Error("AOS trailing stop must be a valid number.");
-    }
-    const strategySelectionMode = normalizeStrategySelectionMode(aosControls.strategy_selection_mode);
-    const maxActiveStrategies = parseMaxActiveStrategies(
-      aosControls.max_active_strategies,
-      parseMaxActiveStrategies(aosTickerConfig?.max_active_strategies, 3)
-    );
-
-    const current = aosTickerConfig && typeof aosTickerConfig === "object" ? aosTickerConfig : {};
-    const currentParams =
-      current.params && typeof current.params === "object" && !Array.isArray(current.params)
-        ? current.params
-        : {};
-
-    const nextConfig = {
-      ...current,
-      time_filter_enabled: !!aosControls.time_filter_enabled,
-      trading_hours: hours,
-      long_only: !!aosControls.long_only,
-      trailing_stop_pct: trailingStopPct,
-      strategy_selection_mode: strategySelectionMode,
-      max_active_strategies: maxActiveStrategies,
-      params: {
-        ...currentParams,
-        long_only: !!aosControls.long_only,
-        trailing_stop_pct: trailingStopPct,
-      },
-    };
-
-    const resp = await fetch("/api/aos-config/update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ticker,
-        config: nextConfig,
-      }),
-    });
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`);
-    }
-
-    return nextConfig;
   };
 
   const handleSaveCheckpointNow = async () => {
@@ -421,20 +330,6 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     }
   };
 
-  const applyMuPreset = (date = "2026-02-03") => {
-    setConfig((prev) => ({
-      ...prev,
-      ticker: "MU",
-      date,
-      date_from: date,
-      date_to: date,
-      ...MU_FLOW_PRESET,
-    }));
-    if (onTickerChange) {
-      onTickerChange("MU");
-    }
-  };
-
   useEffect(() => {
     const fetchAvailableData = async () => {
       try {
@@ -450,11 +345,9 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
           return;
         }
 
-        const targetTicker = data.tickers.includes("MU") ? "MU" : data.tickers[0];
+        const targetTicker = data.tickers[0];
         const range = data.date_ranges[targetTicker];
-        const defaultDate = targetTicker === "MU"
-          ? "2026-02-03"
-          : range?.end || new Date().toISOString().split("T")[0];
+        const defaultDate = range?.end || new Date().toISOString().split("T")[0];
 
         setConfig((prev) => ({
           ...prev,
@@ -462,7 +355,6 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
           date: defaultDate,
           date_from: defaultDate,
           date_to: defaultDate,
-          ...(targetTicker === "MU" ? MU_FLOW_PRESET : {}),
         }));
 
         if (onTickerChange) {
@@ -484,14 +376,6 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   useEffect(() => {
     if (!config.ticker) {
       setAosTickerConfig({});
-      setAosControls({
-        time_filter_enabled: false,
-        trading_hours_text: "",
-        long_only: false,
-        trailing_stop_pct: "",
-        strategy_selection_mode: "adaptive_top_n",
-        max_active_strategies: "3",
-      });
       setAosError(null);
       setAdaptiveProfiles([]);
       setActiveAdaptiveProfileId("");
@@ -504,6 +388,53 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     fetchAdaptiveProfiles(config.ticker);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.ticker]);
+
+  useEffect(() => {
+    const upperTicker = String(config.ticker || "").trim().toUpperCase();
+    if (!upperTicker) return;
+
+    const requestedProfileId =
+      selectedAdaptiveProfileId === ACTIVE_PROFILE_SENTINEL
+        ? String(activeAdaptiveProfileId || "").trim()
+        : String(selectedAdaptiveProfileId || "").trim();
+    if (!requestedProfileId) return;
+
+    const profile = adaptiveProfiles.find(
+      (item) => String(item?.profile_id || "").trim() === requestedProfileId
+    );
+    const candidate =
+      profile && typeof profile.candidate === "object" && !Array.isArray(profile.candidate)
+        ? profile.candidate
+        : null;
+    if (!candidate) return;
+
+    const syncKey = `${upperTicker}:${requestedProfileId}`;
+    if (lastSyncedAdaptiveProfileRef.current === syncKey) {
+      return;
+    }
+    lastSyncedAdaptiveProfileRef.current = syncKey;
+
+    syncAdaptiveCandidateToStrategyApi(candidate)
+      .then(() => {
+        window.dispatchEvent(
+          new CustomEvent("adaptive-profile-updated", {
+            detail: {
+              ticker: upperTicker,
+              profile_id: requestedProfileId,
+            },
+          })
+        );
+      })
+      .catch((err) => {
+        console.warn("Failed to sync adaptive profile to strategy API:", err);
+      });
+  }, [
+    activeAdaptiveProfileId,
+    adaptiveProfiles,
+    config.ticker,
+    selectedAdaptiveProfileId,
+    syncAdaptiveCandidateToStrategyApi,
+  ]);
 
   const getDateRange = () => {
     if (!availableData || !config.ticker) {
@@ -525,26 +456,11 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       const comparableMode = !!config.comparable_mode;
       const stopLossMode = String(config.stop_loss_mode || "strategy").toLowerCase();
       const fixedStopLossPct = Math.max(0, Number(config.fixed_stop_loss_pct || 0));
-      let runtimeAosConfig = null;
       if (stopLossMode !== "strategy" && fixedStopLossPct <= 0) {
         throw new Error("Fixed stop-loss % must be > 0 when stop mode is fixed or capped.");
       }
 
       if (config.ticker) {
-        setAosSaving(true);
-        setAosError(null);
-        try {
-          const savedAos = await persistTickerAosConfig(config.ticker);
-          if (savedAos) {
-            runtimeAosConfig = savedAos;
-            setAosTickerConfig(savedAos);
-          }
-        } catch (aosErr) {
-          throw new Error(`Failed to save AOS settings: ${aosErr.message}`);
-        } finally {
-          setAosSaving(false);
-        }
-
         const selectedProfileId =
           selectedAdaptiveProfileId === ACTIVE_PROFILE_SENTINEL
             ? ""
@@ -553,11 +469,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
           try {
             await applyAdaptiveProfile(config.ticker, selectedProfileId);
             setActiveAdaptiveProfileId(selectedProfileId);
-            const refreshedAos = await fetchTickerAosConfig(config.ticker);
-            if (refreshedAos) {
-              runtimeAosConfig = refreshedAos;
-              setAosTickerConfig(refreshedAos);
-            }
+            await fetchTickerAosConfig(config.ticker);
             await fetchAdaptiveProfiles(config.ticker);
           } catch (profileErr) {
             throw new Error(`Failed to apply adaptive profile: ${profileErr.message}`);
@@ -565,20 +477,30 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         }
       }
 
-      const effectiveStrategySelectionMode = normalizeStrategySelectionMode(
-        runtimeAosConfig?.strategy_selection_mode || aosControls.strategy_selection_mode
-      );
-      const effectiveMaxActiveStrategies = parseMaxActiveStrategies(
-        runtimeAosConfig?.max_active_strategies ?? aosControls.max_active_strategies,
-        3
-      );
-
       const payload = {
-        ...config,
+        run_id: String(config.run_id || "").trim(),
+        ticker: String(config.ticker || "").trim().toUpperCase(),
+        date_from: config.date_from,
+        date_to: config.date_to,
+        strategy_api_url: config.strategy_api_url,
+        regime_detection_minutes: Number(config.regime_detection_minutes),
+        account_size_usd: Number(config.account_size_usd),
+        risk_per_trade_pct: Number(config.risk_per_trade_pct),
+        max_position_notional_pct: Number(config.max_position_notional_pct),
+        max_fill_participation_rate: Number(config.max_fill_participation_rate),
+        min_fill_ratio: Number(config.min_fill_ratio),
+        time_exit_bars: Number(config.time_exit_bars),
+        adverse_flow_exit_enabled: !!config.adverse_flow_exit_enabled,
+        adverse_flow_threshold: Number(config.adverse_flow_threshold),
+        adverse_flow_min_hold_bars: Number(config.adverse_flow_min_hold_bars),
         stop_loss_mode: stopLossMode,
         fixed_stop_loss_pct: fixedStopLossPct,
-        strategy_selection_mode: effectiveStrategySelectionMode,
-        max_active_strategies: effectiveMaxActiveStrategies,
+        l2_only: !!config.l2_only,
+        l2_confirm_enabled: !!config.l2_confirm_enabled,
+        l2_min_imbalance: Number(config.l2_min_imbalance),
+        l2_min_directional_consistency: Number(config.l2_min_directional_consistency),
+        l2_min_signed_aggression: Number(config.l2_min_signed_aggression),
+        l2_lookback_bars: Number(config.l2_lookback_bars),
         comparable_mode: comparableMode,
         // Strategy overrides are used as FE defaults; do not re-apply them at run start.
         apply_ticker_overrides_on_start: false,
@@ -588,6 +510,10 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
           : (useWarmStart ? (config.checkpoint_path || "").trim() || null : null),
         auto_save_checkpoint: comparableMode ? false : !!config.auto_save_checkpoint,
       };
+
+      if (config.data_file) {
+        payload.data_file = config.data_file;
+      }
       if (!comparableMode && useWarmStart && !payload.checkpoint_path) {
         // No checkpoint available - proceed with cold start (no blocking)
         console.info("Warm start enabled but no checkpoint selected, proceeding with cold start.");
@@ -602,10 +528,6 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
 
   const handleChange = (field, value) => {
     setConfig((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleAosControlChange = (field, value) => {
-    setAosControls((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleDateFromChange = (value) => {
@@ -634,7 +556,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
 
   const handleTickerChange = (ticker) => {
     const range = availableData?.date_ranges[ticker];
-    const defaultDate = ticker === "MU" ? "2026-02-03" : range?.end;
+    const defaultDate = range?.end;
 
     setConfig((prev) => ({
       ...prev,
@@ -642,7 +564,6 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       date: defaultDate || prev.date,
       date_from: defaultDate || range?.start || prev.date_from,
       date_to: defaultDate || range?.end || prev.date_to,
-      ...(ticker === "MU" ? MU_FLOW_PRESET : {}),
     }));
 
     if (onTickerChange) {
@@ -698,10 +619,10 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     effectiveConfig.comparable_mode ?? config.comparable_mode
   );
   const activeStrategySelectionMode = normalizeStrategySelectionMode(
-    effectiveConfig.strategy_selection_mode ?? config.strategy_selection_mode
+    effectiveConfig.strategy_selection_mode ?? aosTickerConfig?.strategy_selection_mode ?? "adaptive_top_n"
   );
   const activeMaxActiveStrategies = parseMaxActiveStrategies(
-    effectiveConfig.max_active_strategies ?? config.max_active_strategies,
+    effectiveConfig.max_active_strategies ?? aosTickerConfig?.max_active_strategies ?? 3,
     3
   );
   const requestedAdaptiveProfileId =
@@ -868,23 +789,6 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       </div>
       <div className="card-body">
         <form className="run-config-form" onSubmit={handleSubmit}>
-          <div className="preset-box">
-            <div className="preset-header">
-              <span className="preset-title">MU Flow Preset</span>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => applyMuPreset()}
-                style={{ padding: "6px 10px", fontSize: "0.78rem" }}
-              >
-                Apply
-              </button>
-            </div>
-            <div className="preset-copy">
-              Strategies: momentum_flow, absorption_reversal, exhaustion_fade. L2 confirm + depth thresholds are prefilled.
-            </div>
-          </div>
-
           <div className="form-group">
             <label htmlFor="run_id">Run ID</label>
             <input
@@ -1128,27 +1032,9 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             </label>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="trailing_stop_pct">Global Trailing Stop (%)</label>
-            <input
-              id="trailing_stop_pct"
-              type="number"
-              min="0.1"
-              max="5"
-              step="0.1"
-              value={config.trailing_stop_pct ?? ""}
-              onChange={(e) =>
-                handleChange(
-                  "trailing_stop_pct",
-                  e.target.value === "" ? null : Number(e.target.value)
-                )
-              }
-            />
-          </div>
-
           <div className="preset-box">
             <div className="preset-header">
-              <span className="preset-title">AOS Runtime Settings ({config.ticker || "Ticker"})</span>
+              <span className="preset-title">Adaptive Profile ({config.ticker || "Ticker"})</span>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -1160,82 +1046,8 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
               </button>
             </div>
             <div className="preset-copy">
-              Tieto hodnoty sa načítajú z API a ukladajú pred štartom runu.
-            </div>
-
-            <label className="field-row" htmlFor="aos_time_filter_enabled">
-              <span>AOS Time Filter</span>
-              <input
-                id="aos_time_filter_enabled"
-                type="checkbox"
-                checked={!!aosControls.time_filter_enabled}
-                onChange={(e) => handleAosControlChange("time_filter_enabled", e.target.checked)}
-                disabled={aosLoading}
-              />
-            </label>
-
-            <div className="form-group">
-              <label htmlFor="aos_trading_hours">AOS Trading Hours (ET, comma-separated)</label>
-              <input
-                id="aos_trading_hours"
-                type="text"
-                value={aosControls.trading_hours_text}
-                onChange={(e) => handleAosControlChange("trading_hours_text", e.target.value)}
-                placeholder="15 or 9,10,15"
-                disabled={aosLoading}
-              />
-            </div>
-
-            <label className="field-row" htmlFor="aos_long_only">
-              <span>AOS Long Only</span>
-              <input
-                id="aos_long_only"
-                type="checkbox"
-                checked={!!aosControls.long_only}
-                onChange={(e) => handleAosControlChange("long_only", e.target.checked)}
-                disabled={aosLoading}
-              />
-            </label>
-
-            <div className="form-group">
-              <label htmlFor="aos_trailing_stop_pct">AOS Trailing Stop (%)</label>
-              <input
-                id="aos_trailing_stop_pct"
-                type="number"
-                min="0.1"
-                max="5"
-                step="0.1"
-                value={aosControls.trailing_stop_pct}
-                onChange={(e) => handleAosControlChange("trailing_stop_pct", e.target.value)}
-                disabled={aosLoading}
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="aos_strategy_selection_mode">Strategy Selection Mode</label>
-              <select
-                id="aos_strategy_selection_mode"
-                value={aosControls.strategy_selection_mode}
-                onChange={(e) => handleAosControlChange("strategy_selection_mode", e.target.value)}
-                disabled={aosLoading}
-              >
-                <option value="adaptive_top_n">Adaptive Top-N</option>
-                <option value="all_enabled">All Enabled Strategies</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="aos_max_active_strategies">Max Active Strategies (adaptive mode)</label>
-              <input
-                id="aos_max_active_strategies"
-                type="number"
-                min="1"
-                max="20"
-                step="1"
-                value={aosControls.max_active_strategies}
-                onChange={(e) => handleAosControlChange("max_active_strategies", e.target.value)}
-                disabled={aosLoading || aosControls.strategy_selection_mode === "all_enabled"}
-              />
+              Runtime adaptive/AOS hodnoty sa berú priamo z API (Adaptive Studio/Tuner). Tu vyberieš len profil,
+              ktorý sa má aktivovať pred štartom runu.
             </div>
 
             <div className="form-group">
@@ -1263,13 +1075,19 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
               </select>
             </div>
             <div className="preset-copy">
-              Zvolený profil prepíše adaptive selection parametre pre ďalší run a nastaví sa ako aktívny v AOS.
+              Zvolený profil nastaví active adaptive profil v AOS pred štartom runu.
             </div>
             {selectedAdaptiveProfile && (
               <div className="preset-copy">
                 Candidate: {formatAdaptiveProfileCandidate(selectedAdaptiveProfile.candidate)}
               </div>
             )}
+            <div className="preset-copy">
+              Aktívny AOS režim:{" "}
+              {normalizeStrategySelectionMode(aosTickerConfig?.strategy_selection_mode) === "all_enabled"
+                ? "all enabled strategies"
+                : `adaptive top-${parseMaxActiveStrategies(aosTickerConfig?.max_active_strategies, 3)}`}
+            </div>
 
             {aosError && (
               <div
@@ -1528,7 +1346,6 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             disabled={
               loading ||
               aosLoading ||
-              aosSaving ||
               adaptiveProfilesLoading ||
               !config.ticker ||
               !config.date_from ||
@@ -1536,7 +1353,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             }
             style={{ width: "100%", marginTop: "var(--spacing-sm)" }}
           >
-            {loading ? "Starting..." : (aosSaving ? "Saving AOS..." : "Start Backtest")}
+            {loading ? "Starting..." : "Start Backtest"}
           </button>
         </form>
       </div>
