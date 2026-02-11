@@ -21,7 +21,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `api_server.py` | yes | 4466 | `17d2b9d 2026-02-11` |
+| `api_server.py` | yes | 6013 | `a60ac04 2026-02-11` |
 | `session_runner.py` | yes | 828 | `17d2b9d 2026-02-11` |
 | `data_loader.py` | yes | 300 | `baf7110 2026-02-07` |
 | `available_data.py` | yes | 224 | `baf7110 2026-02-07` |
@@ -57,19 +57,19 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 ## Key Symbols
 
 ### `api_server.py`
-- `function` `_load_strategy_overrides` (line 69)
-- `function` `_load_aos_config` (line 73)
-- `function` `_save_aos_config` (line 78)
-- `function` `_normalize_strategy_selection_mode` (line 86)
-- `function` `_normalize_non_negative_int` (line 91)
-- `function` `_normalize_clamped_int` (line 99)
-- `function` `_normalize_bool_options` (line 107)
-- `function` `_normalize_int_options` (line 121)
-- `function` `_normalize_mode_options` (line 141)
-- `function` `_normalize_float_options` (line 156)
-- `function` `_normalize_strategy_sets` (line 181)
-- `function` `_normalize_regime_filter_sets` (line 208)
-- ... 111 more symbols
+- `function` `_normalize_momentum_diversification_payload` (line 123)
+- `function` `_build_regime_strategy_map_options` (line 263)
+- `function` `_load_strategy_overrides` (line 287)
+- `function` `_resolve_aos_config_path` (line 291)
+- `function` `_load_aos_config` (line 301)
+- `function` `_resolve_positioning_config_path` (line 307)
+- `function` `_load_positioning_config` (line 319)
+- `function` `_save_positioning_config` (line 326)
+- `function` `_get_ticker_positioning_config` (line 337)
+- `function` `_merge_positioning_into_aos_snapshot` (line 349)
+- `function` `_save_aos_config` (line 388)
+- `function` `_create_isolated_tuner_aos_config` (line 400)
+- ... 139 more symbols
 
 ### `session_runner.py`
 - `class` `RunConfig` (line 19)
@@ -121,6 +121,9 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `GET` | `/` | `root` | `api_server.py` |
 | `GET` | `/api/health` | `health` | `api_server.py` |
 | `GET` | `/api/available-data` | `get_available_data` | `api_server.py` |
+| `GET` | `/api/live-trader/runs` | `list_live_trader_runs` | `api_server.py` |
+| `GET` | `/api/live-trader/events/{run_id}` | `get_live_trader_events` | `api_server.py` |
+| `GET` | `/api/live-trader/snapshot/{run_id}` | `get_live_trader_snapshot` | `api_server.py` |
 | `GET` | `/api/strategy-overrides` | `get_strategy_overrides` | `api_server.py` |
 | `GET` | `/api/strategy-overrides/{ticker}` | `get_ticker_overrides` | `api_server.py` |
 | `GET` | `/api/strategy-combos/{ticker}` | `get_strategy_combos` | `api_server.py` |
@@ -130,6 +133,9 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `GET` | `/api/aos-config` | `get_aos_config` | `api_server.py` |
 | `GET` | `/api/aos-config/{ticker}` | `get_ticker_aos_config` | `api_server.py` |
 | `POST` | `/api/aos-config/update` | `update_aos_config` | `api_server.py` |
+| `GET` | `/api/positioning-config` | `get_positioning_config` | `api_server.py` |
+| `GET` | `/api/positioning-config/{ticker}` | `get_ticker_positioning_config` | `api_server.py` |
+| `POST` | `/api/positioning-config/update` | `update_positioning_config` | `api_server.py` |
 | `GET` | `/api/adaptive-tuner/options/{ticker}` | `get_adaptive_tuner_options` | `api_server.py` |
 | `POST` | `/api/adaptive-tuner/profiles/apply` | `apply_adaptive_tuner_profile` | `api_server.py` |
 | `POST` | `/api/adaptive-tuner/run` | `run_adaptive_tuner` | `api_server.py` |

@@ -19,6 +19,7 @@ checkpoints/
 **/checkpoints/
 data/checkpoints/
 **/data/checkpoints/
+aos_optimization/.adaptive_tuner_aos/
 
 # Generated backtest outputs
 data/

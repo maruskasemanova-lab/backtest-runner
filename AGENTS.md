@@ -17,6 +17,7 @@ Deterministic operating guide for coding agents (Codex/GPT/Claude) in this repos
 6. `bmad/context/generated/<domain>.md`
 7. `bmad/context/generated/00-machine-index.json`
 8. `bmad/context/generated/00-endpoint-map.md`
+9. `docs/llm/adaptive-tuning-c4x3.md` (for C4-like/parallel tuning requests)
 
 If documentation conflicts with code, code is authoritative. Update docs in the same change.
 
@@ -51,6 +52,13 @@ Avoid cross-domain edits unless contract changes are explicit and listed.
 - contract deltas
 - tests executed + outcomes
 - residual risks
+
+## Adaptive Tuning Shortcut
+
+When request asks for "like c4", "new adaptive strategy", or "3 independent tunings":
+- use `docs/llm/adaptive-tuning-c4x3.md`
+- keep parallel job count at most 3
+- prefer distinct `strategy_api_url` ports for each parallel job
 
 ## Required Verification Commands
 

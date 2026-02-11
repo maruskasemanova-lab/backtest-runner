@@ -11,6 +11,7 @@ This directory is the curated manual context for LLM-assisted development in the
 5. `bmad/context/generated/<domain>.md`
 6. `bmad/context/generated/00-machine-index.json`
 7. `bmad/context/generated/00-endpoint-map.md`
+8. `docs/llm/adaptive-tuning-c4x3.md` (for C4-like parallel tuning requests)
 
 ## Why Two Layers Exist
 

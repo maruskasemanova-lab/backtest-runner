@@ -54,18 +54,19 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 - `oos_validator.py`: strict chronological split (train/validation/test).
 - `walk_forward_runner.py`: date-range simulation + report generation.
 - `monte_carlo.py`: drawdown distribution/risk gate from trade PnL sequences.
-- Runner adaptive tuner (`POST /api/adaptive-tuner/run`): date-range candidate search for Adaptive Studio v1 controls with grid/random/optuna modes, optional L2-only date filtering, and optional best-candidate persistence.
+- Runner adaptive tuner (`POST /api/adaptive-tuner/run`): date-range candidate search for adaptive v1/v2 controls with grid/random/optuna modes, optional L2-only date filtering, optional momentum-diversification dimensions (L2/CVD-aware momentum gating + fail-fast), and optional best-candidate persistence.
 - Runner adaptive tuner quick mode: optional approximate tuning path that samples representative days and boosts trial budget so more candidate combinations can be screened faster.
 
 ## Frontend Behavioral Ownership
 
 - `App.jsx`: orchestration of controls + data fetches + socket handling.
-- `RunConfig.jsx`: run/session execution parameters, including optional selection of a saved adaptive tuned profile (applied before next run start).
+- `RunConfig.jsx`: run/session execution parameters, including optional selection of a saved adaptive tuned profile (applied before next run start) and optional momentum-diversification override (`single` or `sleeves[]` multi-sleeve JSON).
 - `DecisionPanel.jsx`: marker timeline and explanation details.
 - `CandlestickChart.jsx` + related components: visual representation of bars/markers.
 - `StrategySettings.jsx`: strategy toggles + per-strategy parameter editing with capture/apply strategy-combination profiles per ticker.
 - `AdaptiveStrategyStudio.jsx`: adaptive selection-flow editor (saved to `aos_config.json` via `/api/aos-config/update` and applied on next run) with tuned-profile list/load/apply actions and strategy-combination-aware recomposition.
 - `AdaptiveTuner.jsx`: adaptive v1 tuner UI tab with real OHLCV/L2 coverage ranges, date-range trial execution, scored candidate ranking, saved tuned profile list, and apply-to-backtest action.
 - `AdaptiveTuner.jsx` quick approximation controls: optional sampled-day tuning (`quick_mode`) with configurable `quick_max_days` and `quick_trial_boost`.
+- `LiveTraderMonitor.jsx`: live stream monitor tab that reads realtime trader artifact streams (`runtime|decisions|signals|orders`) via runner API.
 
 For concrete file ownership and symbol inventory, use generated domain packs.

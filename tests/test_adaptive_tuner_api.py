@@ -100,8 +100,10 @@ def test_run_adaptive_tuner_creates_job_and_schedules_worker(monkeypatch) -> Non
     assert result["status"] == "queued"
     assert result["adaptive_version"] == 1
     assert result["effective_days"] == 3
+    assert result["max_parallel_jobs"] == 3
     assert "job123" in api_server.adaptive_tuner_jobs
     assert api_server.adaptive_tuner_jobs["job123"]["progress"]["method"] == "optuna"
+    assert api_server.adaptive_tuner_jobs["job123"]["max_parallel_jobs"] == 3
     assert api_server.adaptive_tuner_jobs["job123"]["effective_dates"] == [
         "2026-02-03",
         "2026-02-04",
@@ -208,11 +210,13 @@ def test_run_adaptive_tuner_quick_mode_samples_dates_and_sets_metadata(monkeypat
     assert result["quick_mode"] is True
     assert result["source_effective_days"] == 5
     assert result["effective_days"] == 2
+    assert result["max_parallel_jobs"] == 3
 
     job = api_server.adaptive_tuner_jobs["quickjob789"]
     assert job["quick_mode"] is True
     assert job["quick_max_days"] == 2
     assert job["quick_trial_boost"] == 4
+    assert job["max_parallel_jobs"] == 3
     assert job["source_effective_days"] == 5
     assert len(job["source_effective_dates"]) == 5
     assert job["effective_dates"] == ["2026-02-01", "2026-02-05"]
@@ -267,6 +271,66 @@ def test_apply_adaptive_tuner_profile_updates_aos_config(monkeypatch, tmp_path) 
     assert mu_cfg["adaptive"]["switch_cooldown_bars"] == 2
     assert mu_cfg["adaptive"]["flow_bias_enabled"] is False
     assert mu_cfg["active_adaptive_tuner_profile_id"] == "p123"
+
+
+def test_create_isolated_tuner_aos_config_snapshot(monkeypatch, tmp_path) -> None:
+    base_aos = tmp_path / "aos_config.json"
+    base_payload = {"version": "1.0.0", "tickers": {"MU": {"strategy": "momentum_flow"}}}
+    base_aos.write_text(json.dumps(base_payload))
+
+    isolated_dir = tmp_path / "isolated"
+    monkeypatch.setattr(api_server, "AOS_CONFIG_PATH", base_aos)
+    monkeypatch.setattr(api_server, "ADAPTIVE_TUNER_AOS_DIR", isolated_dir)
+
+    created = api_server._create_isolated_tuner_aos_config("jobabc")
+    assert created.exists()
+    assert created.parent == isolated_dir
+    assert json.loads(created.read_text()) == base_payload
+
+    api_server._cleanup_isolated_tuner_aos_config(created)
+    assert not created.exists()
+
+
+def test_evaluate_candidate_passes_isolated_aos_path(monkeypatch) -> None:
+    captured_paths = []
+
+    class _DummyRunner:
+        async def run_all(self, speed_ms=0):
+            return {}
+
+        def get_summary(self):
+            return {
+                "session_summary": {
+                    "total_pnl_pct": 0.2,
+                    "total_pnl_dollars": 20.0,
+                    "win_rate": 50.0,
+                    "total_trades": 2,
+                }
+            }
+
+    async def _fake_start_run(run_request):
+        captured_paths.append(run_request.aos_config_path)
+        run_key = f"{run_request.run_id}:{run_request.ticker}:{run_request.date}"
+        api_server.active_runners[run_key] = _DummyRunner()
+        return {"run_key": run_key}
+
+    monkeypatch.setattr(api_server, "start_run", _fake_start_run)
+
+    request = _base_request()
+    result = asyncio.run(
+        api_server._evaluate_adaptive_tuner_candidate(
+            job_id="jobx",
+            ticker="MU",
+            dates=["2026-02-03", "2026-02-04"],
+            trial_index=1,
+            candidate={},
+            request=request,
+            aos_config_path="/tmp/isolated-aos.json",
+        )
+    )
+
+    assert result["metrics"]["valid_days"] == 2
+    assert captured_paths == ["/tmp/isolated-aos.json", "/tmp/isolated-aos.json"]
 
 
 # ============ V2 Multi-Dimensional Vector Discovery Tests ============
@@ -334,6 +398,11 @@ def test_v2_build_search_space_defaults() -> None:
     assert "min_confirming_sources" in space
     assert 2 in space["min_confirming_sources"]
 
+    # Momentum diversification options
+    assert "momentum_diversification_enabled" in space
+    assert "momentum_min_flow_score" in space
+    assert True in space["momentum_diversification_enabled"]
+
 
 def test_v2_build_search_space_custom_options() -> None:
     request = _base_v2_request(
@@ -371,6 +440,17 @@ def test_v2_candidate_config_injects_all_dimensions() -> None:
         "regime_filter": ["TRENDING", "CHOPPY"],
         "base_threshold": 60.0,
         "min_confirming_sources": 3,
+        "momentum_diversification_enabled": True,
+        "momentum_route_enabled": True,
+        "momentum_min_flow_score": 64.0,
+        "momentum_min_directional_consistency": 0.44,
+        "momentum_min_signed_aggression": 0.08,
+        "momentum_min_imbalance": 0.06,
+        "momentum_min_delta_acceleration": 1200.0,
+        "momentum_min_delta_price_divergence": -0.15,
+        "momentum_route_flow_score_impulse": 70.0,
+        "momentum_fail_fast_exit_enabled": True,
+        "momentum_fail_fast_max_bars": 4,
     }
     cfg = api_server._build_v2_candidate_config(_ticker_config(), candidate, 2)
 
@@ -396,6 +476,34 @@ def test_v2_candidate_config_injects_all_dimensions() -> None:
     assert cfg["max_active_strategies"] == 4
     assert cfg["adaptive"]["flow_bias_enabled"] is False
     assert cfg["adaptive"]["version"] == 2
+
+    # Momentum diversification dims applied under adaptive config
+    momentum_cfg = cfg["adaptive"]["momentum_diversification"]
+    assert momentum_cfg["enabled"] is True
+    assert momentum_cfg["route_enabled"] is True
+    assert momentum_cfg["min_flow_score"] == 64.0
+    assert momentum_cfg["min_directional_consistency"] == 0.44
+    assert momentum_cfg["fail_fast_exit_enabled"] is True
+    assert momentum_cfg["fail_fast_max_bars"] == 4
+
+
+def test_extract_profile_runtime_overrides_includes_momentum_diversification() -> None:
+    runtime = api_server._extract_profile_runtime_overrides(
+        {
+            "strategy_selection_mode": "all_enabled",
+            "max_active_strategies": 2,
+            "momentum_diversification_enabled": True,
+            "momentum_route_enabled": True,
+            "momentum_min_flow_score": 62.0,
+            "momentum_fail_fast_exit_enabled": True,
+            "momentum_fail_fast_max_bars": 3,
+        }
+    )
+    assert "momentum_diversification" in runtime
+    assert runtime["momentum_diversification"]["enabled"] is True
+    assert runtime["momentum_diversification"]["route_enabled"] is True
+    assert runtime["momentum_diversification"]["min_flow_score"] == 62.0
+    assert runtime["momentum_diversification"]["fail_fast_exit_enabled"] is True
 
 
 def test_v2_analyze_vectors_dimension_importance() -> None:
@@ -629,3 +737,238 @@ def test_normalize_regime_filter_sets() -> None:
     assert ["TRENDING"] in result
     assert sorted(["CHOPPY", "MIXED"]) in result
     assert len(result) == 2
+
+
+def test_normalize_regime_strategy_map_sets() -> None:
+    result = api_server._normalize_regime_strategy_map_sets(
+        [
+            None,
+            {"TRENDING": ["MOMENTUM_FLOW", "invalid"], "MIXED": ["exhaustion_fade"]},
+            {"TRENDING": ["momentum_flow"], "CHOPPY": []},
+        ],
+        enabled_strategies=["momentum_flow", "exhaustion_fade"],
+    )
+    assert result[0] is None
+    assert isinstance(result[1], dict)
+    assert result[1]["TRENDING"] == ["momentum_flow"]
+    assert result[1]["MIXED"] == ["exhaustion_fade"]
+    assert result[1]["CHOPPY"] == []
+
+
+# ============ Expectancy Scoring & Regime-Conditional Map Tests ============
+
+
+def test_expectancy_scoring_rewards_low_wr_high_rr() -> None:
+    """40% WR with high per-trade PnL should score BETTER than old WR gate."""
+    # Scenario: reversal strategy — 40% WR but 2.5:1 RR → positive expectancy
+    day_results_reversal = [
+        {"success": True, "pnl_pct": 0.15, "trades": 2, "win_rate_pct": 40.0},
+        {"success": True, "pnl_pct": 0.10, "trades": 2, "win_rate_pct": 40.0},
+        {"success": True, "pnl_pct": 0.08, "trades": 2, "win_rate_pct": 40.0},
+    ]
+    score_reversal = api_server._compute_tuner_score_robust(day_results_reversal)
+
+    # Scenario: momentum strategy — 65% WR but same total PnL, more trades
+    day_results_momentum = [
+        {"success": True, "pnl_pct": 0.15, "trades": 4, "win_rate_pct": 65.0},
+        {"success": True, "pnl_pct": 0.10, "trades": 4, "win_rate_pct": 65.0},
+        {"success": True, "pnl_pct": 0.08, "trades": 4, "win_rate_pct": 65.0},
+    ]
+    score_momentum = api_server._compute_tuner_score_robust(day_results_momentum)
+
+    # Both should be positive (not penalized to near-zero)
+    assert score_reversal > 0, f"Reversal score {score_reversal} should be positive"
+    assert score_momentum > 0, f"Momentum score {score_momentum} should be positive"
+    # Reversal should not be dramatically worse (old code would ×0.3 it)
+    assert score_reversal > score_momentum * 0.3, (
+        f"Reversal {score_reversal} should not be crushed vs momentum {score_momentum}"
+    )
+
+
+def test_expectancy_scoring_penalizes_negative() -> None:
+    """Negative per-trade expectancy should still get heavy penalty."""
+    day_results = [
+        {"success": True, "pnl_pct": -0.20, "trades": 3, "win_rate_pct": 30.0},
+        {"success": True, "pnl_pct": -0.15, "trades": 2, "win_rate_pct": 25.0},
+        {"success": True, "pnl_pct": -0.10, "trades": 2, "win_rate_pct": 35.0},
+    ]
+    score = api_server._compute_tuner_score_robust(day_results)
+    # Score should be negative (base PnL is negative) and heavily penalized
+    assert score < 0, f"Negative expectancy score {score} should be negative"
+
+
+def test_l2_bonus_capped_at_10pct() -> None:
+    """L2 bonus should be at most 10% and only applied when l2_avg_score > 0.3."""
+    # Without L2 data
+    day_results_no_l2 = [
+        {"success": True, "pnl_pct": 0.10, "trades": 2, "win_rate_pct": 60.0},
+        {"success": True, "pnl_pct": 0.12, "trades": 2, "win_rate_pct": 60.0},
+        {"success": True, "pnl_pct": 0.08, "trades": 2, "win_rate_pct": 60.0},
+    ]
+    score_no_l2 = api_server._compute_tuner_score_robust(day_results_no_l2)
+
+    # With L2 data on all days (max bonus)
+    day_results_with_l2 = [
+        {"success": True, "pnl_pct": 0.10, "trades": 2, "win_rate_pct": 60.0, "l2_avg_score": 0.5},
+        {"success": True, "pnl_pct": 0.12, "trades": 2, "win_rate_pct": 60.0, "l2_avg_score": 0.6},
+        {"success": True, "pnl_pct": 0.08, "trades": 2, "win_rate_pct": 60.0, "l2_avg_score": 0.7},
+    ]
+    score_with_l2 = api_server._compute_tuner_score_robust(day_results_with_l2)
+
+    # L2 bonus should increase score but cap at +10%
+    assert score_with_l2 > score_no_l2, "L2 bonus should increase score"
+    assert score_with_l2 <= score_no_l2 * 1.101, (
+        f"L2 bonus {score_with_l2} should be at most 10% above {score_no_l2}"
+    )
+
+
+def test_trade_scarcity_relaxed() -> None:
+    """0.5-1.0 trades/day should get moderate penalty, not heavy penalty."""
+    # 0.7 trades/day — should be moderate (0.65), not heavy (0.5 in old code)
+    day_results = [
+        {"success": True, "pnl_pct": 0.20, "trades": 1, "win_rate_pct": 100.0},
+        {"success": True, "pnl_pct": 0.15, "trades": 0, "win_rate_pct": 0.0},
+        {"success": True, "pnl_pct": 0.10, "trades": 1, "win_rate_pct": 100.0},
+    ]
+    score_sparse = api_server._compute_tuner_score_robust(day_results)
+
+    # 2.0 trades/day — should have no scarcity penalty
+    day_results_active = [
+        {"success": True, "pnl_pct": 0.20, "trades": 2, "win_rate_pct": 100.0},
+        {"success": True, "pnl_pct": 0.15, "trades": 2, "win_rate_pct": 100.0},
+        {"success": True, "pnl_pct": 0.10, "trades": 2, "win_rate_pct": 100.0},
+    ]
+    score_active = api_server._compute_tuner_score_robust(day_results_active)
+
+    # Sparse should be discounted but not crushed
+    assert score_sparse > 0, f"Sparse score {score_sparse} should be positive"
+    ratio = score_sparse / score_active if score_active != 0 else 0
+    # With 0.65 factor, ratio should be ~0.65 (not 0.5)
+    assert ratio > 0.55, f"Sparse/active ratio {ratio} too low — old heavy penalty still active?"
+    assert ratio < 0.85, f"Sparse/active ratio {ratio} too high — penalty not applied?"
+
+
+def test_regime_strategy_map_in_search_space() -> None:
+    """Regime-strategy maps should be generated from strategy families."""
+    request = _base_v2_request()
+    config = {
+        "strategy": "momentum_flow",
+        "backup_strategy": "exhaustion_fade",
+        "regime_filter": ["TRENDING", "MIXED"],
+        "l2": {},
+    }
+    space = api_server._build_v2_search_space(request, config)
+
+    assert "regime_strategy_maps" in space
+    maps = space["regime_strategy_maps"]
+    assert isinstance(maps, list)
+    assert len(maps) >= 2
+
+    # First option should be None (flat/backward compatible)
+    assert maps[0] is None
+
+    # Second option should have per-regime strategy assignments
+    regime_map = maps[1]
+    assert isinstance(regime_map, dict)
+    assert "TRENDING" in regime_map
+    assert "MIXED" in regime_map
+    # Trending should include trend-follow family
+    assert "momentum_flow" in regime_map["TRENDING"]
+    # Mixed should include reversal family
+    assert "exhaustion_fade" in regime_map["MIXED"]
+
+
+def test_regime_strategy_map_injected_into_config() -> None:
+    """_build_v2_candidate_config should store regime_strategy_map in config."""
+    candidate = {
+        "strategy_selection_mode": "all_enabled",
+        "max_active_strategies": 3,
+        "min_active_bars_before_switch": 0,
+        "switch_cooldown_bars": 0,
+        "flow_bias_enabled": True,
+        "use_ohlcv_fallbacks": True,
+        "enabled_strategies": ["momentum_flow"],
+        "regime_filter": ["TRENDING", "MIXED"],
+        "regime_strategy_map": {
+            "TRENDING": ["momentum_flow"],
+            "MIXED": ["exhaustion_fade"],
+            "CHOPPY": [],
+        },
+    }
+    cfg = api_server._build_v2_candidate_config(_ticker_config(), candidate, 2)
+
+    assert "regime_strategy_map" in cfg
+    assert cfg["regime_strategy_map"]["TRENDING"] == ["momentum_flow"]
+    assert cfg["regime_strategy_map"]["MIXED"] == ["exhaustion_fade"]
+    assert cfg["regime_strategy_map"]["CHOPPY"] == []
+    assert cfg["adaptive"]["regime_preferences"]["TRENDING"] == ["momentum_flow"]
+    assert cfg["adaptive"]["regime_preferences"]["MIXED"] == ["exhaustion_fade"]
+
+
+def test_regime_strategy_map_none_clears_adaptive_preferences() -> None:
+    ticker_cfg = _ticker_config()
+    ticker_cfg["adaptive"]["regime_preferences"] = {
+        "TRENDING": ["momentum_flow"],
+        "MIXED": ["absorption_reversal"],
+        "CHOPPY": ["absorption_reversal"],
+    }
+    ticker_cfg["regime_strategy_map"] = {
+        "TRENDING": ["momentum_flow"],
+        "MIXED": ["absorption_reversal"],
+        "CHOPPY": ["absorption_reversal"],
+    }
+    candidate = {
+        "strategy_selection_mode": "all_enabled",
+        "max_active_strategies": 3,
+        "regime_strategy_map": None,
+    }
+    cfg = api_server._build_v2_candidate_config(ticker_cfg, candidate, 2)
+    assert "regime_preferences" not in cfg["adaptive"]
+    assert "regime_strategy_map" not in cfg
+
+
+def test_prepare_tuner_trial_ticker_config_disables_active_profile() -> None:
+    cfg = api_server._prepare_tuner_trial_ticker_config(
+        {
+            "strategy": "momentum_flow",
+            "active_adaptive_tuner_profile_id": "abc123",
+        }
+    )
+    assert cfg["active_adaptive_tuner_profile_id"] == ""
+
+
+def test_v2_candidate_key_with_regime_map() -> None:
+    """Candidate key should differentiate candidates with different regime maps."""
+    base = {
+        "enabled_strategies": ["momentum_flow"],
+        "regime_filter": ["TRENDING"],
+        "l2_min_delta": 500,
+        "l2_min_imbalance": 0.12,
+        "l2_min_signed_aggression": 0.12,
+        "l2_min_directional_consistency": 0.5,
+        "base_threshold": 50,
+        "min_confirming_sources": 2,
+        "min_confidence": 60.0,
+        "atr_stop_multiplier": 1.0,
+        "rr_ratio": 2.0,
+        "trading_hours": [9, 10],
+        "adverse_flow_consistency": 0.45,
+        "adverse_book_pressure": 0.15,
+        "time_exit_bars": 25,
+        "trailing_stop_pct": 0.8,
+        "strategy_selection_mode": "all_enabled",
+        "flow_bias_enabled": True,
+    }
+    # Without regime map
+    c1 = {**base, "regime_strategy_map": None}
+    # With regime map
+    c2 = {**base, "regime_strategy_map": {"TRENDING": ["momentum_flow"], "MIXED": ["exhaustion_fade"]}}
+    # Different regime map
+    c3 = {**base, "regime_strategy_map": {"TRENDING": ["momentum_flow"], "MIXED": [], "CHOPPY": []}}
+
+    key1 = api_server._v2_candidate_key(c1)
+    key2 = api_server._v2_candidate_key(c2)
+    key3 = api_server._v2_candidate_key(c3)
+
+    assert key1 != key2, "None map and dict map should produce different keys"
+    assert key2 != key3, "Different regime maps should produce different keys"

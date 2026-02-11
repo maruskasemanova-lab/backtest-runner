@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 import sys
 
@@ -175,5 +176,184 @@ def test_start_run_strategy_selection_request_overrides_aos(monkeypatch):
         assert configure_spy["kwargs"]["max_active_strategies"] == 12
         assert result["execution_config"]["strategy_selection_mode"] == "all_enabled"
         assert result["execution_config"]["max_active_strategies"] == 12
+    finally:
+        api_server.active_runners.clear()
+
+
+def test_start_run_applies_positioning_config_by_default(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    configure_spy = {}
+    _patch_start_run_dependencies(
+        monkeypatch,
+        apply_calls,
+        apply_aos_result={
+            "positioning": {
+                "risk_per_trade_pct": 2.0,
+                "trailing_activation_pct": 0.25,
+                "break_even_buffer_pct": 0.01,
+            }
+        },
+        configure_spy=configure_spy,
+    )
+
+    request = api_server.StartRunRequest(
+        run_id="test-positioning-default",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        assert configure_spy["kwargs"]["risk_per_trade_pct"] == 2.0
+        assert configure_spy["kwargs"]["trailing_activation_pct"] == 0.25
+        assert configure_spy["kwargs"]["break_even_buffer_pct"] == 0.01
+        assert result["execution_config"]["risk_per_trade_pct_source"] == "positioning_config"
+        assert result["execution_config"]["trailing_activation_pct_source"] == "positioning_config"
+        assert result["execution_config"]["break_even_buffer_pct_source"] == "positioning_config"
+    finally:
+        api_server.active_runners.clear()
+
+
+def test_start_run_can_skip_positioning_config(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    configure_spy = {}
+    _patch_start_run_dependencies(
+        monkeypatch,
+        apply_calls,
+        apply_aos_result={
+            "positioning": {
+                "risk_per_trade_pct": 2.0,
+                "trailing_activation_pct": 0.25,
+                "break_even_buffer_pct": 0.01,
+            }
+        },
+        configure_spy=configure_spy,
+    )
+
+    request = api_server.StartRunRequest(
+        run_id="test-positioning-skip",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+        apply_positioning_config_on_start=False,
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        assert configure_spy["kwargs"]["risk_per_trade_pct"] == 1.0
+        assert configure_spy["kwargs"]["trailing_activation_pct"] == 0.15
+        assert configure_spy["kwargs"]["break_even_buffer_pct"] == 0.03
+        assert result["execution_config"]["positioning_config_enabled"] is False
+        assert result["execution_config"]["risk_per_trade_pct_source"] == "request"
+    finally:
+        api_server.active_runners.clear()
+
+
+def test_start_run_passes_momentum_diversification_override(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    configure_spy = {}
+    _patch_start_run_dependencies(
+        monkeypatch,
+        apply_calls,
+        apply_aos_result={
+            "adaptive": {
+                "momentum_diversification": {
+                    "enabled": True,
+                    "min_flow_score": 58.0,
+                }
+            }
+        },
+        configure_spy=configure_spy,
+    )
+
+    request = api_server.StartRunRequest(
+        run_id="test-momentum-diversification",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+        momentum_diversification_override={
+            "enabled": True,
+            "route_enabled": True,
+            "min_flow_score": 66.0,
+            "fail_fast_exit_enabled": True,
+        },
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        raw_payload = configure_spy["kwargs"]["momentum_diversification_json"]
+        payload = json.loads(raw_payload)
+        assert payload["enabled"] is True
+        assert payload["min_flow_score"] == 66.0
+        assert payload["fail_fast_exit_enabled"] is True
+        assert result["execution_config"]["momentum_diversification_source"] == "request"
+        assert result["execution_config"]["momentum_diversification_applied"] is True
+    finally:
+        api_server.active_runners.clear()
+
+
+def test_start_run_passes_momentum_diversification_multi_sleeve_override(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    configure_spy = {}
+    _patch_start_run_dependencies(
+        monkeypatch,
+        apply_calls,
+        configure_spy=configure_spy,
+    )
+
+    request = api_server.StartRunRequest(
+        run_id="test-momentum-diversification-sleeves",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+        momentum_diversification_override={
+            "enabled": True,
+            "sleeves": [
+                {
+                    "sleeve_id": "Impulse",
+                    "enabled": True,
+                    "route_enabled": True,
+                    "min_flow_score": 66.0,
+                    "apply_to_strategies": ["momentum_flow"],
+                    "allocation_weight": 0.65,
+                },
+                {
+                    "sleeve_id": "Defensive",
+                    "enabled": True,
+                    "route_enabled": True,
+                    "min_flow_score": 48.0,
+                    "apply_to_strategies": ["absorption_reversal"],
+                    "allocation_weight": 0.35,
+                },
+            ],
+        },
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        raw_payload = configure_spy["kwargs"]["momentum_diversification_json"]
+        payload = json.loads(raw_payload)
+        assert payload["enabled"] is True
+        assert isinstance(payload.get("sleeves"), list)
+        assert len(payload["sleeves"]) == 2
+        assert payload["sleeves"][0]["sleeve_id"] == "impulse"
+        assert payload["sleeves"][0]["min_flow_score"] == 66.0
+        assert payload["sleeves"][0]["allocation_weight"] == 0.65
+        assert payload["sleeves"][1]["sleeve_id"] == "defensive"
+        assert result["execution_config"]["momentum_diversification_source"] == "request"
+        assert result["execution_config"]["momentum_diversification_applied"] is True
     finally:
         api_server.active_runners.clear()

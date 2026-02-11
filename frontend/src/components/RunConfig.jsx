@@ -47,6 +47,263 @@ const normalizeAosTickerConfig = (payload) => {
   return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
 };
 
+const normalizePositioningConfig = (payload) => {
+  const positioning = payload?.positioning;
+  return positioning && typeof positioning === "object" && !Array.isArray(positioning)
+    ? positioning
+    : {};
+};
+
+const toFiniteNumber = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toBool = (value, fallback) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+  }
+  return fallback;
+};
+
+const normalizeStopLossMode = (value, fallback = "strategy") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "fixed" || normalized === "capped") return normalized;
+  return fallback;
+};
+
+const parseCsvTokens = (value, normalizeToken) => {
+  const tokens = String(value || "").split(",");
+  const seen = new Set();
+  const normalized = [];
+  tokens.forEach((token) => {
+    const raw = String(token || "").trim();
+    if (!raw) return;
+    const next = typeof normalizeToken === "function" ? normalizeToken(raw) : raw;
+    if (!next || seen.has(next)) return;
+    seen.add(next);
+    normalized.push(next);
+  });
+  return normalized;
+};
+
+const normalizeSleeveId = (value, fallback = "sleeve_1") => {
+  const raw = String(value || "").trim().toLowerCase();
+  const cleaned = raw
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return cleaned || fallback;
+};
+
+const createDefaultMomentumSleeveDraft = (index = 1) => ({
+  sleeve_id: `sleeve_${index}`,
+  enabled: true,
+  allocation_weight: 0.5,
+  apply_to_strategies: "momentum_flow",
+  allowed_micro_regimes: "",
+  blocked_micro_regimes: "",
+  require_l2_coverage: true,
+  route_enabled: true,
+  route_require_l2_coverage: true,
+  min_flow_score: 58,
+  min_directional_consistency: 0.45,
+  min_signed_aggression: 0.04,
+  min_imbalance: 0.02,
+  min_delta_acceleration: 0,
+  min_delta_price_divergence: 0,
+  route_flow_score_impulse: 64,
+  fail_fast_exit_enabled: true,
+  fail_fast_max_bars: 3,
+  fail_fast_signed_aggression_max: -0.08,
+  fail_fast_book_pressure_max: -0.1,
+  fail_fast_directional_consistency_max: 0.2,
+});
+
+const buildMomentumSleevePayload = (sleeve, index) => {
+  const clamp = (value, fallback, min, max) =>
+    Math.max(min, Math.min(max, toFiniteNumber(value, fallback)));
+  const clampInt = (value, fallback, min, max) =>
+    Math.max(min, Math.min(max, Math.trunc(toFiniteNumber(value, fallback))));
+
+  const payload = {
+    sleeve_id: normalizeSleeveId(sleeve?.sleeve_id, `sleeve_${index + 1}`),
+    enabled: !!sleeve?.enabled,
+    allocation_weight: clamp(sleeve?.allocation_weight, 0.5, 0, 1),
+    require_l2_coverage: !!sleeve?.require_l2_coverage,
+    route_enabled: !!sleeve?.route_enabled,
+    route_require_l2_coverage: !!sleeve?.route_require_l2_coverage,
+    min_flow_score: clamp(sleeve?.min_flow_score, 0, 0, 100),
+    min_directional_consistency: clamp(sleeve?.min_directional_consistency, 0, 0, 1),
+    min_signed_aggression: clamp(sleeve?.min_signed_aggression, 0, 0, 1),
+    min_imbalance: clamp(sleeve?.min_imbalance, 0, 0, 1),
+    min_delta_acceleration: clamp(sleeve?.min_delta_acceleration, 0, -1_000_000_000, 1_000_000_000),
+    min_delta_price_divergence: clamp(sleeve?.min_delta_price_divergence, 0, -10, 10),
+    route_flow_score_impulse: clamp(sleeve?.route_flow_score_impulse, 0, 0, 100),
+    fail_fast_exit_enabled: !!sleeve?.fail_fast_exit_enabled,
+    fail_fast_max_bars: clampInt(sleeve?.fail_fast_max_bars, 3, 1, 30),
+    fail_fast_signed_aggression_max: clamp(
+      sleeve?.fail_fast_signed_aggression_max,
+      -0.05,
+      -1,
+      0
+    ),
+    fail_fast_book_pressure_max: clamp(sleeve?.fail_fast_book_pressure_max, -0.08, -1, 0),
+    fail_fast_directional_consistency_max: clamp(
+      sleeve?.fail_fast_directional_consistency_max,
+      0.25,
+      0,
+      1
+    ),
+  };
+
+  const applyToStrategies = parseCsvTokens(sleeve?.apply_to_strategies, (token) =>
+    token.toLowerCase()
+  );
+  if (applyToStrategies.length) {
+    payload.apply_to_strategies = applyToStrategies;
+  }
+
+  const allowedMicro = parseCsvTokens(sleeve?.allowed_micro_regimes, (token) =>
+    token.toUpperCase()
+  );
+  if (allowedMicro.length) {
+    payload.allowed_micro_regimes = allowedMicro;
+  }
+
+  const blockedMicro = parseCsvTokens(sleeve?.blocked_micro_regimes, (token) =>
+    token.toUpperCase()
+  );
+  if (blockedMicro.length) {
+    payload.blocked_micro_regimes = blockedMicro;
+  }
+
+  return payload;
+};
+
+const buildMomentumDiversificationOverridePayload = (config) => {
+  const clamp = (value, fallback, min, max) =>
+    Math.max(min, Math.min(max, toFiniteNumber(value, fallback)));
+  const clampInt = (value, fallback, min, max) =>
+    Math.max(min, Math.min(max, Math.trunc(toFiniteNumber(value, fallback))));
+
+  const payload = {
+    enabled: !!config.momentum_diversification_enabled,
+    require_l2_coverage: !!config.momentum_require_l2_coverage,
+    route_enabled: !!config.momentum_route_enabled,
+    route_require_l2_coverage: !!config.momentum_route_require_l2_coverage,
+    min_flow_score: clamp(config.momentum_min_flow_score, 0, 0, 100),
+    min_directional_consistency: clamp(config.momentum_min_directional_consistency, 0, 0, 1),
+    min_signed_aggression: clamp(config.momentum_min_signed_aggression, 0, 0, 1),
+    min_imbalance: clamp(config.momentum_min_imbalance, 0, 0, 1),
+    min_delta_acceleration: clamp(config.momentum_min_delta_acceleration, 0, -1_000_000_000, 1_000_000_000),
+    min_delta_price_divergence: clamp(config.momentum_min_delta_price_divergence, 0, -10, 10),
+    route_flow_score_impulse: clamp(config.momentum_route_flow_score_impulse, 0, 0, 100),
+    fail_fast_exit_enabled: !!config.momentum_fail_fast_exit_enabled,
+    fail_fast_max_bars: clampInt(config.momentum_fail_fast_max_bars, 3, 1, 30),
+    fail_fast_signed_aggression_max: clamp(
+      config.momentum_fail_fast_signed_aggression_max,
+      -0.05,
+      -1,
+      0
+    ),
+    fail_fast_book_pressure_max: clamp(config.momentum_fail_fast_book_pressure_max, -0.08, -1, 0),
+    fail_fast_directional_consistency_max: clamp(
+      config.momentum_fail_fast_directional_consistency_max,
+      0.25,
+      0,
+      1
+    ),
+  };
+
+  const applyToStrategies = parseCsvTokens(config.momentum_apply_to_strategies, (token) =>
+    token.toLowerCase()
+  );
+  if (applyToStrategies.length) {
+    payload.apply_to_strategies = applyToStrategies;
+  }
+
+  const allowedMicro = parseCsvTokens(config.momentum_allowed_micro_regimes, (token) =>
+    token.toUpperCase()
+  );
+  if (allowedMicro.length) {
+    payload.allowed_micro_regimes = allowedMicro;
+  }
+
+  const blockedMicro = parseCsvTokens(config.momentum_blocked_micro_regimes, (token) =>
+    token.toUpperCase()
+  );
+  if (blockedMicro.length) {
+    payload.blocked_micro_regimes = blockedMicro;
+  }
+
+  const sleeveRows = Array.isArray(config.momentum_sleeves) ? config.momentum_sleeves : [];
+  const sleeves = sleeveRows
+    .map((row, index) => buildMomentumSleevePayload(row, index))
+    .filter((row) => row && typeof row === "object");
+  if (sleeves.length) {
+    payload.sleeves = sleeves;
+  }
+
+  return payload;
+};
+
+const executionSectionStyle = {
+  border: "1px solid var(--border-color)",
+  borderRadius: "8px",
+  padding: "12px",
+  marginBottom: "12px",
+  background: "var(--bg-secondary)",
+};
+
+const executionSectionTitleStyle = {
+  fontSize: "0.86rem",
+  fontWeight: 700,
+  color: "var(--text-primary)",
+  marginBottom: "4px",
+};
+
+const executionSectionHintStyle = {
+  color: "var(--text-muted)",
+  fontSize: "0.78rem",
+  marginBottom: "10px",
+};
+
+const l2GateFieldConfig = [
+  {
+    key: "l2_min_imbalance",
+    label: "Min Imbalance",
+    hint: "0 disables this filter; increase only if entries are too noisy.",
+    min: "0",
+    step: "0.01",
+  },
+  {
+    key: "l2_min_signed_aggression",
+    label: "Min Signed Aggression",
+    hint: "Higher values require stronger aggressive flow in entry direction.",
+    min: "0",
+    step: "0.01",
+  },
+  {
+    key: "l2_min_directional_consistency",
+    label: "Min Directional Consistency",
+    hint: "Controls how consistently flow must align before entry is allowed.",
+    min: "0",
+    step: "0.01",
+  },
+  {
+    key: "l2_lookback_bars",
+    label: "Lookback Bars",
+    hint: "Recent bars used for gate evaluation.",
+    min: "1",
+    step: "1",
+  },
+];
+
 function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfig }) {
   const [availableData, setAvailableData] = useState(null);
   const [config, setConfig] = useState({
@@ -61,6 +318,10 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     max_position_notional_pct: 100.0,
     max_fill_participation_rate: 0.2,
     min_fill_ratio: 0.35,
+    trailing_activation_pct: 0.45,
+    break_even_buffer_pct: 0.0,
+    break_even_min_hold_bars: 2,
+    trailing_enabled_in_choppy: false,
     time_exit_bars: 40,
     adverse_flow_exit_enabled: true,
     adverse_flow_threshold: 0.12,
@@ -75,6 +336,27 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     l2_lookback_bars: 3,
     account_size_usd: 10000,
     regime_detection_minutes: 15,
+    momentum_diversification_override_enabled: false,
+    momentum_diversification_enabled: true,
+    momentum_require_l2_coverage: true,
+    momentum_route_enabled: true,
+    momentum_route_require_l2_coverage: true,
+    momentum_min_flow_score: 58,
+    momentum_min_directional_consistency: 0.45,
+    momentum_min_signed_aggression: 0.04,
+    momentum_min_imbalance: 0.02,
+    momentum_min_delta_acceleration: 0,
+    momentum_min_delta_price_divergence: 0,
+    momentum_route_flow_score_impulse: 64,
+    momentum_fail_fast_exit_enabled: true,
+    momentum_fail_fast_max_bars: 3,
+    momentum_fail_fast_signed_aggression_max: -0.08,
+    momentum_fail_fast_book_pressure_max: -0.1,
+    momentum_fail_fast_directional_consistency_max: 0.2,
+    momentum_apply_to_strategies: "momentum_flow",
+    momentum_allowed_micro_regimes: "",
+    momentum_blocked_micro_regimes: "",
+    momentum_sleeves: [],
     checkpoint_path: null,
     auto_save_checkpoint: true,
     cold_start_each_day: false,
@@ -101,6 +383,66 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const lastSyncedAdaptiveProfileRef = useRef("");
 
   const strategyApiBase = (config.strategy_api_url || "").replace(/\/+$/, "");
+
+  const hydrateExecutionConfigFromPositioning = useCallback((payload) => {
+    const positioning = normalizePositioningConfig(payload);
+    if (!Object.keys(positioning).length) return;
+
+    setConfig((prev) => ({
+      ...prev,
+      risk_per_trade_pct: toFiniteNumber(positioning.risk_per_trade_pct, prev.risk_per_trade_pct),
+      max_position_notional_pct: toFiniteNumber(
+        positioning.max_position_notional_pct,
+        prev.max_position_notional_pct
+      ),
+      max_fill_participation_rate: toFiniteNumber(
+        positioning.max_fill_participation_rate,
+        prev.max_fill_participation_rate
+      ),
+      min_fill_ratio: toFiniteNumber(positioning.min_fill_ratio, prev.min_fill_ratio),
+      trailing_activation_pct: toFiniteNumber(
+        positioning.trailing_activation_pct,
+        prev.trailing_activation_pct
+      ),
+      break_even_buffer_pct: toFiniteNumber(
+        positioning.break_even_buffer_pct,
+        prev.break_even_buffer_pct
+      ),
+      break_even_min_hold_bars: Math.max(
+        1,
+        Math.trunc(
+          toFiniteNumber(positioning.break_even_min_hold_bars, prev.break_even_min_hold_bars)
+        )
+      ),
+      trailing_enabled_in_choppy: toBool(
+        positioning.trailing_enabled_in_choppy,
+        prev.trailing_enabled_in_choppy
+      ),
+      time_exit_bars: Math.max(
+        1,
+        Math.trunc(toFiniteNumber(positioning.time_exit_bars, prev.time_exit_bars))
+      ),
+      adverse_flow_exit_enabled: toBool(
+        positioning.adverse_flow_exit_enabled,
+        prev.adverse_flow_exit_enabled
+      ),
+      adverse_flow_threshold: toFiniteNumber(
+        positioning.adverse_flow_threshold,
+        prev.adverse_flow_threshold
+      ),
+      adverse_flow_min_hold_bars: Math.max(
+        1,
+        Math.trunc(
+          toFiniteNumber(positioning.adverse_flow_min_hold_bars, prev.adverse_flow_min_hold_bars)
+        )
+      ),
+      stop_loss_mode: normalizeStopLossMode(positioning.stop_loss_mode, prev.stop_loss_mode),
+      fixed_stop_loss_pct: Math.max(
+        0,
+        toFiniteNumber(positioning.fixed_stop_loss_pct, prev.fixed_stop_loss_pct)
+      ),
+    }));
+  }, []);
 
   const formatCheckpointLabel = (item) => {
     const path = item?.path || "";
@@ -142,7 +484,8 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     }
   };
 
-  const fetchTickerAosConfig = async (ticker) => {
+  const fetchTickerAosConfig = async (ticker, options = {}) => {
+    const { hydrateExecution = false } = options;
     if (!ticker) return;
     setAosLoading(true);
     setAosError(null);
@@ -155,6 +498,9 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       const payload = await resp.json();
       const normalized = normalizeAosTickerConfig(payload);
       setAosTickerConfig(normalized);
+      if (hydrateExecution) {
+        hydrateExecutionConfigFromPositioning(normalized);
+      }
       return normalized;
     } catch (err) {
       console.error("Failed to fetch AOS config:", err);
@@ -384,7 +730,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       return;
     }
 
-    fetchTickerAosConfig(config.ticker);
+    fetchTickerAosConfig(config.ticker, { hydrateExecution: true });
     fetchAdaptiveProfiles(config.ticker);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.ticker]);
@@ -469,7 +815,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
           try {
             await applyAdaptiveProfile(config.ticker, selectedProfileId);
             setActiveAdaptiveProfileId(selectedProfileId);
-            await fetchTickerAosConfig(config.ticker);
+            await fetchTickerAosConfig(config.ticker, { hydrateExecution: true });
             await fetchAdaptiveProfiles(config.ticker);
           } catch (profileErr) {
             throw new Error(`Failed to apply adaptive profile: ${profileErr.message}`);
@@ -489,6 +835,10 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         max_position_notional_pct: Number(config.max_position_notional_pct),
         max_fill_participation_rate: Number(config.max_fill_participation_rate),
         min_fill_ratio: Number(config.min_fill_ratio),
+        trailing_activation_pct: Number(config.trailing_activation_pct),
+        break_even_buffer_pct: Number(config.break_even_buffer_pct),
+        break_even_min_hold_bars: Number(config.break_even_min_hold_bars),
+        trailing_enabled_in_choppy: !!config.trailing_enabled_in_choppy,
         time_exit_bars: Number(config.time_exit_bars),
         adverse_flow_exit_enabled: !!config.adverse_flow_exit_enabled,
         adverse_flow_threshold: Number(config.adverse_flow_threshold),
@@ -511,6 +861,10 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         auto_save_checkpoint: comparableMode ? false : !!config.auto_save_checkpoint,
       };
 
+      if (config.momentum_diversification_override_enabled) {
+        payload.momentum_diversification_override = buildMomentumDiversificationOverridePayload(config);
+      }
+
       if (config.data_file) {
         payload.data_file = config.data_file;
       }
@@ -528,6 +882,36 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
 
   const handleChange = (field, value) => {
     setConfig((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleMomentumSleeveChange = (index, field, value) => {
+    setConfig((prev) => {
+      const current = Array.isArray(prev.momentum_sleeves) ? prev.momentum_sleeves : [];
+      if (index < 0 || index >= current.length) return prev;
+      const next = current.map((item, idx) =>
+        idx === index ? { ...(item || {}), [field]: value } : item
+      );
+      return { ...prev, momentum_sleeves: next };
+    });
+  };
+
+  const handleAddMomentumSleeve = () => {
+    setConfig((prev) => {
+      const current = Array.isArray(prev.momentum_sleeves) ? prev.momentum_sleeves : [];
+      const draft = createDefaultMomentumSleeveDraft(current.length + 1);
+      return { ...prev, momentum_sleeves: [...current, draft] };
+    });
+  };
+
+  const handleRemoveMomentumSleeve = (index) => {
+    setConfig((prev) => {
+      const current = Array.isArray(prev.momentum_sleeves) ? prev.momentum_sleeves : [];
+      if (index < 0 || index >= current.length) return prev;
+      return {
+        ...prev,
+        momentum_sleeves: current.filter((_, idx) => idx !== index),
+      };
+    });
   };
 
   const handleDateFromChange = (value) => {
@@ -574,11 +958,12 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const handleReloadAosAndProfiles = async () => {
     if (!config.ticker) return;
     await Promise.all([
-      fetchTickerAosConfig(config.ticker),
+      fetchTickerAosConfig(config.ticker, { hydrateExecution: true }),
       fetchAdaptiveProfiles(config.ticker),
     ]);
   };
 
+  const momentumSleeves = Array.isArray(config.momentum_sleeves) ? config.momentum_sleeves : [];
   const dateRange = getDateRange();
   const effectiveConfig = effectiveExecutionConfig || {};
   const hasEffectiveConfig = !!effectiveExecutionConfig;
@@ -612,6 +997,18 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const activeFixedStopLossPct = Number(
     effectiveConfig.fixed_stop_loss_pct ?? config.fixed_stop_loss_pct ?? 0
   );
+  const activeTrailingActivationPct = Number(
+    effectiveConfig.trailing_activation_pct ?? config.trailing_activation_pct ?? 0
+  );
+  const activeBreakEvenBufferPct = Number(
+    effectiveConfig.break_even_buffer_pct ?? config.break_even_buffer_pct ?? 0
+  );
+  const activeBreakEvenMinHoldBars = Number(
+    effectiveConfig.break_even_min_hold_bars ?? config.break_even_min_hold_bars ?? 0
+  );
+  const activeTrailingInChoppy = Boolean(
+    effectiveConfig.trailing_enabled_in_choppy ?? config.trailing_enabled_in_choppy
+  );
   const activeColdStartEachDay = Boolean(
     effectiveConfig.cold_start_each_day ?? config.cold_start_each_day
   );
@@ -624,6 +1021,18 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const activeMaxActiveStrategies = parseMaxActiveStrategies(
     effectiveConfig.max_active_strategies ?? aosTickerConfig?.max_active_strategies ?? 3,
     3
+  );
+  const activeMomentumDiversificationRaw =
+    effectiveConfig?.momentum_diversification &&
+    typeof effectiveConfig.momentum_diversification === "object" &&
+    !Array.isArray(effectiveConfig.momentum_diversification)
+      ? effectiveConfig.momentum_diversification
+      : {};
+  const activeMomentumDiversificationApplied = Boolean(
+    effectiveConfig?.momentum_diversification_applied
+  );
+  const activeMomentumDiversificationSource = String(
+    effectiveConfig?.momentum_diversification_source || "none"
   );
   const requestedAdaptiveProfileId =
     selectedAdaptiveProfileId === ACTIVE_PROFILE_SENTINEL
@@ -700,6 +1109,24 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             </div>
           </div>
           <div className="form-group">
+            <label>Break-even Activation</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeTrailingActivationPct.toFixed(2)}% MFE, hold {Math.max(1, Math.trunc(activeBreakEvenMinHoldBars || 1))} bars
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Break-even Buffer</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeBreakEvenBufferPct.toFixed(2)}%
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Trailing In Choppy</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeTrailingInChoppy ? "Enabled" : "Disabled"}
+            </div>
+          </div>
+          <div className="form-group">
             <label>Time Exit</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
               {activeTimeExitBars} bars
@@ -746,6 +1173,39 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
               {effectiveAdaptiveProfileId || "none (using direct AOS settings)"}
             </div>
           </div>
+          <div className="form-group">
+            <label>Momentum Diversification</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeMomentumDiversificationApplied
+                ? `Applied (${activeMomentumDiversificationSource})`
+                : "Not applied"}
+            </div>
+          </div>
+          {activeMomentumDiversificationApplied && (
+            <>
+              <div className="form-group">
+                <label>Momentum Flow Filter</label>
+                <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+                  min_flow_score {Number(activeMomentumDiversificationRaw.min_flow_score ?? 0).toFixed(2)}, directional
+                  {" "}
+                  {Number(activeMomentumDiversificationRaw.min_directional_consistency ?? 0).toFixed(2)}, signed_aggr
+                  {" "}
+                  {Number(activeMomentumDiversificationRaw.min_signed_aggression ?? 0).toFixed(2)}
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Momentum Route + Fail-Fast</label>
+                <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+                  route {activeMomentumDiversificationRaw.route_enabled ? "on" : "off"}, fail-fast
+                  {" "}
+                  {activeMomentumDiversificationRaw.fail_fast_exit_enabled ? "on" : "off"}
+                  {activeMomentumDiversificationRaw.fail_fast_exit_enabled && (
+                    <> ({Math.max(1, Math.trunc(Number(activeMomentumDiversificationRaw.fail_fast_max_bars ?? 1)))} bars)</>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
           <div className="form-group">
             <label>Start Mode</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
@@ -904,132 +1364,199 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="risk_per_trade_pct">Risk Per Trade (%)</label>
-            <input
-              id="risk_per_trade_pct"
-              type="number"
-              min="0.1"
-              max="10"
-              step="0.1"
-              value={config.risk_per_trade_pct}
-              onChange={(e) => handleChange("risk_per_trade_pct", Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="max_position_notional_pct">Max Position Notional (%)</label>
-            <input
-              id="max_position_notional_pct"
-              type="number"
-              min="1"
-              max="100"
-              step="1"
-              value={config.max_position_notional_pct}
-              onChange={(e) => handleChange("max_position_notional_pct", Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="max_fill_participation_rate">Max Fill Participation (0-1)</label>
-            <input
-              id="max_fill_participation_rate"
-              type="number"
-              min="0.01"
-              max="1"
-              step="0.01"
-              value={config.max_fill_participation_rate}
-              onChange={(e) => handleChange("max_fill_participation_rate", Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="min_fill_ratio">Min Fill Ratio (0-1)</label>
-            <input
-              id="min_fill_ratio"
-              type="number"
-              min="0.01"
-              max="1"
-              step="0.01"
-              value={config.min_fill_ratio}
-              onChange={(e) => handleChange("min_fill_ratio", Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="stop_loss_mode">Stop-Loss Mode</label>
-            <select
-              id="stop_loss_mode"
-              value={config.stop_loss_mode}
-              onChange={(e) => handleChange("stop_loss_mode", e.target.value)}
-            >
-              <option value="strategy">strategy (use strategy stop)</option>
-              <option value="fixed">fixed (always fixed % stop)</option>
-              <option value="capped">capped (cap only wide stops)</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="fixed_stop_loss_pct">Fixed Stop-Loss (%)</label>
-            <input
-              id="fixed_stop_loss_pct"
-              type="number"
-              min="0"
-              max="5"
-              step="0.05"
-              value={config.fixed_stop_loss_pct}
-              onChange={(e) => handleChange("fixed_stop_loss_pct", Number(e.target.value))}
-              disabled={config.stop_loss_mode === "strategy"}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="time_exit_bars">Time Exit (bars)</label>
-            <input
-              id="time_exit_bars"
-              type="number"
-              min="1"
-              step="1"
-              value={config.time_exit_bars}
-              onChange={(e) => handleChange("time_exit_bars", Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="adverse_flow_threshold">Adverse Flow Threshold</label>
-            <input
-              id="adverse_flow_threshold"
-              type="number"
-              min="0.02"
-              max="1"
-              step="0.01"
-              value={config.adverse_flow_threshold}
-              onChange={(e) => handleChange("adverse_flow_threshold", Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="adverse_flow_min_hold_bars">Adverse Flow Min Hold (bars)</label>
-            <input
-              id="adverse_flow_min_hold_bars"
-              type="number"
-              min="1"
-              step="1"
-              value={config.adverse_flow_min_hold_bars}
-              onChange={(e) => handleChange("adverse_flow_min_hold_bars", Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="field-row" htmlFor="adverse_flow_exit_enabled">
-              <span>Adverse Flow Exit Enabled</span>
+          <div style={executionSectionStyle}>
+            <div style={executionSectionTitleStyle}>Execution Sizing</div>
+            <div style={executionSectionHintStyle}>
+              Tieto nastavenia riadia veľkosť pozície, fill realizmus a maximálnu dĺžku držania.
+            </div>
+            <div className="form-group">
+              <label htmlFor="risk_per_trade_pct">Risk Per Trade (%)</label>
               <input
-                id="adverse_flow_exit_enabled"
-                type="checkbox"
-                checked={!!config.adverse_flow_exit_enabled}
-                onChange={(e) => handleChange("adverse_flow_exit_enabled", e.target.checked)}
+                id="risk_per_trade_pct"
+                type="number"
+                min="0.1"
+                max="10"
+                step="0.1"
+                value={config.risk_per_trade_pct}
+                onChange={(e) => handleChange("risk_per_trade_pct", Number(e.target.value))}
               />
-            </label>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="max_position_notional_pct">Max Position Notional (%)</label>
+              <input
+                id="max_position_notional_pct"
+                type="number"
+                min="1"
+                max="100"
+                step="1"
+                value={config.max_position_notional_pct}
+                onChange={(e) => handleChange("max_position_notional_pct", Number(e.target.value))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="max_fill_participation_rate">Max Fill Participation (0-1)</label>
+              <input
+                id="max_fill_participation_rate"
+                type="number"
+                min="0.01"
+                max="1"
+                step="0.01"
+                value={config.max_fill_participation_rate}
+                onChange={(e) => handleChange("max_fill_participation_rate", Number(e.target.value))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="min_fill_ratio">Min Fill Ratio (0-1)</label>
+              <input
+                id="min_fill_ratio"
+                type="number"
+                min="0.01"
+                max="1"
+                step="0.01"
+                value={config.min_fill_ratio}
+                onChange={(e) => handleChange("min_fill_ratio", Number(e.target.value))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="time_exit_bars">Time Exit (bars)</label>
+              <input
+                id="time_exit_bars"
+                type="number"
+                min="1"
+                step="1"
+                value={config.time_exit_bars}
+                onChange={(e) => handleChange("time_exit_bars", Number(e.target.value))}
+              />
+            </div>
+          </div>
+
+          <div style={executionSectionStyle}>
+            <div style={executionSectionTitleStyle}>Stop-Loss And Break-Even</div>
+            <div style={executionSectionHintStyle}>
+              `strategy` = stop zo stratégie, `fixed` = vždy fixné %, `capped` = prísnejší zo strategy/fixed.
+            </div>
+            <div className="form-group">
+              <label htmlFor="stop_loss_mode">Stop-Loss Mode</label>
+              <select
+                id="stop_loss_mode"
+                value={config.stop_loss_mode}
+                onChange={(e) => handleChange("stop_loss_mode", e.target.value)}
+              >
+                <option value="strategy">strategy (use strategy stop)</option>
+                <option value="fixed">fixed (always fixed % stop)</option>
+                <option value="capped">capped (cap only wide stops)</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="fixed_stop_loss_pct">Fixed Stop-Loss (%)</label>
+              <input
+                id="fixed_stop_loss_pct"
+                type="number"
+                min="0"
+                max="5"
+                step="0.05"
+                value={config.fixed_stop_loss_pct}
+                onChange={(e) => handleChange("fixed_stop_loss_pct", Number(e.target.value))}
+                disabled={config.stop_loss_mode === "strategy"}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="trailing_activation_pct">Break-even Activation (% MFE)</label>
+              <input
+                id="trailing_activation_pct"
+                type="number"
+                min="0"
+                max="5"
+                step="0.01"
+                value={config.trailing_activation_pct}
+                onChange={(e) => handleChange("trailing_activation_pct", Number(e.target.value))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="break_even_buffer_pct">Break-even Buffer (%)</label>
+              <input
+                id="break_even_buffer_pct"
+                type="number"
+                min="0"
+                max="2"
+                step="0.01"
+                value={config.break_even_buffer_pct}
+                onChange={(e) => handleChange("break_even_buffer_pct", Number(e.target.value))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="break_even_min_hold_bars">Break-even Min Hold (bars)</label>
+              <input
+                id="break_even_min_hold_bars"
+                type="number"
+                min="1"
+                step="1"
+                value={config.break_even_min_hold_bars}
+                onChange={(e) => handleChange("break_even_min_hold_bars", Number(e.target.value))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="field-row" htmlFor="trailing_enabled_in_choppy">
+                <span>Enable Trailing In CHOPPY</span>
+                <input
+                  id="trailing_enabled_in_choppy"
+                  type="checkbox"
+                  checked={!!config.trailing_enabled_in_choppy}
+                  onChange={(e) => handleChange("trailing_enabled_in_choppy", e.target.checked)}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div style={executionSectionStyle}>
+            <div style={executionSectionTitleStyle}>Adverse Flow Exit</div>
+            <div style={executionSectionHintStyle}>
+              Ochranný exit pri zhoršení order-flow podmienok po vstupe.
+            </div>
+            <div className="form-group">
+              <label className="field-row" htmlFor="adverse_flow_exit_enabled">
+                <span>Adverse Flow Exit Enabled</span>
+                <input
+                  id="adverse_flow_exit_enabled"
+                  type="checkbox"
+                  checked={!!config.adverse_flow_exit_enabled}
+                  onChange={(e) => handleChange("adverse_flow_exit_enabled", e.target.checked)}
+                />
+              </label>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="adverse_flow_threshold">Adverse Flow Threshold</label>
+              <input
+                id="adverse_flow_threshold"
+                type="number"
+                min="0.02"
+                max="1"
+                step="0.01"
+                value={config.adverse_flow_threshold}
+                onChange={(e) => handleChange("adverse_flow_threshold", Number(e.target.value))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="adverse_flow_min_hold_bars">Adverse Flow Min Hold (bars)</label>
+              <input
+                id="adverse_flow_min_hold_bars"
+                type="number"
+                min="1"
+                step="1"
+                value={config.adverse_flow_min_hold_bars}
+                onChange={(e) => handleChange("adverse_flow_min_hold_bars", Number(e.target.value))}
+              />
+            </div>
           </div>
 
           <div className="preset-box">
@@ -1113,6 +1640,681 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
                 }}
               >
                 {adaptiveProfilesError}
+              </div>
+            )}
+          </div>
+
+          <div style={executionSectionStyle}>
+            <div style={executionSectionTitleStyle}>Momentum Diversification Override</div>
+            <div style={executionSectionHintStyle}>
+              Voliteľný run-level override pre adaptive momentum routing (L2/CVD prahy, route a fail-fast).
+              Keď je vypnutý, použije sa aktívny Adaptive Profile/AOS config.
+            </div>
+
+            <div className="form-group">
+              <label className="field-row" htmlFor="momentum_diversification_override_enabled">
+                <span>Enable per-run momentum diversification override</span>
+                <input
+                  id="momentum_diversification_override_enabled"
+                  type="checkbox"
+                  checked={!!config.momentum_diversification_override_enabled}
+                  onChange={(e) =>
+                    handleChange("momentum_diversification_override_enabled", e.target.checked)
+                  }
+                />
+              </label>
+            </div>
+
+            {config.momentum_diversification_override_enabled ? (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: "8px",
+                    marginBottom: "8px",
+                  }}
+                >
+                  <label className="field-row">
+                    <span>Momentum Diversification Enabled</span>
+                    <input
+                      type="checkbox"
+                      checked={!!config.momentum_diversification_enabled}
+                      onChange={(e) => handleChange("momentum_diversification_enabled", e.target.checked)}
+                    />
+                  </label>
+                  <label className="field-row">
+                    <span>Require L2 Coverage</span>
+                    <input
+                      type="checkbox"
+                      checked={!!config.momentum_require_l2_coverage}
+                      onChange={(e) => handleChange("momentum_require_l2_coverage", e.target.checked)}
+                    />
+                  </label>
+                  <label className="field-row">
+                    <span>Route Enabled</span>
+                    <input
+                      type="checkbox"
+                      checked={!!config.momentum_route_enabled}
+                      onChange={(e) => handleChange("momentum_route_enabled", e.target.checked)}
+                    />
+                  </label>
+                  <label className="field-row">
+                    <span>Route Requires L2 Coverage</span>
+                    <input
+                      type="checkbox"
+                      checked={!!config.momentum_route_require_l2_coverage}
+                      onChange={(e) =>
+                        handleChange("momentum_route_require_l2_coverage", e.target.checked)
+                      }
+                    />
+                  </label>
+                  <label className="field-row">
+                    <span>Fail-Fast Exit Enabled</span>
+                    <input
+                      type="checkbox"
+                      checked={!!config.momentum_fail_fast_exit_enabled}
+                      onChange={(e) => handleChange("momentum_fail_fast_exit_enabled", e.target.checked)}
+                    />
+                  </label>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+                    gap: "10px",
+                  }}
+                >
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_flow_score">Min Flow Score</label>
+                    <input
+                      id="momentum_min_flow_score"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={config.momentum_min_flow_score}
+                      onChange={(e) => handleChange("momentum_min_flow_score", Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_directional_consistency">Min Directional Consistency</label>
+                    <input
+                      id="momentum_min_directional_consistency"
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={config.momentum_min_directional_consistency}
+                      onChange={(e) =>
+                        handleChange("momentum_min_directional_consistency", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_signed_aggression">Min Signed Aggression</label>
+                    <input
+                      id="momentum_min_signed_aggression"
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={config.momentum_min_signed_aggression}
+                      onChange={(e) =>
+                        handleChange("momentum_min_signed_aggression", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_imbalance">Min Imbalance</label>
+                    <input
+                      id="momentum_min_imbalance"
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={config.momentum_min_imbalance}
+                      onChange={(e) => handleChange("momentum_min_imbalance", Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_delta_acceleration">Min Delta Acceleration</label>
+                    <input
+                      id="momentum_min_delta_acceleration"
+                      type="number"
+                      min="-1000000000"
+                      max="1000000000"
+                      step="1"
+                      value={config.momentum_min_delta_acceleration}
+                      onChange={(e) =>
+                        handleChange("momentum_min_delta_acceleration", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_delta_price_divergence">Min Delta-Price Divergence</label>
+                    <input
+                      id="momentum_min_delta_price_divergence"
+                      type="number"
+                      min="-10"
+                      max="10"
+                      step="0.01"
+                      value={config.momentum_min_delta_price_divergence}
+                      onChange={(e) =>
+                        handleChange("momentum_min_delta_price_divergence", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_route_flow_score_impulse">Route Flow Score (Impulse)</label>
+                    <input
+                      id="momentum_route_flow_score_impulse"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={config.momentum_route_flow_score_impulse}
+                      onChange={(e) =>
+                        handleChange("momentum_route_flow_score_impulse", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_fail_fast_max_bars">Fail-Fast Max Bars</label>
+                    <input
+                      id="momentum_fail_fast_max_bars"
+                      type="number"
+                      min="1"
+                      max="30"
+                      step="1"
+                      value={config.momentum_fail_fast_max_bars}
+                      onChange={(e) =>
+                        handleChange("momentum_fail_fast_max_bars", Math.max(1, Math.trunc(Number(e.target.value))))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_fail_fast_signed_aggression_max">Fail-Fast Signed Aggression Max</label>
+                    <input
+                      id="momentum_fail_fast_signed_aggression_max"
+                      type="number"
+                      min="-1"
+                      max="0"
+                      step="0.01"
+                      value={config.momentum_fail_fast_signed_aggression_max}
+                      onChange={(e) =>
+                        handleChange("momentum_fail_fast_signed_aggression_max", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_fail_fast_book_pressure_max">Fail-Fast Book Pressure Max</label>
+                    <input
+                      id="momentum_fail_fast_book_pressure_max"
+                      type="number"
+                      min="-1"
+                      max="0"
+                      step="0.01"
+                      value={config.momentum_fail_fast_book_pressure_max}
+                      onChange={(e) =>
+                        handleChange("momentum_fail_fast_book_pressure_max", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_fail_fast_directional_consistency_max">
+                      Fail-Fast Directional Consistency Max
+                    </label>
+                    <input
+                      id="momentum_fail_fast_directional_consistency_max"
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={config.momentum_fail_fast_directional_consistency_max}
+                      onChange={(e) =>
+                        handleChange(
+                          "momentum_fail_fast_directional_consistency_max",
+                          Number(e.target.value)
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="momentum_apply_to_strategies">
+                    Apply To Strategies (CSV, optional)
+                  </label>
+                  <input
+                    id="momentum_apply_to_strategies"
+                    type="text"
+                    value={config.momentum_apply_to_strategies}
+                    onChange={(e) => handleChange("momentum_apply_to_strategies", e.target.value)}
+                    placeholder="momentum_flow,momentum"
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: "10px",
+                  }}
+                >
+                  <div className="form-group">
+                    <label htmlFor="momentum_allowed_micro_regimes">Allowed Micro Regimes (CSV)</label>
+                    <input
+                      id="momentum_allowed_micro_regimes"
+                      type="text"
+                      value={config.momentum_allowed_micro_regimes}
+                      onChange={(e) => handleChange("momentum_allowed_micro_regimes", e.target.value)}
+                      placeholder="TRENDING_UP,BREAKOUT"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_blocked_micro_regimes">Blocked Micro Regimes (CSV)</label>
+                    <input
+                      id="momentum_blocked_micro_regimes"
+                      type="text"
+                      value={config.momentum_blocked_micro_regimes}
+                      onChange={(e) => handleChange("momentum_blocked_micro_regimes", e.target.value)}
+                      placeholder="CHOPPY,ABSORPTION"
+                    />
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "6px",
+                    padding: "10px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: "0.8rem" }}>
+                      Multi-Sleeve Diversification
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: "6px 10px", fontSize: "0.74rem" }}
+                      onClick={handleAddMomentumSleeve}
+                    >
+                      Add Sleeve
+                    </button>
+                  </div>
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.74rem", marginBottom: "8px" }}>
+                    Vizualny editor pre `sleeves[]`. Ak pridáš aspoň jeden sleeve, backend použije multi-sleeve režim.
+                  </div>
+
+                  {momentumSleeves.length === 0 ? (
+                    <div style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
+                      Zatial nie je definovany ziadny sleeve.
+                    </div>
+                  ) : (
+                    <div style={{ display: "grid", gap: "10px" }}>
+                      {momentumSleeves.map((sleeve, index) => (
+                        <div
+                          key={`${sleeve?.sleeve_id || "sleeve"}-${index}`}
+                          style={{
+                            border: "1px solid var(--border-color)",
+                            borderRadius: "6px",
+                            padding: "10px",
+                            background: "var(--bg-primary)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              marginBottom: "8px",
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, fontSize: "0.78rem" }}>
+                              Sleeve #{index + 1}
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: "4px 8px", fontSize: "0.72rem" }}
+                              onClick={() => handleRemoveMomentumSleeve(index)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                              gap: "8px",
+                            }}
+                          >
+                            <div className="form-group">
+                              <label>Sleeve ID</label>
+                              <input
+                                type="text"
+                                value={sleeve?.sleeve_id || ""}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "sleeve_id", e.target.value)
+                                }
+                                placeholder="impulse"
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Allocation Weight (0-1)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                value={sleeve?.allocation_weight ?? 0.5}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "allocation_weight", Number(e.target.value))
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Apply To Strategies (CSV)</label>
+                              <input
+                                type="text"
+                                value={sleeve?.apply_to_strategies || ""}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "apply_to_strategies", e.target.value)
+                                }
+                                placeholder="momentum_flow,pullback"
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Allowed Micro Regimes (CSV)</label>
+                              <input
+                                type="text"
+                                value={sleeve?.allowed_micro_regimes || ""}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "allowed_micro_regimes", e.target.value)
+                                }
+                                placeholder="TRENDING_UP,BREAKOUT"
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Blocked Micro Regimes (CSV)</label>
+                              <input
+                                type="text"
+                                value={sleeve?.blocked_micro_regimes || ""}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "blocked_micro_regimes", e.target.value)
+                                }
+                                placeholder="CHOPPY,ABSORPTION"
+                              />
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                              gap: "8px",
+                              marginBottom: "8px",
+                            }}
+                          >
+                            <label className="field-row">
+                              <span>Enabled</span>
+                              <input
+                                type="checkbox"
+                                checked={!!sleeve?.enabled}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "enabled", e.target.checked)
+                                }
+                              />
+                            </label>
+                            <label className="field-row">
+                              <span>Require L2 Coverage</span>
+                              <input
+                                type="checkbox"
+                                checked={!!sleeve?.require_l2_coverage}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "require_l2_coverage", e.target.checked)
+                                }
+                              />
+                            </label>
+                            <label className="field-row">
+                              <span>Route Enabled</span>
+                              <input
+                                type="checkbox"
+                                checked={!!sleeve?.route_enabled}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "route_enabled", e.target.checked)
+                                }
+                              />
+                            </label>
+                            <label className="field-row">
+                              <span>Route Requires L2</span>
+                              <input
+                                type="checkbox"
+                                checked={!!sleeve?.route_require_l2_coverage}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "route_require_l2_coverage", e.target.checked)
+                                }
+                              />
+                            </label>
+                            <label className="field-row">
+                              <span>Fail-Fast Exit Enabled</span>
+                              <input
+                                type="checkbox"
+                                checked={!!sleeve?.fail_fast_exit_enabled}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "fail_fast_exit_enabled", e.target.checked)
+                                }
+                              />
+                            </label>
+                          </div>
+
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(auto-fit, minmax(185px, 1fr))",
+                              gap: "10px",
+                            }}
+                          >
+                            <div className="form-group">
+                              <label>Min Flow Score</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.5"
+                                value={sleeve?.min_flow_score ?? 58}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "min_flow_score", Number(e.target.value))
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Min Directional Consistency</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={sleeve?.min_directional_consistency ?? 0.45}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "min_directional_consistency",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Min Signed Aggression</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={sleeve?.min_signed_aggression ?? 0.04}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "min_signed_aggression",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Min Imbalance</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={sleeve?.min_imbalance ?? 0.02}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "min_imbalance", Number(e.target.value))
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Min Delta Acceleration</label>
+                              <input
+                                type="number"
+                                min="-1000000000"
+                                max="1000000000"
+                                step="1"
+                                value={sleeve?.min_delta_acceleration ?? 0}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "min_delta_acceleration",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Min Delta-Price Divergence</label>
+                              <input
+                                type="number"
+                                min="-10"
+                                max="10"
+                                step="0.01"
+                                value={sleeve?.min_delta_price_divergence ?? 0}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "min_delta_price_divergence",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Route Flow Score (Impulse)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.5"
+                                value={sleeve?.route_flow_score_impulse ?? 64}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "route_flow_score_impulse",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Fail-Fast Max Bars</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max="30"
+                                step="1"
+                                value={sleeve?.fail_fast_max_bars ?? 3}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "fail_fast_max_bars",
+                                    Math.max(1, Math.trunc(Number(e.target.value)))
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Fail-Fast Signed Aggression Max</label>
+                              <input
+                                type="number"
+                                min="-1"
+                                max="0"
+                                step="0.01"
+                                value={sleeve?.fail_fast_signed_aggression_max ?? -0.08}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "fail_fast_signed_aggression_max",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Fail-Fast Book Pressure Max</label>
+                              <input
+                                type="number"
+                                min="-1"
+                                max="0"
+                                step="0.01"
+                                value={sleeve?.fail_fast_book_pressure_max ?? -0.1}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "fail_fast_book_pressure_max",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Fail-Fast Directional Consistency Max</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={sleeve?.fail_fast_directional_consistency_max ?? 0.2}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "fail_fast_directional_consistency_max",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>
+                Override je vypnutý, použije sa profil z Adaptive Tuner/AOS.
               </div>
             )}
           </div>
@@ -1266,65 +2468,64 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             )}
           </div>
 
-          <div className="form-group">
-            <label className="field-row" htmlFor="l2_confirm_enabled">
-              <span>L2 Confirmation Gate</span>
-              <input
-                id="l2_confirm_enabled"
-                type="checkbox"
-                checked={config.l2_confirm_enabled || false}
-                onChange={(e) => handleChange("l2_confirm_enabled", e.target.checked)}
-              />
-            </label>
-          </div>
+          <div style={executionSectionStyle}>
+            <div style={executionSectionTitleStyle}>L2 Confirmation Gate</div>
+            <div style={executionSectionHintStyle}>
+              Applies an order-flow quality check before entry. Keep filters light to avoid overfitting.
+            </div>
+            <div className="form-group">
+              <label className="field-row" htmlFor="l2_confirm_enabled">
+                <span>Enable L2 Confirmation Gate</span>
+                <input
+                  id="l2_confirm_enabled"
+                  type="checkbox"
+                  checked={config.l2_confirm_enabled || false}
+                  onChange={(e) => handleChange("l2_confirm_enabled", e.target.checked)}
+                />
+              </label>
+            </div>
 
-          {config.l2_confirm_enabled && (
-            <>
-              <div className="form-group">
-                <label htmlFor="l2_min_imbalance">L2 Min Imbalance</label>
-                <input
-                  id="l2_min_imbalance"
-                  type="number"
-                  step="0.01"
-                  value={config.l2_min_imbalance}
-                  onChange={(e) => handleChange("l2_min_imbalance", Number(e.target.value))}
-                />
+            {config.l2_confirm_enabled && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+                  gap: "10px",
+                }}
+              >
+                {l2GateFieldConfig.map((field) => {
+                  const isLookback = field.key === "l2_lookback_bars";
+                  return (
+                    <div key={field.key} className="form-group">
+                      <label htmlFor={field.key}>{field.label}</label>
+                      <input
+                        id={field.key}
+                        type="number"
+                        min={field.min}
+                        step={field.step}
+                        value={config[field.key]}
+                        onChange={(e) =>
+                          handleChange(
+                            field.key,
+                            isLookback ? Math.max(1, Math.trunc(Number(e.target.value))) : Number(e.target.value)
+                          )
+                        }
+                      />
+                      <div
+                        style={{
+                          fontSize: "0.74rem",
+                          color: "var(--text-muted)",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {field.hint}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="form-group">
-                <label htmlFor="l2_min_signed_aggression">L2 Min Signed Aggression</label>
-                <input
-                  id="l2_min_signed_aggression"
-                  type="number"
-                  step="0.01"
-                  value={config.l2_min_signed_aggression}
-                  onChange={(e) => handleChange("l2_min_signed_aggression", Number(e.target.value))}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="l2_min_directional_consistency">L2 Min Directional Consistency</label>
-                <input
-                  id="l2_min_directional_consistency"
-                  type="number"
-                  step="0.01"
-                  value={config.l2_min_directional_consistency}
-                  onChange={(e) =>
-                    handleChange("l2_min_directional_consistency", Number(e.target.value))
-                  }
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="l2_lookback_bars">L2 Lookback Bars</label>
-                <input
-                  id="l2_lookback_bars"
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={config.l2_lookback_bars}
-                  onChange={(e) => handleChange("l2_lookback_bars", Number(e.target.value))}
-                />
-              </div>
-            </>
-          )}
+            )}
+          </div>
 
           {error && (
             <div

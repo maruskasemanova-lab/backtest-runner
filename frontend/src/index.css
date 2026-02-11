@@ -2385,3 +2385,143 @@ body {
   height: 16px;
   accent-color: var(--accent-blue);
 }
+
+/* Live Trader Monitor */
+.live-monitor-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  overflow: auto;
+  min-height: 0;
+}
+
+.live-monitor-card {
+  min-height: 180px;
+}
+
+.live-monitor-table-card {
+  grid-column: 1 / -1;
+  min-height: 380px;
+}
+
+.live-monitor-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.live-monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.live-stat {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.78);
+  padding: 10px;
+}
+
+.live-stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent-blue);
+}
+
+.live-stat-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.live-meta {
+  grid-column: span 2;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.live-monitor-muted {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.live-monitor-error {
+  color: var(--accent-red);
+  font-size: 0.85rem;
+  margin-bottom: var(--spacing-sm);
+}
+
+.live-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.live-checkbox input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-blue);
+}
+
+.live-monitor-table-wrap {
+  overflow: auto;
+  max-height: 520px;
+}
+
+.live-monitor-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.live-monitor-table th,
+.live-monitor-table td {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 8px 10px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.live-monitor-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(247, 243, 236, 0.96);
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.live-monitor-table pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  max-width: 840px;
+}
+
+@media (max-width: 1200px) {
+  .live-monitor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .live-monitor-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .live-monitor-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .live-meta {
+    grid-column: 1 / -1;
+  }
+}

@@ -27,7 +27,9 @@ class L2FeatureService:
         if isinstance(value, datetime):
             dt = value
         else:
-            dt = pd.to_datetime(value).to_pydatetime()
+            # Use warn=False so nanosecond truncation does not spam logs during
+            # large L2-enriched tuning runs.
+            dt = pd.to_datetime(value).to_pydatetime(warn=False)
 
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)

@@ -13,9 +13,10 @@ Important request fields:
 - identity: `run_id`, `ticker`, `date` OR `date_from` + `date_to`
 - execution realism: `account_size_usd`, `risk_per_trade_pct`, `max_fill_participation_rate`, `min_fill_ratio`
 - stop-risk policy: `stop_loss_mode` (`strategy|fixed|capped`), `fixed_stop_loss_pct`
-- exit behavior: `enable_partial_take_profit`, `partial_take_profit_rr`, `time_exit_bars`, `adverse_flow_*`
+- exit behavior: `enable_partial_take_profit`, `partial_take_profit_rr`, `time_exit_bars`, `adverse_flow_*`, `adverse_flow_consistency_threshold`, `adverse_book_pressure_threshold`
 - L2 gating: `l2_only`, `l2_confirm_enabled`, `l2_min_*`, `l2_lookback_bars`
 - strategy selection: `strategy_selection_mode` (`adaptive_top_n|all_enabled`), `max_active_strategies`
+- optional momentum nesting override: `momentum_diversification_override` (object, merged into strategy `adaptive.momentum_diversification` for this run only; supports single config and optional `sleeves[]` multi-sleeve layout)
 - intrabar execution realism: optional `intrabar_execution_recalc_1s` (defaults to auto-on when L2 is available)
 - reset semantics: `comparable_mode`, `cold_start_each_day`, `checkpoint_path`, `auto_save_checkpoint`
 - strategy defaults behavior: `apply_ticker_overrides_on_start` (`true` keeps legacy runner-side override apply; `false` preserves manual FE strategy edits)
@@ -28,6 +29,7 @@ Important response fields:
 - `l2_applied` (effective L2 parameters and coverage stats)
 - `execution_config` (effective execution defaults)
   - includes effective `strategy_selection_mode` and `max_active_strategies`
+  - includes `momentum_diversification_applied`, `momentum_diversification_source` (`request|adaptive_profile|aos_config|none`), and effective `momentum_diversification`
   - active strategy-parameter combo application details are exposed through `aos_applied.strategy_combo` when present
 
 ### `POST /api/run/{run_id}/{ticker}/{date}/step|play|pause|resume|stop`
@@ -81,6 +83,28 @@ Apply contract (`POST /api/strategy-combos/apply`):
 - behavior: sets selected combo profile as ticker active profile in AOS config.
 - effect: next `POST /api/run/start` applies profile strategy params automatically; when `apply_now=true` they are also pushed to strategy API immediately.
 
+### `GET /api/live-trader/runs` / `GET /api/live-trader/events/{run_id}` / `GET /api/live-trader/snapshot/{run_id}`
+
+Purpose: expose JSONL artifacts from sibling realtime project (`ibkr-realtime-trader/artifacts`) for frontend live monitoring.
+
+List contract (`GET /api/live-trader/runs`):
+
+- query: `limit`, `active_only`
+- returns discovered `run_id` values and per-stream file metadata (`runtime|decisions|signals|orders`)
+- sorted by latest artifact update timestamp
+- includes run `status` (`active|idle|finished|error`) and latest runtime summary (`profile_id`, `active_profile_id`, `execution_config`, latest `event`)
+
+Events contract (`GET /api/live-trader/events/{run_id}`):
+
+- query: `stream` (`runtime|decisions|signals|orders`), `limit`
+- returns tail rows from selected stream as parsed JSON objects
+
+Snapshot contract (`GET /api/live-trader/snapshot/{run_id}`):
+
+- query: `tail_limit`
+- returns per-stream existence/count/latest row for dashboard status cards
+- includes aggregate `status` (`active|idle|finished|error`), `updated_at`, and top-level `runtime` latest summary
+
 ### `GET /api/adaptive-tuner/options/{ticker}` / `POST /api/adaptive-tuner/profiles/apply` / `POST /api/adaptive-tuner/run` / `GET /api/adaptive-tuner/{job_id}` / `GET /api/adaptive-tuner`
 
 Purpose: expose real ticker coverage for L2-aware tuning, manage saved tuned profiles, run adaptive strategy-selection tuning jobs (Adaptive Studio v1), poll job status/results, and list recent jobs.
@@ -117,6 +141,13 @@ Important request fields (`POST /api/adaptive-tuner/run`):
   - `switch_cooldown_bars_options`
   - `flow_bias_options`
   - `ohlcv_fallback_options`
+- optional v2 momentum-diversification fields:
+  - `momentum_diversification_enabled_options`, `momentum_route_enabled_options`
+  - `momentum_min_flow_score_options`, `momentum_min_directional_consistency_options`
+  - `momentum_min_signed_aggression_options`, `momentum_min_imbalance_options`
+  - `momentum_min_delta_acceleration_options`, `momentum_min_delta_price_divergence_options`
+  - `momentum_route_flow_score_impulse_options`
+  - `momentum_fail_fast_exit_enabled_options`, `momentum_fail_fast_max_bars_options`
 
 Important response fields:
 
@@ -135,9 +166,10 @@ Key settings passed from runner:
 - regime cadence: `regime_detection_minutes`, `regime_refresh_bars`
 - risk/fill: `risk_per_trade_pct`, `max_position_notional_pct`, `max_fill_participation_rate`, `min_fill_ratio`
 - stop-risk policy: `stop_loss_mode`, `fixed_stop_loss_pct`
-- exits: `time_exit_bars`, `partial_take_profit_*`, `adverse_flow_*`
+- exits: `time_exit_bars`, `partial_take_profit_*`, `adverse_flow_*`, `adverse_flow_consistency_threshold`, `adverse_book_pressure_threshold`
 - L2 confirmation: `l2_confirm_enabled`, `l2_min_*`, `l2_lookback_bars`
 - strategy selection: `strategy_selection_mode`, `max_active_strategies`
+- momentum diversification override transport: `momentum_diversification_json` (JSON string; strategy API validates/normalizes into session defaults, including optional `sleeves[]` multi-sleeve definitions with per-sleeve thresholds)
 - reset policy: `cold_start_each_day`
 
 ### `POST /api/session/bar`

@@ -6,7 +6,9 @@ import asyncio
 import copy
 import json
 import random
-from datetime import datetime, timedelta
+import re
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from itertools import product
 from typing import Dict, Any, List, Optional, Union
 from zoneinfo import ZoneInfo
@@ -60,27 +62,519 @@ active_runners: Dict[str, SessionRunner] = {}
 connected_clients: List[WebSocket] = []
 databento_svc = DatabentoService()
 adaptive_tuner_jobs: Dict[str, Dict[str, Any]] = {}
-adaptive_tuner_lock = asyncio.Lock()
+MAX_PARALLEL_ADAPTIVE_TUNERS = 3
+adaptive_tuner_slots = asyncio.Semaphore(MAX_PARALLEL_ADAPTIVE_TUNERS)
+adaptive_tuner_merge_lock = asyncio.Lock()
 STRATEGY_OVERRIDES_PATH = Path(__file__).parent / "strategy_overrides.json"
 AOS_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "aos_config.json"
+POSITIONING_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "positioning_config.json"
+ADAPTIVE_TUNER_AOS_DIR = Path(__file__).parent / "aos_optimization" / ".adaptive_tuner_aos"
+LIVE_TRADER_ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "ibkr-realtime-trader" / "artifacts"
 MARKET_TZ = ZoneInfo("America/New_York")
+LIVE_RUN_ACTIVE_WINDOW_SECONDS = 180
+
+# Strategy family taxonomy for regime-conditional mapping.
+# Keys use lowercase snake_case (matching candidate enabled_strategies).
+STRATEGY_FAMILY_MAP: Dict[str, str] = {
+    "momentum_flow": "trend-follow",
+    "momentum": "trend-follow",
+    "pullback": "trend-follow",
+    "mean_reversion": "reversal",
+    "absorption_reversal": "reversal",
+    "exhaustion_fade": "reversal",
+    "vwap_magnet": "reversal",
+    "volume_profile": "level-based",
+    "gap_liquidity": "level-based",
+    "rotation": "sector",
+    "iceberg_defense": "institutional",
+}
+POSITIONING_CONFIG_KEYS = {
+    "risk_per_trade_pct",
+    "max_position_notional_pct",
+    "max_fill_participation_rate",
+    "min_fill_ratio",
+    "enable_partial_take_profit",
+    "partial_take_profit_rr",
+    "partial_take_profit_fraction",
+    "trailing_activation_pct",
+    "break_even_buffer_pct",
+    "break_even_min_hold_bars",
+    "trailing_enabled_in_choppy",
+    "time_exit_bars",
+    "adverse_flow_exit_enabled",
+    "adverse_flow_threshold",
+    "adverse_flow_min_hold_bars",
+    "adverse_flow_consistency_threshold",
+    "adverse_book_pressure_threshold",
+    "stop_loss_mode",
+    "fixed_stop_loss_pct",
+}
+MOMENTUM_DIVERSIFICATION_MICRO_KEYS = {
+    "TRENDING_UP",
+    "TRENDING_DOWN",
+    "BREAKOUT",
+    "MIXED",
+    "ABSORPTION",
+    "CHOPPY",
+}
+MOMENTUM_DIVERSIFICATION_ROUTE_KEYS = {"impulse", "continuation", "defensive"}
+
+
+def _normalize_momentum_diversification_payload(
+    raw: Any,
+    *,
+    include_sleeves: bool = True,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+
+    payload: Dict[str, Any] = {}
+    bool_keys = {
+        "enabled",
+        "require_l2_coverage",
+        "route_enabled",
+        "route_require_l2_coverage",
+        "fail_fast_exit_enabled",
+    }
+    for key in bool_keys:
+        if key in raw:
+            payload[key] = bool(raw.get(key))
+
+    float_bounds = {
+        "min_flow_score": (0.0, 100.0),
+        "min_directional_consistency": (0.0, 1.0),
+        "min_signed_aggression": (0.0, 1.0),
+        "min_imbalance": (0.0, 1.0),
+        "min_delta_acceleration": (-1_000_000_000.0, 1_000_000_000.0),
+        "min_delta_price_divergence": (-10.0, 10.0),
+        "route_flow_score_impulse": (0.0, 100.0),
+        "fail_fast_signed_aggression_max": (-1.0, 0.0),
+        "fail_fast_book_pressure_max": (-1.0, 0.0),
+        "fail_fast_directional_consistency_max": (0.0, 1.0),
+    }
+    for key, (low, high) in float_bounds.items():
+        if key not in raw:
+            continue
+        try:
+            value = float(raw.get(key))
+        except (TypeError, ValueError):
+            continue
+        payload[key] = max(low, min(high, value))
+
+    if "fail_fast_max_bars" in raw:
+        try:
+            value = int(raw.get("fail_fast_max_bars"))
+        except (TypeError, ValueError):
+            value = 0
+        payload["fail_fast_max_bars"] = max(1, min(30, value))
+
+    if isinstance(raw.get("apply_to_strategies"), list):
+        cleaned = []
+        seen = set()
+        for item in raw.get("apply_to_strategies", []):
+            value = str(item or "").strip().lower()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            cleaned.append(value)
+        if cleaned:
+            payload["apply_to_strategies"] = cleaned
+
+    for list_key in ("allowed_micro_regimes", "blocked_micro_regimes"):
+        if not isinstance(raw.get(list_key), list):
+            continue
+        cleaned = []
+        seen = set()
+        for item in raw.get(list_key, []):
+            value = str(item or "").strip().upper()
+            if value not in MOMENTUM_DIVERSIFICATION_MICRO_KEYS or value in seen:
+                continue
+            seen.add(value)
+            cleaned.append(value)
+        payload[list_key] = cleaned
+
+    route_map = raw.get("route_strategy_map")
+    if isinstance(route_map, dict):
+        cleaned_route_map: Dict[str, List[str]] = {}
+        for route_key in MOMENTUM_DIVERSIFICATION_ROUTE_KEYS:
+            values = route_map.get(route_key, [])
+            if not isinstance(values, list):
+                continue
+            cleaned = []
+            seen = set()
+            for item in values:
+                value = str(item or "").strip().lower()
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                cleaned.append(value)
+            cleaned_route_map[route_key] = cleaned
+        if cleaned_route_map:
+            payload["route_strategy_map"] = cleaned_route_map
+
+    micro_routes = raw.get("micro_regime_routes")
+    if isinstance(micro_routes, dict):
+        cleaned_micro_routes: Dict[str, str] = {}
+        for micro_key in MOMENTUM_DIVERSIFICATION_MICRO_KEYS:
+            route_name = str(micro_routes.get(micro_key, "")).strip().lower()
+            if route_name not in MOMENTUM_DIVERSIFICATION_ROUTE_KEYS:
+                continue
+            cleaned_micro_routes[micro_key] = route_name
+        if cleaned_micro_routes:
+            payload["micro_regime_routes"] = cleaned_micro_routes
+
+    if include_sleeves and isinstance(raw.get("sleeves"), list):
+        cleaned_sleeves: List[Dict[str, Any]] = []
+        seen_ids = set()
+        for idx, item in enumerate(raw.get("sleeves", [])):
+            if not isinstance(item, dict):
+                continue
+            sleeve_payload = _normalize_momentum_diversification_payload(
+                item,
+                include_sleeves=False,
+            )
+            if not sleeve_payload:
+                continue
+            raw_id = str(item.get("sleeve_id") or item.get("name") or f"sleeve_{idx + 1}").strip()
+            normalized_id = raw_id.lower().replace(" ", "_")
+            if not normalized_id:
+                normalized_id = f"sleeve_{idx + 1}"
+            if normalized_id in seen_ids:
+                continue
+            seen_ids.add(normalized_id)
+            sleeve_payload["sleeve_id"] = normalized_id
+
+            if "allocation_weight" in item:
+                try:
+                    weight = float(item.get("allocation_weight"))
+                except (TypeError, ValueError):
+                    weight = 0.0
+                sleeve_payload["allocation_weight"] = max(0.0, min(1.0, weight))
+
+            cleaned_sleeves.append(sleeve_payload)
+            if len(cleaned_sleeves) >= 8:
+                break
+        if cleaned_sleeves:
+            payload["sleeves"] = cleaned_sleeves
+
+    return payload or None
+
+
+def _build_regime_strategy_map_options(
+    enabled: List[str],
+) -> List[Optional[Dict[str, List[str]]]]:
+    """Build regime-conditional strategy map options for v2 search space.
+
+    Returns a list of map candidates.  ``None`` means flat mode (no per-regime
+    mapping, backward compatible).  Each map assigns a strategy list to each
+    macro regime (TRENDING / MIXED / CHOPPY).
+    """
+    trend = [s for s in enabled if STRATEGY_FAMILY_MAP.get(s) == "trend-follow"]
+    reversal = [s for s in enabled if STRATEGY_FAMILY_MAP.get(s) == "reversal"]
+    # Fallback: if a family bucket is empty, use enabled list
+    if not trend:
+        trend = enabled[:1]
+    if not reversal:
+        reversal = enabled[:1]
+    return [
+        None,  # flat mode — backward compatible
+        {"TRENDING": trend, "MIXED": reversal, "CHOPPY": []},
+        {"TRENDING": trend, "MIXED": reversal, "CHOPPY": reversal},
+        {"TRENDING": trend, "MIXED": trend + reversal, "CHOPPY": []},
+    ]
 
 
 def _load_strategy_overrides() -> Dict[str, Any]:
     return load_json_file(STRATEGY_OVERRIDES_PATH, default={})
 
 
-def _load_aos_config() -> Dict[str, Any]:
+def _resolve_aos_config_path(aos_config_path: Optional[Union[str, Path]] = None) -> Path:
+    if aos_config_path is None:
+        return AOS_CONFIG_PATH
+    raw = str(aos_config_path).strip()
+    if not raw:
+        return AOS_CONFIG_PATH
+    path = Path(raw).expanduser()
+    return path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+
+
+def _load_aos_config(aos_config_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     """Load AOS optimization config from JSON file."""
-    return load_json_file(AOS_CONFIG_PATH, default={"version": "1.0.0", "tickers": {}})
+    path = _resolve_aos_config_path(aos_config_path)
+    return load_json_file(path, default={"version": "1.0.0", "tickers": {}})
 
 
-def _save_aos_config(config: Dict[str, Any]) -> bool:
-    """Save AOS optimization config to JSON file."""
-    ok = save_json_file(AOS_CONFIG_PATH, payload=config)
+def _resolve_positioning_config_path(
+    positioning_config_path: Optional[Union[str, Path]] = None,
+) -> Path:
+    if positioning_config_path is None:
+        return POSITIONING_CONFIG_PATH
+    raw = str(positioning_config_path).strip()
+    if not raw:
+        return POSITIONING_CONFIG_PATH
+    path = Path(raw).expanduser()
+    return path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+
+
+def _load_positioning_config(
+    positioning_config_path: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    path = _resolve_positioning_config_path(positioning_config_path)
+    return load_json_file(path, default={"version": "1.0.0", "tickers": {}})
+
+
+def _save_positioning_config(
+    config: Dict[str, Any],
+    positioning_config_path: Optional[Union[str, Path]] = None,
+) -> bool:
+    path = _resolve_positioning_config_path(positioning_config_path)
+    ok = save_json_file(path, payload=config)
     if not ok:
-        logger.error("Failed to save AOS config.")
+        logger.error(f"Failed to save positioning config: {path}")
     return ok
+
+
+def _get_ticker_positioning_config(
+    ticker: str,
+    positioning_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    cfg = positioning_config if isinstance(positioning_config, dict) else _load_positioning_config()
+    tickers = cfg.get("tickers", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(tickers, dict):
+        return {}
+    raw = tickers.get(str(ticker or "").upper(), {})
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _merge_positioning_into_aos_snapshot(
+    aos_config: Dict[str, Any],
+    positioning_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    merged = copy.deepcopy(aos_config if isinstance(aos_config, dict) else {})
+    tickers = merged.get("tickers")
+    if not isinstance(tickers, dict):
+        tickers = {}
+        merged["tickers"] = tickers
+    pos_cfg = positioning_config if isinstance(positioning_config, dict) else _load_positioning_config()
+    pos_tickers = pos_cfg.get("tickers", {}) if isinstance(pos_cfg, dict) else {}
+    if not isinstance(pos_tickers, dict):
+        pos_tickers = {}
+    for ticker, ticker_cfg in list(tickers.items()):
+        if not isinstance(ticker_cfg, dict):
+            continue
+        legacy = {}
+        for key in POSITIONING_CONFIG_KEYS:
+            if key in ticker_cfg:
+                legacy[key] = ticker_cfg.get(key)
+        if legacy:
+            current = pos_tickers.get(ticker, {})
+            if not isinstance(current, dict):
+                current = {}
+            merged_legacy = dict(legacy)
+            merged_legacy.update(current)
+            pos_tickers[ticker] = merged_legacy
+    for ticker, p_cfg in pos_tickers.items():
+        if not isinstance(p_cfg, dict):
+            continue
+        base = tickers.get(ticker, {})
+        if not isinstance(base, dict):
+            base = {}
+        overlay = dict(base)
+        overlay["positioning"] = dict(p_cfg)
+        tickers[ticker] = overlay
+    return merged
+
+
+def _save_aos_config(
+    config: Dict[str, Any],
+    aos_config_path: Optional[Union[str, Path]] = None,
+) -> bool:
+    """Save AOS optimization config to JSON file."""
+    path = _resolve_aos_config_path(aos_config_path)
+    ok = save_json_file(path, payload=config)
+    if not ok:
+        logger.error(f"Failed to save AOS config: {path}")
+    return ok
+
+
+def _create_isolated_tuner_aos_config(
+    job_id: str,
+    *,
+    snapshot: Optional[Dict[str, Any]] = None,
+) -> Path:
+    """Create per-job AOS config snapshot so tuner trials do not collide."""
+    ADAPTIVE_TUNER_AOS_DIR.mkdir(parents=True, exist_ok=True)
+    path = ADAPTIVE_TUNER_AOS_DIR / f"aos_config_{job_id}.json"
+    source = snapshot if isinstance(snapshot, dict) else _load_aos_config()
+    if not _save_aos_config(source, path):
+        raise RuntimeError("Failed to create isolated tuner AOS config snapshot.")
+    return path
+
+
+def _cleanup_isolated_tuner_aos_config(aos_config_path: Optional[Union[str, Path]]) -> None:
+    if aos_config_path is None:
+        return
+    path = _resolve_aos_config_path(aos_config_path)
+    if path == AOS_CONFIG_PATH:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.warning(f"Failed to clean isolated tuner AOS config {path}: {exc}")
+
+
+async def _create_isolated_tuner_aos_config_locked(job_id: str) -> Path:
+    """Take a lock-protected primary snapshot and materialize isolated tuner config."""
+    async with adaptive_tuner_merge_lock:
+        snapshot = _load_aos_config()
+    return _create_isolated_tuner_aos_config(job_id, snapshot=snapshot)
+
+
+def _sanitize_live_run_id(run_id: str) -> str:
+    raw = str(run_id or "").strip()
+    if not raw:
+        raise HTTPException(400, "run_id is required")
+    if not re.fullmatch(r"[A-Za-z0-9._:-]+", raw):
+        raise HTTPException(400, "Invalid run_id format")
+    return raw
+
+
+def _live_artifact_file(stream: str, run_id: str) -> Path:
+    run_id_safe = _sanitize_live_run_id(run_id)
+    return LIVE_TRADER_ARTIFACTS_DIR / f"{stream}_{run_id_safe}.jsonl"
+
+
+def _read_jsonl_tail(path: Path, limit: int = 200) -> List[Dict[str, Any]]:
+    capped = max(1, min(2000, int(limit)))
+    if not path.exists():
+        return []
+
+    rows: deque[Dict[str, Any]] = deque(maxlen=capped)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                text = line.strip()
+                if not text:
+                    continue
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed, dict):
+                    rows.append(parsed)
+    except Exception as exc:
+        logger.warning(f"Failed reading live artifact {path}: {exc}")
+        return []
+    return list(rows)
+
+
+def _parse_utc_iso(value: Any) -> Optional[datetime]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(raw)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _extract_runtime_summary(run_id: str) -> Optional[Dict[str, Any]]:
+    runtime_path = _live_artifact_file("runtime", run_id)
+    if not runtime_path.exists():
+        return None
+    rows = _read_jsonl_tail(runtime_path, limit=20)
+    if not rows:
+        return None
+    latest = rows[-1]
+    if not isinstance(latest, dict):
+        return None
+    summary: Dict[str, Any] = {
+        "event": str(latest.get("event", "runtime_started")).strip() or "runtime_started",
+    }
+    for key in (
+        "ticker",
+        "profile_id",
+        "active_profile_id",
+        "execution_config",
+        "processed_minutes",
+        "decisions",
+        "signals",
+        "orders",
+        "error",
+        "timestamp",
+    ):
+        if key in latest:
+            summary[key] = latest.get(key)
+    return summary
+
+
+def _infer_live_run_status(updated_at: Any, runtime_summary: Optional[Dict[str, Any]]) -> str:
+    event = str((runtime_summary or {}).get("event", "")).strip().lower()
+    if event == "runtime_error":
+        return "error"
+    if event == "runtime_finished":
+        return "finished"
+
+    updated_dt = _parse_utc_iso(updated_at)
+    now_utc = datetime.now(timezone.utc)
+    if updated_dt is not None and (now_utc - updated_dt) <= timedelta(seconds=LIVE_RUN_ACTIVE_WINDOW_SECONDS):
+        return "active"
+    return "idle"
+
+
+def _discover_live_trader_runs(limit: int = 20, active_only: bool = False) -> List[Dict[str, Any]]:
+    if not LIVE_TRADER_ARTIFACTS_DIR.exists():
+        return []
+
+    run_index: Dict[str, Dict[str, Any]] = {}
+    for stream in ("runtime", "decisions", "signals", "orders"):
+        for file in LIVE_TRADER_ARTIFACTS_DIR.glob(f"{stream}_*.jsonl"):
+            run_id = file.stem[len(stream) + 1 :]
+            entry = run_index.setdefault(
+                run_id,
+                {
+                    "run_id": run_id,
+                    "streams": {},
+                    "updated_at": None,
+                },
+            )
+            stat = file.stat()
+            updated = datetime.utcfromtimestamp(stat.st_mtime).isoformat() + "Z"
+            entry["streams"][stream] = {
+                "path": str(file),
+                "size_bytes": int(stat.st_size),
+                "updated_at": updated,
+            }
+            current_updated = entry.get("updated_at")
+            if current_updated is None or updated > current_updated:
+                entry["updated_at"] = updated
+
+    rows_raw = sorted(
+        run_index.values(),
+        key=lambda item: str(item.get("updated_at") or ""),
+        reverse=True,
+    )
+    rows = []
+    for entry in rows_raw:
+        runtime_summary = _extract_runtime_summary(str(entry.get("run_id") or ""))
+        status = _infer_live_run_status(entry.get("updated_at"), runtime_summary)
+        if active_only and status != "active":
+            continue
+        row = dict(entry)
+        row["status"] = status
+        row["runtime"] = runtime_summary
+        row["ticker"] = (
+            str((runtime_summary or {}).get("ticker") or "").strip().upper() or None
+        )
+        rows.append(row)
+
+    capped = max(1, min(200, int(limit)))
+    return rows[:capped]
 
 
 def _normalize_strategy_selection_mode(mode: Any) -> str:
@@ -265,6 +759,65 @@ def _normalize_time_window_sets(
         seen.add(key)
         normalized.append(cleaned)
     return normalized or defaults
+
+
+def _normalize_regime_strategy_map_sets(
+    raw_sets: Optional[List[Optional[Dict[str, List[str]]]]],
+    enabled_strategies: List[str],
+) -> List[Optional[Dict[str, List[str]]]]:
+    """Normalize v2 regime->strategy map sets.
+
+    Always includes ``None`` as the first option (flat mode).
+    """
+    defaults = _build_regime_strategy_map_options(enabled_strategies)
+    if not isinstance(raw_sets, list) or not raw_sets:
+        return defaults
+
+    allowed = {
+        str(name).strip().lower()
+        for name in enabled_strategies
+        if str(name).strip()
+    }
+    normalized: List[Optional[Dict[str, List[str]]]] = []
+    seen_maps = set()
+    has_flat_mode = False
+
+    for raw_map in raw_sets:
+        if raw_map is None:
+            has_flat_mode = True
+            continue
+        if not isinstance(raw_map, dict):
+            continue
+
+        cleaned_map: Dict[str, List[str]] = {}
+        for regime in ("TRENDING", "MIXED", "CHOPPY"):
+            raw_values = raw_map.get(regime, [])
+            cleaned_values: List[str] = []
+            seen_values = set()
+            if isinstance(raw_values, list):
+                for value in raw_values:
+                    strategy_key = str(value).strip().lower()
+                    if not strategy_key or strategy_key in seen_values:
+                        continue
+                    if allowed and strategy_key not in allowed:
+                        continue
+                    seen_values.add(strategy_key)
+                    cleaned_values.append(strategy_key)
+            cleaned_map[regime] = cleaned_values
+
+        if not any(cleaned_map.values()):
+            continue
+
+        map_key = json.dumps(cleaned_map, sort_keys=True)
+        if map_key in seen_maps:
+            continue
+        seen_maps.add(map_key)
+        normalized.append(cleaned_map)
+
+    if not normalized and not has_flat_mode:
+        return defaults
+    # Keep backward-compatible flat mode available in every search.
+    return [None] + normalized
 
 
 def _iter_date_strings(date_from: str, date_to: str) -> List[str]:
@@ -715,18 +1268,26 @@ def _compute_tuner_score_robust(
     cv = std_dev / mean_abs  # coefficient of variation
     consistency = 1.0 / (1.0 + cv)  # 0→1, higher = more consistent
 
-    # — 2. Win-rate quality gate —
-    total_wins = sum(
-        max(0, int(d.get("trades", 0)) * float(d.get("win_rate_pct", 0.0)) / 100.0)
-        for d in valid
+    # — 2. Expectancy-based quality gate —
+    # Uses per-trade PnL as expectancy proxy.  This correctly values strategies
+    # with low win-rate but high risk-reward (e.g. 40% WR / 2.5:1 RR).
+    daily_expectancy = []
+    for d in valid:
+        pnl = float(d.get("pnl_pct", 0.0))
+        trades = max(int(d.get("trades", 0)), 1)
+        daily_expectancy.append(pnl / trades)
+
+    avg_expectancy = (
+        sum(daily_expectancy) / len(daily_expectancy) if daily_expectancy else 0.0
     )
-    overall_wr = total_wins / total_trades if total_trades > 0 else 0.0
-    if overall_wr < 0.40:
-        quality_gate = 0.3  # heavy penalty for low win-rate
-    elif overall_wr < 0.50:
-        quality_gate = 0.7
+    if avg_expectancy < -0.05:
+        quality_gate = 0.3   # losing per trade → heavy penalty
+    elif avg_expectancy < 0.0:
+        quality_gate = 0.6   # marginal negative → moderate penalty
+    elif avg_expectancy < 0.02:
+        quality_gate = 0.85  # marginal positive → slight discount
     else:
-        quality_gate = 1.0
+        quality_gate = 1.0   # clearly positive expectancy → no penalty
 
     # — 3. Positive-day ratio —
     positive_days = sum(1 for p in daily_pnl if p > 0)
@@ -738,7 +1299,7 @@ def _compute_tuner_score_robust(
         day_penalty = 1.0
 
     # — 4. Trade-count normalization —
-    # Penalize excessive trading (>2 trades/day average → diminishing returns)
+    # Penalize excessive trading (>3 trades/day average → diminishing returns)
     avg_trades_per_day = total_trades / n_days
     if avg_trades_per_day > 3.0:
         trade_norm = 1.0 - min(0.3, (avg_trades_per_day - 3.0) * 0.05)
@@ -746,16 +1307,27 @@ def _compute_tuner_score_robust(
         trade_norm = 1.0
 
     # — 5. Min-trade gate —
-    # Too few trades = edge is too rare to be statistically reliable
-    if avg_trades_per_day < 1.5:
-        trade_scarcity = 0.5
+    # Relaxed thresholds: flow-based strategies may legitimately produce
+    # fewer trades while still having positive expectancy.
+    if avg_trades_per_day < 0.5:
+        trade_scarcity = 0.25  # truly no signal → heavy penalty
     elif avg_trades_per_day < 1.0:
-        trade_scarcity = 0.25
+        trade_scarcity = 0.65  # sparse but possible for flow strategies
     else:
-        trade_scarcity = 1.0
+        trade_scarcity = 1.0   # 1+ trade/day is sufficient
+
+    # — 6. L2-confirmation bonus —
+    # Reward profiles where L2 order-flow features confirmed entries.
+    # Capped at +10% to avoid creating a new overfit vector.
+    l2_confirmed_days = sum(
+        1 for d in valid if float(d.get("l2_avg_score", 0.0)) > 0.3
+    )
+    l2_ratio = l2_confirmed_days / n_days if n_days > 0 else 0.0
+    l2_bonus = 1.0 + (l2_ratio * 0.10)  # up to +10%
 
     # — Final robust score —
     score = avg_pnl * consistency * quality_gate * day_penalty * trade_norm * trade_scarcity
+    score *= l2_bonus
     return round(score, 6)
 
 
@@ -903,6 +1475,20 @@ def _extract_profile_runtime_overrides(candidate: Dict[str, Any]) -> Dict[str, A
             runtime["time_exit_bars"] = time_exit_bars
     except (TypeError, ValueError):
         pass
+    threshold_overrides = (
+        ("adverse_flow_consistency", "adverse_flow_consistency_threshold"),
+        ("adverse_book_pressure", "adverse_book_pressure_threshold"),
+    )
+    for candidate_key, runtime_key in threshold_overrides:
+        raw = candidate.get(candidate_key)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            runtime[runtime_key] = value
     for key in (
         "l2_min_delta",
         "l2_min_imbalance",
@@ -918,6 +1504,45 @@ def _extract_profile_runtime_overrides(candidate: Dict[str, Any]) -> Dict[str, A
             runtime[key] = float(raw)
         except (TypeError, ValueError):
             continue
+
+    momentum_runtime = _normalize_momentum_diversification_payload(
+        candidate.get("momentum_diversification")
+    )
+    if not momentum_runtime:
+        raw_momentum: Dict[str, Any] = {}
+        momentum_keys = (
+            "momentum_diversification_enabled",
+            "momentum_route_enabled",
+            "momentum_min_flow_score",
+            "momentum_min_directional_consistency",
+            "momentum_min_signed_aggression",
+            "momentum_min_imbalance",
+            "momentum_min_delta_acceleration",
+            "momentum_min_delta_price_divergence",
+            "momentum_route_flow_score_impulse",
+            "momentum_fail_fast_exit_enabled",
+            "momentum_fail_fast_max_bars",
+        )
+        key_map = {
+            "momentum_diversification_enabled": "enabled",
+            "momentum_route_enabled": "route_enabled",
+            "momentum_min_flow_score": "min_flow_score",
+            "momentum_min_directional_consistency": "min_directional_consistency",
+            "momentum_min_signed_aggression": "min_signed_aggression",
+            "momentum_min_imbalance": "min_imbalance",
+            "momentum_min_delta_acceleration": "min_delta_acceleration",
+            "momentum_min_delta_price_divergence": "min_delta_price_divergence",
+            "momentum_route_flow_score_impulse": "route_flow_score_impulse",
+            "momentum_fail_fast_exit_enabled": "fail_fast_exit_enabled",
+            "momentum_fail_fast_max_bars": "fail_fast_max_bars",
+        }
+        for key in momentum_keys:
+            if key not in candidate:
+                continue
+            raw_momentum[key_map[key]] = candidate.get(key)
+        momentum_runtime = _normalize_momentum_diversification_payload(raw_momentum)
+    if momentum_runtime:
+        runtime["momentum_diversification"] = momentum_runtime
     return runtime
 
 
@@ -1011,13 +1636,28 @@ async def _apply_global_trailing(strategy_api_url: str, trailing_stop_pct: Optio
         logger.warning(f"Global trailing update failed: {e}")
 
 
-async def _apply_aos_optimizations(strategy_api_url: str, ticker: str) -> Dict[str, Any]:
+async def _apply_aos_optimizations(
+    strategy_api_url: str,
+    ticker: str,
+    *,
+    aos_config_path: Optional[str] = None,
+) -> Dict[str, Any]:
     """Apply AOS optimizations (time filter, long_only, params) to strategy API."""
-    aos_config = _load_aos_config()
+    aos_config = _load_aos_config(aos_config_path)
     ticker_config = aos_config.get("tickers", {}).get(ticker.upper(), {})
+    positioning_ticker_config = _get_ticker_positioning_config(ticker)
+    if isinstance(ticker_config, dict):
+        legacy_positioning = {}
+        for key in POSITIONING_CONFIG_KEYS:
+            if key in ticker_config:
+                legacy_positioning[key] = ticker_config.get(key)
+        if legacy_positioning:
+            merged_positioning = dict(legacy_positioning)
+            merged_positioning.update(positioning_ticker_config)
+            positioning_ticker_config = merged_positioning
     
     if not ticker_config:
-        return {}
+        return {"positioning": positioning_ticker_config} if positioning_ticker_config else {}
     
     applied = {}
     combo_applied = await _apply_active_strategy_combo(
@@ -1074,10 +1714,24 @@ async def _apply_aos_optimizations(strategy_api_url: str, ticker: str) -> Dict[s
     except (TypeError, ValueError):
         raw_max_active = 3
     applied["max_active_strategies"] = max(1, min(20, raw_max_active))
+    try:
+        applied["adverse_flow_consistency_threshold"] = float(
+            ticker_config.get("adverse_flow_consistency_threshold", 0.45)
+        )
+    except (TypeError, ValueError):
+        applied["adverse_flow_consistency_threshold"] = 0.45
+    try:
+        applied["adverse_book_pressure_threshold"] = float(
+            ticker_config.get("adverse_book_pressure_threshold", 0.15)
+        )
+    except (TypeError, ValueError):
+        applied["adverse_book_pressure_threshold"] = 0.15
     if isinstance(ticker_config.get("l2"), dict):
         applied["l2"] = ticker_config.get("l2", {})
     if isinstance(ticker_config.get("adaptive"), dict):
         applied["adaptive"] = ticker_config.get("adaptive", {})
+    if positioning_ticker_config:
+        applied["positioning"] = positioning_ticker_config
     
     return applied
 
@@ -1097,10 +1751,16 @@ async def _configure_session(
     enable_partial_take_profit: bool = True,
     partial_take_profit_rr: float = 1.0,
     partial_take_profit_fraction: float = 0.5,
+    trailing_activation_pct: float = 0.15,
+    break_even_buffer_pct: float = 0.03,
+    break_even_min_hold_bars: int = 2,
+    trailing_enabled_in_choppy: bool = False,
     time_exit_bars: int = 40,
     adverse_flow_exit_enabled: bool = True,
     adverse_flow_threshold: float = 0.12,
     adverse_flow_min_hold_bars: int = 3,
+    adverse_flow_consistency_threshold: float = 0.45,
+    adverse_book_pressure_threshold: float = 0.15,
     stop_loss_mode: str = "strategy",
     fixed_stop_loss_pct: float = 0.0,
     l2_confirm_enabled: bool = False,
@@ -1114,6 +1774,7 @@ async def _configure_session(
     cold_start_each_day: bool = False,
     strategy_selection_mode: str = "adaptive_top_n",
     max_active_strategies: int = 3,
+    momentum_diversification_json: Optional[str] = None,
 ) -> None:
     params = {
         "run_id": run_id,
@@ -1129,10 +1790,16 @@ async def _configure_session(
         "enable_partial_take_profit": int(bool(enable_partial_take_profit)),
         "partial_take_profit_rr": float(partial_take_profit_rr),
         "partial_take_profit_fraction": float(partial_take_profit_fraction),
+        "trailing_activation_pct": float(trailing_activation_pct),
+        "break_even_buffer_pct": float(break_even_buffer_pct),
+        "break_even_min_hold_bars": int(break_even_min_hold_bars),
+        "trailing_enabled_in_choppy": int(bool(trailing_enabled_in_choppy)),
         "time_exit_bars": int(time_exit_bars),
         "adverse_flow_exit_enabled": int(bool(adverse_flow_exit_enabled)),
         "adverse_flow_threshold": float(adverse_flow_threshold),
         "adverse_flow_min_hold_bars": int(adverse_flow_min_hold_bars),
+        "adverse_flow_consistency_threshold": float(adverse_flow_consistency_threshold),
+        "adverse_book_pressure_threshold": float(adverse_book_pressure_threshold),
         "stop_loss_mode": str(stop_loss_mode),
         "fixed_stop_loss_pct": float(fixed_stop_loss_pct),
         "l2_confirm_enabled": int(bool(l2_confirm_enabled)),
@@ -1147,6 +1814,8 @@ async def _configure_session(
         "strategy_selection_mode": str(strategy_selection_mode),
         "max_active_strategies": int(max_active_strategies),
     }
+    if momentum_diversification_json:
+        params["momentum_diversification_json"] = str(momentum_diversification_json)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -1448,10 +2117,16 @@ class StartRunRequest(BaseModel):
     enable_partial_take_profit: bool = True
     partial_take_profit_rr: float = 1.0
     partial_take_profit_fraction: float = 0.5
+    trailing_activation_pct: float = 0.15
+    break_even_buffer_pct: float = 0.03
+    break_even_min_hold_bars: int = 2
+    trailing_enabled_in_choppy: bool = False
     time_exit_bars: int = 40
     adverse_flow_exit_enabled: bool = True
     adverse_flow_threshold: float = 0.12
     adverse_flow_min_hold_bars: int = 3
+    adverse_flow_consistency_threshold: float = 0.45
+    adverse_book_pressure_threshold: float = 0.15
     stop_loss_mode: str = "strategy"
     fixed_stop_loss_pct: float = 0.0
     allow_mock_data: bool = False
@@ -1466,15 +2141,19 @@ class StartRunRequest(BaseModel):
     l2_min_signed_aggression: float = 0.0
     strategy_selection_mode: Optional[str] = None
     max_active_strategies: Optional[int] = None
+    momentum_diversification_override: Optional[Dict[str, Any]] = None
     intrabar_execution_recalc_1s: Optional[bool] = None
     cold_start_each_day: bool = False
     comparable_mode: bool = False
+    apply_positioning_config_on_start: bool = True
     # Whether runner should re-apply ticker defaults from strategy_overrides.json
     # during run start. Keep enabled by default for backward compatibility.
     apply_ticker_overrides_on_start: bool = True
     # Checkpoint: warm-start from a previous backtest's learning state
     checkpoint_path: Optional[str] = None
     auto_save_checkpoint: bool = True
+    # Internal override used by adaptive tuner parallel workers.
+    aos_config_path: Optional[str] = None
 
 
 class PlayRequest(BaseModel):
@@ -1536,6 +2215,20 @@ class AdaptiveTunerRequest(BaseModel):
     # Exit parameter dims (v2)
     time_exit_bars_options: Optional[List[int]] = None
     trailing_stop_pct_options: Optional[List[float]] = None
+    # Momentum diversification dims (v2)
+    momentum_diversification_enabled_options: Optional[List[bool]] = None
+    momentum_route_enabled_options: Optional[List[bool]] = None
+    momentum_min_flow_score_options: Optional[List[float]] = None
+    momentum_min_directional_consistency_options: Optional[List[float]] = None
+    momentum_min_signed_aggression_options: Optional[List[float]] = None
+    momentum_min_imbalance_options: Optional[List[float]] = None
+    momentum_min_delta_acceleration_options: Optional[List[float]] = None
+    momentum_min_delta_price_divergence_options: Optional[List[float]] = None
+    momentum_route_flow_score_impulse_options: Optional[List[float]] = None
+    momentum_fail_fast_exit_enabled_options: Optional[List[bool]] = None
+    momentum_fail_fast_max_bars_options: Optional[List[int]] = None
+    # Regime-conditional strategy maps: each map assigns strategies per macro regime
+    regime_strategy_map_sets: Optional[List[Optional[Dict[str, List[str]]]]] = None
     # Neighborhood search: half candidates are baseline perturbations
     neighborhood_search: bool = False
     # V2 analysis options
@@ -1713,6 +2406,7 @@ async def _evaluate_adaptive_tuner_candidate(
     trial_index: int,
     candidate: Dict[str, Any],
     request: AdaptiveTunerRequest,
+    aos_config_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     total_pnl_pct = 0.0
     total_pnl_dollars = 0.0
@@ -1727,9 +2421,11 @@ async def _evaluate_adaptive_tuner_candidate(
             ticker=ticker,
             date=date,
             strategy_api_url=request.strategy_api_url,
+            aos_config_path=aos_config_path,
             allow_mock_data=bool(request.allow_mock_data),
             comparable_mode=bool(request.comparable_mode),
             apply_ticker_overrides_on_start=False,
+            apply_positioning_config_on_start=False,
             l2_confirm_enabled=bool(request.l2_confirm_enabled),
             l2_only=bool(request.l2_only),
             intrabar_execution_recalc_1s=False,
@@ -1831,6 +2527,14 @@ def _build_v2_search_space(
     """Build multi-dimensional search space from request options + AOS ticker config defaults."""
     # Extract existing ticker config values for defaults
     l2_cfg = ticker_config.get("l2", {}) if isinstance(ticker_config.get("l2"), dict) else {}
+    adaptive_cfg = (
+        ticker_config.get("adaptive", {})
+        if isinstance(ticker_config.get("adaptive"), dict)
+        else {}
+    )
+    momentum_cfg = _normalize_momentum_diversification_payload(
+        adaptive_cfg.get("momentum_diversification")
+    ) or {}
     existing_regime_filter = ticker_config.get("regime_filter", [])
     if not isinstance(existing_regime_filter, list):
         existing_regime_filter = ["TRENDING", "MIXED", "CHOPPY"]
@@ -1945,6 +2649,72 @@ def _build_v2_search_space(
             min_value=0.1,
             max_value=3.0,
         ),
+        # Momentum diversification dims
+        "momentum_diversification_enabled": _normalize_bool_options(
+            request.momentum_diversification_enabled_options,
+            default=[True, False],
+        ),
+        "momentum_route_enabled": _normalize_bool_options(
+            request.momentum_route_enabled_options,
+            default=[True, False],
+        ),
+        "momentum_min_flow_score": _normalize_float_options(
+            request.momentum_min_flow_score_options,
+            default=[float(momentum_cfg.get("min_flow_score", 52.0)), 60.0, 68.0],
+            min_value=0.0,
+            max_value=100.0,
+        ),
+        "momentum_min_directional_consistency": _normalize_float_options(
+            request.momentum_min_directional_consistency_options,
+            default=[float(momentum_cfg.get("min_directional_consistency", 0.35)), 0.45, 0.55],
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "momentum_min_signed_aggression": _normalize_float_options(
+            request.momentum_min_signed_aggression_options,
+            default=[float(momentum_cfg.get("min_signed_aggression", 0.03)), 0.06, 0.10],
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "momentum_min_imbalance": _normalize_float_options(
+            request.momentum_min_imbalance_options,
+            default=[float(momentum_cfg.get("min_imbalance", 0.02)), 0.06, 0.12],
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "momentum_min_delta_acceleration": _normalize_float_options(
+            request.momentum_min_delta_acceleration_options,
+            default=[float(momentum_cfg.get("min_delta_acceleration", 0.0)), 500.0, 1500.0],
+            min_value=-1_000_000.0,
+            max_value=1_000_000.0,
+        ),
+        "momentum_min_delta_price_divergence": _normalize_float_options(
+            request.momentum_min_delta_price_divergence_options,
+            default=[float(momentum_cfg.get("min_delta_price_divergence", -0.45)), -0.20, 0.0],
+            min_value=-10.0,
+            max_value=10.0,
+        ),
+        "momentum_route_flow_score_impulse": _normalize_float_options(
+            request.momentum_route_flow_score_impulse_options,
+            default=[float(momentum_cfg.get("route_flow_score_impulse", 62.0)), 68.0, 74.0],
+            min_value=0.0,
+            max_value=100.0,
+        ),
+        "momentum_fail_fast_exit_enabled": _normalize_bool_options(
+            request.momentum_fail_fast_exit_enabled_options,
+            default=[True, False],
+        ),
+        "momentum_fail_fast_max_bars": _normalize_int_options(
+            request.momentum_fail_fast_max_bars_options,
+            default=[int(momentum_cfg.get("fail_fast_max_bars", 3)), 4, 6],
+            min_value=1,
+            max_value=30,
+        ),
+        # Regime-conditional strategy map dimension
+        "regime_strategy_maps": _normalize_regime_strategy_map_sets(
+            request.regime_strategy_map_sets,
+            enabled_strategies,
+        ),
     }
 
 
@@ -1969,8 +2739,23 @@ def _v2_candidate_key(candidate: Dict[str, Any]) -> tuple:
         candidate.get("adverse_book_pressure"),
         candidate.get("time_exit_bars"),
         candidate.get("trailing_stop_pct"),
+        candidate.get("momentum_diversification_enabled"),
+        candidate.get("momentum_route_enabled"),
+        candidate.get("momentum_min_flow_score"),
+        candidate.get("momentum_min_directional_consistency"),
+        candidate.get("momentum_min_signed_aggression"),
+        candidate.get("momentum_min_imbalance"),
+        candidate.get("momentum_min_delta_acceleration"),
+        candidate.get("momentum_min_delta_price_divergence"),
+        candidate.get("momentum_route_flow_score_impulse"),
+        candidate.get("momentum_fail_fast_exit_enabled"),
+        candidate.get("momentum_fail_fast_max_bars"),
         _normalize_strategy_selection_mode(candidate.get("strategy_selection_mode")),
         candidate.get("flow_bias_enabled"),
+        # Regime-conditional map (hashable serialization)
+        json.dumps(candidate.get("regime_strategy_map"), sort_keys=True)
+        if candidate.get("regime_strategy_map") is not None
+        else None,
     )
 
 
@@ -2002,8 +2787,14 @@ def _build_v2_random_candidates(
         "min_confidence", "atr_stop_multiplier", "rr_ratio",
         "adverse_flow_consistency", "adverse_book_pressure",
         "time_exit_bars", "trailing_stop_pct",
+        "momentum_diversification_enabled", "momentum_route_enabled",
+        "momentum_min_flow_score", "momentum_min_directional_consistency",
+        "momentum_min_signed_aggression", "momentum_min_imbalance",
+        "momentum_min_delta_acceleration", "momentum_min_delta_price_divergence",
+        "momentum_route_flow_score_impulse", "momentum_fail_fast_exit_enabled",
+        "momentum_fail_fast_max_bars",
     ]
-    list_dims = ["strategy_sets", "regime_filter_sets", "time_window_sets"]
+    list_dims = ["strategy_sets", "regime_filter_sets", "time_window_sets", "regime_strategy_maps"]
 
     neighbor_attempts = 0
     while len(candidates) < n_neighborhood and neighbor_attempts < max_attempts:
@@ -2020,6 +2811,8 @@ def _build_v2_random_candidates(
                 candidate["enabled_strategies"] = list(rng.choice(search_space["strategy_sets"]))
             elif dim == "regime_filter_sets":
                 candidate["regime_filter"] = list(rng.choice(search_space["regime_filter_sets"]))
+            elif dim == "regime_strategy_maps":
+                candidate["regime_strategy_map"] = rng.choice(search_space["regime_strategy_maps"])
             elif dim == "time_window_sets":
                 candidate["trading_hours"] = list(rng.choice(search_space["time_window_sets"]))
             elif dim in search_space:
@@ -2068,6 +2861,36 @@ def _build_v2_random_candidates(
             # V2 exit dims
             "time_exit_bars": rng.choice(search_space["time_exit_bars"]),
             "trailing_stop_pct": rng.choice(search_space["trailing_stop_pct"]),
+            # V2 momentum diversification dims
+            "momentum_diversification_enabled": rng.choice(
+                search_space["momentum_diversification_enabled"]
+            ),
+            "momentum_route_enabled": rng.choice(search_space["momentum_route_enabled"]),
+            "momentum_min_flow_score": rng.choice(search_space["momentum_min_flow_score"]),
+            "momentum_min_directional_consistency": rng.choice(
+                search_space["momentum_min_directional_consistency"]
+            ),
+            "momentum_min_signed_aggression": rng.choice(
+                search_space["momentum_min_signed_aggression"]
+            ),
+            "momentum_min_imbalance": rng.choice(search_space["momentum_min_imbalance"]),
+            "momentum_min_delta_acceleration": rng.choice(
+                search_space["momentum_min_delta_acceleration"]
+            ),
+            "momentum_min_delta_price_divergence": rng.choice(
+                search_space["momentum_min_delta_price_divergence"]
+            ),
+            "momentum_route_flow_score_impulse": rng.choice(
+                search_space["momentum_route_flow_score_impulse"]
+            ),
+            "momentum_fail_fast_exit_enabled": rng.choice(
+                search_space["momentum_fail_fast_exit_enabled"]
+            ),
+            "momentum_fail_fast_max_bars": rng.choice(
+                search_space["momentum_fail_fast_max_bars"]
+            ),
+            # V2 regime-conditional strategy map
+            "regime_strategy_map": rng.choice(search_space.get("regime_strategy_maps", [None])),
         }
         key = _v2_candidate_key(candidate)
         if key in seen:
@@ -2108,6 +2931,21 @@ def _build_v2_baseline_candidate(
         "adverse_book_pressure": _first("adverse_book_pressure"),
         "time_exit_bars": _first("time_exit_bars"),
         "trailing_stop_pct": _first("trailing_stop_pct"),
+        "momentum_diversification_enabled": _first("momentum_diversification_enabled"),
+        "momentum_route_enabled": _first("momentum_route_enabled"),
+        "momentum_min_flow_score": _first("momentum_min_flow_score"),
+        "momentum_min_directional_consistency": _first("momentum_min_directional_consistency"),
+        "momentum_min_signed_aggression": _first("momentum_min_signed_aggression"),
+        "momentum_min_imbalance": _first("momentum_min_imbalance"),
+        "momentum_min_delta_acceleration": _first("momentum_min_delta_acceleration"),
+        "momentum_min_delta_price_divergence": _first("momentum_min_delta_price_divergence"),
+        "momentum_route_flow_score_impulse": _first("momentum_route_flow_score_impulse"),
+        "momentum_fail_fast_exit_enabled": _first("momentum_fail_fast_exit_enabled"),
+        "momentum_fail_fast_max_bars": _first("momentum_fail_fast_max_bars"),
+        # Regime-conditional map: first option is None (flat/backward compat)
+        "regime_strategy_map": search_space.get("regime_strategy_maps", [None])[0]
+        if search_space.get("regime_strategy_maps")
+        else None,
     }
 
 
@@ -2211,6 +3049,81 @@ def _build_v2_candidate_config(
         overrides["trailing_stop_pct"] = float(ts_pct)
         cfg["v2_strategy_param_overrides"] = overrides
 
+    # -- Momentum diversification dimensions --
+    momentum_key_map = {
+        "momentum_diversification_enabled": "enabled",
+        "momentum_route_enabled": "route_enabled",
+        "momentum_min_flow_score": "min_flow_score",
+        "momentum_min_directional_consistency": "min_directional_consistency",
+        "momentum_min_signed_aggression": "min_signed_aggression",
+        "momentum_min_imbalance": "min_imbalance",
+        "momentum_min_delta_acceleration": "min_delta_acceleration",
+        "momentum_min_delta_price_divergence": "min_delta_price_divergence",
+        "momentum_route_flow_score_impulse": "route_flow_score_impulse",
+        "momentum_fail_fast_exit_enabled": "fail_fast_exit_enabled",
+        "momentum_fail_fast_max_bars": "fail_fast_max_bars",
+    }
+    raw_momentum_cfg: Dict[str, Any] = {}
+    for candidate_key, cfg_key in momentum_key_map.items():
+        if candidate_key not in candidate:
+            continue
+        raw_momentum_cfg[cfg_key] = candidate.get(candidate_key)
+
+    direct_momentum_cfg = _normalize_momentum_diversification_payload(
+        candidate.get("momentum_diversification")
+    )
+    if direct_momentum_cfg:
+        raw_momentum_cfg.update(direct_momentum_cfg)
+
+    normalized_momentum_cfg = _normalize_momentum_diversification_payload(raw_momentum_cfg)
+    if normalized_momentum_cfg:
+        adaptive_cfg = cfg.get("adaptive", {})
+        if not isinstance(adaptive_cfg, dict):
+            adaptive_cfg = {}
+        existing_momentum = _normalize_momentum_diversification_payload(
+            adaptive_cfg.get("momentum_diversification")
+        ) or {}
+        existing_momentum.update(normalized_momentum_cfg)
+        adaptive_cfg["momentum_diversification"] = existing_momentum
+        cfg["adaptive"] = adaptive_cfg
+        cfg["momentum_diversification"] = existing_momentum
+
+    # -- Regime-conditional strategy map --
+    # Strategy engine consumes this under adaptive.regime_preferences.
+    # Keep a top-level copy for diagnostics/UI compatibility.
+    if "regime_strategy_map" in candidate:
+        regime_map = candidate.get("regime_strategy_map")
+        adaptive_cfg = cfg.get("adaptive", {})
+        if not isinstance(adaptive_cfg, dict):
+            adaptive_cfg = {}
+        if isinstance(regime_map, dict):
+            normalized_map: Dict[str, List[str]] = {}
+            for regime in ("TRENDING", "MIXED", "CHOPPY"):
+                raw_values = regime_map.get(regime, [])
+                cleaned_values: List[str] = []
+                seen_values = set()
+                if isinstance(raw_values, list):
+                    for value in raw_values:
+                        strategy_key = str(value).strip().lower()
+                        if not strategy_key or strategy_key in seen_values:
+                            continue
+                        seen_values.add(strategy_key)
+                        cleaned_values.append(strategy_key)
+                normalized_map[regime] = cleaned_values
+            adaptive_cfg["regime_preferences"] = normalized_map
+            cfg["regime_strategy_map"] = normalized_map
+        else:
+            adaptive_cfg.pop("regime_preferences", None)
+            cfg.pop("regime_strategy_map", None)
+        cfg["adaptive"] = adaptive_cfg
+
+    return cfg
+
+
+def _prepare_tuner_trial_ticker_config(ticker_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Isolate trial settings from currently active adaptive tuner profile."""
+    cfg = copy.deepcopy(ticker_cfg)
+    cfg["active_adaptive_tuner_profile_id"] = ""
     return cfg
 
 
@@ -2222,6 +3135,7 @@ async def _evaluate_v2_candidate(
     trial_index: int,
     candidate: Dict[str, Any],
     request: AdaptiveTunerRequest,
+    aos_config_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Evaluate a v2 candidate — same as v1 but with enriched metrics and v2 config injection."""
     total_pnl_pct = 0.0
@@ -2238,9 +3152,11 @@ async def _evaluate_v2_candidate(
             ticker=ticker,
             date=date,
             strategy_api_url=request.strategy_api_url,
+            aos_config_path=aos_config_path,
             allow_mock_data=bool(request.allow_mock_data),
             comparable_mode=bool(request.comparable_mode),
             apply_ticker_overrides_on_start=False,
+            apply_positioning_config_on_start=False,
             l2_confirm_enabled=bool(request.l2_confirm_enabled),
             l2_only=bool(request.l2_only),
             intrabar_execution_recalc_1s=False,
@@ -2300,6 +3216,8 @@ async def _evaluate_v2_candidate(
                 "pnl_dollars": pnl_dollars,
                 "win_rate_pct": win_rate_pct,
                 "trades": trades,
+                "regime_breakdown": summary.get("regime_trade_breakdown", {}),
+                "l2_avg_score": float(summary.get("l2_avg_confirmation_score", 0.0) or 0.0),
             })
         except HTTPException as exc:
             day_results.append({
@@ -2485,24 +3403,11 @@ def _analyze_vectors(
 
     # --- Strategy correlation / diversity scoring ---
     # Group strategies into families to detect correlated vs diversified vectors.
-    STRATEGY_FAMILY = {
-        "MomentumFlow": "trend-follow",
-        "Momentum": "trend-follow",
-        "Pullback": "trend-follow",
-        "MeanReversion": "reversal",
-        "AbsorptionReversal": "reversal",
-        "ExhaustionFade": "reversal",
-        "VWAPMagnet": "reversal",
-        "VolumeProfile": "level-based",
-        "GapLiquidity": "level-based",
-        "Rotation": "sector",
-        "IcebergDefense": "institutional",
-    }
     for vec in surprising:
         strategies = vec.get("candidate", {}).get("enabled_strategies", [])
         families = set()
         for s in strategies:
-            fam = STRATEGY_FAMILY.get(s)
+            fam = STRATEGY_FAMILY_MAP.get(s) or STRATEGY_FAMILY_MAP.get(s.lower())
             if fam:
                 families.add(fam)
         n_families = len(families)
@@ -2543,6 +3448,78 @@ def _analyze_vectors(
     }
 
 
+async def _persist_tuner_result_to_primary_aos(
+    *,
+    ticker: str,
+    request: "AdaptiveTunerRequest",
+    method_used: str,
+    dates: List[str],
+    best_trial: Optional[Dict[str, Any]],
+    vector_analysis: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Merge tuner profile into primary aos_config.json under a short critical section.
+
+    Trial-level candidate writes happen against isolated per-job configs, so only
+    this final merge touches the shared config.
+    """
+    async with adaptive_tuner_merge_lock:
+        final_config = _load_aos_config()
+        if "tickers" not in final_config or not isinstance(final_config.get("tickers"), dict):
+            final_config["tickers"] = {}
+
+        updated_ticker_cfg = copy.deepcopy(final_config["tickers"].get(ticker, {}))
+        saved_profile = None
+        persist_best_applied = False
+
+        if isinstance(best_trial, dict):
+            saved_profile = _build_tuner_profile_entry(
+                ticker=ticker,
+                request=request,
+                method_used=method_used,
+                dates=dates,
+                best_trial=best_trial,
+            )
+            if vector_analysis:
+                saved_profile["vector_analysis"] = vector_analysis
+
+            existing_profiles = _normalize_tuner_profiles(
+                updated_ticker_cfg.get("adaptive_tuner_profiles", [])
+            )
+            existing_profiles.insert(0, saved_profile)
+            updated_ticker_cfg["adaptive_tuner_profiles"] = existing_profiles[:30]
+
+            if request.persist_best:
+                best_candidate = best_trial.get("candidate", {})
+                if int(request.adaptive_version or 1) == 2:
+                    updated_ticker_cfg = _build_v2_candidate_config(
+                        updated_ticker_cfg,
+                        best_candidate if isinstance(best_candidate, dict) else {},
+                        request.adaptive_version,
+                    )
+                else:
+                    updated_ticker_cfg = _build_adaptive_candidate_config(
+                        updated_ticker_cfg,
+                        best_candidate if isinstance(best_candidate, dict) else {},
+                        request.adaptive_version,
+                    )
+                updated_ticker_cfg["active_adaptive_tuner_profile_id"] = saved_profile["profile_id"]
+                persist_best_applied = True
+            else:
+                updated_ticker_cfg["active_adaptive_tuner_profile_id"] = str(
+                    updated_ticker_cfg.get("active_adaptive_tuner_profile_id", "")
+                ).strip() or saved_profile["profile_id"]
+
+        final_config["tickers"][ticker] = updated_ticker_cfg
+        if not _save_aos_config(final_config):
+            raise RuntimeError("Failed to save final AOS tuner result")
+
+    return {
+        "saved_profile": saved_profile,
+        "persist_best_applied": persist_best_applied,
+    }
+
+
 async def _run_v2_adaptive_tuner_job(
     job_id: str,
     request: AdaptiveTunerRequest,
@@ -2562,54 +3539,68 @@ async def _run_v2_adaptive_tuner_job(
         max_trials=400,
     )
     n_trials = trial_budget["effective"]
-
-    async with adaptive_tuner_lock:
-        original_config = _load_aos_config()
-        original_ticker_config = copy.deepcopy(
-            original_config.get("tickers", {}).get(ticker, {})
-        )
-        cfg_work = copy.deepcopy(original_config)
-        if "tickers" not in cfg_work or not isinstance(cfg_work.get("tickers"), dict):
-            cfg_work["tickers"] = {}
-
-        search_space = _build_v2_search_space(request, original_ticker_config)
-
-        # V2 only supports random and optuna (grid is infeasible)
-        method = str(request.method or "random").strip().lower()
-        if method == "grid":
-            method = "random"
-            job.setdefault("notes", []).append(
-                "Grid search is not feasible for v2 multi-dimensional space; using random sampling."
-            )
-        method_used = method
-
-        job["started_at"] = datetime.utcnow().isoformat() + "Z"
-        job["status"] = "running"
-        job["progress"] = {"completed_trials": 0, "total_trials": 0, "method": method}
-        job["trials"] = []
-        job["best_trial"] = None
-        job["trial_budget"] = trial_budget
-        job["search_space_summary"] = {
-            "strategy_sets_count": len(search_space.get("strategy_sets", [])),
-            "l2_options": {
-                "min_delta": len(search_space.get("l2_min_delta", [])),
-                "min_imbalance": len(search_space.get("l2_min_imbalance", [])),
-                "min_signed_aggression": len(search_space.get("l2_min_signed_aggression", [])),
-            },
-            "regime_filter_sets_count": len(search_space.get("regime_filter_sets", [])),
-            "evidence_options": {
-                "base_threshold": len(search_space.get("base_threshold", [])),
-                "min_confirming_sources": len(search_space.get("min_confirming_sources", [])),
-            },
-        }
-        if bool(request.quick_mode) and trial_budget["boost"] > 1:
-            job.setdefault("notes", []).append(
-                "Quick mode trial boost applied: "
-                f"{trial_budget['requested']} -> {trial_budget['effective']} "
-                f"(x{trial_budget['boost']})."
-            )
-
+    isolated_aos_config_path: Optional[Path] = None
+    async with adaptive_tuner_slots:
         try:
+            isolated_aos_config_path = await _create_isolated_tuner_aos_config_locked(job_id)
+            isolated_aos_config_str = str(isolated_aos_config_path)
+            job["isolated_aos_config_path"] = isolated_aos_config_str
+            job["max_parallel_jobs"] = MAX_PARALLEL_ADAPTIVE_TUNERS
+
+            original_config = _load_aos_config(isolated_aos_config_str)
+            original_ticker_config = copy.deepcopy(
+                original_config.get("tickers", {}).get(ticker, {})
+            )
+            cfg_work = copy.deepcopy(original_config)
+            if "tickers" not in cfg_work or not isinstance(cfg_work.get("tickers"), dict):
+                cfg_work["tickers"] = {}
+
+            search_space = _build_v2_search_space(request, original_ticker_config)
+
+            # Anti-overfit: warn when too few days for robust scoring
+            score_metric = str(request.score_metric or "").strip().lower()
+            if score_metric == "robust" and len(dates) < 10:
+                job.setdefault("notes", []).append(
+                    f"WARNING: Only {len(dates)} days available for robust scoring. "
+                    "Minimum 10-15 days recommended for statistical significance. "
+                    "Results may be unreliable."
+                )
+
+            # V2 only supports random and optuna (grid is infeasible)
+            method = str(request.method or "random").strip().lower()
+            if method == "grid":
+                method = "random"
+                job.setdefault("notes", []).append(
+                    "Grid search is not feasible for v2 multi-dimensional space; using random sampling."
+                )
+            method_used = method
+
+            job["started_at"] = datetime.utcnow().isoformat() + "Z"
+            job["status"] = "running"
+            job["progress"] = {"completed_trials": 0, "total_trials": 0, "method": method}
+            job["trials"] = []
+            job["best_trial"] = None
+            job["trial_budget"] = trial_budget
+            job["search_space_summary"] = {
+                "strategy_sets_count": len(search_space.get("strategy_sets", [])),
+                "l2_options": {
+                    "min_delta": len(search_space.get("l2_min_delta", [])),
+                    "min_imbalance": len(search_space.get("l2_min_imbalance", [])),
+                    "min_signed_aggression": len(search_space.get("l2_min_signed_aggression", [])),
+                },
+                "regime_filter_sets_count": len(search_space.get("regime_filter_sets", [])),
+                "evidence_options": {
+                    "base_threshold": len(search_space.get("base_threshold", [])),
+                    "min_confirming_sources": len(search_space.get("min_confirming_sources", [])),
+                },
+            }
+            if bool(request.quick_mode) and trial_budget["boost"] > 1:
+                job.setdefault("notes", []).append(
+                    "Quick mode trial boost applied: "
+                    f"{trial_budget['requested']} -> {trial_budget['effective']} "
+                    f"(x{trial_budget['boost']})."
+                )
+
             optuna_module = None
             if method == "optuna":
                 try:
@@ -2634,8 +3625,10 @@ async def _run_v2_adaptive_tuner_job(
                     next_ticker_cfg = _build_v2_candidate_config(
                         original_ticker_config, candidate, request.adaptive_version
                     )
-                    cfg_work["tickers"][ticker] = next_ticker_cfg
-                    if not _save_aos_config(cfg_work):
+                    cfg_work["tickers"][ticker] = _prepare_tuner_trial_ticker_config(
+                        next_ticker_cfg
+                    )
+                    if not _save_aos_config(cfg_work, isolated_aos_config_str):
                         raise RuntimeError("Failed to save temporary AOS config for v2 tuner trial")
 
                     result = await _evaluate_v2_candidate(
@@ -2645,6 +3638,7 @@ async def _run_v2_adaptive_tuner_job(
                         trial_index=idx,
                         candidate=candidate,
                         request=request,
+                        aos_config_path=isolated_aos_config_str,
                     )
                     job["trials"].append(result)
                     current_best = job.get("best_trial")
@@ -2665,6 +3659,10 @@ async def _run_v2_adaptive_tuner_job(
                     trial = study.ask()
                     ss_idx = trial.suggest_int("strategy_set_idx", 0, len(search_space["strategy_sets"]) - 1)
                     rf_idx = trial.suggest_int("regime_filter_idx", 0, len(search_space["regime_filter_sets"]) - 1)
+                    tw_idx = trial.suggest_int("time_window_idx", 0, len(search_space["time_window_sets"]) - 1)
+                    rsm_idx = trial.suggest_int(
+                        "regime_strategy_map_idx", 0, len(search_space["regime_strategy_maps"]) - 1
+                    )
                     candidate = {
                         "strategy_selection_mode": trial.suggest_categorical(
                             "strategy_selection_mode", search_space["strategy_selection_mode"]
@@ -2712,13 +3710,38 @@ async def _run_v2_adaptive_tuner_job(
                             min(search_space["min_confirming_sources"]),
                             max(search_space["min_confirming_sources"]),
                         ),
+                        "min_confidence": trial.suggest_categorical(
+                            "min_confidence", search_space["min_confidence"]
+                        ),
+                        "atr_stop_multiplier": trial.suggest_categorical(
+                            "atr_stop_multiplier", search_space["atr_stop_multiplier"]
+                        ),
+                        "rr_ratio": trial.suggest_categorical(
+                            "rr_ratio", search_space["rr_ratio"]
+                        ),
+                        "trading_hours": list(search_space["time_window_sets"][tw_idx]),
+                        "adverse_flow_consistency": trial.suggest_categorical(
+                            "adverse_flow_consistency", search_space["adverse_flow_consistency"]
+                        ),
+                        "adverse_book_pressure": trial.suggest_categorical(
+                            "adverse_book_pressure", search_space["adverse_book_pressure"]
+                        ),
+                        "time_exit_bars": trial.suggest_categorical(
+                            "time_exit_bars", search_space["time_exit_bars"]
+                        ),
+                        "trailing_stop_pct": trial.suggest_categorical(
+                            "trailing_stop_pct", search_space["trailing_stop_pct"]
+                        ),
+                        "regime_strategy_map": search_space["regime_strategy_maps"][rsm_idx],
                     }
 
                     next_ticker_cfg = _build_v2_candidate_config(
                         original_ticker_config, candidate, request.adaptive_version
                     )
-                    cfg_work["tickers"][ticker] = next_ticker_cfg
-                    if not _save_aos_config(cfg_work):
+                    cfg_work["tickers"][ticker] = _prepare_tuner_trial_ticker_config(
+                        next_ticker_cfg
+                    )
+                    if not _save_aos_config(cfg_work, isolated_aos_config_str):
                         raise RuntimeError("Failed to save temporary AOS config for v2 tuner trial")
 
                     result = await _evaluate_v2_candidate(
@@ -2728,6 +3751,7 @@ async def _run_v2_adaptive_tuner_job(
                         trial_index=idx,
                         candidate=candidate,
                         request=request,
+                        aos_config_path=isolated_aos_config_str,
                     )
                     score = float(result["score"])
                     study.tell(trial, score)
@@ -2749,51 +3773,21 @@ async def _run_v2_adaptive_tuner_job(
                 )
                 job["vector_analysis"] = vector_analysis
 
-            # --- Save results ---
+            # --- Save final merged result ---
             best_trial = job.get("best_trial")
-            final_config = copy.deepcopy(original_config)
-            if "tickers" not in final_config or not isinstance(final_config.get("tickers"), dict):
-                final_config["tickers"] = {}
-
-            updated_ticker_cfg = copy.deepcopy(original_ticker_config)
-            saved_profile = None
-            if isinstance(best_trial, dict):
-                saved_profile = _build_tuner_profile_entry(
-                    ticker=ticker,
-                    request=request,
-                    method_used=method_used,
-                    dates=dates,
-                    best_trial=best_trial,
+            persist_result = await _persist_tuner_result_to_primary_aos(
+                ticker=ticker,
+                request=request,
+                method_used=method_used,
+                dates=dates,
+                best_trial=best_trial if isinstance(best_trial, dict) else None,
+                vector_analysis=vector_analysis if vector_analysis else None,
+            )
+            saved_profile = persist_result.get("saved_profile")
+            if persist_result.get("persist_best_applied"):
+                job.setdefault("notes", []).append(
+                    "Best v2 vector candidate was persisted to aos_config.json."
                 )
-                # Attach vector analysis to the profile
-                if vector_analysis:
-                    saved_profile["vector_analysis"] = vector_analysis
-
-                existing_profiles = _normalize_tuner_profiles(
-                    updated_ticker_cfg.get("adaptive_tuner_profiles", [])
-                )
-                existing_profiles.insert(0, saved_profile)
-                updated_ticker_cfg["adaptive_tuner_profiles"] = existing_profiles[:30]
-
-                if request.persist_best:
-                    best_candidate = best_trial.get("candidate", {})
-                    updated_ticker_cfg = _build_v2_candidate_config(
-                        updated_ticker_cfg,
-                        best_candidate if isinstance(best_candidate, dict) else {},
-                        request.adaptive_version,
-                    )
-                    updated_ticker_cfg["active_adaptive_tuner_profile_id"] = saved_profile["profile_id"]
-                    job.setdefault("notes", []).append(
-                        "Best v2 vector candidate was persisted to aos_config.json."
-                    )
-                elif saved_profile:
-                    updated_ticker_cfg["active_adaptive_tuner_profile_id"] = str(
-                        updated_ticker_cfg.get("active_adaptive_tuner_profile_id", "")
-                    ).strip() or saved_profile["profile_id"]
-
-            final_config["tickers"][ticker] = updated_ticker_cfg
-            if not _save_aos_config(final_config):
-                raise RuntimeError("Failed to save final v2 AOS tuner result")
 
             job["status"] = "completed"
             job["method_used"] = method_used
@@ -2819,16 +3813,17 @@ async def _run_v2_adaptive_tuner_job(
                 "requested_trials": trial_budget["requested"],
                 "effective_trial_budget": trial_budget["effective"],
             }
-            if saved_profile:
+            if isinstance(saved_profile, dict):
                 job["saved_profile"] = {
                     "profile_id": saved_profile.get("profile_id"),
                     "created_at": saved_profile.get("created_at"),
                 }
         except Exception as exc:
-            _save_aos_config(original_config)
             job["status"] = "failed"
             job["error"] = str(exc)
             job["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        finally:
+            _cleanup_isolated_tuner_aos_config(isolated_aos_config_path)
 
 
 async def _run_adaptive_tuner_job(
@@ -2853,30 +3848,35 @@ async def _run_adaptive_tuner_job(
         max_trials=400,
     )
     n_trials = trial_budget["effective"]
-
-    async with adaptive_tuner_lock:
-        original_config = _load_aos_config()
-        original_ticker_config = copy.deepcopy(
-            original_config.get("tickers", {}).get(ticker, {})
-        )
-        cfg_work = copy.deepcopy(original_config)
-        if "tickers" not in cfg_work or not isinstance(cfg_work.get("tickers"), dict):
-            cfg_work["tickers"] = {}
-
-        job["started_at"] = datetime.utcnow().isoformat() + "Z"
-        job["status"] = "running"
-        job["progress"] = {"completed_trials": 0, "total_trials": 0, "method": method}
-        job["trials"] = []
-        job["best_trial"] = None
-        job["trial_budget"] = trial_budget
-        if bool(request.quick_mode) and trial_budget["boost"] > 1:
-            job.setdefault("notes", []).append(
-                "Quick mode trial boost applied: "
-                f"{trial_budget['requested']} -> {trial_budget['effective']} "
-                f"(x{trial_budget['boost']})."
-            )
-
+    isolated_aos_config_path: Optional[Path] = None
+    async with adaptive_tuner_slots:
         try:
+            isolated_aos_config_path = await _create_isolated_tuner_aos_config_locked(job_id)
+            isolated_aos_config_str = str(isolated_aos_config_path)
+            job["isolated_aos_config_path"] = isolated_aos_config_str
+            job["max_parallel_jobs"] = MAX_PARALLEL_ADAPTIVE_TUNERS
+
+            original_config = _load_aos_config(isolated_aos_config_str)
+            original_ticker_config = copy.deepcopy(
+                original_config.get("tickers", {}).get(ticker, {})
+            )
+            cfg_work = copy.deepcopy(original_config)
+            if "tickers" not in cfg_work or not isinstance(cfg_work.get("tickers"), dict):
+                cfg_work["tickers"] = {}
+
+            job["started_at"] = datetime.utcnow().isoformat() + "Z"
+            job["status"] = "running"
+            job["progress"] = {"completed_trials": 0, "total_trials": 0, "method": method}
+            job["trials"] = []
+            job["best_trial"] = None
+            job["trial_budget"] = trial_budget
+            if bool(request.quick_mode) and trial_budget["boost"] > 1:
+                job.setdefault("notes", []).append(
+                    "Quick mode trial boost applied: "
+                    f"{trial_budget['requested']} -> {trial_budget['effective']} "
+                    f"(x{trial_budget['boost']})."
+                )
+
             optuna_module = None
             if method == "optuna":
                 try:
@@ -2912,8 +3912,10 @@ async def _run_adaptive_tuner_job(
                         candidate,
                         request.adaptive_version,
                     )
-                    cfg_work["tickers"][ticker] = next_ticker_cfg
-                    if not _save_aos_config(cfg_work):
+                    cfg_work["tickers"][ticker] = _prepare_tuner_trial_ticker_config(
+                        next_ticker_cfg
+                    )
+                    if not _save_aos_config(cfg_work, isolated_aos_config_str):
                         raise RuntimeError("Failed to save temporary AOS config for tuner trial")
 
                     result = await _evaluate_adaptive_tuner_candidate(
@@ -2923,6 +3925,7 @@ async def _run_adaptive_tuner_job(
                         trial_index=idx,
                         candidate=candidate,
                         request=request,
+                        aos_config_path=isolated_aos_config_str,
                     )
                     job["trials"].append(result)
                     current_best = job.get("best_trial")
@@ -2970,8 +3973,10 @@ async def _run_adaptive_tuner_job(
                         candidate,
                         request.adaptive_version,
                     )
-                    cfg_work["tickers"][ticker] = next_ticker_cfg
-                    if not _save_aos_config(cfg_work):
+                    cfg_work["tickers"][ticker] = _prepare_tuner_trial_ticker_config(
+                        next_ticker_cfg
+                    )
+                    if not _save_aos_config(cfg_work, isolated_aos_config_str):
                         raise RuntimeError("Failed to save temporary AOS config for tuner trial")
 
                     result = await _evaluate_adaptive_tuner_candidate(
@@ -2981,6 +3986,7 @@ async def _run_adaptive_tuner_job(
                         trial_index=idx,
                         candidate=candidate,
                         request=request,
+                        aos_config_path=isolated_aos_config_str,
                     )
                     score = float(result["score"])
                     study.tell(trial, score)
@@ -2994,45 +4000,18 @@ async def _run_adaptive_tuner_job(
                     job["progress"]["completed_trials"] = idx
 
             best_trial = job.get("best_trial")
-            final_config = copy.deepcopy(original_config)
-            if "tickers" not in final_config or not isinstance(final_config.get("tickers"), dict):
-                final_config["tickers"] = {}
-
-            updated_ticker_cfg = copy.deepcopy(original_ticker_config)
-            saved_profile = None
-            if isinstance(best_trial, dict):
-                saved_profile = _build_tuner_profile_entry(
-                    ticker=ticker,
-                    request=request,
-                    method_used=method_used,
-                    dates=dates,
-                    best_trial=best_trial,
+            persist_result = await _persist_tuner_result_to_primary_aos(
+                ticker=ticker,
+                request=request,
+                method_used=method_used,
+                dates=dates,
+                best_trial=best_trial if isinstance(best_trial, dict) else None,
+            )
+            saved_profile = persist_result.get("saved_profile")
+            if persist_result.get("persist_best_applied"):
+                job.setdefault("notes", []).append(
+                    "Best candidate was persisted to aos_config.json."
                 )
-                existing_profiles = _normalize_tuner_profiles(
-                    updated_ticker_cfg.get("adaptive_tuner_profiles", [])
-                )
-                existing_profiles.insert(0, saved_profile)
-                updated_ticker_cfg["adaptive_tuner_profiles"] = existing_profiles[:30]
-
-                if request.persist_best:
-                    best_candidate = best_trial.get("candidate", {})
-                    updated_ticker_cfg = _build_adaptive_candidate_config(
-                        updated_ticker_cfg,
-                        best_candidate if isinstance(best_candidate, dict) else {},
-                        request.adaptive_version,
-                    )
-                    updated_ticker_cfg["active_adaptive_tuner_profile_id"] = saved_profile["profile_id"]
-                    job.setdefault("notes", []).append(
-                        "Best candidate was persisted to aos_config.json."
-                    )
-                elif saved_profile:
-                    updated_ticker_cfg["active_adaptive_tuner_profile_id"] = str(
-                        updated_ticker_cfg.get("active_adaptive_tuner_profile_id", "")
-                    ).strip() or saved_profile["profile_id"]
-
-            final_config["tickers"][ticker] = updated_ticker_cfg
-            if not _save_aos_config(final_config):
-                raise RuntimeError("Failed to save final AOS tuner result")
 
             job["status"] = "completed"
             job["method_used"] = method_used
@@ -3058,16 +4037,17 @@ async def _run_adaptive_tuner_job(
                 "requested_trials": trial_budget["requested"],
                 "effective_trial_budget": trial_budget["effective"],
             }
-            if saved_profile:
+            if isinstance(saved_profile, dict):
                 job["saved_profile"] = {
                     "profile_id": saved_profile.get("profile_id"),
                     "created_at": saved_profile.get("created_at"),
                 }
         except Exception as exc:
-            _save_aos_config(original_config)
             job["status"] = "failed"
             job["error"] = str(exc)
             job["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        finally:
+            _cleanup_isolated_tuner_aos_config(isolated_aos_config_path)
 
 
 # ============ API Endpoints ============
@@ -3090,6 +4070,85 @@ async def health():
 async def get_available_data():
     """Get available tickers and date ranges from data files."""
     return databento_svc.get_available_data_summary(refresh=False)
+
+
+@app.get("/api/live-trader/runs")
+async def list_live_trader_runs(limit: int = 20, active_only: bool = False):
+    """List discovered ibkr-realtime-trader runs from JSONL artifacts."""
+    runs = _discover_live_trader_runs(limit=limit, active_only=active_only)
+    return {
+        "artifacts_dir": str(LIVE_TRADER_ARTIFACTS_DIR),
+        "count": len(runs),
+        "active_only": bool(active_only),
+        "runs": runs,
+    }
+
+
+@app.get("/api/live-trader/events/{run_id}")
+async def get_live_trader_events(
+    run_id: str,
+    stream: str = "decisions",
+    limit: int = 200,
+):
+    """Get tail events for one stream (runtime/decisions/signals/orders)."""
+    stream_key = str(stream or "decisions").strip().lower()
+    if stream_key not in {"runtime", "decisions", "signals", "orders"}:
+        raise HTTPException(400, "stream must be one of: runtime, decisions, signals, orders")
+
+    file_path = _live_artifact_file(stream_key, run_id)
+    if not file_path.exists():
+        raise HTTPException(404, f"Live stream file not found: {file_path.name}")
+
+    events = _read_jsonl_tail(file_path, limit=limit)
+    return {
+        "run_id": _sanitize_live_run_id(run_id),
+        "stream": stream_key,
+        "count": len(events),
+        "events": events,
+    }
+
+
+@app.get("/api/live-trader/snapshot/{run_id}")
+async def get_live_trader_snapshot(run_id: str, tail_limit: int = 200):
+    """Get latest records and counts from all live-trader streams for one run."""
+    run_id_safe = _sanitize_live_run_id(run_id)
+    streams = {}
+    total_count = 0
+    updated_at: Optional[str] = None
+    for stream_key in ("runtime", "decisions", "signals", "orders"):
+        file_path = _live_artifact_file(stream_key, run_id_safe)
+        events = _read_jsonl_tail(file_path, limit=tail_limit) if file_path.exists() else []
+        stream_updated = (
+            datetime.utcfromtimestamp(file_path.stat().st_mtime).isoformat() + "Z"
+            if file_path.exists()
+            else None
+        )
+        streams[stream_key] = {
+            "exists": bool(file_path.exists()),
+            "count": len(events),
+            "latest": events[-1] if events else None,
+            "updated_at": stream_updated,
+        }
+        if stream_updated and (updated_at is None or stream_updated > updated_at):
+            updated_at = stream_updated
+        total_count += len(events)
+
+    if not any(item["exists"] for item in streams.values()):
+        raise HTTPException(404, f"No live-trader artifacts found for run_id={run_id_safe}")
+
+    runtime_latest = streams.get("runtime", {}).get("latest")
+    runtime_summary = runtime_latest if isinstance(runtime_latest, dict) else None
+    status = _infer_live_run_status(updated_at, runtime_summary)
+
+    return {
+        "run_id": run_id_safe,
+        "tail_limit": max(1, min(2000, int(tail_limit))),
+        "total_count": total_count,
+        "updated_at": updated_at,
+        "status": status,
+        "runtime": runtime_summary,
+        "streams": streams,
+    }
 
 
 @app.get("/api/strategy-overrides")
@@ -3216,7 +4275,9 @@ async def list_data_files():
 @app.get("/api/aos-config")
 async def get_aos_config():
     """Get full AOS optimization config."""
-    return _load_aos_config()
+    aos_config = _load_aos_config()
+    positioning_config = _load_positioning_config()
+    return _merge_positioning_into_aos_snapshot(aos_config, positioning_config)
 
 
 @app.get("/api/aos-config/{ticker}")
@@ -3224,6 +4285,21 @@ async def get_ticker_aos_config(ticker: str):
     """Get AOS config for a specific ticker."""
     config = _load_aos_config()
     ticker_config = config.get("tickers", {}).get(ticker.upper(), {})
+    if not isinstance(ticker_config, dict):
+        ticker_config = {}
+    positioning_cfg = _get_ticker_positioning_config(ticker)
+    legacy_positioning = {}
+    for key in POSITIONING_CONFIG_KEYS:
+        if key in ticker_config:
+            legacy_positioning[key] = ticker_config.get(key)
+    if legacy_positioning:
+        merged_positioning = dict(legacy_positioning)
+        merged_positioning.update(positioning_cfg)
+        positioning_cfg = merged_positioning
+    if positioning_cfg:
+        payload = dict(ticker_config)
+        payload["positioning"] = positioning_cfg
+        return payload
     return ticker_config
 
 
@@ -3236,22 +4312,112 @@ class AOSUpdateRequest(BaseModel):
 async def update_aos_config(request: AOSUpdateRequest):
     """Update AOS config for a specific ticker."""
     config = _load_aos_config()
+    positioning_config = _load_positioning_config()
     
     if "tickers" not in config:
         config["tickers"] = {}
+    if "tickers" not in positioning_config:
+        positioning_config["tickers"] = {}
     
     # Merge with existing config
     ticker_upper = request.ticker.upper()
+    incoming_config = dict(request.config or {})
+    positioning_marker = object()
+    incoming_positioning = incoming_config.pop("positioning", positioning_marker)
+    legacy_positioning_payload: Dict[str, Any] = {}
+    for key in POSITIONING_CONFIG_KEYS:
+        if key in incoming_config:
+            legacy_positioning_payload[key] = incoming_config.pop(key)
+    if legacy_positioning_payload:
+        if incoming_positioning is positioning_marker:
+            incoming_positioning = {}
+        if incoming_positioning is None:
+            incoming_positioning = {}
+        if isinstance(incoming_positioning, dict):
+            incoming_positioning = {**legacy_positioning_payload, **incoming_positioning}
+        else:
+            raise HTTPException(400, "positioning must be an object or null")
     existing = config["tickers"].get(ticker_upper, {})
-    existing.update(request.config)
+    if not isinstance(existing, dict):
+        existing = {}
+    # Keep strategy/adaptive settings in aos_config only.
+    existing.pop("positioning", None)
+    for key in POSITIONING_CONFIG_KEYS:
+        existing.pop(key, None)
+    existing.update(incoming_config)
     config["tickers"][ticker_upper] = existing
+
+    # Keep execution/positioning settings in dedicated positioning_config.json.
+    if incoming_positioning is not positioning_marker:
+        if incoming_positioning is None:
+            if isinstance(positioning_config.get("tickers"), dict):
+                positioning_config["tickers"].pop(ticker_upper, None)
+        elif isinstance(incoming_positioning, dict):
+            pos_tickers = positioning_config.get("tickers")
+            if not isinstance(pos_tickers, dict):
+                pos_tickers = {}
+                positioning_config["tickers"] = pos_tickers
+            pos_existing = pos_tickers.get(ticker_upper, {})
+            if not isinstance(pos_existing, dict):
+                pos_existing = {}
+            pos_existing.update(incoming_positioning)
+            pos_tickers[ticker_upper] = pos_existing
+        else:
+            raise HTTPException(400, "positioning must be an object or null")
     
-    # Save
-    if _save_aos_config(config):
-        logger.info(f"Updated AOS config for {ticker_upper}: {request.config}")
-        return {"success": True, "config": existing}
-    else:
+    saved_aos = _save_aos_config(config)
+    saved_positioning = _save_positioning_config(positioning_config)
+    if not (saved_aos and saved_positioning):
         raise HTTPException(500, "Failed to save AOS config")
+
+    logger.info(f"Updated AOS config for {ticker_upper}: {incoming_config}")
+    if incoming_positioning is not positioning_marker:
+        logger.info(f"Updated positioning config for {ticker_upper}: {incoming_positioning}")
+    payload = dict(existing)
+    merged_positioning = _get_ticker_positioning_config(ticker_upper, positioning_config)
+    if merged_positioning:
+        payload["positioning"] = merged_positioning
+    return {"success": True, "config": payload}
+
+
+class PositioningUpdateRequest(BaseModel):
+    ticker: str
+    config: Dict[str, Any]
+
+
+@app.get("/api/positioning-config")
+async def get_positioning_config():
+    """Get full positioning config file."""
+    return _load_positioning_config()
+
+
+@app.get("/api/positioning-config/{ticker}")
+async def get_ticker_positioning_config(ticker: str):
+    """Get positioning config for one ticker."""
+    return _get_ticker_positioning_config(ticker)
+
+
+@app.post("/api/positioning-config/update")
+async def update_positioning_config(request: PositioningUpdateRequest):
+    """Update positioning config for a specific ticker."""
+    ticker_upper = str(request.ticker or "").upper().strip()
+    if not ticker_upper:
+        raise HTTPException(400, "ticker is required")
+    incoming = dict(request.config or {})
+    cfg = _load_positioning_config()
+    tickers = cfg.get("tickers")
+    if not isinstance(tickers, dict):
+        tickers = {}
+        cfg["tickers"] = tickers
+    existing = tickers.get(ticker_upper, {})
+    if not isinstance(existing, dict):
+        existing = {}
+    existing.update(incoming)
+    tickers[ticker_upper] = existing
+    if not _save_positioning_config(cfg):
+        raise HTTPException(500, "Failed to save positioning config")
+    logger.info(f"Updated positioning config for {ticker_upper}: {incoming}")
+    return {"success": True, "config": existing}
 
 
 @app.get("/api/adaptive-tuner/options/{ticker}")
@@ -3386,7 +4552,23 @@ async def run_adaptive_tuner(request: AdaptiveTunerRequest):
         "quick_max_days": quick_max_days,
         "quick_trial_boost": quick_trial_boost,
         "adaptive_version": version,
+        "max_parallel_jobs": MAX_PARALLEL_ADAPTIVE_TUNERS,
+        "isolated_aos_config_path": None,
     }
+    active_same_strategy_url = [
+        existing
+        for existing in adaptive_tuner_jobs.values()
+        if existing.get("job_id") != job_id
+        and str(existing.get("request", {}).get("strategy_api_url", "")).strip()
+        == str(request.strategy_api_url).strip()
+        and str(existing.get("status", "")).lower() in {"queued", "running"}
+    ]
+    if active_same_strategy_url:
+        adaptive_tuner_jobs[job_id]["notes"].append(
+            "WARNING: Another tuner job is using the same strategy_api_url. "
+            "For true parallel tuning without orchestrator-state interference, "
+            "run each tuner against a different strategy API port."
+        )
     if quick_mode:
         adaptive_tuner_jobs[job_id]["notes"].append(
             "Quick mode enabled: sampled "
@@ -3414,6 +4596,7 @@ async def run_adaptive_tuner(request: AdaptiveTunerRequest):
         "quick_mode": quick_mode,
         "quick_max_days": quick_max_days,
         "quick_trial_boost": quick_trial_boost,
+        "max_parallel_jobs": MAX_PARALLEL_ADAPTIVE_TUNERS,
     }
 
 
@@ -3491,12 +4674,44 @@ async def start_run(request: StartRunRequest):
     if strategy_overrides_applied:
         await _apply_strategy_overrides(request.strategy_api_url, ticker)
     # Apply AOS optimizations (time filter, long_only, params)
-    aos_applied = await _apply_aos_optimizations(request.strategy_api_url, ticker)
+    aos_applied = await _apply_aos_optimizations(
+        request.strategy_api_url,
+        ticker,
+        aos_config_path=request.aos_config_path,
+    )
     adaptive_profile_runtime = {}
     if isinstance(aos_applied.get("adaptive_profile"), dict):
         raw_runtime = aos_applied["adaptive_profile"].get("runtime_overrides")
         if isinstance(raw_runtime, dict):
             adaptive_profile_runtime = dict(raw_runtime)
+
+    request_momentum_diversification = _normalize_momentum_diversification_payload(
+        request.momentum_diversification_override
+    )
+    profile_momentum_diversification = _normalize_momentum_diversification_payload(
+        adaptive_profile_runtime.get("momentum_diversification")
+    )
+    aos_adaptive_cfg = aos_applied.get("adaptive", {}) if isinstance(aos_applied.get("adaptive"), dict) else {}
+    aos_momentum_diversification = _normalize_momentum_diversification_payload(
+        aos_adaptive_cfg.get("momentum_diversification")
+    )
+    if request_momentum_diversification:
+        effective_momentum_diversification = request_momentum_diversification
+        momentum_diversification_source = "request"
+    elif profile_momentum_diversification:
+        effective_momentum_diversification = profile_momentum_diversification
+        momentum_diversification_source = "adaptive_profile"
+    elif aos_momentum_diversification:
+        effective_momentum_diversification = aos_momentum_diversification
+        momentum_diversification_source = "aos_config"
+    else:
+        effective_momentum_diversification = None
+        momentum_diversification_source = "none"
+    momentum_diversification_json = (
+        json.dumps(effective_momentum_diversification, separators=(",", ":"))
+        if effective_momentum_diversification
+        else None
+    )
     # Apply global trailing (best-effort, overrides per-ticker trailing)
     await _apply_global_trailing(request.strategy_api_url, request.trailing_stop_pct)
 
@@ -3647,16 +4862,311 @@ async def start_run(request: StartRunRequest):
     )
     effective_max_active_strategies = max(1, min(20, effective_max_active_strategies))
 
-    try:
-        effective_time_exit_bars = int(request.time_exit_bars)
-    except (TypeError, ValueError):
-        effective_time_exit_bars = 40
-    try:
-        profile_time_exit_bars = int(adaptive_profile_runtime.get("time_exit_bars", 0))
-    except (TypeError, ValueError):
-        profile_time_exit_bars = 0
-    if profile_time_exit_bars > 0:
-        effective_time_exit_bars = profile_time_exit_bars
+    positioning_cfg_requested = bool(request.apply_positioning_config_on_start)
+    positioning_cfg = (
+        dict(aos_applied.get("positioning", {}))
+        if positioning_cfg_requested and isinstance(aos_applied.get("positioning"), dict)
+        else {}
+    )
+
+    def _coerce_bool(value: Any, *, default: Optional[bool] = None) -> Optional[bool]:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "y", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "n", "off"}:
+                return False
+        return default
+
+    def _resolve_positioning_float(
+        *,
+        request_value: Any,
+        request_default: float,
+        positioning_key: str,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+        runtime_key: Optional[str] = None,
+        runtime_positive_only: bool = False,
+    ) -> tuple[float, str]:
+        source = "request"
+        try:
+            resolved = float(request_value)
+        except (TypeError, ValueError):
+            resolved = float(request_default)
+            source = "default"
+
+        if abs(resolved - float(request_default)) < 1e-12 and positioning_cfg:
+            raw = positioning_cfg.get(positioning_key)
+            if raw is not None:
+                try:
+                    resolved = float(raw)
+                    source = "positioning_config"
+                except (TypeError, ValueError):
+                    pass
+
+        if runtime_key:
+            try:
+                runtime_value = float(adaptive_profile_runtime.get(runtime_key, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                runtime_value = 0.0
+            runtime_valid = runtime_value > 0 if runtime_positive_only else abs(runtime_value) > 1e-12
+            if runtime_valid:
+                resolved = runtime_value
+                source = "adaptive_profile"
+
+        if min_value is not None:
+            resolved = max(min_value, resolved)
+        if max_value is not None:
+            resolved = min(max_value, resolved)
+        return resolved, source
+
+    def _resolve_positioning_int(
+        *,
+        request_value: Any,
+        request_default: int,
+        positioning_key: str,
+        min_value: Optional[int] = None,
+        max_value: Optional[int] = None,
+        runtime_key: Optional[str] = None,
+        runtime_positive_only: bool = False,
+    ) -> tuple[int, str]:
+        source = "request"
+        try:
+            resolved = int(request_value)
+        except (TypeError, ValueError):
+            resolved = int(request_default)
+            source = "default"
+
+        if resolved == int(request_default) and positioning_cfg:
+            raw = positioning_cfg.get(positioning_key)
+            if raw is not None:
+                try:
+                    resolved = int(raw)
+                    source = "positioning_config"
+                except (TypeError, ValueError):
+                    pass
+
+        if runtime_key:
+            try:
+                runtime_value = int(adaptive_profile_runtime.get(runtime_key, 0) or 0)
+            except (TypeError, ValueError):
+                runtime_value = 0
+            runtime_valid = runtime_value > 0 if runtime_positive_only else runtime_value != 0
+            if runtime_valid:
+                resolved = runtime_value
+                source = "adaptive_profile"
+
+        if min_value is not None:
+            resolved = max(min_value, resolved)
+        if max_value is not None:
+            resolved = min(max_value, resolved)
+        return resolved, source
+
+    def _resolve_positioning_bool(
+        *,
+        request_value: Any,
+        request_default: bool,
+        positioning_key: str,
+        runtime_key: Optional[str] = None,
+    ) -> tuple[bool, str]:
+        source = "request"
+        resolved = _coerce_bool(request_value, default=request_default)
+        if resolved is None:
+            resolved = request_default
+            source = "default"
+        if resolved == bool(request_default) and positioning_cfg and positioning_key in positioning_cfg:
+            positioned = _coerce_bool(positioning_cfg.get(positioning_key), default=None)
+            if positioned is not None:
+                resolved = positioned
+                source = "positioning_config"
+        if runtime_key:
+            runtime_bool = _coerce_bool(adaptive_profile_runtime.get(runtime_key), default=None)
+            if runtime_bool is not None:
+                resolved = runtime_bool
+                source = "adaptive_profile"
+        return bool(resolved), source
+
+    def _resolve_stop_loss_mode(
+        *,
+        request_mode: Any,
+        request_default: str = "strategy",
+        positioning_key: str = "stop_loss_mode",
+    ) -> tuple[str, str]:
+        valid_modes = {"strategy", "fixed", "capped"}
+        source = "request"
+        normalized_default = str(request_default).strip().lower() or "strategy"
+        mode = str(request_mode or normalized_default).strip().lower()
+        if mode not in valid_modes:
+            mode = normalized_default
+            source = "default"
+        if mode == normalized_default and positioning_cfg:
+            positioned_mode = str(positioning_cfg.get(positioning_key, "")).strip().lower()
+            if positioned_mode in valid_modes:
+                mode = positioned_mode
+                source = "positioning_config"
+        return mode, source
+
+    effective_risk_per_trade_pct, risk_per_trade_source = _resolve_positioning_float(
+        request_value=request.risk_per_trade_pct,
+        request_default=1.0,
+        positioning_key="risk_per_trade_pct",
+        min_value=0.1,
+    )
+    effective_max_position_notional_pct, max_position_notional_source = _resolve_positioning_float(
+        request_value=request.max_position_notional_pct,
+        request_default=100.0,
+        positioning_key="max_position_notional_pct",
+        min_value=1.0,
+    )
+    effective_max_fill_participation_rate, max_fill_participation_source = _resolve_positioning_float(
+        request_value=request.max_fill_participation_rate,
+        request_default=0.20,
+        positioning_key="max_fill_participation_rate",
+        min_value=0.01,
+        max_value=1.0,
+    )
+    effective_min_fill_ratio, min_fill_ratio_source = _resolve_positioning_float(
+        request_value=request.min_fill_ratio,
+        request_default=0.35,
+        positioning_key="min_fill_ratio",
+        min_value=0.01,
+        max_value=1.0,
+    )
+    effective_enable_partial_take_profit, partial_take_profit_enabled_source = _resolve_positioning_bool(
+        request_value=request.enable_partial_take_profit,
+        request_default=True,
+        positioning_key="enable_partial_take_profit",
+    )
+    effective_partial_take_profit_rr, partial_take_profit_rr_source = _resolve_positioning_float(
+        request_value=request.partial_take_profit_rr,
+        request_default=1.0,
+        positioning_key="partial_take_profit_rr",
+        min_value=0.25,
+    )
+    effective_partial_take_profit_fraction, partial_take_profit_fraction_source = _resolve_positioning_float(
+        request_value=request.partial_take_profit_fraction,
+        request_default=0.5,
+        positioning_key="partial_take_profit_fraction",
+        min_value=0.05,
+        max_value=0.95,
+    )
+    effective_trailing_activation_pct, trailing_activation_source = _resolve_positioning_float(
+        request_value=request.trailing_activation_pct,
+        request_default=0.15,
+        positioning_key="trailing_activation_pct",
+        min_value=0.0,
+    )
+    effective_break_even_buffer_pct, break_even_buffer_source = _resolve_positioning_float(
+        request_value=request.break_even_buffer_pct,
+        request_default=0.03,
+        positioning_key="break_even_buffer_pct",
+        min_value=0.0,
+    )
+    effective_break_even_min_hold_bars, break_even_min_hold_source = _resolve_positioning_int(
+        request_value=request.break_even_min_hold_bars,
+        request_default=2,
+        positioning_key="break_even_min_hold_bars",
+        min_value=1,
+    )
+    effective_trailing_enabled_in_choppy, trailing_enabled_in_choppy_source = _resolve_positioning_bool(
+        request_value=request.trailing_enabled_in_choppy,
+        request_default=False,
+        positioning_key="trailing_enabled_in_choppy",
+    )
+    effective_time_exit_bars, time_exit_source = _resolve_positioning_int(
+        request_value=request.time_exit_bars,
+        request_default=40,
+        positioning_key="time_exit_bars",
+        min_value=1,
+        runtime_key="time_exit_bars",
+        runtime_positive_only=True,
+    )
+    effective_adverse_flow_exit_enabled, adverse_flow_exit_enabled_source = _resolve_positioning_bool(
+        request_value=request.adverse_flow_exit_enabled,
+        request_default=True,
+        positioning_key="adverse_flow_exit_enabled",
+    )
+    effective_adverse_flow_threshold, adverse_flow_threshold_source = _resolve_positioning_float(
+        request_value=request.adverse_flow_threshold,
+        request_default=0.12,
+        positioning_key="adverse_flow_threshold",
+        min_value=0.02,
+    )
+    effective_adverse_flow_min_hold_bars, adverse_flow_min_hold_source = _resolve_positioning_int(
+        request_value=request.adverse_flow_min_hold_bars,
+        request_default=3,
+        positioning_key="adverse_flow_min_hold_bars",
+        min_value=1,
+    )
+    effective_stop_loss_mode, stop_loss_mode_source = _resolve_stop_loss_mode(
+        request_mode=request.stop_loss_mode
+    )
+    effective_fixed_stop_loss_pct, fixed_stop_loss_source = _resolve_positioning_float(
+        request_value=request.fixed_stop_loss_pct,
+        request_default=0.0,
+        positioning_key="fixed_stop_loss_pct",
+        min_value=0.0,
+    )
+
+    def _resolve_adverse_flow_threshold(
+        *,
+        request_value: Any,
+        request_default: float,
+        positioning_key: str,
+        aos_key: str,
+        runtime_key: str,
+    ) -> tuple[float, str]:
+        source = "request"
+        try:
+            resolved = float(request_value)
+        except (TypeError, ValueError):
+            resolved = request_default
+            source = "default"
+        if abs(resolved - request_default) < 1e-12:
+            if positioning_cfg and positioning_key in positioning_cfg:
+                try:
+                    resolved = float(positioning_cfg.get(positioning_key))
+                    source = "positioning_config"
+                except (TypeError, ValueError):
+                    pass
+            if source in {"request", "default"}:
+                try:
+                    resolved = float(aos_applied.get(aos_key, request_default))
+                    source = "aos_config"
+                except (TypeError, ValueError):
+                    resolved = request_default
+                    source = "default"
+        try:
+            runtime_value = float(adaptive_profile_runtime.get(runtime_key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            runtime_value = 0.0
+        if runtime_value > 0:
+            resolved = runtime_value
+            source = "adaptive_profile"
+        return max(0.02, resolved), source
+
+    effective_adverse_flow_consistency_threshold, adverse_flow_consistency_source = (
+        _resolve_adverse_flow_threshold(
+            request_value=request.adverse_flow_consistency_threshold,
+            request_default=0.45,
+            positioning_key="adverse_flow_consistency_threshold",
+            aos_key="adverse_flow_consistency_threshold",
+            runtime_key="adverse_flow_consistency_threshold",
+        )
+    )
+    effective_adverse_book_pressure_threshold, adverse_book_pressure_source = (
+        _resolve_adverse_flow_threshold(
+            request_value=request.adverse_book_pressure_threshold,
+            request_default=0.15,
+            positioning_key="adverse_book_pressure_threshold",
+            aos_key="adverse_book_pressure_threshold",
+            runtime_key="adverse_book_pressure_threshold",
+        )
+    )
 
     # Keep request value unless left at default and AOS provides an override.
     if int(request.l2_lookback_bars) != 3:
@@ -3734,19 +5244,25 @@ async def start_run(request: StartRunRequest):
         request.regime_detection_minutes,
         request.regime_refresh_bars,
         request.account_size_usd,
-        risk_per_trade_pct=request.risk_per_trade_pct,
-        max_position_notional_pct=request.max_position_notional_pct,
-        max_fill_participation_rate=request.max_fill_participation_rate,
-        min_fill_ratio=request.min_fill_ratio,
-        enable_partial_take_profit=request.enable_partial_take_profit,
-        partial_take_profit_rr=request.partial_take_profit_rr,
-        partial_take_profit_fraction=request.partial_take_profit_fraction,
+        risk_per_trade_pct=effective_risk_per_trade_pct,
+        max_position_notional_pct=effective_max_position_notional_pct,
+        max_fill_participation_rate=effective_max_fill_participation_rate,
+        min_fill_ratio=effective_min_fill_ratio,
+        enable_partial_take_profit=effective_enable_partial_take_profit,
+        partial_take_profit_rr=effective_partial_take_profit_rr,
+        partial_take_profit_fraction=effective_partial_take_profit_fraction,
+        trailing_activation_pct=effective_trailing_activation_pct,
+        break_even_buffer_pct=effective_break_even_buffer_pct,
+        break_even_min_hold_bars=effective_break_even_min_hold_bars,
+        trailing_enabled_in_choppy=effective_trailing_enabled_in_choppy,
         time_exit_bars=effective_time_exit_bars,
-        adverse_flow_exit_enabled=request.adverse_flow_exit_enabled,
-        adverse_flow_threshold=request.adverse_flow_threshold,
-        adverse_flow_min_hold_bars=request.adverse_flow_min_hold_bars,
-        stop_loss_mode=request.stop_loss_mode,
-        fixed_stop_loss_pct=request.fixed_stop_loss_pct,
+        adverse_flow_exit_enabled=effective_adverse_flow_exit_enabled,
+        adverse_flow_threshold=effective_adverse_flow_threshold,
+        adverse_flow_min_hold_bars=effective_adverse_flow_min_hold_bars,
+        adverse_flow_consistency_threshold=effective_adverse_flow_consistency_threshold,
+        adverse_book_pressure_threshold=effective_adverse_book_pressure_threshold,
+        stop_loss_mode=effective_stop_loss_mode,
+        fixed_stop_loss_pct=effective_fixed_stop_loss_pct,
         l2_confirm_enabled=effective_l2_confirm,
         l2_min_delta=l2_min_delta,
         l2_min_imbalance=l2_min_imbalance,
@@ -3758,6 +5274,7 @@ async def start_run(request: StartRunRequest):
         cold_start_each_day=effective_cold_start_each_day,
         strategy_selection_mode=effective_strategy_selection_mode,
         max_active_strategies=effective_max_active_strategies,
+        momentum_diversification_json=momentum_diversification_json,
     )
 
     if not bars:
@@ -3870,24 +5387,54 @@ async def start_run(request: StartRunRequest):
         },
         "execution_config": {
             "account_size_usd": request.account_size_usd,
-            "risk_per_trade_pct": request.risk_per_trade_pct,
-            "max_position_notional_pct": request.max_position_notional_pct,
-            "max_fill_participation_rate": request.max_fill_participation_rate,
-            "min_fill_ratio": request.min_fill_ratio,
-            "enable_partial_take_profit": request.enable_partial_take_profit,
-            "partial_take_profit_rr": request.partial_take_profit_rr,
-            "partial_take_profit_fraction": request.partial_take_profit_fraction,
+            "positioning_config_enabled": positioning_cfg_requested,
+            "positioning_config_applied": bool(positioning_cfg),
+            "risk_per_trade_pct": effective_risk_per_trade_pct,
+            "risk_per_trade_pct_source": risk_per_trade_source,
+            "max_position_notional_pct": effective_max_position_notional_pct,
+            "max_position_notional_pct_source": max_position_notional_source,
+            "max_fill_participation_rate": effective_max_fill_participation_rate,
+            "max_fill_participation_rate_source": max_fill_participation_source,
+            "min_fill_ratio": effective_min_fill_ratio,
+            "min_fill_ratio_source": min_fill_ratio_source,
+            "enable_partial_take_profit": effective_enable_partial_take_profit,
+            "enable_partial_take_profit_source": partial_take_profit_enabled_source,
+            "partial_take_profit_rr": effective_partial_take_profit_rr,
+            "partial_take_profit_rr_source": partial_take_profit_rr_source,
+            "partial_take_profit_fraction": effective_partial_take_profit_fraction,
+            "partial_take_profit_fraction_source": partial_take_profit_fraction_source,
+            "trailing_activation_pct": effective_trailing_activation_pct,
+            "trailing_activation_pct_source": trailing_activation_source,
+            "break_even_buffer_pct": effective_break_even_buffer_pct,
+            "break_even_buffer_pct_source": break_even_buffer_source,
+            "break_even_min_hold_bars": effective_break_even_min_hold_bars,
+            "break_even_min_hold_bars_source": break_even_min_hold_source,
+            "trailing_enabled_in_choppy": effective_trailing_enabled_in_choppy,
+            "trailing_enabled_in_choppy_source": trailing_enabled_in_choppy_source,
             "time_exit_bars": effective_time_exit_bars,
-            "adverse_flow_exit_enabled": request.adverse_flow_exit_enabled,
-            "adverse_flow_threshold": request.adverse_flow_threshold,
-            "adverse_flow_min_hold_bars": request.adverse_flow_min_hold_bars,
-            "stop_loss_mode": request.stop_loss_mode,
-            "fixed_stop_loss_pct": request.fixed_stop_loss_pct,
+            "time_exit_bars_source": time_exit_source,
+            "adverse_flow_exit_enabled": effective_adverse_flow_exit_enabled,
+            "adverse_flow_exit_enabled_source": adverse_flow_exit_enabled_source,
+            "adverse_flow_threshold": effective_adverse_flow_threshold,
+            "adverse_flow_threshold_source": adverse_flow_threshold_source,
+            "adverse_flow_min_hold_bars": effective_adverse_flow_min_hold_bars,
+            "adverse_flow_min_hold_bars_source": adverse_flow_min_hold_source,
+            "adverse_flow_consistency_threshold": effective_adverse_flow_consistency_threshold,
+            "adverse_flow_consistency_threshold_source": adverse_flow_consistency_source,
+            "adverse_book_pressure_threshold": effective_adverse_book_pressure_threshold,
+            "adverse_book_pressure_threshold_source": adverse_book_pressure_source,
+            "stop_loss_mode": effective_stop_loss_mode,
+            "stop_loss_mode_source": stop_loss_mode_source,
+            "fixed_stop_loss_pct": effective_fixed_stop_loss_pct,
+            "fixed_stop_loss_pct_source": fixed_stop_loss_source,
             "intrabar_execution_recalc_1s": effective_intrabar_execution_recalc_1s,
             "cold_start_each_day": effective_cold_start_each_day,
             "comparable_mode": comparable_mode,
             "strategy_selection_mode": effective_strategy_selection_mode,
             "max_active_strategies": effective_max_active_strategies,
+            "momentum_diversification_applied": bool(effective_momentum_diversification),
+            "momentum_diversification_source": momentum_diversification_source,
+            "momentum_diversification": effective_momentum_diversification or {},
         },
         "first_bar": bars[0] if bars else None,
         "last_bar": bars[-1] if bars else None

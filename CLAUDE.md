@@ -19,6 +19,7 @@ The most sensitive area is Adaptive Tuning + AOS config persistence (`aos_optimi
 6. `bmad/context/generated/<domain>.md`
 7. `bmad/context/generated/00-machine-index.json`
 8. `bmad/context/generated/00-endpoint-map.md`
+9. `docs/llm/adaptive-tuning-c4x3.md` (only for C4-like/parallel adaptive tuning tasks)
 
 If docs conflict with code, code wins. Update docs in the same change.
 
@@ -126,9 +127,14 @@ See also `docs/REPO_MAP.md` (generated).
 
 ### Concurrency Caveat
 
-- `adaptive_tuner_lock` serializes tuner workers with each other.
-- Other write endpoints are not guarded by that same lock.
-- Running manual AOS updates/profile applies concurrently with tuner can produce last-write-wins behavior.
+- Parallel tuner slots are capped at 3 (`MAX_PARALLEL_ADAPTIVE_TUNERS`).
+- Trial-level candidate writes use isolated per-job AOS files; final merge writes to primary AOS under merge lock.
+- For true isolation, run parallel jobs on distinct `strategy_api_url` ports.
+
+### Standard C4x3 Workflow
+
+When user requests "like c4" or "3 independent tunings", follow:
+- `docs/llm/adaptive-tuning-c4x3.md`
 
 ## Invariants (Do Not Break)
 

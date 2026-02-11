@@ -29,6 +29,27 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     return new Date(parsed).toLocaleString();
   };
 
+  const formatFieldLabel = (field) => {
+    const upperTokenMap = new Map([
+      ["ma", "MA"],
+      ["rr", "RR"],
+      ["vwap", "VWAP"],
+      ["l2", "L2"],
+      ["pct", "%"],
+    ]);
+    return String(field || "")
+      .split("_")
+      .filter(Boolean)
+      .map((token) => {
+        const normalized = token.toLowerCase();
+        if (upperTokenMap.has(normalized)) {
+          return upperTokenMap.get(normalized);
+        }
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+      })
+      .join(" ");
+  };
+
   const fetchStrategies = useCallback(async () => {
     if (!resolvedUrl) return null;
     setLoading(true);
@@ -400,13 +421,18 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     // Editable numeric or boolean fields; allowed_regimes multi-select
     if (field === "allowed_regimes" && Array.isArray(value)) {
       return (
-        <div className="field-row" key={field}>
-          <span className="field-label">Allowed Regimes</span>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div key={field} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span className="field-label" style={{ fontWeight: 600 }}>
+            Allowed Regimes
+          </span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {regimeOptions.map((opt) => {
               const checked = (drafts[name]?.allowed_regimes || value || []).includes(opt);
               return (
-                <label key={opt} style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                <label
+                  key={opt}
+                  style={{ fontSize: "0.8rem", color: "var(--text-secondary)", cursor: "pointer" }}
+                >
                   <input
                     type="checkbox"
                     checked={checked}
@@ -429,7 +455,7 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     if (typeof value === "number") {
       return (
         <div className="field-row" key={field}>
-          <span className="field-label">{field.replace(/_/g, " ")}</span>
+          <span className="field-label">{formatFieldLabel(field)}</span>
           <input
             type="number"
             step="0.01"
@@ -444,7 +470,7 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     if (typeof value === "boolean") {
       return (
         <div className="field-row" key={field}>
-          <span className="field-label">{field.replace(/_/g, " ")}</span>
+          <span className="field-label">{formatFieldLabel(field)}</span>
           <input
             type="checkbox"
             checked={drafts[name]?.[field] ?? value}
@@ -497,16 +523,76 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     return null;
   };
 
+  const strategyFieldExclusions = useMemo(
+    () =>
+      new Set(["enabled", "display_name", "name", "open_positions", "total_signals", "last_signal"]),
+    []
+  );
+
+  const classifyFieldGroup = (field) => {
+    if (field === "allowed_regimes") return "Regime";
+    if (/stop|trailing|rr_ratio|risk|take_profit|time_exit/i.test(field)) {
+      return "Risk And Exit";
+    }
+    if (
+      /entry|breakout|pullback|deviation|threshold|lookback|consolidation|rotation|distance|bars_since|ma_|volume|confidence|confirm/i.test(
+        field
+      )
+    ) {
+      return "Signal Setup";
+    }
+    return "Other";
+  };
+
+  const groupFieldsForEdit = (cfg) => {
+    const grouped = {
+      Regime: [],
+      "Signal Setup": [],
+      "Risk And Exit": [],
+      Other: [],
+    };
+    Object.entries(cfg || {}).forEach(([field, value]) => {
+      if (strategyFieldExclusions.has(field)) return;
+      if (
+        !(typeof value === "number" || typeof value === "boolean" || (field === "allowed_regimes" && Array.isArray(value)))
+      ) {
+        return;
+      }
+      const group = classifyFieldGroup(field);
+      grouped[group].push([field, value]);
+    });
+    return Object.entries(grouped).filter(([, entries]) => entries.length > 0);
+  };
+
   const strategyEntries = useMemo(() => {
     if (!strategies) {
       return [];
     }
-    const entries = Object.entries(strategies);
+    const entries = Object.entries(strategies).sort((a, b) => {
+      const aEnabled = a[1]?.enabled ? 1 : 0;
+      const bEnabled = b[1]?.enabled ? 1 : 0;
+      if (aEnabled !== bEnabled) return bEnabled - aEnabled;
+      const aLabel = String(a[1]?.display_name || a[1]?.name || a[0] || "");
+      const bLabel = String(b[1]?.display_name || b[1]?.name || b[0] || "");
+      return aLabel.localeCompare(bLabel);
+    });
     if (selectedTicker === "MU" && showCoreOnly) {
       return entries.filter(([name]) => flowCoreSet.has(name));
     }
     return entries;
   }, [strategies, selectedTicker, showCoreOnly, flowCoreSet]);
+
+  const strategySummary = useMemo(() => {
+    const total = strategyEntries.length;
+    const enabled = strategyEntries.filter(([, cfg]) => !!cfg?.enabled).length;
+    const expandedCount = strategyEntries.filter(([name]) => !!expanded[name]).length;
+    return {
+      total,
+      enabled,
+      disabled: Math.max(0, total - enabled),
+      expanded: expandedCount,
+    };
+  }, [strategyEntries, expanded]);
 
   const selectedComboProfile = useMemo(() => {
     const selectedId = String(comboSelectedProfileId || "").trim();
@@ -529,13 +615,13 @@ function StrategySettings({ apiUrl, selectedTicker }) {
               onClick={() => setShowCoreOnly((prev) => !prev)}
               title="Show only MU flow strategies used in backtest profile"
             >
-              {showCoreOnly ? "Core Flow" : "All"}
+              {showCoreOnly ? "Core Only" : "Show All"}
             </button>
           )}
           <button className="btn btn-secondary" onClick={fetchStrategies} disabled={loading}>
-            ↻
+            Refresh
           </button>
-          {loading && <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Loading…</span>}
+          {loading && <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Loading...</span>}
         </div>
       </div>
       <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -644,63 +730,169 @@ function StrategySettings({ apiUrl, selectedTicker }) {
             Showing only MU flow strategies used by current backtest profile.
           </div>
         )}
+        {strategySummary.total > 0 && (
+          <div
+            style={{
+              border: "1px solid var(--border-color)",
+              borderRadius: 6,
+              padding: "8px 10px",
+              background: "rgba(255, 255, 255, 0.65)",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+              gap: 8,
+              fontSize: "0.8rem",
+              color: "var(--text-secondary)",
+            }}
+          >
+            <div>
+              <strong style={{ color: "var(--text-primary)" }}>{strategySummary.total}</strong> visible
+            </div>
+            <div>
+              <strong style={{ color: "var(--text-primary)" }}>{strategySummary.enabled}</strong> enabled
+            </div>
+            <div>
+              <strong style={{ color: "var(--text-primary)" }}>{strategySummary.disabled}</strong> disabled
+            </div>
+            <div>
+              <strong style={{ color: "var(--text-primary)" }}>{strategySummary.expanded}</strong> open
+            </div>
+          </div>
+        )}
+        {strategies && strategyEntries.length === 0 && (
+          <div style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+            No strategies match the current filter.
+          </div>
+        )}
         {strategies &&
-          strategyEntries.map(([name, cfg]) => (
-            <div
-              key={name}
-              style={{
-                border: "1px solid var(--border-color)",
-                borderRadius: "6px",
-                padding: "8px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600 }}>{cfg.display_name || cfg.name || name}</div>
-                <div style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
-                  Regimes: {(cfg.allowed_regimes || cfg.regimes || []).join(", ") || "all"}
+          strategyEntries.map(([name, cfg]) => {
+            const displayName = cfg.display_name || cfg.name || name;
+            const regimes = (cfg.allowed_regimes || cfg.regimes || []).join(", ") || "all";
+            const warning = getStrategyWarning(name, cfg);
+            const editableGroups = groupFieldsForEdit(cfg);
+            const isExpanded = !!expanded[name];
+            return (
+              <div
+                key={name}
+                style={{
+                  border: "1px solid var(--border-color)",
+                  borderLeft: cfg.enabled
+                    ? "3px solid var(--accent-blue)"
+                    : "3px solid rgba(148, 163, 184, 0.45)",
+                  borderRadius: "6px",
+                  padding: "10px",
+                  background: cfg.enabled ? "rgba(255, 255, 255, 0.75)" : "rgba(248, 250, 252, 0.68)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ fontWeight: 700 }}>{displayName}</div>
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          lineHeight: 1,
+                          padding: "4px 6px",
+                          borderRadius: 999,
+                          background: cfg.enabled ? "rgba(37, 99, 235, 0.12)" : "rgba(148, 163, 184, 0.16)",
+                          color: cfg.enabled ? "var(--accent-blue)" : "var(--text-muted)",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {cfg.enabled ? "enabled" : "disabled"}
+                      </span>
+                      <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{name}</span>
+                    </div>
+                    <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: 4 }}>
+                      Regimes: {regimes}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={cfg.enabled}
+                        onChange={(e) => toggleStrategy(name, e.target.checked)}
+                      />
+                      <span className="slider" />
+                    </label>
+                    <button className="btn btn-secondary" onClick={() => toggleExpanded(name)}>
+                      {isExpanded ? "Hide" : "Edit"}
+                    </button>
+                  </div>
                 </div>
-                {expanded[name] && (
-                  <div style={{ marginTop: 8, color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: 1.4, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {getStrategyWarning(name, cfg) && (
-                      <div style={{ color: "var(--accent-red)", fontSize: "0.8rem", background: "rgba(239, 68, 68, 0.08)", padding: "6px 8px", borderRadius: 6 }}>
-                        ⚠ {getStrategyWarning(name, cfg)}
+
+                {isExpanded && (
+                  <div
+                    style={{
+                      borderTop: "1px solid var(--border-color)",
+                      paddingTop: 10,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                      color: "var(--text-secondary)",
+                      fontSize: "0.85rem",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {warning && (
+                      <div
+                        style={{
+                          color: "var(--accent-red)",
+                          fontSize: "0.8rem",
+                          background: "rgba(239, 68, 68, 0.08)",
+                          padding: "6px 8px",
+                          borderRadius: 6,
+                        }}
+                      >
+                        Warning: {warning}
                       </div>
                     )}
-                    {Object.entries(cfg)
-                      .filter(([k, v]) => !["enabled", "display_name", "name", "open_positions", "total_signals", "last_signal"].includes(k))
-                      .map(([k, v]) => renderField(name, k, v))}
-                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
-                      <button className="btn btn-secondary" onClick={() => handleReset(name)}>Reset (server)</button>
+                    {editableGroups.map(([groupLabel, groupFields]) => (
+                      <div
+                        key={groupLabel}
+                        style={{
+                          border: "1px solid rgba(148, 163, 184, 0.22)",
+                          borderRadius: 6,
+                          padding: "8px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
+                        }}
+                      >
+                        <div style={{ fontSize: "0.74rem", fontWeight: 700, color: "var(--text-muted)" }}>
+                          {groupLabel}
+                        </div>
+                        {groupFields.map(([field, value]) => renderField(name, field, value))}
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 2 }}>
+                      <button className="btn btn-secondary" onClick={() => handleReset(name)}>
+                        Reset
+                      </button>
                       {recommendedParams[name] && (
                         <button className="btn btn-secondary" onClick={() => applyRecommended(name)}>
                           Recommended
                         </button>
                       )}
-                      <button className="btn btn-primary" onClick={() => saveDraft(name)}>Save</button>
+                      <button className="btn btn-primary" onClick={() => saveDraft(name)}>
+                        Save
+                      </button>
                     </div>
                   </div>
                 )}
               </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={cfg.enabled}
-                  onChange={(e) => toggleStrategy(name, e.target.checked)}
-                />
-                <span className="slider" />
-              </label>
-              <button
-                className="btn btn-secondary"
-                style={{ marginLeft: 8 }}
-                onClick={() => toggleExpanded(name)}
-              >
-                {expanded[name] ? "▲" : "▼"}
-              </button>
-            </div>
-          ))}
+            );
+          })}
       </div>
     </div>
   );

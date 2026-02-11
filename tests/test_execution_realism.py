@@ -263,6 +263,7 @@ class ExecutionRealismTests(unittest.TestCase):
                     l2_delta=-3_000.0,
                     l2_volume=5_000.0,
                     l2_imbalance=-0.25,
+                    l2_book_pressure=-0.25,
                 )
             )
 

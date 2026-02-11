@@ -10,6 +10,7 @@ import DataManager from './components/DataManager';
 import IntrabarPanel from './components/IntrabarPanel';
 import AdaptiveStrategyStudio from './components/AdaptiveStrategyStudio';
 import AdaptiveTuner from './components/AdaptiveTuner';
+import LiveTraderMonitor from './components/LiveTraderMonitor';
 
 const toUnixSeconds = (value) => {
   if (value === null || value === undefined) return null;
@@ -137,7 +138,7 @@ function App() {
   const [strategyApiUrl, setStrategyApiUrl] = useState("http://localhost:8001");
   
   // View navigation
-  const [activeView, setActiveView] = useState("backtest"); // "backtest" | "data-manager" | "adaptive-studio" | "adaptive-tuner"
+  const [activeView, setActiveView] = useState("backtest"); // "backtest" | "data-manager" | "adaptive-studio" | "adaptive-tuner" | "live-trader"
   const [downloadProgress, setDownloadProgress] = useState(null);
 
   // L2 Data
@@ -790,6 +791,12 @@ function App() {
           >
             Adaptive Tuner
           </button>
+          <button
+            className={`nav-tab ${activeView === 'live-trader' ? 'active' : ''}`}
+            onClick={() => setActiveView('live-trader')}
+          >
+            Live Trader
+          </button>
         </nav>
         <div className="connection-status">
           <span className={`status-dot ${isConnected ? 'connected' : ''}`}></span>
@@ -812,6 +819,8 @@ function App() {
           onTickerChange={setSelectedTicker}
           strategyApiUrl={strategyApiUrl}
         />
+      ) : activeView === 'live-trader' ? (
+        <LiveTraderMonitor />
       ) : (
       <main className="app-content">
         {/* Left Sidebar */}
