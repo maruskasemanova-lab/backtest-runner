@@ -35,6 +35,45 @@ from src.config_io import (
 from src.l2_data_manager import L2DataManager
 from src.l2_feature_service import L2FeatureService
 from src.databento_service import DatabentoService
+from src.time_utils import to_utc_datetime, epoch_minute_key, format_iso_utc
+from src.l2_schema import L2_PAYLOAD_KEYS, get_default_l2_feature_bucket
+from src.momentum_diversification import (
+    normalize_momentum_diversification_payload,
+    build_regime_strategy_map_options,
+    MICRO_REGIMES,
+    ROUTE_KEYS,
+    STRATEGY_FAMILY_MAP,
+)
+from src.normalization import (
+    normalize_strategy_selection_mode,
+    normalize_clamped_int,
+    normalize_strategy_sets,
+    normalize_regime_filter_sets,
+    sanitize_strategy_params,
+    normalize_strategy_combo_profiles,
+    normalize_tuner_profiles,
+    normalize_time_window_sets,
+    normalize_strategy_key,
+)
+from src.aos_config import (
+    load_aos_config,
+    save_aos_config,
+    load_positioning_config,
+    save_positioning_config,
+    get_ticker_positioning_config,
+    POSITIONING_CONFIG_KEYS,
+)
+from src.session_config import (
+    configure_session,
+    clear_remote_strategy_sessions,
+    reset_remote_orchestrator_state,
+    load_remote_checkpoint,
+    save_remote_checkpoint,
+)
+from src.tuner_scoring import (
+    compute_tuner_score,
+    compute_tuner_score_robust,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BacktestRunner")
@@ -73,215 +112,22 @@ LIVE_TRADER_ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "ibkr-realt
 MARKET_TZ = ZoneInfo("America/New_York")
 LIVE_RUN_ACTIVE_WINDOW_SECONDS = 180
 
-# Strategy family taxonomy for regime-conditional mapping.
-# Keys use lowercase snake_case (matching candidate enabled_strategies).
-STRATEGY_FAMILY_MAP: Dict[str, str] = {
-    "momentum_flow": "trend-follow",
-    "momentum": "trend-follow",
-    "pullback": "trend-follow",
-    "mean_reversion": "reversal",
-    "absorption_reversal": "reversal",
-    "exhaustion_fade": "reversal",
-    "vwap_magnet": "reversal",
-    "volume_profile": "level-based",
-    "gap_liquidity": "level-based",
-    "rotation": "sector",
-    "iceberg_defense": "institutional",
-}
-POSITIONING_CONFIG_KEYS = {
-    "risk_per_trade_pct",
-    "max_position_notional_pct",
-    "max_fill_participation_rate",
-    "min_fill_ratio",
-    "enable_partial_take_profit",
-    "partial_take_profit_rr",
-    "partial_take_profit_fraction",
-    "trailing_activation_pct",
-    "break_even_buffer_pct",
-    "break_even_min_hold_bars",
-    "trailing_enabled_in_choppy",
-    "time_exit_bars",
-    "adverse_flow_exit_enabled",
-    "adverse_flow_threshold",
-    "adverse_flow_min_hold_bars",
-    "adverse_flow_consistency_threshold",
-    "adverse_book_pressure_threshold",
-    "stop_loss_mode",
-    "fixed_stop_loss_pct",
-}
-MOMENTUM_DIVERSIFICATION_MICRO_KEYS = {
-    "TRENDING_UP",
-    "TRENDING_DOWN",
-    "BREAKOUT",
-    "MIXED",
-    "ABSORPTION",
-    "CHOPPY",
-}
-MOMENTUM_DIVERSIFICATION_ROUTE_KEYS = {"impulse", "continuation", "defensive"}
+# Strategy family taxonomy - imported from src.momentum_diversification
+# Backward-compatible alias
+# STRATEGY_FAMILY_MAP is now imported from src.momentum_diversification
 
+# Positioning config keys - imported from src.aos_config
+# Backward-compatible alias  
+# POSITIONING_CONFIG_KEYS is now imported from src.aos_config
 
-def _normalize_momentum_diversification_payload(
-    raw: Any,
-    *,
-    include_sleeves: bool = True,
-) -> Optional[Dict[str, Any]]:
-    if not isinstance(raw, dict):
-        return None
+# Momentum diversification keys - imported from src.momentum_diversification
+# Backward-compatible aliases
+MOMENTUM_DIVERSIFICATION_MICRO_KEYS = MICRO_REGIMES
+MOMENTUM_DIVERSIFICATION_ROUTE_KEYS = ROUTE_KEYS
 
-    payload: Dict[str, Any] = {}
-    bool_keys = {
-        "enabled",
-        "require_l2_coverage",
-        "route_enabled",
-        "route_require_l2_coverage",
-        "fail_fast_exit_enabled",
-    }
-    for key in bool_keys:
-        if key in raw:
-            payload[key] = bool(raw.get(key))
-
-    float_bounds = {
-        "min_flow_score": (0.0, 100.0),
-        "min_directional_consistency": (0.0, 1.0),
-        "min_signed_aggression": (0.0, 1.0),
-        "min_imbalance": (0.0, 1.0),
-        "min_delta_acceleration": (-1_000_000_000.0, 1_000_000_000.0),
-        "min_delta_price_divergence": (-10.0, 10.0),
-        "route_flow_score_impulse": (0.0, 100.0),
-        "fail_fast_signed_aggression_max": (-1.0, 0.0),
-        "fail_fast_book_pressure_max": (-1.0, 0.0),
-        "fail_fast_directional_consistency_max": (0.0, 1.0),
-    }
-    for key, (low, high) in float_bounds.items():
-        if key not in raw:
-            continue
-        try:
-            value = float(raw.get(key))
-        except (TypeError, ValueError):
-            continue
-        payload[key] = max(low, min(high, value))
-
-    if "fail_fast_max_bars" in raw:
-        try:
-            value = int(raw.get("fail_fast_max_bars"))
-        except (TypeError, ValueError):
-            value = 0
-        payload["fail_fast_max_bars"] = max(1, min(30, value))
-
-    if isinstance(raw.get("apply_to_strategies"), list):
-        cleaned = []
-        seen = set()
-        for item in raw.get("apply_to_strategies", []):
-            value = str(item or "").strip().lower()
-            if not value or value in seen:
-                continue
-            seen.add(value)
-            cleaned.append(value)
-        if cleaned:
-            payload["apply_to_strategies"] = cleaned
-
-    for list_key in ("allowed_micro_regimes", "blocked_micro_regimes"):
-        if not isinstance(raw.get(list_key), list):
-            continue
-        cleaned = []
-        seen = set()
-        for item in raw.get(list_key, []):
-            value = str(item or "").strip().upper()
-            if value not in MOMENTUM_DIVERSIFICATION_MICRO_KEYS or value in seen:
-                continue
-            seen.add(value)
-            cleaned.append(value)
-        payload[list_key] = cleaned
-
-    route_map = raw.get("route_strategy_map")
-    if isinstance(route_map, dict):
-        cleaned_route_map: Dict[str, List[str]] = {}
-        for route_key in MOMENTUM_DIVERSIFICATION_ROUTE_KEYS:
-            values = route_map.get(route_key, [])
-            if not isinstance(values, list):
-                continue
-            cleaned = []
-            seen = set()
-            for item in values:
-                value = str(item or "").strip().lower()
-                if not value or value in seen:
-                    continue
-                seen.add(value)
-                cleaned.append(value)
-            cleaned_route_map[route_key] = cleaned
-        if cleaned_route_map:
-            payload["route_strategy_map"] = cleaned_route_map
-
-    micro_routes = raw.get("micro_regime_routes")
-    if isinstance(micro_routes, dict):
-        cleaned_micro_routes: Dict[str, str] = {}
-        for micro_key in MOMENTUM_DIVERSIFICATION_MICRO_KEYS:
-            route_name = str(micro_routes.get(micro_key, "")).strip().lower()
-            if route_name not in MOMENTUM_DIVERSIFICATION_ROUTE_KEYS:
-                continue
-            cleaned_micro_routes[micro_key] = route_name
-        if cleaned_micro_routes:
-            payload["micro_regime_routes"] = cleaned_micro_routes
-
-    if include_sleeves and isinstance(raw.get("sleeves"), list):
-        cleaned_sleeves: List[Dict[str, Any]] = []
-        seen_ids = set()
-        for idx, item in enumerate(raw.get("sleeves", [])):
-            if not isinstance(item, dict):
-                continue
-            sleeve_payload = _normalize_momentum_diversification_payload(
-                item,
-                include_sleeves=False,
-            )
-            if not sleeve_payload:
-                continue
-            raw_id = str(item.get("sleeve_id") or item.get("name") or f"sleeve_{idx + 1}").strip()
-            normalized_id = raw_id.lower().replace(" ", "_")
-            if not normalized_id:
-                normalized_id = f"sleeve_{idx + 1}"
-            if normalized_id in seen_ids:
-                continue
-            seen_ids.add(normalized_id)
-            sleeve_payload["sleeve_id"] = normalized_id
-
-            if "allocation_weight" in item:
-                try:
-                    weight = float(item.get("allocation_weight"))
-                except (TypeError, ValueError):
-                    weight = 0.0
-                sleeve_payload["allocation_weight"] = max(0.0, min(1.0, weight))
-
-            cleaned_sleeves.append(sleeve_payload)
-            if len(cleaned_sleeves) >= 8:
-                break
-        if cleaned_sleeves:
-            payload["sleeves"] = cleaned_sleeves
-
-    return payload or None
-
-
-def _build_regime_strategy_map_options(
-    enabled: List[str],
-) -> List[Optional[Dict[str, List[str]]]]:
-    """Build regime-conditional strategy map options for v2 search space.
-
-    Returns a list of map candidates.  ``None`` means flat mode (no per-regime
-    mapping, backward compatible).  Each map assigns a strategy list to each
-    macro regime (TRENDING / MIXED / CHOPPY).
-    """
-    trend = [s for s in enabled if STRATEGY_FAMILY_MAP.get(s) == "trend-follow"]
-    reversal = [s for s in enabled if STRATEGY_FAMILY_MAP.get(s) == "reversal"]
-    # Fallback: if a family bucket is empty, use enabled list
-    if not trend:
-        trend = enabled[:1]
-    if not reversal:
-        reversal = enabled[:1]
-    return [
-        None,  # flat mode — backward compatible
-        {"TRENDING": trend, "MIXED": reversal, "CHOPPY": []},
-        {"TRENDING": trend, "MIXED": reversal, "CHOPPY": reversal},
-        {"TRENDING": trend, "MIXED": trend + reversal, "CHOPPY": []},
-    ]
+# Backward-compatible aliases for functions now in src modules
+_normalize_momentum_diversification_payload = normalize_momentum_diversification_payload
+_build_regime_strategy_map_options = build_regime_strategy_map_options
 
 
 def _load_strategy_overrides() -> Dict[str, Any]:

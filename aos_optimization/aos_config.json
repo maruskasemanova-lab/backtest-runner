@@ -674,7 +674,7 @@
                   "trailing_stop_pct": 1.0,
                   "regime_strategy_map": null
                 },
-                "correlation_note": "Same-family penalty applied (\u00d70.85)",
+                "correlation_note": "Same-family penalty applied (×0.85)",
                 "diversity_score": 0.75,
                 "n_families": 1,
                 "strategy_families": [
@@ -1464,7 +1464,390 @@
       },
       "adverse_flow_consistency_threshold": 0.15,
       "adverse_book_pressure_threshold": 0.15,
-      "time_exit_bars": 35
+      "time_exit_bars": 35,
+      "strategy_combo_profiles": [
+        {
+          "profile_id": "1f3728760005",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T08:30:00.600305Z",
+          "updated_at": "2026-02-12T08:30:00.600305Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "fdc7881e8837",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T08:29:19.946047Z",
+          "updated_at": "2026-02-12T08:29:19.946047Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "4e4d31e981ed",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T07:23:21.900695Z",
+          "updated_at": "2026-02-12T07:23:21.900695Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "a66bebc02f14",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T06:43:34.442427Z",
+          "updated_at": "2026-02-12T06:43:34.442427Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "2e81e4148c97",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T06:27:55.808800Z",
+          "updated_at": "2026-02-12T06:27:55.808800Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "6394f731a053",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T06:23:39.155394Z",
+          "updated_at": "2026-02-12T06:23:39.155394Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "78885e2bb289",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T04:34:57.652635Z",
+          "updated_at": "2026-02-12T04:34:57.652635Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "48f3de1be959",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T04:25:26.863928Z",
+          "updated_at": "2026-02-12T04:25:26.863928Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "dcf84a011164",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T04:20:27.120804Z",
+          "updated_at": "2026-02-12T04:20:27.120804Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "6c242b3cdcf1",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T04:10:58.757013Z",
+          "updated_at": "2026-02-12T04:10:58.757013Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "f8f7fc5198ff",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T04:06:58.226874Z",
+          "updated_at": "2026-02-12T04:06:58.226874Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "41d61c983420",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T03:51:54.329714Z",
+          "updated_at": "2026-02-12T03:51:54.329714Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "396619c6a11c",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-12T03:50:24.044130Z",
+          "updated_at": "2026-02-12T03:50:24.044130Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "8546b31cc067",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-11T21:45:30.002711Z",
+          "updated_at": "2026-02-11T21:45:30.002711Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "ed69757cc489",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-11T21:34:32.640780Z",
+          "updated_at": "2026-02-11T21:34:32.640780Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "d913f92f7ae8",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-11T21:33:27.772767Z",
+          "updated_at": "2026-02-11T21:33:27.772767Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "2d6759341922",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-11T21:24:11.045613Z",
+          "updated_at": "2026-02-11T21:24:11.045613Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "ae53f3a6096a",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-11T21:11:07.419009Z",
+          "updated_at": "2026-02-11T21:11:07.419009Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "1a532a6adea6",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-11T20:55:54.538933Z",
+          "updated_at": "2026-02-11T20:55:54.538933Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "profile_id": "94663a5af204",
+          "profile_name": "MU short window v1",
+          "created_at": "2026-02-11T20:52:09.969781Z",
+          "updated_at": "2026-02-11T20:52:09.969781Z",
+          "strategy_params": {
+            "momentum_flow": {
+              "enabled": true,
+              "min_confidence": 58.0,
+              "allowed_regimes": [
+                "TRENDING",
+                "MIXED"
+              ]
+            },
+            "mean_reversion": {
+              "enabled": false
+            }
+          }
+        }
+      ],
+      "active_strategy_combo_profile_id": "1f3728760005"
     },
     "AMZN": {
       "strategy": "pullback",

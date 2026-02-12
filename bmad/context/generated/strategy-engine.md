@@ -21,9 +21,9 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 877 | `5e15927 2026-02-10` |
-| `../market_regime_detection/src/api_models.py` | yes | 100 | `5e15927 2026-02-10` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 4937 | `0d786b7 2026-02-11` |
+| `../market_regime_detection/api_server.py` | yes | 877 | `247e30c 2026-02-11` |
+| `../market_regime_detection/src/api_models.py` | yes | 100 | `247e30c 2026-02-11` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 4937 | `247e30c 2026-02-11` |
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 60 | `5e15927 2026-02-10` |
 | `../market_regime_detection/src/trading_orchestrator.py` | yes | 464 | `5e15927 2026-02-10` |
 | `../market_regime_detection/src/feature_store.py` | yes | 871 | `cf2281d 2026-02-08` |
