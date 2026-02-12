@@ -21,12 +21,34 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `api_server.py` | yes | 5859 | `b21f28a 2026-02-11` |
+| `api_server.py` | yes | 2674 | `1feb58e 2026-02-12` |
 | `session_runner.py` | yes | 828 | `17d2b9d 2026-02-11` |
 | `data_loader.py` | yes | 300 | `baf7110 2026-02-07` |
 | `available_data.py` | yes | 224 | `baf7110 2026-02-07` |
 | `decision_tracker.py` | yes | 440 | `64da33c 2026-02-10` |
 | `performance_tracker.py` | yes | 822 | `13f270b 2026-02-06` |
+| `src/routes/context.py` | yes | 41 | `-` |
+| `src/routes/system_routes.py` | yes | 31 | `-` |
+| `src/routes/l2_routes.py` | yes | 51 | `-` |
+| `src/routes/data_loader_routes.py` | yes | 236 | `-` |
+| `src/routes/live_trader_routes.py` | yes | 68 | `-` |
+| `src/routes/config_read_routes.py` | yes | 78 | `-` |
+| `src/routes/config_write_routes.py` | yes | 64 | `-` |
+| `src/routes/run_routes.py` | yes | 174 | `-` |
+| `src/routes/adaptive_tuner_routes.py` | yes | 38 | `-` |
+| `src/routes/run_start_routes.py` | yes | 15 | `-` |
+| `src/models/config_requests.py` | yes | 32 | `-` |
+| `src/models/run_requests.py` | yes | 66 | `-` |
+| `src/models/tuner_requests.py` | yes | 78 | `-` |
+| `src/services/live_trader_service.py` | yes | 255 | `-` |
+| `src/services/run_registry.py` | yes | 21 | `-` |
+| `src/services/config_write_service.py` | yes | 264 | `-` |
+| `src/services/run_control_service.py` | yes | 223 | `-` |
+| `src/services/adaptive_tuner_orchestration_service.py` | yes | 161 | `-` |
+| `src/services/adaptive_tuner_worker_service.py` | yes | 601 | `-` |
+| `src/services/adaptive_tuner_runtime_service.py` | yes | 412 | `-` |
+| `src/services/adaptive_tuner_v2_service.py` | yes | 735 | `-` |
+| `src/services/start_run_service.py` | yes | 884 | `-` |
 | `src/config_io.py` | yes | 28 | `64da33c 2026-02-10` |
 | `src/system_settings.py` | yes | 172 | `baf7110 2026-02-07` |
 | `src/databento_service.py` | yes | 1106 | `64da33c 2026-02-10` |
@@ -57,19 +79,19 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 ## Key Symbols
 
 ### `api_server.py`
-- `function` `_load_strategy_overrides` (line 133)
-- `function` `_resolve_aos_config_path` (line 137)
-- `function` `_load_aos_config` (line 147)
-- `function` `_resolve_positioning_config_path` (line 153)
-- `function` `_load_positioning_config` (line 165)
-- `function` `_save_positioning_config` (line 172)
-- `function` `_get_ticker_positioning_config` (line 183)
-- `function` `_merge_positioning_into_aos_snapshot` (line 195)
-- `function` `_save_aos_config` (line 234)
-- `function` `_create_isolated_tuner_aos_config` (line 246)
-- `function` `_cleanup_isolated_tuner_aos_config` (line 260)
-- `async_function` `_create_isolated_tuner_aos_config_locked` (line 272)
-- ... 137 more symbols
+- `function` `_refresh_runtime_data_services` (line 199)
+- `async_function` `_broadcast_with_api_services` (line 210)
+- `function` `_build_config_write_deps` (line 244)
+- `function` `_build_run_control_deps` (line 266)
+- `function` `_build_adaptive_tuner_deps` (line 278)
+- `function` `_build_adaptive_tuner_worker_deps` (line 294)
+- `function` `_build_adaptive_tuner_runtime_deps` (line 320)
+- `function` `_build_adaptive_tuner_v2_deps` (line 340)
+- `function` `_build_start_run_deps` (line 358)
+- `function` `_load_strategy_overrides` (line 402)
+- `function` `_resolve_aos_config_path` (line 406)
+- `function` `_load_aos_config` (line 416)
+- ... 116 more symbols
 
 ### `session_runner.py`
 - `class` `RunConfig` (line 19)
@@ -96,6 +118,161 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `class` `PerformanceTracker` (line 268)
 - `function` `create_tracker` (line 762)
 
+### `src/routes/context.py`
+- `class` `ApiServices` (line 9)
+- `function` `get_api_services` (line 37)
+
+### `src/routes/system_routes.py`
+- `async_function` `root` (line 9)
+- `async_function` `health` (line 18)
+- `async_function` `get_available_data` (line 23)
+- `async_function` `list_data_files` (line 29)
+
+### `src/routes/l2_routes.py`
+- `async_function` `get_footprint_data` (line 11)
+- `async_function` `get_icebergs` (line 34)
+
+### `src/routes/data_loader_routes.py`
+- `class` `DownloadRequest` (line 13)
+- `class` `CostEstimateRequest` (line 22)
+- `class` `DeleteDataRequest` (line 30)
+- `class` `DataSettingsRequest` (line 37)
+- `class` `DatabentoApiKeyRequest` (line 42)
+- `async_function` `get_data_catalog` (line 47)
+- `async_function` `get_ticker_catalog` (line 68)
+- `async_function` `get_data_loader_settings` (line 77)
+- `async_function` `update_data_loader_settings` (line 83)
+- `async_function` `set_databento_api_key` (line 101)
+- `async_function` `get_supported_schemas` (line 114)
+- `async_function` `get_cost_estimate` (line 120)
+- ... 4 more symbols
+
+### `src/routes/live_trader_routes.py`
+- `async_function` `list_live_trader_runs` (line 14)
+- `async_function` `get_live_trader_events` (line 37)
+- `async_function` `get_live_trader_snapshot` (line 55)
+
+### `src/routes/config_read_routes.py`
+- `async_function` `get_strategy_overrides` (line 11)
+- `async_function` `get_ticker_overrides` (line 17)
+- `async_function` `get_strategy_combos` (line 24)
+- `async_function` `get_aos_config` (line 30)
+- `async_function` `get_ticker_aos_config` (line 38)
+- `async_function` `get_positioning_config` (line 64)
+- `async_function` `get_ticker_positioning_config` (line 70)
+- `async_function` `get_adaptive_tuner_options` (line 76)
+
+### `src/routes/config_write_routes.py`
+- `async_function` `capture_strategy_combo_endpoint` (line 23)
+- `async_function` `apply_strategy_combo_endpoint` (line 32)
+- `async_function` `update_aos_config_endpoint` (line 41)
+- `async_function` `update_positioning_config_endpoint` (line 50)
+- `async_function` `apply_adaptive_tuner_profile_endpoint` (line 59)
+
+### `src/routes/run_routes.py`
+- `async_function` `get_run_state_endpoint` (line 27)
+- `async_function` `step_run_endpoint` (line 38)
+- `async_function` `play_run_endpoint` (line 49)
+- `async_function` `pause_run_endpoint` (line 71)
+- `async_function` `resume_run_endpoint` (line 82)
+- `async_function` `stop_run_endpoint` (line 93)
+- `async_function` `get_processed_bars_endpoint` (line 104)
+- `async_function` `get_bar_details_endpoint` (line 115)
+- `async_function` `get_markers_endpoint` (line 127)
+- `async_function` `get_chart_annotations_endpoint` (line 139)
+- `async_function` `get_run_summary_endpoint` (line 150)
+- `async_function` `delete_run_endpoint` (line 161)
+- ... 1 more symbols
+
+### `src/routes/adaptive_tuner_routes.py`
+- `async_function` `run_adaptive_tuner_endpoint` (line 15)
+- `async_function` `get_adaptive_tuner_job_endpoint` (line 24)
+- `async_function` `list_adaptive_tuner_jobs_endpoint` (line 33)
+
+### `src/routes/run_start_routes.py`
+- `async_function` `start_run_endpoint` (line 10)
+
+### `src/models/config_requests.py`
+- `class` `AdaptiveTunerProfileApplyRequest` (line 6)
+- `class` `StrategyComboCaptureRequest` (line 11)
+- `class` `StrategyComboApplyRequest` (line 18)
+- `class` `AOSUpdateRequest` (line 25)
+- `class` `PositioningUpdateRequest` (line 30)
+
+### `src/models/run_requests.py`
+- `class` `StartRunRequest` (line 6)
+- `class` `PlayRequest` (line 64)
+
+### `src/models/tuner_requests.py`
+- `class` `AdaptiveTunerRequest` (line 6)
+
+### `src/services/live_trader_service.py`
+- `function` `sanitize_live_run_id` (line 14)
+- `function` `live_artifact_file` (line 23)
+- `function` `read_jsonl_tail` (line 28)
+- `function` `parse_utc_iso` (line 53)
+- `function` `extract_runtime_summary` (line 68)
+- `function` `infer_live_run_status` (line 99)
+- `function` `discover_live_trader_runs` (line 117)
+- `function` `live_trader_events_payload` (line 180)
+- `function` `live_trader_snapshot_payload` (line 205)
+
+### `src/services/run_registry.py`
+- `class` `RunRegistry` (line 6)
+
+### `src/services/config_write_service.py`
+- `class` `ConfigWriteDeps` (line 8)
+- `async_function` `capture_strategy_combo` (line 27)
+- `async_function` `apply_strategy_combo` (line 72)
+- `function` `update_aos_config` (line 120)
+- `function` `update_positioning_config` (line 189)
+- `function` `apply_adaptive_tuner_profile` (line 210)
+
+### `src/services/run_control_service.py`
+- `class` `RunControlDeps` (line 13)
+- `function` `get_run_state` (line 23)
+- `async_function` `step_run` (line 28)
+- `async_function` `play_run` (line 33)
+- `function` `pause_run` (line 110)
+- `function` `resume_run` (line 116)
+- `function` `stop_run` (line 122)
+- `function` `get_processed_bars` (line 128)
+- `function` `get_bar_details` (line 137)
+- `function` `get_markers` (line 183)
+- `function` `get_chart_annotations` (line 200)
+- `function` `get_run_summary` (line 205)
+- ... 2 more symbols
+
+### `src/services/adaptive_tuner_orchestration_service.py`
+- `class` `AdaptiveTunerOrchestrationDeps` (line 11)
+- `async_function` `run_adaptive_tuner` (line 25)
+- `function` `get_adaptive_tuner_job` (line 145)
+- `function` `list_adaptive_tuner_jobs` (line 153)
+
+### `src/services/adaptive_tuner_worker_service.py`
+- `class` `AdaptiveTunerWorkerDeps` (line 13)
+- `async_function` `run_v2_adaptive_tuner_job` (line 37)
+- `async_function` `run_adaptive_tuner_job` (line 361)
+
+### `src/services/adaptive_tuner_runtime_service.py`
+- `class` `AdaptiveTunerRuntimeDeps` (line 14)
+- `async_function` `evaluate_adaptive_tuner_candidate` (line 32)
+- `async_function` `evaluate_v2_candidate` (line 160)
+- `async_function` `persist_tuner_result_to_primary_aos` (line 334)
+
+### `src/services/adaptive_tuner_v2_service.py`
+- `class` `AdaptiveTunerV2Deps` (line 12)
+- `function` `build_v2_search_space` (line 28)
+- `function` `v2_candidate_key` (line 220)
+- `function` `build_v2_baseline_candidate` (line 261)
+- `function` `build_v2_random_candidates` (line 311)
+- `function` `build_v2_candidate_config` (line 436)
+- `function` `analyze_vectors` (line 592)
+
+### `src/services/start_run_service.py`
+- `class` `StartRunDeps` (line 15)
+- `async_function` `start_run` (line 40)
+
 ### `src/config_io.py`
 - `function` `load_json_file` (line 11)
 - `function` `save_json_file` (line 21)
@@ -118,56 +295,56 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | Method | Path | Handler | File |
 |---|---|---|---|
 | `WEBSOCKET` | `/ws/live` | `websocket_endpoint` | `api_server.py` |
-| `GET` | `/` | `root` | `api_server.py` |
-| `GET` | `/api/health` | `health` | `api_server.py` |
-| `GET` | `/api/available-data` | `get_available_data` | `api_server.py` |
-| `GET` | `/api/live-trader/runs` | `list_live_trader_runs` | `api_server.py` |
-| `GET` | `/api/live-trader/events/{run_id}` | `get_live_trader_events` | `api_server.py` |
-| `GET` | `/api/live-trader/snapshot/{run_id}` | `get_live_trader_snapshot` | `api_server.py` |
-| `GET` | `/api/strategy-overrides` | `get_strategy_overrides` | `api_server.py` |
-| `GET` | `/api/strategy-overrides/{ticker}` | `get_ticker_overrides` | `api_server.py` |
-| `GET` | `/api/strategy-combos/{ticker}` | `get_strategy_combos` | `api_server.py` |
-| `POST` | `/api/strategy-combos/capture` | `capture_strategy_combo` | `api_server.py` |
-| `POST` | `/api/strategy-combos/apply` | `apply_strategy_combo` | `api_server.py` |
-| `GET` | `/api/data/files` | `list_data_files` | `api_server.py` |
-| `GET` | `/api/aos-config` | `get_aos_config` | `api_server.py` |
-| `GET` | `/api/aos-config/{ticker}` | `get_ticker_aos_config` | `api_server.py` |
-| `POST` | `/api/aos-config/update` | `update_aos_config` | `api_server.py` |
-| `GET` | `/api/positioning-config` | `get_positioning_config` | `api_server.py` |
-| `GET` | `/api/positioning-config/{ticker}` | `get_ticker_positioning_config` | `api_server.py` |
-| `POST` | `/api/positioning-config/update` | `update_positioning_config` | `api_server.py` |
-| `GET` | `/api/adaptive-tuner/options/{ticker}` | `get_adaptive_tuner_options` | `api_server.py` |
-| `POST` | `/api/adaptive-tuner/profiles/apply` | `apply_adaptive_tuner_profile` | `api_server.py` |
-| `POST` | `/api/adaptive-tuner/run` | `run_adaptive_tuner` | `api_server.py` |
-| `GET` | `/api/adaptive-tuner/{job_id}` | `get_adaptive_tuner_job` | `api_server.py` |
-| `GET` | `/api/adaptive-tuner` | `list_adaptive_tuner_jobs` | `api_server.py` |
-| `POST` | `/api/run/start` | `start_run` | `api_server.py` |
-| `GET` | `/api/run/{run_id}/{ticker}/{date}/state` | `get_run_state` | `api_server.py` |
-| `POST` | `/api/run/{run_id}/{ticker}/{date}/step` | `step_run` | `api_server.py` |
-| `POST` | `/api/run/{run_id}/{ticker}/{date}/play` | `play_run` | `api_server.py` |
-| `POST` | `/api/run/{run_id}/{ticker}/{date}/pause` | `pause_run` | `api_server.py` |
-| `POST` | `/api/run/{run_id}/{ticker}/{date}/resume` | `resume_run` | `api_server.py` |
-| `POST` | `/api/run/{run_id}/{ticker}/{date}/stop` | `stop_run` | `api_server.py` |
-| `GET` | `/api/run/{run_id}/{ticker}/{date}/bars` | `get_processed_bars` | `api_server.py` |
-| `GET` | `/api/run/{run_id}/{ticker}/{date}/bar-details/{minute_key}` | `get_bar_details` | `api_server.py` |
-| `GET` | `/api/run/{run_id}/{ticker}/{date}/markers` | `get_markers` | `api_server.py` |
-| `GET` | `/api/run/{run_id}/{ticker}/{date}/chart-annotations` | `get_chart_annotations` | `api_server.py` |
-| `GET` | `/api/run/{run_id}/{ticker}/{date}/summary` | `get_run_summary` | `api_server.py` |
-| `DELETE` | `/api/run/{run_id}/{ticker}/{date}` | `delete_run` | `api_server.py` |
-| `GET` | `/api/runs` | `list_runs` | `api_server.py` |
-| `GET` | `/api/l2/footprint/{ticker}` | `get_footprint_data` | `api_server.py` |
-| `GET` | `/api/l2/icebergs/{ticker}` | `get_icebergs` | `api_server.py` |
-| `GET` | `/api/data-loader/catalog` | `get_data_catalog` | `api_server.py` |
-| `GET` | `/api/data-loader/catalog/{ticker}` | `get_ticker_catalog` | `api_server.py` |
-| `GET` | `/api/data-loader/settings` | `get_data_loader_settings` | `api_server.py` |
-| `PUT` | `/api/data-loader/settings` | `update_data_loader_settings` | `api_server.py` |
-| `PUT` | `/api/data-loader/api-key` | `set_databento_api_key` | `api_server.py` |
-| `GET` | `/api/data-loader/schemas` | `get_supported_schemas` | `api_server.py` |
-| `POST` | `/api/data-loader/cost-estimate` | `get_cost_estimate` | `api_server.py` |
-| `POST` | `/api/data-loader/download` | `start_download` | `api_server.py` |
-| `GET` | `/api/data-loader/downloads/active` | `get_active_downloads` | `api_server.py` |
-| `DELETE` | `/api/data-loader/entry` | `delete_data_entry` | `api_server.py` |
-| `POST` | `/api/data-loader/scan` | `scan_existing_data` | `api_server.py` |
+| `GET` | `/` | `root` | `src/routes/system_routes.py` |
+| `GET` | `/api/health` | `health` | `src/routes/system_routes.py` |
+| `GET` | `/api/available-data` | `get_available_data` | `src/routes/system_routes.py` |
+| `GET` | `/api/data/files` | `list_data_files` | `src/routes/system_routes.py` |
+| `GET` | `/api/l2/footprint/{ticker}` | `get_footprint_data` | `src/routes/l2_routes.py` |
+| `GET` | `/api/l2/icebergs/{ticker}` | `get_icebergs` | `src/routes/l2_routes.py` |
+| `GET` | `/api/data-loader/catalog` | `get_data_catalog` | `src/routes/data_loader_routes.py` |
+| `GET` | `/api/data-loader/catalog/{ticker}` | `get_ticker_catalog` | `src/routes/data_loader_routes.py` |
+| `GET` | `/api/data-loader/settings` | `get_data_loader_settings` | `src/routes/data_loader_routes.py` |
+| `PUT` | `/api/data-loader/settings` | `update_data_loader_settings` | `src/routes/data_loader_routes.py` |
+| `PUT` | `/api/data-loader/api-key` | `set_databento_api_key` | `src/routes/data_loader_routes.py` |
+| `GET` | `/api/data-loader/schemas` | `get_supported_schemas` | `src/routes/data_loader_routes.py` |
+| `POST` | `/api/data-loader/cost-estimate` | `get_cost_estimate` | `src/routes/data_loader_routes.py` |
+| `POST` | `/api/data-loader/download` | `start_download` | `src/routes/data_loader_routes.py` |
+| `GET` | `/api/data-loader/downloads/active` | `get_active_downloads` | `src/routes/data_loader_routes.py` |
+| `DELETE` | `/api/data-loader/entry` | `delete_data_entry` | `src/routes/data_loader_routes.py` |
+| `POST` | `/api/data-loader/scan` | `scan_existing_data` | `src/routes/data_loader_routes.py` |
+| `GET` | `/api/live-trader/runs` | `list_live_trader_runs` | `src/routes/live_trader_routes.py` |
+| `GET` | `/api/live-trader/events/{run_id}` | `get_live_trader_events` | `src/routes/live_trader_routes.py` |
+| `GET` | `/api/live-trader/snapshot/{run_id}` | `get_live_trader_snapshot` | `src/routes/live_trader_routes.py` |
+| `GET` | `/api/strategy-overrides` | `get_strategy_overrides` | `src/routes/config_read_routes.py` |
+| `GET` | `/api/strategy-overrides/{ticker}` | `get_ticker_overrides` | `src/routes/config_read_routes.py` |
+| `GET` | `/api/strategy-combos/{ticker}` | `get_strategy_combos` | `src/routes/config_read_routes.py` |
+| `GET` | `/api/aos-config` | `get_aos_config` | `src/routes/config_read_routes.py` |
+| `GET` | `/api/aos-config/{ticker}` | `get_ticker_aos_config` | `src/routes/config_read_routes.py` |
+| `GET` | `/api/positioning-config` | `get_positioning_config` | `src/routes/config_read_routes.py` |
+| `GET` | `/api/positioning-config/{ticker}` | `get_ticker_positioning_config` | `src/routes/config_read_routes.py` |
+| `GET` | `/api/adaptive-tuner/options/{ticker}` | `get_adaptive_tuner_options` | `src/routes/config_read_routes.py` |
+| `POST` | `/api/strategy-combos/capture` | `capture_strategy_combo_endpoint` | `src/routes/config_write_routes.py` |
+| `POST` | `/api/strategy-combos/apply` | `apply_strategy_combo_endpoint` | `src/routes/config_write_routes.py` |
+| `POST` | `/api/aos-config/update` | `update_aos_config_endpoint` | `src/routes/config_write_routes.py` |
+| `POST` | `/api/positioning-config/update` | `update_positioning_config_endpoint` | `src/routes/config_write_routes.py` |
+| `POST` | `/api/adaptive-tuner/profiles/apply` | `apply_adaptive_tuner_profile_endpoint` | `src/routes/config_write_routes.py` |
+| `GET` | `/api/run/{run_id}/{ticker}/{date}/state` | `get_run_state_endpoint` | `src/routes/run_routes.py` |
+| `POST` | `/api/run/{run_id}/{ticker}/{date}/step` | `step_run_endpoint` | `src/routes/run_routes.py` |
+| `POST` | `/api/run/{run_id}/{ticker}/{date}/play` | `play_run_endpoint` | `src/routes/run_routes.py` |
+| `POST` | `/api/run/{run_id}/{ticker}/{date}/pause` | `pause_run_endpoint` | `src/routes/run_routes.py` |
+| `POST` | `/api/run/{run_id}/{ticker}/{date}/resume` | `resume_run_endpoint` | `src/routes/run_routes.py` |
+| `POST` | `/api/run/{run_id}/{ticker}/{date}/stop` | `stop_run_endpoint` | `src/routes/run_routes.py` |
+| `GET` | `/api/run/{run_id}/{ticker}/{date}/bars` | `get_processed_bars_endpoint` | `src/routes/run_routes.py` |
+| `GET` | `/api/run/{run_id}/{ticker}/{date}/bar-details/{minute_key}` | `get_bar_details_endpoint` | `src/routes/run_routes.py` |
+| `GET` | `/api/run/{run_id}/{ticker}/{date}/markers` | `get_markers_endpoint` | `src/routes/run_routes.py` |
+| `GET` | `/api/run/{run_id}/{ticker}/{date}/chart-annotations` | `get_chart_annotations_endpoint` | `src/routes/run_routes.py` |
+| `GET` | `/api/run/{run_id}/{ticker}/{date}/summary` | `get_run_summary_endpoint` | `src/routes/run_routes.py` |
+| `DELETE` | `/api/run/{run_id}/{ticker}/{date}` | `delete_run_endpoint` | `src/routes/run_routes.py` |
+| `GET` | `/api/runs` | `list_runs_endpoint` | `src/routes/run_routes.py` |
+| `POST` | `/api/adaptive-tuner/run` | `run_adaptive_tuner_endpoint` | `src/routes/adaptive_tuner_routes.py` |
+| `GET` | `/api/adaptive-tuner/{job_id}` | `get_adaptive_tuner_job_endpoint` | `src/routes/adaptive_tuner_routes.py` |
+| `GET` | `/api/adaptive-tuner` | `list_adaptive_tuner_jobs_endpoint` | `src/routes/adaptive_tuner_routes.py` |
+| `POST` | `/api/run/start` | `start_run_endpoint` | `src/routes/run_start_routes.py` |
 
 ## Prompt Primer
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-02-06",
+  "updated_at": "2026-02-12",
   "stories": [
     {
       "id": "ER-01",
@@ -198,6 +198,26 @@
         "Payload contains prior/new regime and reason metrics."
       ],
       "prompt_seed": "Add explicit reason fields to regime refresh telemetry."
+    },
+    {
+      "id": "AO-04",
+      "epic": "EPIC-04",
+      "title": "api_server decomposition to routes/services",
+      "priority": "P1",
+      "domain": "orchestration",
+      "status": "in_progress",
+      "files": [
+        "api_server.py",
+        "src/routes",
+        "src/services",
+        "bmad/context/component-map.json"
+      ],
+      "acceptance": [
+        "Endpoint paths/methods remain backward compatible.",
+        "api_server.py line count is reduced in phased extraction.",
+        "Orchestration regression suite passes after each extraction phase."
+      ],
+      "prompt_seed": "Split monolithic runner API server into domain route and service modules with DI and no behavior regressions."
     },
     {
       "id": "FE-01",
