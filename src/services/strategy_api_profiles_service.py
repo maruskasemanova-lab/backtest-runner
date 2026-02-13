@@ -159,6 +159,12 @@ def extract_profile_runtime_overrides(
         momentum_runtime = deps.normalize_momentum_diversification_payload(raw_momentum)
     if momentum_runtime:
         runtime["momentum_diversification"] = momentum_runtime
+
+    # Context-aware exit response parameters
+    context_exit = candidate.get("adaptive", {}).get("context_exit_response")
+    if isinstance(context_exit, dict) and context_exit:
+        runtime["context_exit_response"] = context_exit
+
     return runtime
 
 

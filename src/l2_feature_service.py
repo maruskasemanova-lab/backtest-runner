@@ -54,7 +54,7 @@ class L2FeatureService:
         - l2_buy_volume / l2_sell_volume / l2_volume
         - l2_imbalance
         - l2_bid_depth_total / l2_ask_depth_total
-        - l2_book_pressure / l2_book_pressure_delta
+        - l2_book_pressure / l2_book_pressure_change
         - l2_iceberg_buy_count / l2_iceberg_sell_count / l2_iceberg_bias
         """
         feature_map: Dict[int, Dict[str, float]] = {}
@@ -120,7 +120,7 @@ class L2FeatureService:
                     "l2_bid_depth_total": 0.0,
                     "l2_ask_depth_total": 0.0,
                     "l2_book_pressure": 0.0,
-                    "l2_book_pressure_delta": 0.0,
+                    "l2_book_pressure_change": 0.0,
                     "l2_top_heavy_bid": 0.0,
                     "l2_top_heavy_ask": 0.0,
                     "l2_iceberg_buy_count": 0.0,

@@ -74,6 +74,16 @@ class AdaptiveTunerRequest(BaseModel):
     momentum_route_flow_score_impulse_options: Optional[List[float]] = None
     momentum_fail_fast_exit_enabled_options: Optional[List[bool]] = None
     momentum_fail_fast_max_bars_options: Optional[List[int]] = None
+    # Context-aware exit response dims (v2) – Phase 3
+    context_regime_flip_tighten_stop_pct_options: Optional[List[float]] = None
+    context_regime_flip_shorten_time_pct_options: Optional[List[float]] = None
+    context_regime_flip_exit_when_losing_options: Optional[List[bool]] = None
+    context_regime_flip_exit_loss_threshold_pct_options: Optional[List[float]] = None
+    context_flow_reversal_move_to_breakeven_options: Optional[List[bool]] = None
+    context_flow_reversal_exit_when_losing_options: Optional[List[bool]] = None
+    context_momentum_stall_time_multiplier_options: Optional[List[float]] = None
+    context_volatility_spike_tighten_pct_options: Optional[List[float]] = None
+    context_response_grace_bars_options: Optional[List[int]] = None
     # Regime-conditional strategy maps: each map assigns strategies per macro regime
     regime_strategy_map_sets: Optional[List[Optional[Dict[str, List[str]]]]] = None
     # Neighborhood search: half candidates are baseline perturbations

@@ -29,10 +29,10 @@ def test_normalize_l2_feature_map_for_market_day_sessions_resets_day_scoped_fiel
 
     k1, k2, k3, k4 = (_minute_key(ts_1), _minute_key(ts_2), _minute_key(ts_3), _minute_key(ts_4))
     feature_map = {
-        k1: {"l2_delta": 2.0, "l2_cumulative_delta": 102.0, "l2_delta_acceleration": 99.0, "l2_book_pressure": 0.10, "l2_book_pressure_delta": 5.0},
-        k2: {"l2_delta": -1.0, "l2_cumulative_delta": 101.0, "l2_delta_acceleration": -77.0, "l2_book_pressure": 0.30, "l2_book_pressure_delta": -3.0},
-        k3: {"l2_delta": 5.0, "l2_cumulative_delta": 205.0, "l2_delta_acceleration": 44.0, "l2_book_pressure": -0.20, "l2_book_pressure_delta": 4.0},
-        k4: {"l2_delta": 1.0, "l2_cumulative_delta": 206.0, "l2_delta_acceleration": -11.0, "l2_book_pressure": 0.10, "l2_book_pressure_delta": -2.0},
+        k1: {"l2_delta": 2.0, "l2_cumulative_delta": 102.0, "l2_delta_acceleration": 99.0, "l2_book_pressure": 0.10, "l2_book_pressure_change": 5.0},
+        k2: {"l2_delta": -1.0, "l2_cumulative_delta": 101.0, "l2_delta_acceleration": -77.0, "l2_book_pressure": 0.30, "l2_book_pressure_change": -3.0},
+        k3: {"l2_delta": 5.0, "l2_cumulative_delta": 205.0, "l2_delta_acceleration": 44.0, "l2_book_pressure": -0.20, "l2_book_pressure_change": 4.0},
+        k4: {"l2_delta": 1.0, "l2_cumulative_delta": 206.0, "l2_delta_acceleration": -11.0, "l2_book_pressure": 0.10, "l2_book_pressure_change": -2.0},
     }
     bars = [{"timestamp": ts_1}, {"timestamp": ts_2}, {"timestamp": ts_3}, {"timestamp": ts_4}]
 
@@ -50,10 +50,10 @@ def test_normalize_l2_feature_map_for_market_day_sessions_resets_day_scoped_fiel
     assert feature_map[k3]["l2_delta_acceleration"] == pytest.approx(5.0)
     assert feature_map[k4]["l2_delta_acceleration"] == pytest.approx(-4.0)
 
-    assert feature_map[k1]["l2_book_pressure_delta"] == pytest.approx(0.0)
-    assert feature_map[k2]["l2_book_pressure_delta"] == pytest.approx(0.20)
-    assert feature_map[k3]["l2_book_pressure_delta"] == pytest.approx(0.0)
-    assert feature_map[k4]["l2_book_pressure_delta"] == pytest.approx(0.30)
+    assert feature_map[k1]["l2_book_pressure_change"] == pytest.approx(0.0)
+    assert feature_map[k2]["l2_book_pressure_change"] == pytest.approx(0.20)
+    assert feature_map[k3]["l2_book_pressure_change"] == pytest.approx(0.0)
+    assert feature_map[k4]["l2_book_pressure_change"] == pytest.approx(0.30)
 
 
 def test_normalize_l2_feature_map_for_market_day_sessions_ignores_missing_minutes() -> None:
@@ -71,7 +71,7 @@ def test_normalize_l2_feature_map_for_market_day_sessions_ignores_missing_minute
     assert stats == {"sessionized_days": 1, "sessionized_minutes": 1}
     assert feature_map[k1]["l2_cumulative_delta"] == pytest.approx(1.5)
     assert feature_map[k1]["l2_delta_acceleration"] == pytest.approx(1.5)
-    assert feature_map[k1]["l2_book_pressure_delta"] == pytest.approx(0.0)
+    assert feature_map[k1]["l2_book_pressure_change"] == pytest.approx(0.0)
 
 
 def test_normalize_l2_feature_map_for_market_day_sessions_empty() -> None:

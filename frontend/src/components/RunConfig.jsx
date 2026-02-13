@@ -16,7 +16,7 @@ const parseMaxActiveStrategies = (value, fallback = 3) => {
 const ACTIVE_PROFILE_SENTINEL = "__ACTIVE__";
 const AVAILABLE_DATA_CACHE_KEY = "backtest_runner_available_data_v1";
 const MU_TICKER = "MU";
-const MAX_RANGE_L2_PREWARM_DAYS = 10;
+const AUTO_PREWARM_TICKERS = new Set([MU_TICKER]);
 const MU_DEFAULT_MOMENTUM_APPLY_TO_STRATEGIES = [
   "mean_reversion",
   "momentum",
@@ -43,17 +43,6 @@ const applyMuMomentumDefaults = (draft, ticker, previousTicker) => {
   };
 };
 
-const inclusiveDaySpan = (startIso, endIso) => {
-  const start = String(startIso || "").trim();
-  const end = String(endIso || "").trim();
-  if (!start || !end) return NaN;
-  const startDate = new Date(`${start}T00:00:00Z`);
-  const endDate = new Date(`${end}T00:00:00Z`);
-  const startMs = Number(startDate.getTime());
-  const endMs = Number(endDate.getTime());
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return NaN;
-  return Math.floor((endMs - startMs) / 86400000) + 1;
-};
 
 const formatProfileTimestamp = (value) => {
   if (!value) return "-";
@@ -111,6 +100,21 @@ const formatStartTimingPhaseLabel = (phaseKey) => {
   return key
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const formatPrewarmReadyMessage = (payload) => {
+  const barsCount = Number(payload?.bars || 0);
+  const useL2 = !!payload?.use_l2;
+  const cacheHit = !!payload?.cache_hit;
+  const prewarmScope = String(payload?.prewarm_scope || "range").toLowerCase();
+  const l2GuardReason = String(payload?.l2_guard_reason || "").trim();
+  const coveredMinutes = Number(payload?.l2?.covered_minutes || 0);
+  const readyPrefix = cacheHit ? "Prewarm ready (cached)" : "Prewarm ready";
+  const scopeSuffix = prewarmScope === "ticker" ? " [ticker]" : "";
+  const guardSuffix = l2GuardReason ? " | L2 guard active" : "";
+  return useL2
+    ? `${readyPrefix}${scopeSuffix}: ${barsCount} bars, L2 ${coveredMinutes}m${guardSuffix}`
+    : `${readyPrefix}${scopeSuffix}: ${barsCount} bars${guardSuffix}`;
 };
 
 const normalizeAosTickerConfig = (payload) => {
@@ -490,6 +494,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   );
   const lastSyncedAdaptiveProfileRef = useRef("");
   const lastPrewarmKeyRef = useRef("");
+  const activePrewarmRequestKeyRef = useRef("");
   const prewarmTimerRef = useRef(null);
   const prewarmAbortRef = useRef(null);
 
@@ -498,40 +503,18 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const buildPrewarmPayload = useCallback(() => {
     const ticker = String(config.ticker || "").trim().toUpperCase();
     if (!ticker) return null;
-    const hasRange = Boolean(config.date_from && config.date_to);
-    const wantsL2Prewarm = Boolean(config.l2_only || config.l2_confirm_enabled);
-    const rangeSpanDays = hasRange ? inclusiveDaySpan(config.date_from, config.date_to) : NaN;
-    const canRangeL2Prewarm = (
-      hasRange
-      && wantsL2Prewarm
-      && Number.isFinite(rangeSpanDays)
-      && rangeSpanDays <= MAX_RANGE_L2_PREWARM_DAYS
-    );
-    const prewarmScope = canRangeL2Prewarm ? "range" : "ticker";
-    const enableL2Prewarm = canRangeL2Prewarm && wantsL2Prewarm;
-    const payload = {
+    if (!AUTO_PREWARM_TICKERS.has(ticker)) return null;
+    // Keep auto-prewarm key stable across date/range toggles and run-level options.
+    // Startup prewarm uses the same canonical payload.
+    return {
       ticker,
-      prewarm_scope: prewarmScope,
-      data_file: config.data_file || null,
+      prewarm_scope: "ticker",
       allow_mock_data: false,
-      l2_only: enableL2Prewarm ? !!config.l2_only : false,
-      l2_confirm_enabled: enableL2Prewarm ? !!config.l2_confirm_enabled : false,
-      comparable_mode: !!config.comparable_mode,
+      l2_only: false,
+      l2_confirm_enabled: true,
+      comparable_mode: false,
     };
-    if (canRangeL2Prewarm) {
-      payload.date_from = config.date_from;
-      payload.date_to = config.date_to;
-    }
-    return payload;
-  }, [
-    config.ticker,
-    config.date_from,
-    config.date_to,
-    config.data_file,
-    config.l2_only,
-    config.l2_confirm_enabled,
-    config.comparable_mode,
-  ]);
+  }, [config.ticker]);
 
   const hydrateExecutionConfigFromPositioning = useCallback((payload) => {
     const positioning = normalizePositioningConfig(payload);
@@ -974,6 +957,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   useEffect(() => {
     const payload = buildPrewarmPayload();
     if (!payload) {
+      activePrewarmRequestKeyRef.current = "";
       setPrewarmStatus({ state: "idle", message: "" });
       return;
     }
@@ -982,6 +966,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     if (prewarmKey === lastPrewarmKeyRef.current) {
       return;
     }
+    activePrewarmRequestKeyRef.current = prewarmKey;
 
     if (prewarmTimerRef.current) {
       clearTimeout(prewarmTimerRef.current);
@@ -996,12 +981,40 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       const controller = new AbortController();
       prewarmAbortRef.current = controller;
       let done = false;
-      const warmingIndicator = setTimeout(() => {
-        if (!done) {
-          setPrewarmStatus({ state: "warming", message: "Prewarming cache..." });
-        }
-      }, 120);
+      let warmingIndicator = null;
       try {
+        const statusResp = await fetch("/api/run/prewarm/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        const statusData = await statusResp.json().catch(() => ({}));
+        if (activePrewarmRequestKeyRef.current !== prewarmKey) {
+          return;
+        }
+        if (statusResp.ok && statusData?.ready) {
+          lastPrewarmKeyRef.current = prewarmKey;
+          setPrewarmStatus({
+            state: "ready",
+            message: formatPrewarmReadyMessage({ ...statusData, cache_hit: true }),
+          });
+          return;
+        }
+        if (statusResp.ok && statusData?.in_progress) {
+          setPrewarmStatus({ state: "warming", message: "Prewarming cache..." });
+          setTimeout(() => {
+            if (activePrewarmRequestKeyRef.current !== prewarmKey) return;
+            setPrewarmRevision((prev) => prev + 1);
+          }, 1000);
+          return;
+        }
+
+        warmingIndicator = setTimeout(() => {
+          if (!done) {
+            setPrewarmStatus({ state: "warming", message: "Prewarming cache..." });
+          }
+        }, 120);
         const resp = await fetch("/api/run/prewarm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1009,34 +1022,28 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
           signal: controller.signal,
         });
         const data = await resp.json().catch(() => ({}));
+        if (activePrewarmRequestKeyRef.current !== prewarmKey) {
+          return;
+        }
         if (!resp.ok) {
           throw new Error(data?.detail || `HTTP ${resp.status}`);
         }
         lastPrewarmKeyRef.current = prewarmKey;
-        const barsCount = Number(data?.bars || 0);
-        const useL2 = !!data?.use_l2;
-        const cacheHit = !!data?.cache_hit;
-        const prewarmScope = String(data?.prewarm_scope || "range").toLowerCase();
-        const l2GuardReason = String(data?.l2_guard_reason || "").trim();
-        const coveredMinutes = Number(data?.l2?.covered_minutes || 0);
-        const readyPrefix = cacheHit ? "Prewarm ready (cached)" : "Prewarm ready";
-        const scopeSuffix = prewarmScope === "ticker" ? " [ticker]" : "";
-        const guardSuffix = l2GuardReason ? " | L2 guard active" : "";
         setPrewarmStatus({
           state: "ready",
-          message: useL2
-            ? `${readyPrefix}${scopeSuffix}: ${barsCount} bars, L2 ${coveredMinutes}m${guardSuffix}`
-            : `${readyPrefix}${scopeSuffix}: ${barsCount} bars${guardSuffix}`,
+          message: formatPrewarmReadyMessage(data),
         });
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || activePrewarmRequestKeyRef.current !== prewarmKey) return;
         setPrewarmStatus({
           state: "error",
           message: `Prewarm failed: ${err.message}`,
         });
       } finally {
         done = true;
-        clearTimeout(warmingIndicator);
+        if (warmingIndicator) {
+          clearTimeout(warmingIndicator);
+        }
         if (prewarmAbortRef.current === controller) {
           prewarmAbortRef.current = null;
         }
@@ -1047,6 +1054,9 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       if (prewarmTimerRef.current) {
         clearTimeout(prewarmTimerRef.current);
         prewarmTimerRef.current = null;
+      }
+      if (activePrewarmRequestKeyRef.current === prewarmKey) {
+        activePrewarmRequestKeyRef.current = "";
       }
     };
   }, [buildPrewarmPayload, prewarmRevision]);
@@ -1061,6 +1071,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         prewarmAbortRef.current.abort();
         prewarmAbortRef.current = null;
       }
+      activePrewarmRequestKeyRef.current = "";
     };
   }, []);
 

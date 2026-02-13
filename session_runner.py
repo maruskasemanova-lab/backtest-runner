@@ -43,13 +43,19 @@ class SessionRunner:
         "l2_bid_depth_total",
         "l2_ask_depth_total",
         "l2_book_pressure",
-        "l2_book_pressure_delta",
+        "l2_book_pressure_change",
         "l2_iceberg_buy_count",
         "l2_iceberg_sell_count",
         "l2_iceberg_bias",
         "l2_quality_coverage_ratio",
         "l2_quality_trade_ticks",
         "l2_quality_book_updates",
+        # Extended L2 features: previously computed but not transmitted
+        "l2_cumulative_delta",
+        "l2_signed_aggression",
+        "l2_absorption_rate",
+        "l2_delta_price_divergence",
+        "l2_delta_acceleration",
     )
     
     def __init__(self, config: RunConfig):

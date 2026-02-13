@@ -49,11 +49,11 @@ Purpose: Warm run-start caches (bars/reference/L2 enrichment) for a ticker and d
 Compatibility notes:
 
 - accepts `ticker` with `date` or `date_from/date_to` (scope `range`) and optional `prewarm_scope=ticker` to warm full available ticker coverage, plus optional L2 flags (`l2_only`, `l2_confirm_enabled`, `comparable_mode`).
-- guardrail: ticker-scope prewarm auto-disables L2 enrichment for large ranges by default (`BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS`, default `7`) to avoid runaway memory; override only with `BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE=1`.
+- ticker-scope prewarm keeps full-range behavior by default (`BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS=0` => no day-span cap). Set a positive day cap to limit L2 prewarm memory footprint when needed.
 - guardrail: range-scope prewarm also auto-disables L2 enrichment when requested range exceeds run L2 window (`BACKTEST_RUN_L2_MAX_DAYS`, default `10`, unless `BACKTEST_RUN_L2_FORCE=1`) to prevent startup-memory spikes.
 - uses local AOS snapshot for time-filter/L2 defaults; does not reset or mutate remote strategy session state.
 - returns `cache_hit` (`true` when identical request was already prewarmed in-memory during current backend process).
-- server startup can auto-prewarm configured tickers (defaults to `MU`) via envs: `BACKTEST_STARTUP_PREWARM_ENABLED`, `BACKTEST_STARTUP_PREWARM_TICKERS`, `BACKTEST_STARTUP_PREWARM_L2_CONFIRM` (default `false` for memory safety).
+- server startup can auto-prewarm configured tickers (defaults to `MU`) via envs: `BACKTEST_STARTUP_PREWARM_ENABLED`, `BACKTEST_STARTUP_PREWARM_TICKERS`, `BACKTEST_STARTUP_PREWARM_L2_CONFIRM` (default `true`).
 - ticker-scope prewarm can be reused for narrower date sub-ranges in later `POST /api/run/start` calls (same ticker/files/time-filter signature), so changing date windows no longer forces full file reload.
 
 ### `POST /api/run/{run_id}/{ticker}/{date}/step|play|pause|resume|stop|restart`

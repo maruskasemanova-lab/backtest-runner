@@ -42,6 +42,7 @@ _DISK_CACHE_ROOT = _PROJECT_ROOT / ".cache" / "start_run_data"
 _BASE_BARS_DISK_DIR = _DISK_CACHE_ROOT / "bars"
 _REFERENCE_BARS_DISK_DIR = _DISK_CACHE_ROOT / "reference"
 _L2_ENRICH_DISK_DIR = _DISK_CACHE_ROOT / "l2_enriched"
+_PREWARM_RESULT_DISK_DIR = _DISK_CACHE_ROOT / "prewarm_results"
 _CACHE_LOCK = RLock()
 _BASE_BARS_CACHE: "OrderedDict[str, Tuple[List[Dict[str, Any]], List[str]]]" = OrderedDict()
 _REFERENCE_BARS_CACHE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
@@ -61,7 +62,12 @@ def clear_start_run_data_caches(*, include_disk: bool = False) -> None:
         _BASE_BARS_CACHE_META.clear()
         _REFERENCE_BARS_CACHE_META.clear()
     if include_disk:
-        for cache_dir in (_BASE_BARS_DISK_DIR, _REFERENCE_BARS_DISK_DIR, _L2_ENRICH_DISK_DIR):
+        for cache_dir in (
+            _BASE_BARS_DISK_DIR,
+            _REFERENCE_BARS_DISK_DIR,
+            _L2_ENRICH_DISK_DIR,
+            _PREWARM_RESULT_DISK_DIR,
+        ):
             if not cache_dir.exists():
                 continue
             for path in cache_dir.glob("*.pkl"):
@@ -197,7 +203,12 @@ def _disk_cache_total_bytes(cache_dir: Path) -> int:
 
 
 def _prune_all_disk_caches() -> None:
-    for cache_dir in (_BASE_BARS_DISK_DIR, _REFERENCE_BARS_DISK_DIR, _L2_ENRICH_DISK_DIR):
+    for cache_dir in (
+        _BASE_BARS_DISK_DIR,
+        _REFERENCE_BARS_DISK_DIR,
+        _L2_ENRICH_DISK_DIR,
+        _PREWARM_RESULT_DISK_DIR,
+    ):
         _prune_disk_cache(cache_dir)
 
 
@@ -216,9 +227,11 @@ def get_start_run_data_cache_stats() -> Dict[str, Any]:
         "base_bars_entries": _count_disk_cache_entries(_BASE_BARS_DISK_DIR),
         "reference_entries": _count_disk_cache_entries(_REFERENCE_BARS_DISK_DIR),
         "l2_enriched_entries": _count_disk_cache_entries(_L2_ENRICH_DISK_DIR),
+        "prewarm_results": _count_disk_cache_entries(_PREWARM_RESULT_DISK_DIR),
         "base_bars_bytes": _disk_cache_total_bytes(_BASE_BARS_DISK_DIR),
         "reference_bytes": _disk_cache_total_bytes(_REFERENCE_BARS_DISK_DIR),
         "l2_enriched_bytes": _disk_cache_total_bytes(_L2_ENRICH_DISK_DIR),
+        "prewarm_results_bytes": _disk_cache_total_bytes(_PREWARM_RESULT_DISK_DIR),
         "max_entries_per_dir": _DISK_CACHE_MAX_ENTRIES,
         "max_bytes_per_dir": _DISK_CACHE_MAX_BYTES,
     }
@@ -241,6 +254,15 @@ def get_prewarm_result(key: str) -> Dict[str, Any] | None:
     cached = _cache_get(_PREWARM_RESULT_CACHE, key)
     if isinstance(cached, dict):
         return cached
+    cached_disk = _disk_cache_get(_PREWARM_RESULT_DISK_DIR, key)
+    if isinstance(cached_disk, dict):
+        _cache_set(
+            _PREWARM_RESULT_CACHE,
+            key,
+            cached_disk,
+            _PREWARM_RESULT_CACHE_MAX_ENTRIES,
+        )
+        return cached_disk
     return None
 
 
@@ -253,6 +275,7 @@ def set_prewarm_result(key: str, payload: Dict[str, Any]) -> None:
         payload,
         _PREWARM_RESULT_CACHE_MAX_ENTRIES,
     )
+    _disk_cache_set(_PREWARM_RESULT_DISK_DIR, key, payload)
 
 
 def _canonical_trading_hours(raw_hours: Any) -> Tuple[int, ...]:

@@ -399,6 +399,55 @@ def resolve_execution_config(
         except (TypeError, ValueError):
             l2_lookback_bars = max(1, int(request.l2_lookback_bars))
 
+    try:
+        regime_detection_minutes = max(1, int(request.regime_detection_minutes))
+    except (TypeError, ValueError):
+        regime_detection_minutes = 15
+    try:
+        regime_refresh_bars = max(3, int(request.regime_refresh_bars))
+    except (TypeError, ValueError):
+        regime_refresh_bars = 12
+    try:
+        account_size_usd = max(0.0, float(request.account_size_usd))
+    except (TypeError, ValueError):
+        account_size_usd = 10_000.0
+
+    trading_config_payload = {
+        "regime_detection_minutes": regime_detection_minutes,
+        "regime_refresh_bars": regime_refresh_bars,
+        "account_size_usd": account_size_usd,
+        "risk_per_trade_pct": effective_risk_per_trade_pct,
+        "max_position_notional_pct": effective_max_position_notional_pct,
+        "max_fill_participation_rate": effective_max_fill_participation_rate,
+        "min_fill_ratio": effective_min_fill_ratio,
+        "enable_partial_take_profit": effective_enable_partial_take_profit,
+        "partial_take_profit_rr": effective_partial_take_profit_rr,
+        "partial_take_profit_fraction": effective_partial_take_profit_fraction,
+        "trailing_activation_pct": effective_trailing_activation_pct,
+        "break_even_buffer_pct": effective_break_even_buffer_pct,
+        "break_even_min_hold_bars": effective_break_even_min_hold_bars,
+        "trailing_enabled_in_choppy": effective_trailing_enabled_in_choppy,
+        "time_exit_bars": effective_time_exit_bars,
+        "adverse_flow_exit_enabled": effective_adverse_flow_exit_enabled,
+        "adverse_flow_threshold": effective_adverse_flow_threshold,
+        "adverse_flow_min_hold_bars": effective_adverse_flow_min_hold_bars,
+        "adverse_flow_consistency_threshold": effective_adverse_flow_consistency_threshold,
+        "adverse_book_pressure_threshold": effective_adverse_book_pressure_threshold,
+        "stop_loss_mode": effective_stop_loss_mode,
+        "fixed_stop_loss_pct": effective_fixed_stop_loss_pct,
+        "l2_confirm_enabled": requested_l2_confirm,
+        "l2_min_delta": l2_min_delta,
+        "l2_min_imbalance": l2_min_imbalance,
+        "l2_min_iceberg_bias": l2_min_iceberg_bias,
+        "l2_lookback_bars": l2_lookback_bars,
+        "l2_min_participation_ratio": l2_min_participation_ratio,
+        "l2_min_directional_consistency": l2_min_directional_consistency,
+        "l2_min_signed_aggression": l2_min_signed_aggression,
+        "cold_start_each_day": bool(request.cold_start_each_day),
+        "strategy_selection_mode": effective_strategy_selection_mode,
+        "max_active_strategies": effective_max_active_strategies,
+    }
+
     return {
         "requested_l2_only": requested_l2_only,
         "requested_l2_confirm": requested_l2_confirm,
@@ -451,4 +500,5 @@ def resolve_execution_config(
         "adverse_flow_consistency_source": adverse_flow_consistency_source,
         "effective_adverse_book_pressure_threshold": effective_adverse_book_pressure_threshold,
         "adverse_book_pressure_source": adverse_book_pressure_source,
+        "trading_config": trading_config_payload,
     }

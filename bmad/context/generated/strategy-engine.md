@@ -21,9 +21,9 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 877 | `247e30c 2026-02-11` |
-| `../market_regime_detection/src/api_models.py` | yes | 100 | `247e30c 2026-02-11` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 5052 | `6e4761c 2026-02-13` |
+| `../market_regime_detection/api_server.py` | yes | 828 | `247e30c 2026-02-11` |
+| `../market_regime_detection/src/api_models.py` | yes | 109 | `247e30c 2026-02-11` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 1424 | `6e4761c 2026-02-13` |
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 60 | `5e15927 2026-02-10` |
 | `../market_regime_detection/src/trading_orchestrator.py` | yes | 464 | `5e15927 2026-02-10` |
 | `../market_regime_detection/src/feature_store.py` | yes | 871 | `cf2281d 2026-02-08` |
@@ -32,7 +32,7 @@ Own regime detection, signal generation, position management, learning component
 | `../market_regime_detection/src/checkpoint.py` | yes | 284 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/adaptive_regime.py` | yes | 400 | `cf2281d 2026-02-08` |
 | `../market_regime_detection/src/position_sizing.py` | yes | 145 | `d33cc78 2026-02-07` |
-| `../market_regime_detection/src/evidence_decision.py` | yes | 532 | `5e15927 2026-02-10` |
+| `../market_regime_detection/src/evidence_decision.py` | yes | 543 | `5e15927 2026-02-10` |
 | `../market_regime_detection/src/strategy_factory.py` | yes | 37 | `0d786b7 2026-02-11` |
 | `../market_regime_detection/src/strategies/base_strategy.py` | yes | 355 | `0d786b7 2026-02-11` |
 | `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 172 | `0d786b7 2026-02-11` |
@@ -70,18 +70,18 @@ Own regime detection, signal generation, position management, learning component
 ## Key Symbols
 
 ### `../market_regime_detection/api_server.py`
-- `async_function` `root` (line 53)
-- `async_function` `get_state` (line 58)
-- `async_function` `get_regime` (line 64)
-- `async_function` `get_strategies` (line 84)
-- `async_function` `toggle_strategy` (line 100)
-- `async_function` `update_strategy` (line 120)
-- `async_function` `get_signals` (line 154)
-- `async_function` `get_positions` (line 164)
-- `async_function` `get_trades` (line 175)
-- `async_function` `get_performance` (line 185)
-- `async_function` `step_backtest` (line 191)
-- `async_function` `run_backtest` (line 198)
+- `async_function` `root` (line 54)
+- `async_function` `get_state` (line 59)
+- `async_function` `get_regime` (line 65)
+- `async_function` `get_strategies` (line 85)
+- `async_function` `toggle_strategy` (line 101)
+- `async_function` `update_strategy` (line 121)
+- `async_function` `get_signals` (line 155)
+- `async_function` `get_positions` (line 165)
+- `async_function` `get_trades` (line 176)
+- `async_function` `get_performance` (line 186)
+- `async_function` `step_backtest` (line 192)
+- `async_function` `run_backtest` (line 199)
 - ... 24 more symbols
 
 ### `../market_regime_detection/src/api_models.py`
@@ -89,16 +89,11 @@ Own regime detection, signal generation, position management, learning component
 - `class` `StrategyUpdate` (line 16)
 - `class` `TrailingStopConfig` (line 21)
 - `class` `BarInput` (line 28)
-- `class` `SessionQuery` (line 65)
-- `class` `TradingConfig` (line 73)
+- `class` `SessionQuery` (line 74)
+- `class` `TradingConfig` (line 82)
 
 ### `../market_regime_detection/src/day_trading_manager.py`
-- `class` `SessionPhase` (line 22)
-- `class` `BarData` (line 32)
-- `class` `DayTrade` (line 81)
-- `class` `TradingCosts` (line 143)
-- `class` `TradingSession` (line 234)
-- `class` `DayTradingManager` (line 371)
+- `class` `DayTradingManager` (line 79)
 
 ### `../market_regime_detection/src/multi_layer_decision.py`
 - `class` `DecisionResult` (line 11)

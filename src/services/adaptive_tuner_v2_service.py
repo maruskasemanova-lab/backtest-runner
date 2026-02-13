@@ -240,6 +240,55 @@ def build_v2_search_space(
             min_value=1,
             max_value=30,
         ),
+        # Context-aware exit response dimensions (Phase 3)
+        "context_regime_flip_tighten_stop_pct": _normalize_float_options(
+            request.context_regime_flip_tighten_stop_pct_options,
+            default=[0.0, 0.15, 0.30, 0.50],
+            min_value=0.0,
+            max_value=0.8,
+        ),
+        "context_regime_flip_shorten_time_pct": _normalize_float_options(
+            request.context_regime_flip_shorten_time_pct_options,
+            default=[0.0, 0.30, 0.50],
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "context_regime_flip_exit_when_losing": _normalize_bool_options(
+            request.context_regime_flip_exit_when_losing_options,
+            default=[False, True],
+        ),
+        "context_regime_flip_exit_loss_threshold_pct": _normalize_float_options(
+            request.context_regime_flip_exit_loss_threshold_pct_options,
+            default=[0.2, 0.3, 0.5],
+            min_value=0.0,
+            max_value=2.0,
+        ),
+        "context_flow_reversal_move_to_breakeven": _normalize_bool_options(
+            request.context_flow_reversal_move_to_breakeven_options,
+            default=[False, True],
+        ),
+        "context_flow_reversal_exit_when_losing": _normalize_bool_options(
+            request.context_flow_reversal_exit_when_losing_options,
+            default=[False, True],
+        ),
+        "context_momentum_stall_time_multiplier": _normalize_float_options(
+            request.context_momentum_stall_time_multiplier_options,
+            default=[0.5, 0.7, 1.0],
+            min_value=0.3,
+            max_value=1.0,
+        ),
+        "context_volatility_spike_tighten_pct": _normalize_float_options(
+            request.context_volatility_spike_tighten_pct_options,
+            default=[0.0, 0.15, 0.25],
+            min_value=0.0,
+            max_value=0.5,
+        ),
+        "context_response_grace_bars": _normalize_int_options(
+            request.context_response_grace_bars_options,
+            default=[1, 2, 3],
+            min_value=1,
+            max_value=5,
+        ),
         "regime_strategy_maps": _normalize_regime_strategy_map_sets(
             request.regime_strategy_map_sets,
             enabled_strategies,
@@ -290,6 +339,15 @@ def v2_candidate_key(candidate: Dict[str, Any], deps: AdaptiveTunerV2Deps) -> tu
         json.dumps(candidate.get("regime_strategy_map"), sort_keys=True)
         if candidate.get("regime_strategy_map") is not None
         else None,
+        candidate.get("context_regime_flip_tighten_stop_pct"),
+        candidate.get("context_regime_flip_shorten_time_pct"),
+        candidate.get("context_regime_flip_exit_when_losing"),
+        candidate.get("context_regime_flip_exit_loss_threshold_pct"),
+        candidate.get("context_flow_reversal_move_to_breakeven"),
+        candidate.get("context_flow_reversal_exit_when_losing"),
+        candidate.get("context_momentum_stall_time_multiplier"),
+        candidate.get("context_volatility_spike_tighten_pct"),
+        candidate.get("context_response_grace_bars"),
     )
 
 
@@ -342,6 +400,15 @@ def build_v2_baseline_candidate(
         "momentum_route_flow_score_impulse": _first("momentum_route_flow_score_impulse"),
         "momentum_fail_fast_exit_enabled": _first("momentum_fail_fast_exit_enabled"),
         "momentum_fail_fast_max_bars": _first("momentum_fail_fast_max_bars"),
+        "context_regime_flip_tighten_stop_pct": _first("context_regime_flip_tighten_stop_pct"),
+        "context_regime_flip_shorten_time_pct": _first("context_regime_flip_shorten_time_pct"),
+        "context_regime_flip_exit_when_losing": _first("context_regime_flip_exit_when_losing"),
+        "context_regime_flip_exit_loss_threshold_pct": _first("context_regime_flip_exit_loss_threshold_pct"),
+        "context_flow_reversal_move_to_breakeven": _first("context_flow_reversal_move_to_breakeven"),
+        "context_flow_reversal_exit_when_losing": _first("context_flow_reversal_exit_when_losing"),
+        "context_momentum_stall_time_multiplier": _first("context_momentum_stall_time_multiplier"),
+        "context_volatility_spike_tighten_pct": _first("context_volatility_spike_tighten_pct"),
+        "context_response_grace_bars": _first("context_response_grace_bars"),
         "regime_strategy_map": search_space.get("regime_strategy_maps", [None])[0]
         if search_space.get("regime_strategy_maps")
         else None,
@@ -382,6 +449,11 @@ def build_v2_random_candidates(
         "momentum_min_delta_acceleration", "momentum_min_delta_price_divergence",
         "momentum_route_flow_score_impulse", "momentum_fail_fast_exit_enabled",
         "momentum_fail_fast_max_bars",
+        "context_regime_flip_tighten_stop_pct", "context_regime_flip_shorten_time_pct",
+        "context_regime_flip_exit_when_losing", "context_regime_flip_exit_loss_threshold_pct",
+        "context_flow_reversal_move_to_breakeven", "context_flow_reversal_exit_when_losing",
+        "context_momentum_stall_time_multiplier", "context_volatility_spike_tighten_pct",
+        "context_response_grace_bars",
     ]
     list_dims = ["strategy_sets", "regime_filter_sets", "time_window_sets", "regime_strategy_maps"]
 
@@ -478,6 +550,33 @@ def build_v2_random_candidates(
             ),
             "momentum_fail_fast_max_bars": rng.choice(
                 search_space["momentum_fail_fast_max_bars"]
+            ),
+            "context_regime_flip_tighten_stop_pct": rng.choice(
+                search_space["context_regime_flip_tighten_stop_pct"]
+            ),
+            "context_regime_flip_shorten_time_pct": rng.choice(
+                search_space["context_regime_flip_shorten_time_pct"]
+            ),
+            "context_regime_flip_exit_when_losing": rng.choice(
+                search_space["context_regime_flip_exit_when_losing"]
+            ),
+            "context_regime_flip_exit_loss_threshold_pct": rng.choice(
+                search_space["context_regime_flip_exit_loss_threshold_pct"]
+            ),
+            "context_flow_reversal_move_to_breakeven": rng.choice(
+                search_space["context_flow_reversal_move_to_breakeven"]
+            ),
+            "context_flow_reversal_exit_when_losing": rng.choice(
+                search_space["context_flow_reversal_exit_when_losing"]
+            ),
+            "context_momentum_stall_time_multiplier": rng.choice(
+                search_space["context_momentum_stall_time_multiplier"]
+            ),
+            "context_volatility_spike_tighten_pct": rng.choice(
+                search_space["context_volatility_spike_tighten_pct"]
+            ),
+            "context_response_grace_bars": rng.choice(
+                search_space["context_response_grace_bars"]
             ),
             "regime_strategy_map": rng.choice(search_space.get("regime_strategy_maps", [None])),
         }
@@ -620,6 +719,34 @@ def build_v2_candidate_config(
         adaptive_cfg["momentum_diversification"] = existing_momentum
         cfg["adaptive"] = adaptive_cfg
         cfg["momentum_diversification"] = existing_momentum
+
+    # Context-aware exit response parameters → adaptive.context_exit_response
+    context_key_map = {
+        "context_regime_flip_tighten_stop_pct": "regime_flip_tighten_stop_pct",
+        "context_regime_flip_shorten_time_pct": "regime_flip_shorten_time_pct",
+        "context_regime_flip_exit_when_losing": "regime_flip_exit_when_losing",
+        "context_regime_flip_exit_loss_threshold_pct": "regime_flip_exit_loss_threshold_pct",
+        "context_flow_reversal_move_to_breakeven": "flow_reversal_move_to_breakeven",
+        "context_flow_reversal_exit_when_losing": "flow_reversal_exit_when_losing",
+        "context_momentum_stall_time_multiplier": "momentum_stall_time_multiplier",
+        "context_volatility_spike_tighten_pct": "volatility_spike_tighten_pct",
+        "context_response_grace_bars": "context_response_grace_bars",
+    }
+    context_exit_cfg: Dict[str, Any] = {}
+    for candidate_key, cfg_key in context_key_map.items():
+        val = candidate.get(candidate_key)
+        if val is not None:
+            context_exit_cfg[cfg_key] = val
+    if context_exit_cfg:
+        adaptive_cfg = cfg.get("adaptive", {})
+        if not isinstance(adaptive_cfg, dict):
+            adaptive_cfg = {}
+        existing = adaptive_cfg.get("context_exit_response", {})
+        if not isinstance(existing, dict):
+            existing = {}
+        existing.update(context_exit_cfg)
+        adaptive_cfg["context_exit_response"] = existing
+        cfg["adaptive"] = adaptive_cfg
 
     if "regime_strategy_map" in candidate:
         regime_map = candidate.get("regime_strategy_map")

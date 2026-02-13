@@ -13,12 +13,12 @@
       "break_even_buffer_pct": 0.0,
       "break_even_min_hold_bars": 3,
       "trailing_enabled_in_choppy": false,
-      "time_exit_bars": 48,
+      "time_exit_bars": 35,
       "adverse_flow_exit_enabled": true,
       "adverse_flow_threshold": 0.14,
       "adverse_flow_min_hold_bars": 5,
-      "adverse_flow_consistency_threshold": 0.5,
-      "adverse_book_pressure_threshold": 0.18,
+      "adverse_flow_consistency_threshold": 0.18,
+      "adverse_book_pressure_threshold": 0.12,
       "stop_loss_mode": "strategy",
       "fixed_stop_loss_pct": 0.0
     }

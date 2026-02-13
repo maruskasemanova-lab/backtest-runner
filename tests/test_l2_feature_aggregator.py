@@ -76,7 +76,7 @@ def test_aggregate_minute_book_pressure_delta():
     
     # pressure starts at 0.1, ends at 0.1 + 59*0.001 = 0.159
     expected_delta = 0.159 - 0.1
-    assert result.features["l2_book_pressure_delta"] == pytest.approx(expected_delta)
+    assert result.features["l2_book_pressure_change"] == pytest.approx(expected_delta)
 
 
 def test_aggregate_minute_delta_consistency():

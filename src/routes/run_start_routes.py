@@ -25,6 +25,15 @@ async def prewarm_run_endpoint(
     return await services.prewarm_run(request)
 
 
+@router.post("/api/run/prewarm/status")
+async def prewarm_status_endpoint(
+    request: PrewarmRunRequest,
+    services: ApiServices = Depends(get_api_services),
+):
+    """Check prewarm readiness/in-flight state without triggering heavy loads."""
+    return await services.prewarm_status(request)
+
+
 @router.post("/api/run/cache/flush")
 async def flush_run_cache_endpoint(
     include_disk: bool = Query(default=False),

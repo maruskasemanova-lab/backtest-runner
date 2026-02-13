@@ -232,7 +232,7 @@
       "time_filter_enabled": false
     },
     "MU": {
-      "strategy": "momentum",
+      "strategy": "momentum_flow",
       "params": {
         "min_signed_aggression": 0.06,
         "min_directional_consistency": 0.5,
@@ -245,9 +245,10 @@
         "trailing_stop_pct": 0.9,
         "long_only": false
       },
-      "backup_strategy": "",
+      "backup_strategy": "absorption_reversal",
       "regime_filter": [
-        "TRENDING"
+        "TRENDING",
+        "MIXED"
       ],
       "avoid_days": [],
       "long_only": false,
@@ -256,13 +257,13 @@
       "l2": {
         "min_delta": 3000.0,
         "min_imbalance": 0.05,
-        "min_signed_aggression": 0.03,
+        "min_signed_aggression": 0.05,
         "min_directional_consistency": 0.3
       },
       "notes": "Flow-first MU profile with stricter L2 conviction gates (imbalance/aggression >= 0.12) to cut low-quality microstructure noise entries.",
       "trailing_stop_pct": 0.9,
       "strategy_selection_mode": "all_enabled",
-      "max_active_strategies": 3,
+      "max_active_strategies": 2,
       "trading_hours": [
         9,
         10,
@@ -272,46 +273,364 @@
       "time_filter_enabled": true,
       "adaptive": {
         "version": 2,
-        "flow_bias_enabled": true,
-        "use_ohlcv_fallbacks": false,
-        "min_active_bars_before_switch": 0,
-        "switch_cooldown_bars": 8,
+        "flow_bias_enabled": false,
+        "use_ohlcv_fallbacks": true,
+        "min_active_bars_before_switch": 2,
+        "switch_cooldown_bars": 2,
         "evidence_base_threshold": 50.0,
         "evidence_min_confirming_sources": 2,
-        "momentum_diversification": {
-          "enabled": true,
-          "require_l2_coverage": true,
-          "route_enabled": true,
-          "route_require_l2_coverage": true,
-          "apply_to_strategies": [
-            "momentum",
+        "regime_preferences": {
+          "TRENDING": [
+            "momentum_flow"
+          ],
+          "MIXED": [
             "momentum_flow",
-            "pullback"
+            "absorption_reversal"
           ],
-          "blocked_micro_regimes": [
-            "CHOPPY",
-            "ABSORPTION"
-          ],
-          "min_flow_score": 46.0,
-          "min_directional_consistency": 0.8,
-          "min_signed_aggression": 0.15,
-          "min_imbalance": 0.08,
-          "min_cvd": 15000.0,
-          "min_directional_price_change_pct": 0.03,
-          "min_price_trend_efficiency": 0.2,
-          "min_last_bar_body_ratio": 0.25,
-          "min_last_bar_close_location": 0.55,
-          "min_delta_acceleration": 0.0,
-          "min_delta_price_divergence": -0.1,
-          "route_flow_score_impulse": 62.0,
-          "fail_fast_exit_enabled": true,
-          "fail_fast_max_bars": 3,
-          "fail_fast_signed_aggression_max": -0.04,
-          "fail_fast_book_pressure_max": -0.08,
-          "fail_fast_directional_consistency_max": 0.4
+          "CHOPPY": [
+            "absorption_reversal"
+          ]
+        },
+        "momentum_diversification": {
+          "route_enabled": false,
+          "enabled": false
+        },
+        "context_exit_response": {
+          "regime_flip_tighten_stop_pct": 0.15,
+          "regime_flip_shorten_time_pct": 0.3,
+          "regime_flip_exit_when_losing": true,
+          "regime_flip_exit_loss_threshold_pct": 0.2,
+          "flow_reversal_move_to_breakeven": true,
+          "flow_reversal_exit_when_losing": true,
+          "momentum_stall_time_multiplier": 0.8,
+          "volatility_spike_tighten_pct": 0.1,
+          "context_response_grace_bars": 2
         }
       },
       "adaptive_tuner_profiles": [
+        {
+          "profile_id": "8cf170cd814a",
+          "created_at": "2026-02-13T13:19:51.624543Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "manual_v5_saved_from_runtime",
+          "score_metric": "manual_full_eval",
+          "score": 0.5092,
+          "date_from": "2025-11-03",
+          "date_to": "2026-02-10",
+          "evaluated_days": 46,
+          "l2_required": true,
+          "l2_only": true,
+          "quick_mode": false,
+          "quick_max_days": 8,
+          "quick_trial_boost": 1,
+          "candidate": {
+            "strategy_selection_mode": "all_enabled",
+            "max_active_strategies": 2,
+            "min_active_bars_before_switch": 2,
+            "switch_cooldown_bars": 2,
+            "flow_bias_enabled": false,
+            "use_ohlcv_fallbacks": true,
+            "enabled_strategies": [
+              "momentum_flow",
+              "absorption_reversal"
+            ],
+            "l2_min_delta": 3000.0,
+            "l2_min_imbalance": 0.05,
+            "l2_min_signed_aggression": 0.05,
+            "l2_min_directional_consistency": 0.3,
+            "regime_filter": [
+              "TRENDING",
+              "MIXED"
+            ],
+            "base_threshold": 50.0,
+            "min_confirming_sources": 2,
+            "min_confidence": 58.0,
+            "atr_stop_multiplier": 1.4,
+            "rr_ratio": 2.0,
+            "trading_hours": [
+              9,
+              10,
+              11,
+              12
+            ],
+            "adverse_flow_consistency": 0.18,
+            "adverse_book_pressure": 0.12,
+            "time_exit_bars": 35,
+            "trailing_stop_pct": 0.5,
+            "momentum_diversification_enabled": false,
+            "momentum_route_enabled": false,
+            "context_regime_flip_tighten_stop_pct": 0.15,
+            "context_regime_flip_shorten_time_pct": 0.3,
+            "context_regime_flip_exit_when_losing": true,
+            "context_regime_flip_exit_loss_threshold_pct": 0.2,
+            "context_flow_reversal_move_to_breakeven": true,
+            "context_flow_reversal_exit_when_losing": true,
+            "context_momentum_stall_time_multiplier": 0.8,
+            "context_volatility_spike_tighten_pct": 0.1,
+            "context_response_grace_bars": 2,
+            "regime_strategy_map": {
+              "TRENDING": [
+                "momentum_flow"
+              ],
+              "MIXED": [
+                "momentum_flow",
+                "absorption_reversal"
+              ],
+              "CHOPPY": [
+                "absorption_reversal"
+              ]
+            }
+          },
+          "metrics": {
+            "valid_days": 46,
+            "total_days": 46,
+            "total_trades": 8,
+            "total_pnl_pct": 0.5092,
+            "avg_pnl_pct": 0.011069565217391305,
+            "total_pnl_dollars": 50.9102,
+            "avg_pnl_dollars": 1.1067,
+            "avg_win_rate_pct": 6.52
+          },
+          "source_note": "Manual MU v5 profile saved from active runtime config on 2026-02-13."
+        },
+        {
+          "profile_id": "f968e5e6ea1d",
+          "created_at": "2026-02-13T11:41:16.556878Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "random",
+          "score_metric": "robust",
+          "score": -0.667174,
+          "date_from": "2025-11-03",
+          "date_to": "2026-02-10",
+          "evaluated_days": 8,
+          "l2_required": true,
+          "l2_only": true,
+          "quick_mode": true,
+          "quick_max_days": 8,
+          "quick_trial_boost": 1,
+          "candidate": {
+            "strategy_selection_mode": "adaptive_top_n",
+            "max_active_strategies": 1,
+            "min_active_bars_before_switch": 0,
+            "switch_cooldown_bars": 0,
+            "flow_bias_enabled": true,
+            "use_ohlcv_fallbacks": true,
+            "enabled_strategies": [
+              "momentum_flow"
+            ],
+            "l2_min_delta": 1000.0,
+            "l2_min_imbalance": 0.03,
+            "l2_min_signed_aggression": 0.02,
+            "l2_min_directional_consistency": 0.2,
+            "regime_filter": [
+              "TRENDING"
+            ],
+            "base_threshold": 45.0,
+            "min_confirming_sources": 1,
+            "min_confidence": 50.0,
+            "atr_stop_multiplier": 1.2,
+            "rr_ratio": 1.6,
+            "trading_hours": [
+              9,
+              10,
+              11,
+              12
+            ],
+            "adverse_flow_consistency": 0.12,
+            "adverse_book_pressure": 0.1,
+            "time_exit_bars": 25,
+            "trailing_stop_pct": 0.4,
+            "momentum_diversification_enabled": false,
+            "momentum_route_enabled": false,
+            "momentum_min_flow_score": 68.0,
+            "momentum_min_directional_consistency": 0.45,
+            "momentum_min_signed_aggression": 0.06,
+            "momentum_min_imbalance": 0.12,
+            "momentum_min_cvd": 3000.0,
+            "momentum_min_directional_price_change_pct": 0.03,
+            "momentum_min_price_trend_efficiency": 0.22,
+            "momentum_min_last_bar_body_ratio": 0.3,
+            "momentum_min_last_bar_close_location": 0.55,
+            "momentum_min_delta_acceleration": 1500.0,
+            "momentum_min_delta_price_divergence": -0.2,
+            "momentum_route_flow_score_impulse": 62.0,
+            "momentum_fail_fast_exit_enabled": true,
+            "momentum_fail_fast_max_bars": 2,
+            "context_regime_flip_tighten_stop_pct": 0.0,
+            "context_regime_flip_shorten_time_pct": 0.0,
+            "context_regime_flip_exit_when_losing": false,
+            "context_regime_flip_exit_loss_threshold_pct": 0.2,
+            "context_flow_reversal_move_to_breakeven": true,
+            "context_flow_reversal_exit_when_losing": false,
+            "context_momentum_stall_time_multiplier": 0.7,
+            "context_volatility_spike_tighten_pct": 0.0,
+            "context_response_grace_bars": 1,
+            "regime_strategy_map": null
+          },
+          "metrics": {
+            "valid_days": 8,
+            "total_days": 8,
+            "total_trades": 1,
+            "total_pnl_pct": -0.0312,
+            "avg_pnl_pct": -0.0039,
+            "total_pnl_dollars": -3.1241,
+            "avg_pnl_dollars": -0.3905,
+            "avg_win_rate_pct": 0.0
+          },
+          "vector_analysis": {
+            "dimension_importance": {},
+            "top_interactions": [],
+            "surprising_vectors": []
+          }
+        },
+        {
+          "profile_id": "c4f39c534169",
+          "created_at": "2026-02-13T11:24:11.362489Z",
+          "ticker": "MU",
+          "adaptive_version": 2,
+          "method": "random",
+          "score_metric": "robust",
+          "score": 0.012721,
+          "date_from": "2025-11-03",
+          "date_to": "2026-02-10",
+          "evaluated_days": 8,
+          "l2_required": true,
+          "l2_only": true,
+          "quick_mode": true,
+          "quick_max_days": 8,
+          "quick_trial_boost": 1,
+          "candidate": {
+            "strategy_selection_mode": "all_enabled",
+            "max_active_strategies": 2,
+            "min_active_bars_before_switch": 2,
+            "switch_cooldown_bars": 1,
+            "flow_bias_enabled": false,
+            "use_ohlcv_fallbacks": true,
+            "enabled_strategies": [
+              "momentum_flow"
+            ],
+            "l2_min_delta": 3000.0,
+            "l2_min_imbalance": 0.05,
+            "l2_min_signed_aggression": 0.05,
+            "l2_min_directional_consistency": 0.3,
+            "regime_filter": [
+              "TRENDING"
+            ],
+            "base_threshold": 50.0,
+            "min_confirming_sources": 2,
+            "min_confidence": 60.0,
+            "atr_stop_multiplier": 1.0,
+            "rr_ratio": 3.0,
+            "trading_hours": [
+              9,
+              10,
+              11
+            ],
+            "adverse_flow_consistency": 0.25,
+            "adverse_book_pressure": 0.1,
+            "time_exit_bars": 25,
+            "trailing_stop_pct": 0.4,
+            "momentum_diversification_enabled": false,
+            "momentum_route_enabled": false,
+            "momentum_min_flow_score": 68.0,
+            "momentum_min_directional_consistency": 0.45,
+            "momentum_min_signed_aggression": 0.06,
+            "momentum_min_imbalance": 0.12,
+            "momentum_min_cvd": 3000.0,
+            "momentum_min_directional_price_change_pct": 0.03,
+            "momentum_min_price_trend_efficiency": 0.22,
+            "momentum_min_last_bar_body_ratio": 0.3,
+            "momentum_min_last_bar_close_location": 0.55,
+            "momentum_min_delta_acceleration": 1500.0,
+            "momentum_min_delta_price_divergence": -0.2,
+            "momentum_route_flow_score_impulse": 62.0,
+            "momentum_fail_fast_exit_enabled": true,
+            "momentum_fail_fast_max_bars": 2,
+            "context_regime_flip_tighten_stop_pct": 0.15,
+            "context_regime_flip_shorten_time_pct": 0.3,
+            "context_regime_flip_exit_when_losing": true,
+            "context_regime_flip_exit_loss_threshold_pct": 0.2,
+            "context_flow_reversal_move_to_breakeven": true,
+            "context_flow_reversal_exit_when_losing": false,
+            "context_momentum_stall_time_multiplier": 0.7,
+            "context_volatility_spike_tighten_pct": 0.0,
+            "context_response_grace_bars": 1,
+            "regime_strategy_map": {
+              "TRENDING": [
+                "momentum"
+              ],
+              "MIXED": [
+                "momentum",
+                "momentum"
+              ],
+              "CHOPPY": []
+            }
+          },
+          "metrics": {
+            "valid_days": 8,
+            "total_days": 8,
+            "total_trades": 5,
+            "total_pnl_pct": 0.5106,
+            "avg_pnl_pct": 0.0638,
+            "total_pnl_dollars": 51.0588,
+            "avg_pnl_dollars": 6.3823,
+            "avg_win_rate_pct": 31.25
+          },
+          "vector_analysis": {
+            "dimension_importance": {
+              "strategy_set": 0.0447,
+              "l2_thresholds": 0.0447,
+              "regime_filter": 0.433,
+              "evidence_params": 0.0447,
+              "v1_adaptive": 0.433
+            },
+            "top_interactions": [
+              {
+                "dims": [
+                  "strategy_set",
+                  "regime_filter"
+                ],
+                "effect_size": 1.0
+              },
+              {
+                "dims": [
+                  "strategy_set",
+                  "v1_adaptive"
+                ],
+                "effect_size": 1.0
+              },
+              {
+                "dims": [
+                  "l2_thresholds",
+                  "regime_filter"
+                ],
+                "effect_size": 1.0
+              },
+              {
+                "dims": [
+                  "l2_thresholds",
+                  "v1_adaptive"
+                ],
+                "effect_size": 1.0
+              },
+              {
+                "dims": [
+                  "regime_filter",
+                  "evidence_params"
+                ],
+                "effect_size": 1.0
+              }
+            ],
+            "surprising_vectors": [],
+            "stats": {
+              "total_valid_trials": 3,
+              "overall_mean_score": 0.0118,
+              "score_std": 0.0009
+            }
+          }
+        },
         {
           "profile_id": "acee5f2a63a3",
           "created_at": "2026-02-11T14:14:46.219030Z",
@@ -1479,16 +1798,13 @@
           }
         }
       ],
-      "active_adaptive_tuner_profile_id": "c4bb2197e651",
+      "active_adaptive_tuner_profile_id": "8cf170cd814a",
       "v2_strategy_param_overrides": {
-        "min_confidence": 55.0,
-        "atr_stop_multiplier": 1.6,
-        "rr_ratio": 1.6,
-        "trailing_stop_pct": 0.6
+        "min_confidence": 58.0,
+        "atr_stop_multiplier": 1.4,
+        "rr_ratio": 2.0,
+        "trailing_stop_pct": 0.5
       },
-      "adverse_flow_consistency_threshold": 0.15,
-      "adverse_book_pressure_threshold": 0.15,
-      "time_exit_bars": 35,
       "strategy_combo_profiles": [
         {
           "profile_id": "1f3728760005",
@@ -1871,7 +2187,26 @@
           }
         }
       ],
-      "active_strategy_combo_profile_id": "ed69757cc489"
+      "active_strategy_combo_profile_id": "ed69757cc489",
+      "momentum_diversification": {
+        "route_enabled": false,
+        "enabled": false
+      },
+      "regime_strategy_map": {
+        "TRENDING": [
+          "momentum_flow"
+        ],
+        "MIXED": [
+          "momentum_flow",
+          "absorption_reversal"
+        ],
+        "CHOPPY": [
+          "absorption_reversal"
+        ]
+      },
+      "adverse_flow_consistency_threshold": 0.18,
+      "adverse_book_pressure_threshold": 0.12,
+      "time_exit_bars": 35
     },
     "AMZN": {
       "strategy": "pullback",

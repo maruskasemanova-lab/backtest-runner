@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import json
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from time import perf_counter
@@ -47,7 +50,7 @@ def _parse_bool_env(name: str, default: bool) -> bool:
 # overwhelm local machines. Limit it by default, but allow explicit override.
 PREWARM_TICKER_SCOPE_L2_MAX_DAYS = _parse_non_negative_int_env(
     "BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS",
-    7,
+    0,
 )
 PREWARM_TICKER_SCOPE_L2_FORCE = _parse_bool_env(
     "BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE",
@@ -55,6 +58,39 @@ PREWARM_TICKER_SCOPE_L2_FORCE = _parse_bool_env(
 )
 RUN_L2_MAX_DAYS = _parse_non_negative_int_env("BACKTEST_RUN_L2_MAX_DAYS", 10)
 RUN_L2_FORCE = _parse_bool_env("BACKTEST_RUN_L2_FORCE", False)
+_PREWARM_INFLIGHT: Dict[str, concurrent.futures.Future] = {}
+_PREWARM_INFLIGHT_LOCK = threading.Lock()
+
+
+def _acquire_prewarm_inflight(key: str) -> tuple[concurrent.futures.Future, bool]:
+    with _PREWARM_INFLIGHT_LOCK:
+        existing = _PREWARM_INFLIGHT.get(key)
+        if isinstance(existing, concurrent.futures.Future):
+            if existing.done():
+                _PREWARM_INFLIGHT.pop(key, None)
+            else:
+                return existing, False
+        future: concurrent.futures.Future = concurrent.futures.Future()
+        _PREWARM_INFLIGHT[key] = future
+        return future, True
+
+
+def _release_prewarm_inflight(key: str, future: concurrent.futures.Future) -> None:
+    with _PREWARM_INFLIGHT_LOCK:
+        current = _PREWARM_INFLIGHT.get(key)
+        if current is future:
+            _PREWARM_INFLIGHT.pop(key, None)
+
+
+def _is_prewarm_inflight(key: str) -> bool:
+    with _PREWARM_INFLIGHT_LOCK:
+        current = _PREWARM_INFLIGHT.get(key)
+        if not isinstance(current, concurrent.futures.Future):
+            return False
+        if current.done():
+            _PREWARM_INFLIGHT.pop(key, None)
+            return False
+        return True
 
 
 @dataclass
@@ -536,42 +572,12 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         if request.intrabar_execution_recalc_1s is not None
         else bool(use_l2 and l2_stats.get("has_l2"))
     )
-    session_config_snapshot = {
-        "regime_detection_minutes": request.regime_detection_minutes,
-        "regime_refresh_bars": request.regime_refresh_bars,
-        "account_size_usd": request.account_size_usd,
-        "risk_per_trade_pct": effective_risk_per_trade_pct,
-        "max_position_notional_pct": effective_max_position_notional_pct,
-        "max_fill_participation_rate": effective_max_fill_participation_rate,
-        "min_fill_ratio": effective_min_fill_ratio,
-        "enable_partial_take_profit": effective_enable_partial_take_profit,
-        "partial_take_profit_rr": effective_partial_take_profit_rr,
-        "partial_take_profit_fraction": effective_partial_take_profit_fraction,
-        "trailing_activation_pct": effective_trailing_activation_pct,
-        "break_even_buffer_pct": effective_break_even_buffer_pct,
-        "break_even_min_hold_bars": effective_break_even_min_hold_bars,
-        "trailing_enabled_in_choppy": effective_trailing_enabled_in_choppy,
-        "time_exit_bars": effective_time_exit_bars,
-        "adverse_flow_exit_enabled": effective_adverse_flow_exit_enabled,
-        "adverse_flow_threshold": effective_adverse_flow_threshold,
-        "adverse_flow_min_hold_bars": effective_adverse_flow_min_hold_bars,
-        "adverse_flow_consistency_threshold": effective_adverse_flow_consistency_threshold,
-        "adverse_book_pressure_threshold": effective_adverse_book_pressure_threshold,
-        "stop_loss_mode": effective_stop_loss_mode,
-        "fixed_stop_loss_pct": effective_fixed_stop_loss_pct,
-        "l2_confirm_enabled": effective_l2_confirm,
-        "l2_min_delta": l2_min_delta,
-        "l2_min_imbalance": l2_min_imbalance,
-        "l2_min_iceberg_bias": l2_min_iceberg_bias,
-        "l2_lookback_bars": l2_lookback_bars,
-        "l2_min_participation_ratio": l2_min_participation_ratio,
-        "l2_min_directional_consistency": l2_min_directional_consistency,
-        "l2_min_signed_aggression": l2_min_signed_aggression,
-        "cold_start_each_day": effective_cold_start_each_day,
-        "strategy_selection_mode": effective_strategy_selection_mode,
-        "max_active_strategies": effective_max_active_strategies,
-        "momentum_diversification_json": momentum_diversification_json,
-    }
+    session_config_snapshot = dict(execution_cfg.get("trading_config", {}))
+    session_config_snapshot["l2_confirm_enabled"] = effective_l2_confirm
+    session_config_snapshot["cold_start_each_day"] = effective_cold_start_each_day
+    session_config_snapshot["strategy_selection_mode"] = effective_strategy_selection_mode
+    session_config_snapshot["max_active_strategies"] = effective_max_active_strategies
+    session_config_snapshot["momentum_diversification_json"] = momentum_diversification_json
 
     phase_started = perf_counter()
     await _configure_session(
@@ -843,65 +849,194 @@ async def prewarm_run_data(request: PrewarmRunRequest, deps: StartRunDeps) -> Di
         cached_payload["cache_key"] = prewarm_cache_key
         cached_payload["cache_stats"] = get_start_run_data_cache_stats()
         return cached_payload
+    shared_future, is_owner = _acquire_prewarm_inflight(prewarm_cache_key)
+    if not is_owner:
+        logger.info(
+            "Joining in-flight prewarm for %s %s..%s",
+            ticker,
+            range_start,
+            range_end,
+        )
+        joined_result = await asyncio.wrap_future(shared_future)
+        joined_payload = dict(joined_result)
+        joined_payload["cache_hit"] = True
+        joined_payload["cache_key"] = prewarm_cache_key
+        joined_payload["cache_stats"] = get_start_run_data_cache_stats()
+        joined_payload["joined_inflight"] = True
+        return joined_payload
 
-    bars, data_files = load_run_bars(
+    try:
+        bars, data_files = load_run_bars(
+            request=request,
+            ticker=ticker,
+            range_start=range_start,
+            range_end=range_end,
+            data_loader=deps.data_loader,
+            databento_svc=deps.databento_svc,
+            get_discovery=deps.get_discovery,
+            aos_applied=aos_applied,
+            logger=logger,
+        )
+
+        bars, l2_stats, l2_sessionized_by_market_day = enrich_bars_with_l2(
+            bars=bars,
+            ticker=ticker,
+            range_start=range_start,
+            range_end=range_end,
+            requested_l2_only=requested_l2_only,
+            requested_l2_confirm=requested_l2_confirm,
+            comparable_mode=bool(request.comparable_mode),
+            is_multi_day_request=is_multi_day_request,
+            aos_l2_config_applied=bool(isinstance(aos_applied.get("l2"), dict) and aos_applied.get("l2")),
+            to_utc_datetime=deps.to_utc_datetime,
+            build_l2_feature_map=deps.build_l2_feature_map,
+            normalize_l2_feature_map_for_market_day_sessions=deps.normalize_l2_feature_map_for_market_day_sessions,
+            attach_l2_features=deps.attach_l2_features,
+            logger=logger,
+        )
+
+        ref_bars_map = load_reference_bars_map(
+            ticker=ticker,
+            range_start=range_start,
+            range_end=range_end,
+            data_loader=deps.data_loader,
+            databento_svc=deps.databento_svc,
+            get_discovery=deps.get_discovery,
+            logger=logger,
+        )
+
+        result = {
+            "success": True,
+            "ticker": ticker,
+            "prewarm_scope": prewarm_scope,
+            "range_start": range_start,
+            "range_end": range_end,
+            "bars": len(bars),
+            "data_files_count": len(data_files),
+            "reference_bars": len(ref_bars_map),
+            "l2_requested": bool(requested_l2_only_raw or requested_l2_confirm_raw),
+            "use_l2": bool(requested_l2_only or requested_l2_confirm),
+            "l2_only": requested_l2_only,
+            "l2_confirm_enabled": requested_l2_confirm,
+            "l2_guard_reason": l2_guard_reason,
+            "l2_sessionized_by_market_day": l2_sessionized_by_market_day,
+            "l2": l2_stats,
+            "cache_hit": False,
+            "cache_key": prewarm_cache_key,
+            "cache_stats": get_start_run_data_cache_stats(),
+        }
+        set_prewarm_result(prewarm_cache_key, result)
+        if not shared_future.done():
+            shared_future.set_result(dict(result))
+        return result
+    except Exception as exc:
+        if not shared_future.done():
+            shared_future.set_exception(exc)
+        raise
+    finally:
+        _release_prewarm_inflight(prewarm_cache_key, shared_future)
+
+
+async def get_prewarm_status(request: PrewarmRunRequest, deps: StartRunDeps) -> Dict[str, Any]:
+    """Check whether a prewarm request key is already ready/in-flight without loading data."""
+    logger = deps.logger
+    ticker = str(request.ticker or "").strip().upper()
+    if not ticker:
+        raise HTTPException(400, "Ticker is required")
+
+    prewarm_scope, range_start, range_end = _resolve_prewarm_scope_range(
         request=request,
         ticker=ticker,
-        range_start=range_start,
-        range_end=range_end,
-        data_loader=deps.data_loader,
         databento_svc=deps.databento_svc,
         get_discovery=deps.get_discovery,
-        aos_applied=aos_applied,
-        logger=logger,
     )
+    aos_applied = _resolve_local_aos_applied(
+        ticker=ticker,
+        load_aos_config=deps.load_aos_config,
+        get_ticker_positioning_config=deps.get_ticker_positioning_config,
+        aos_config_path=getattr(request, "aos_config_path", None),
+    )
+    aos_l2_cfg = aos_applied.get("l2", {}) if isinstance(aos_applied.get("l2"), dict) else {}
+    requested_l2_only_raw = bool(request.l2_only or bool(aos_l2_cfg.get("l2_only", False)))
+    requested_l2_confirm_raw = bool(
+        request.l2_confirm_enabled or bool(aos_l2_cfg.get("confirm_enabled", False))
+    )
+    requested_l2_only = requested_l2_only_raw
+    requested_l2_confirm = requested_l2_confirm_raw
+    l2_guard_reason = None
+    if bool(requested_l2_only or requested_l2_confirm):
+        day_span = _inclusive_day_span(range_start, range_end)
+        if prewarm_scope == "ticker":
+            if (
+                not PREWARM_TICKER_SCOPE_L2_FORCE
+                and PREWARM_TICKER_SCOPE_L2_MAX_DAYS > 0
+                and day_span > PREWARM_TICKER_SCOPE_L2_MAX_DAYS
+            ):
+                requested_l2_only = False
+                requested_l2_confirm = False
+                l2_guard_reason = (
+                    "L2 prewarm skipped for ticker scope because requested range "
+                    f"covers {day_span} days (> {PREWARM_TICKER_SCOPE_L2_MAX_DAYS})."
+                )
+        else:
+            if (
+                not RUN_L2_FORCE
+                and RUN_L2_MAX_DAYS > 0
+                and day_span > RUN_L2_MAX_DAYS
+            ):
+                requested_l2_only = False
+                requested_l2_confirm = False
+                l2_guard_reason = (
+                    "L2 prewarm skipped for range scope because requested range "
+                    f"covers {day_span} days (> {RUN_L2_MAX_DAYS})."
+                )
+        if l2_guard_reason:
+            logger.warning(
+                "%s ticker=%s range=%s..%s",
+                l2_guard_reason,
+                ticker,
+                range_start,
+                range_end,
+            )
 
-    bars, l2_stats, l2_sessionized_by_market_day = enrich_bars_with_l2(
-        bars=bars,
+    prewarm_cache_key = _build_prewarm_cache_key(
+        request=request,
+        prewarm_scope=prewarm_scope,
         ticker=ticker,
         range_start=range_start,
         range_end=range_end,
         requested_l2_only=requested_l2_only,
         requested_l2_confirm=requested_l2_confirm,
-        comparable_mode=bool(request.comparable_mode),
-        is_multi_day_request=is_multi_day_request,
-        aos_l2_config_applied=bool(isinstance(aos_applied.get("l2"), dict) and aos_applied.get("l2")),
-        to_utc_datetime=deps.to_utc_datetime,
-        build_l2_feature_map=deps.build_l2_feature_map,
-        normalize_l2_feature_map_for_market_day_sessions=deps.normalize_l2_feature_map_for_market_day_sessions,
-        attach_l2_features=deps.attach_l2_features,
-        logger=logger,
+        aos_applied=aos_applied,
     )
+    cached_result = get_prewarm_result(prewarm_cache_key)
+    in_progress = _is_prewarm_inflight(prewarm_cache_key)
 
-    ref_bars_map = load_reference_bars_map(
-        ticker=ticker,
-        range_start=range_start,
-        range_end=range_end,
-        data_loader=deps.data_loader,
-        databento_svc=deps.databento_svc,
-        get_discovery=deps.get_discovery,
-        logger=logger,
-    )
-
-    result = {
+    response = {
         "success": True,
+        "ready": bool(isinstance(cached_result, dict)),
+        "in_progress": bool(in_progress),
+        "cache_key": prewarm_cache_key,
         "ticker": ticker,
         "prewarm_scope": prewarm_scope,
         "range_start": range_start,
         "range_end": range_end,
-        "bars": len(bars),
-        "data_files_count": len(data_files),
-        "reference_bars": len(ref_bars_map),
         "l2_requested": bool(requested_l2_only_raw or requested_l2_confirm_raw),
         "use_l2": bool(requested_l2_only or requested_l2_confirm),
         "l2_only": requested_l2_only,
         "l2_confirm_enabled": requested_l2_confirm,
         "l2_guard_reason": l2_guard_reason,
-        "l2_sessionized_by_market_day": l2_sessionized_by_market_day,
-        "l2": l2_stats,
-        "cache_hit": False,
-        "cache_key": prewarm_cache_key,
         "cache_stats": get_start_run_data_cache_stats(),
     }
-    set_prewarm_result(prewarm_cache_key, result)
-    return result
+    if isinstance(cached_result, dict):
+        response.update(
+            {
+                "bars": int(cached_result.get("bars", 0) or 0),
+                "reference_bars": int(cached_result.get("reference_bars", 0) or 0),
+                "l2_sessionized_by_market_day": bool(
+                    cached_result.get("l2_sessionized_by_market_day", False)
+                ),
+                "l2": dict(cached_result.get("l2", {})),
+            }
+        )
+    return response

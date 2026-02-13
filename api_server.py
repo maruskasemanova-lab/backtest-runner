@@ -126,6 +126,7 @@ from src.services.adaptive_tuner_orchestration_service import (
 )
 from src.services.start_run_service import (
     StartRunDeps,
+    get_prewarm_status as service_prewarm_status,
     prewarm_run_data as service_prewarm_run,
     start_run as service_start_run,
 )
@@ -281,7 +282,7 @@ STARTUP_PREWARM_TICKERS = _parse_startup_prewarm_tickers(
 )
 STARTUP_PREWARM_L2_CONFIRM = _parse_bool_env(
     os.getenv("BACKTEST_STARTUP_PREWARM_L2_CONFIRM"),
-    False,
+    True,
 )
 
 
@@ -329,6 +330,7 @@ api_services = ApiServices(
     build_adaptive_tuner_deps=lambda: _build_adaptive_tuner_deps(),
     start_run=lambda request: start_run(request),
     prewarm_run=lambda request: prewarm_run(request),
+    prewarm_status=lambda request: prewarm_status(request),
     broadcast=_broadcast_with_api_services,
     refresh_runtime_data_services=_refresh_runtime_data_services,
     reset_discovery=reset_discovery,
@@ -1345,7 +1347,7 @@ def _normalize_l2_feature_map_for_market_day_sessions(
             running_cumulative += delta
             feats["l2_cumulative_delta"] = running_cumulative
             feats["l2_delta_acceleration"] = delta - prev_delta
-            feats["l2_book_pressure_delta"] = (
+            feats["l2_book_pressure_change"] = (
                 0.0 if prev_book_pressure is None else (book_pressure - prev_book_pressure)
             )
 
@@ -1763,6 +1765,11 @@ async def start_run(request: StartRunRequest):
 async def prewarm_run(request: PrewarmRunRequest):
     """Prewarm run-start caches (bars/reference/L2) for a ticker/date range."""
     return await service_prewarm_run(request, _build_start_run_deps())
+
+
+async def prewarm_status(request: PrewarmRunRequest):
+    """Read-only prewarm status for a ticker/date payload key."""
+    return await service_prewarm_status(request, _build_start_run_deps())
 
 
 async def get_run_state(run_id: str, ticker: str, date: str):

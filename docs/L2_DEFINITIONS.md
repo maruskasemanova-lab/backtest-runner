@@ -24,7 +24,7 @@ Schema version: `l2fv-1.0`
 | `l2_bid_depth_total` | shares | Mean sum of bid sizes (levels 0-9) |
 | `l2_ask_depth_total` | shares | Mean sum of ask sizes (levels 0-9) |
 | `l2_book_pressure` | ratio [-1,1] | (bid − ask) / (bid + ask) |
-| `l2_book_pressure_delta` | ratio | book_pressure[t] − book_pressure[t-1] |
+| `l2_book_pressure_change` | ratio | book_pressure[t] − book_pressure[t-1] |
 | `l2_top_heavy_bid` | ratio [0,1] | bid_sz_00 / bid_depth_total |
 | `l2_top_heavy_ask` | ratio [0,1] | ask_sz_00 / ask_depth_total |
 

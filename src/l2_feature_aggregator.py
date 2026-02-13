@@ -129,7 +129,7 @@ class L2FeatureAggregator:
         if "book_pressure_sec" in df_1s.columns:
             first_pressure = float(df_1s["book_pressure_sec"].iloc[0])
             last_pressure = float(df_1s["book_pressure_sec"].iloc[-1])
-            features["l2_book_pressure_delta"] = last_pressure - first_pressure
+            features["l2_book_pressure_change"] = last_pressure - first_pressure
         
         # Compute l2_volume
         buy_vol = features.get("l2_buy_volume", 0.0)

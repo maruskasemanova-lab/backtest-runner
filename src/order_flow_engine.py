@@ -7,7 +7,7 @@ Field Units & Semantics:
 - l2_delta: shares (buy_volume - sell_volume)
 - l2_imbalance: ratio [-1,1] = delta / volume (size-weighted)
 - l2_book_pressure: ratio [-1,1] = (bid_depth - ask_depth) / total_depth
-- l2_book_pressure_delta: ratio = book_pressure[t] - book_pressure[t-1]
+- l2_book_pressure_change: ratio = book_pressure[t] - book_pressure[t-1]
 
 Aggressor Classification Priority:
 1. side field from source ("B" = buy aggressor, "A" = sell aggressor)
@@ -310,7 +310,7 @@ class OrderFlowEngine:
                 "l2_bid_depth_total": snapshot.bid_depth_total,
                 "l2_ask_depth_total": snapshot.ask_depth_total,
                 "l2_book_pressure": snapshot.book_pressure,
-                "l2_book_pressure_delta": snapshot.book_pressure_delta,
+                "l2_book_pressure_change": snapshot.book_pressure_delta,
                 "l2_top_heavy_bid": snapshot.top_heavy_bid,
                 "l2_top_heavy_ask": snapshot.top_heavy_ask,
                 # Quality metrics
