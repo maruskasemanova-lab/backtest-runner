@@ -54,6 +54,14 @@ class StartRunRequest(BaseModel):
     # Whether runner should re-apply ticker defaults from strategy_overrides.json
     # during run start. Keep enabled by default for backward compatibility.
     apply_ticker_overrides_on_start: bool = True
+    # Whether runner should sync AOS/adaptive strategy params to Strategy API
+    # during run start. Disable for faster starts when FE already synced params.
+    apply_aos_optimizations_on_start: bool = True
+    # Optional orchestrator reset scope override for faster starts:
+    # - "all" (default deterministic cold reset)
+    # - "session" (faster, preserves learned state)
+    # - "learning"
+    orchestrator_reset_scope: Optional[str] = None
     # Checkpoint: warm-start from a previous backtest's learning state
     checkpoint_path: Optional[str] = None
     auto_save_checkpoint: bool = True
@@ -61,6 +69,35 @@ class StartRunRequest(BaseModel):
     aos_config_path: Optional[str] = None
 
 
+class PrewarmRunRequest(BaseModel):
+    ticker: str
+    # "range" uses date/date_from/date_to, "ticker" resolves full available ticker coverage.
+    prewarm_scope: str = "range"
+    date: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    data_file: Optional[str] = None
+    allow_mock_data: bool = False
+    l2_only: bool = False
+    l2_confirm_enabled: bool = False
+    l2_min_delta: float = 0.0
+    l2_min_imbalance: float = 0.0
+    l2_min_iceberg_bias: float = 0.0
+    l2_lookback_bars: int = 3
+    l2_min_participation_ratio: float = 0.0
+    l2_min_directional_consistency: float = 0.0
+    l2_min_signed_aggression: float = 0.0
+    strategy_selection_mode: Optional[str] = None
+    max_active_strategies: Optional[int] = None
+    apply_positioning_config_on_start: bool = True
+    comparable_mode: bool = False
+    aos_config_path: Optional[str] = None
+
+
 class PlayRequest(BaseModel):
     # Accept strings like "max" / "10hz" as well as raw millisecond values.
     speed_ms: Optional[Union[int, str]] = 100
+    # Optional playback override for in-trade evaluation path:
+    # - "standard" => minute bars only (faster)
+    # - "intrabar_1s" => include 1-second intrabar quotes while active/pending
+    trade_eval_mode: Optional[str] = None

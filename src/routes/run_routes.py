@@ -15,6 +15,7 @@ from src.services.run_control_service import (
     list_runs,
     pause_run,
     play_run,
+    restart_run,
     resume_run,
     step_run,
     stop_run,
@@ -98,6 +99,17 @@ async def stop_run_endpoint(
 ):
     """Stop a running backtest."""
     return stop_run(run_id, ticker, date, services.build_run_control_deps())
+
+
+@router.post("/api/run/{run_id}/{ticker}/{date}/restart")
+async def restart_run_endpoint(
+    run_id: str,
+    ticker: str,
+    date: str,
+    services: ApiServices = Depends(get_api_services),
+):
+    """Restart an existing run from bar zero using already loaded bars."""
+    return await restart_run(run_id, ticker, date, services.build_run_control_deps())
 
 
 @router.get("/api/run/{run_id}/{ticker}/{date}/bars")

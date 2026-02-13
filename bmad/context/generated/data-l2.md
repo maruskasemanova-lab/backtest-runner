@@ -22,7 +22,7 @@ Own L2 acquisition, conversion, minute alignment, intrabar frames, and flow-feat
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `src/l2_data_manager.py` | yes | 510 | `5ba62b7 2026-02-08` |
+| `src/l2_data_manager.py` | yes | 564 | `5ba62b7 2026-02-08` |
 | `src/l2_feature_service.py` | yes | 177 | `b21f28a 2026-02-11` |
 | `src/order_flow_engine.py` | yes | 336 | `5ba62b7 2026-02-08` |
 | `src/intrabar_frame_builder.py` | yes | 314 | `5ba62b7 2026-02-08` |
@@ -59,7 +59,7 @@ Own L2 acquisition, conversion, minute alignment, intrabar frames, and flow-feat
 ## Key Symbols
 
 ### `src/l2_data_manager.py`
-- `class` `L2DataManager` (line 11)
+- `class` `L2DataManager` (line 12)
 
 ### `src/l2_feature_service.py`
 - `class` `L2FeatureService` (line 18)

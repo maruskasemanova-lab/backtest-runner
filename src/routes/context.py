@@ -29,6 +29,7 @@ class ApiServices:
     build_run_control_deps: Callable[[], Any]
     build_adaptive_tuner_deps: Callable[[], Any]
     start_run: Callable[[Any], Awaitable[Any]]
+    prewarm_run: Callable[[Any], Awaitable[Any]]
     broadcast: Callable[[Dict[str, Any]], Awaitable[None]]
     refresh_runtime_data_services: Callable[[], None]
     reset_discovery: Callable[[], None]

@@ -69,6 +69,11 @@ const createDefaultSleeveDraft = (index = 1) => ({
   min_directional_consistency: 0.45,
   min_signed_aggression: 0.04,
   min_imbalance: 0.02,
+  min_cvd: 0,
+  min_directional_price_change_pct: 0,
+  min_price_trend_efficiency: 0,
+  min_last_bar_body_ratio: 0,
+  min_last_bar_close_location: 0,
   min_delta_acceleration: 0,
   min_delta_price_divergence: 0,
   route_flow_score_impulse: 64,
@@ -88,6 +93,11 @@ const createDefaultMomentumDraft = () => ({
   min_directional_consistency: 0.45,
   min_signed_aggression: 0.04,
   min_imbalance: 0.02,
+  min_cvd: 0,
+  min_directional_price_change_pct: 0,
+  min_price_trend_efficiency: 0,
+  min_last_bar_body_ratio: 0,
+  min_last_bar_close_location: 0,
   min_delta_acceleration: 0,
   min_delta_price_divergence: 0,
   route_flow_score_impulse: 64,
@@ -120,6 +130,11 @@ const normalizeSleeveDraft = (raw, index) => {
     min_directional_consistency: clamp(source.min_directional_consistency, 0.45, 0, 1),
     min_signed_aggression: clamp(source.min_signed_aggression, 0.04, 0, 1),
     min_imbalance: clamp(source.min_imbalance, 0.02, 0, 1),
+    min_cvd: clamp(source.min_cvd, 0, -1_000_000_000, 1_000_000_000),
+    min_directional_price_change_pct: clamp(source.min_directional_price_change_pct, 0, -100, 100),
+    min_price_trend_efficiency: clamp(source.min_price_trend_efficiency, 0, 0, 1),
+    min_last_bar_body_ratio: clamp(source.min_last_bar_body_ratio, 0, 0, 1),
+    min_last_bar_close_location: clamp(source.min_last_bar_close_location, 0, 0, 1),
     min_delta_acceleration: clamp(source.min_delta_acceleration, 0, -1_000_000_000, 1_000_000_000),
     min_delta_price_divergence: clamp(source.min_delta_price_divergence, 0, -10, 10),
     route_flow_score_impulse: clamp(source.route_flow_score_impulse, 64, 0, 100),
@@ -161,6 +176,26 @@ const normalizeMomentumDraft = (raw) => {
     ),
     min_signed_aggression: clamp(source.min_signed_aggression, base.min_signed_aggression, 0, 1),
     min_imbalance: clamp(source.min_imbalance, base.min_imbalance, 0, 1),
+    min_cvd: clamp(source.min_cvd, base.min_cvd, -1_000_000_000, 1_000_000_000),
+    min_directional_price_change_pct: clamp(
+      source.min_directional_price_change_pct,
+      base.min_directional_price_change_pct,
+      -100,
+      100
+    ),
+    min_price_trend_efficiency: clamp(
+      source.min_price_trend_efficiency,
+      base.min_price_trend_efficiency,
+      0,
+      1
+    ),
+    min_last_bar_body_ratio: clamp(source.min_last_bar_body_ratio, base.min_last_bar_body_ratio, 0, 1),
+    min_last_bar_close_location: clamp(
+      source.min_last_bar_close_location,
+      base.min_last_bar_close_location,
+      0,
+      1
+    ),
     min_delta_acceleration: clamp(source.min_delta_acceleration, base.min_delta_acceleration, -1_000_000_000, 1_000_000_000),
     min_delta_price_divergence: clamp(source.min_delta_price_divergence, base.min_delta_price_divergence, -10, 10),
     route_flow_score_impulse: clamp(source.route_flow_score_impulse, base.route_flow_score_impulse, 0, 100),
@@ -207,6 +242,11 @@ const buildMomentumSleeveConfig = (draft, index) => {
     min_directional_consistency: clamp(source.min_directional_consistency, 0.45, 0, 1),
     min_signed_aggression: clamp(source.min_signed_aggression, 0.04, 0, 1),
     min_imbalance: clamp(source.min_imbalance, 0.02, 0, 1),
+    min_cvd: clamp(source.min_cvd, 0, -1_000_000_000, 1_000_000_000),
+    min_directional_price_change_pct: clamp(source.min_directional_price_change_pct, 0, -100, 100),
+    min_price_trend_efficiency: clamp(source.min_price_trend_efficiency, 0, 0, 1),
+    min_last_bar_body_ratio: clamp(source.min_last_bar_body_ratio, 0, 0, 1),
+    min_last_bar_close_location: clamp(source.min_last_bar_close_location, 0, 0, 1),
     min_delta_acceleration: clamp(source.min_delta_acceleration, 0, -1_000_000_000, 1_000_000_000),
     min_delta_price_divergence: clamp(source.min_delta_price_divergence, 0, -10, 10),
     route_flow_score_impulse: clamp(source.route_flow_score_impulse, 64, 0, 100),
@@ -242,6 +282,11 @@ const buildMomentumConfigFromDraft = (draft) => {
     min_directional_consistency: clamp(source.min_directional_consistency, 0.45, 0, 1),
     min_signed_aggression: clamp(source.min_signed_aggression, 0.04, 0, 1),
     min_imbalance: clamp(source.min_imbalance, 0.02, 0, 1),
+    min_cvd: clamp(source.min_cvd, 0, -1_000_000_000, 1_000_000_000),
+    min_directional_price_change_pct: clamp(source.min_directional_price_change_pct, 0, -100, 100),
+    min_price_trend_efficiency: clamp(source.min_price_trend_efficiency, 0, 0, 1),
+    min_last_bar_body_ratio: clamp(source.min_last_bar_body_ratio, 0, 0, 1),
+    min_last_bar_close_location: clamp(source.min_last_bar_close_location, 0, 0, 1),
     min_delta_acceleration: clamp(source.min_delta_acceleration, 0, -1_000_000_000, 1_000_000_000),
     min_delta_price_divergence: clamp(source.min_delta_price_divergence, 0, -10, 10),
     route_flow_score_impulse: clamp(source.route_flow_score_impulse, 64, 0, 100),
@@ -754,6 +799,69 @@ function AOSOptimizations({ apiUrl, selectedTicker, onOptimizationChange }) {
               />
             </div>
             <div className="form-group">
+              <label>Min CVD (Directional)</label>
+              <input
+                type="number"
+                min="-1000000000"
+                max="1000000000"
+                step="1"
+                value={momentumDraft.min_cvd}
+                onChange={(e) => handleMomentumChange("min_cvd", Number(e.target.value))}
+              />
+            </div>
+            <div className="form-group">
+              <label>Min Directional Price Change %</label>
+              <input
+                type="number"
+                min="-100"
+                max="100"
+                step="0.01"
+                value={momentumDraft.min_directional_price_change_pct}
+                onChange={(e) =>
+                  handleMomentumChange("min_directional_price_change_pct", Number(e.target.value))
+                }
+              />
+            </div>
+            <div className="form-group">
+              <label>Min Price Trend Efficiency</label>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                value={momentumDraft.min_price_trend_efficiency}
+                onChange={(e) =>
+                  handleMomentumChange("min_price_trend_efficiency", Number(e.target.value))
+                }
+              />
+            </div>
+            <div className="form-group">
+              <label>Min Last Bar Body Ratio</label>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                value={momentumDraft.min_last_bar_body_ratio}
+                onChange={(e) =>
+                  handleMomentumChange("min_last_bar_body_ratio", Number(e.target.value))
+                }
+              />
+            </div>
+            <div className="form-group">
+              <label>Min Last Bar Close Location</label>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                value={momentumDraft.min_last_bar_close_location}
+                onChange={(e) =>
+                  handleMomentumChange("min_last_bar_close_location", Number(e.target.value))
+                }
+              />
+            </div>
+            <div className="form-group">
               <label>Min Delta Acceleration</label>
               <input
                 type="number"
@@ -1098,6 +1206,69 @@ function AOSOptimizations({ apiUrl, selectedTicker, onOptimizationChange }) {
                           step="0.01"
                           value={sleeve?.min_imbalance ?? 0.02}
                           onChange={(e) => handleSleeveChange(index, "min_imbalance", Number(e.target.value))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Min CVD (Directional)</label>
+                        <input
+                          type="number"
+                          min="-1000000000"
+                          max="1000000000"
+                          step="1"
+                          value={sleeve?.min_cvd ?? 0}
+                          onChange={(e) => handleSleeveChange(index, "min_cvd", Number(e.target.value))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Min Directional Price Change %</label>
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          step="0.01"
+                          value={sleeve?.min_directional_price_change_pct ?? 0}
+                          onChange={(e) =>
+                            handleSleeveChange(index, "min_directional_price_change_pct", Number(e.target.value))
+                          }
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Min Price Trend Efficiency</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={sleeve?.min_price_trend_efficiency ?? 0}
+                          onChange={(e) =>
+                            handleSleeveChange(index, "min_price_trend_efficiency", Number(e.target.value))
+                          }
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Min Last Bar Body Ratio</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={sleeve?.min_last_bar_body_ratio ?? 0}
+                          onChange={(e) =>
+                            handleSleeveChange(index, "min_last_bar_body_ratio", Number(e.target.value))
+                          }
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Min Last Bar Close Location</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={sleeve?.min_last_bar_close_location ?? 0}
+                          onChange={(e) =>
+                            handleSleeveChange(index, "min_last_bar_close_location", Number(e.target.value))
+                          }
                         />
                       </div>
                       <div className="form-group">

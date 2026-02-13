@@ -123,6 +123,26 @@ class SessionRunner:
         self._intrabar_quote_cache.clear()
         logger.info(f"Loaded {len(bars)} bars for session")
 
+    def reset_for_replay(self):
+        """Reset runtime/session state so the same loaded bars can replay from the start."""
+        self.current_bar_index = 0
+        self.is_running = False
+        self.is_paused = False
+        self.last_run_speed = None
+        self.phase = "INITIALIZED"
+        self.last_response = None
+        self.session_summary = None
+        self._session_end_marker_keys.clear()
+        self._position_active = False
+        self._pending_entry = False
+        self._intrabar_quote_cache.clear()
+        self.decision_tracker = DecisionTracker(
+            run_id=self.config.run_id,
+            ticker=self.config.ticker,
+            date=self.config.date,
+        )
+        self.perf_tracker = PerformanceTracker()
+
     @staticmethod
     def _to_utc_datetime(value: Any) -> datetime:
         """Normalize timestamp-like values to timezone-aware UTC datetime."""

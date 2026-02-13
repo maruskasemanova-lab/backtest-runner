@@ -21,6 +21,7 @@ function StrategySettings({ apiUrl, selectedTicker }) {
   const resolvedUrl =
     apiUrl ||
     `http://${window.location.hostname}:8001`;
+  const MU_TICKER = "MU";
 
   const formatTimestamp = (value) => {
     if (!value) return "-";
@@ -314,12 +315,44 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     }
   }, [resolvedUrl, presetsLoaded, tickerPresets]);
 
+  const enableAllStrategies = useCallback(async () => {
+    if (!resolvedUrl) return;
+    try {
+      const resp = await fetch(`${resolvedUrl}/api/strategies`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const strategyNames = Object.keys(data || {});
+      if (!strategyNames.length) return;
+
+      await Promise.all(
+        strategyNames.map((strategyName) =>
+          fetch(`${resolvedUrl}/api/strategies/update`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              strategy_name: strategyName,
+              params: { enabled: true },
+            }),
+          }).catch(() => null)
+        )
+      );
+      await fetchStrategies();
+    } catch (err) {
+      console.error("Failed to enable all strategies:", err);
+    }
+  }, [resolvedUrl, fetchStrategies]);
+
   // Watch for ticker changes and apply presets
   useEffect(() => {
-    if (selectedTicker && presetsLoaded) {
-      applyTickerPresets(selectedTicker);
-    }
-  }, [selectedTicker, presetsLoaded, applyTickerPresets]);
+    if (!selectedTicker || !presetsLoaded) return;
+    const upperTicker = String(selectedTicker || "").trim().toUpperCase();
+    (async () => {
+      await applyTickerPresets(upperTicker);
+      if (upperTicker === MU_TICKER) {
+        await enableAllStrategies();
+      }
+    })();
+  }, [selectedTicker, presetsLoaded, applyTickerPresets, enableAllStrategies]);
 
   useEffect(() => {
     if (selectedTicker === "MU") {

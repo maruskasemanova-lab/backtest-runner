@@ -14,6 +14,46 @@ const parseMaxActiveStrategies = (value, fallback = 3) => {
 };
 
 const ACTIVE_PROFILE_SENTINEL = "__ACTIVE__";
+const AVAILABLE_DATA_CACHE_KEY = "backtest_runner_available_data_v1";
+const MU_TICKER = "MU";
+const MAX_RANGE_L2_PREWARM_DAYS = 10;
+const MU_DEFAULT_MOMENTUM_APPLY_TO_STRATEGIES = [
+  "mean_reversion",
+  "momentum",
+  "pullback",
+  "rotation",
+  "vwap_magnet",
+  "volume_profile",
+  "gap_liquidity",
+  "absorption_reversal",
+  "momentum_flow",
+  "exhaustion_fade",
+].join(",");
+
+const applyMuMomentumDefaults = (draft, ticker, previousTicker) => {
+  const upperTicker = String(ticker || "").trim().toUpperCase();
+  const priorTicker = String(previousTicker || "").trim().toUpperCase();
+  if (upperTicker !== MU_TICKER || priorTicker === MU_TICKER) {
+    return draft;
+  }
+  return {
+    ...draft,
+    momentum_diversification_override_enabled: true,
+    momentum_apply_to_strategies: MU_DEFAULT_MOMENTUM_APPLY_TO_STRATEGIES,
+  };
+};
+
+const inclusiveDaySpan = (startIso, endIso) => {
+  const start = String(startIso || "").trim();
+  const end = String(endIso || "").trim();
+  if (!start || !end) return NaN;
+  const startDate = new Date(`${start}T00:00:00Z`);
+  const endDate = new Date(`${end}T00:00:00Z`);
+  const startMs = Number(startDate.getTime());
+  const endMs = Number(endDate.getTime());
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return NaN;
+  return Math.floor((endMs - startMs) / 86400000) + 1;
+};
 
 const formatProfileTimestamp = (value) => {
   if (!value) return "-";
@@ -41,6 +81,36 @@ const formatAdaptiveProfileLabel = (profile) => {
   const score = Number(profile?.score || 0).toFixed(4);
   const stamp = formatProfileTimestamp(profile?.created_at);
   return `${profileId} | score ${score} | ${stamp}`;
+};
+
+const START_TIMING_PHASE_LABELS = {
+  reset_orchestrator: "Orchestrator reset",
+  clear_remote_sessions: "Remote session cleanup",
+  apply_strategy_overrides: "Strategy overrides",
+  apply_aos_optimizations: "AOS apply",
+  apply_global_trailing: "Global trailing apply",
+  load_run_bars: "Load bars",
+  resolve_execution_config: "Resolve execution config",
+  enrich_bars_with_l2: "L2 enrich",
+  configure_session: "Configure session",
+  load_reference_bars: "Load reference bars",
+  runner_setup: "Runner setup",
+};
+
+const formatStartTimingMs = (value) => {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms < 0) return "-";
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+  return `${ms.toFixed(0)}ms`;
+};
+
+const formatStartTimingPhaseLabel = (phaseKey) => {
+  const key = String(phaseKey || "").trim();
+  if (!key) return "unknown";
+  if (START_TIMING_PHASE_LABELS[key]) return START_TIMING_PHASE_LABELS[key];
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
 const normalizeAosTickerConfig = (payload) => {
@@ -114,6 +184,11 @@ const createDefaultMomentumSleeveDraft = (index = 1) => ({
   min_directional_consistency: 0.45,
   min_signed_aggression: 0.04,
   min_imbalance: 0.02,
+  min_cvd: 0,
+  min_directional_price_change_pct: 0,
+  min_price_trend_efficiency: 0,
+  min_last_bar_body_ratio: 0,
+  min_last_bar_close_location: 0,
   min_delta_acceleration: 0,
   min_delta_price_divergence: 0,
   route_flow_score_impulse: 64,
@@ -141,6 +216,16 @@ const buildMomentumSleevePayload = (sleeve, index) => {
     min_directional_consistency: clamp(sleeve?.min_directional_consistency, 0, 0, 1),
     min_signed_aggression: clamp(sleeve?.min_signed_aggression, 0, 0, 1),
     min_imbalance: clamp(sleeve?.min_imbalance, 0, 0, 1),
+    min_cvd: clamp(sleeve?.min_cvd, 0, -1_000_000_000, 1_000_000_000),
+    min_directional_price_change_pct: clamp(
+      sleeve?.min_directional_price_change_pct,
+      0,
+      -100,
+      100
+    ),
+    min_price_trend_efficiency: clamp(sleeve?.min_price_trend_efficiency, 0, 0, 1),
+    min_last_bar_body_ratio: clamp(sleeve?.min_last_bar_body_ratio, 0, 0, 1),
+    min_last_bar_close_location: clamp(sleeve?.min_last_bar_close_location, 0, 0, 1),
     min_delta_acceleration: clamp(sleeve?.min_delta_acceleration, 0, -1_000_000_000, 1_000_000_000),
     min_delta_price_divergence: clamp(sleeve?.min_delta_price_divergence, 0, -10, 10),
     route_flow_score_impulse: clamp(sleeve?.route_flow_score_impulse, 0, 0, 100),
@@ -200,6 +285,16 @@ const buildMomentumDiversificationOverridePayload = (config) => {
     min_directional_consistency: clamp(config.momentum_min_directional_consistency, 0, 0, 1),
     min_signed_aggression: clamp(config.momentum_min_signed_aggression, 0, 0, 1),
     min_imbalance: clamp(config.momentum_min_imbalance, 0, 0, 1),
+    min_cvd: clamp(config.momentum_min_cvd, 0, -1_000_000_000, 1_000_000_000),
+    min_directional_price_change_pct: clamp(
+      config.momentum_min_directional_price_change_pct,
+      0,
+      -100,
+      100
+    ),
+    min_price_trend_efficiency: clamp(config.momentum_min_price_trend_efficiency, 0, 0, 1),
+    min_last_bar_body_ratio: clamp(config.momentum_min_last_bar_body_ratio, 0, 0, 1),
+    min_last_bar_close_location: clamp(config.momentum_min_last_bar_close_location, 0, 0, 1),
     min_delta_acceleration: clamp(config.momentum_min_delta_acceleration, 0, -1_000_000_000, 1_000_000_000),
     min_delta_price_divergence: clamp(config.momentum_min_delta_price_divergence, 0, -10, 10),
     route_flow_score_impulse: clamp(config.momentum_route_flow_score_impulse, 0, 0, 100),
@@ -345,6 +440,11 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     momentum_min_directional_consistency: 0.45,
     momentum_min_signed_aggression: 0.04,
     momentum_min_imbalance: 0.02,
+    momentum_min_cvd: 0,
+    momentum_min_directional_price_change_pct: 0,
+    momentum_min_price_trend_efficiency: 0,
+    momentum_min_last_bar_body_ratio: 0,
+    momentum_min_last_bar_close_location: 0,
     momentum_min_delta_acceleration: 0,
     momentum_min_delta_price_divergence: 0,
     momentum_route_flow_score_impulse: 64,
@@ -361,9 +461,17 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     auto_save_checkpoint: true,
     cold_start_each_day: false,
     comparable_mode: false,
+    fast_start_session_reset: true,
+    apply_aos_optimizations_on_start: false,
   });
 
   const [loading, setLoading] = useState(false);
+  const [cacheFlushLoading, setCacheFlushLoading] = useState(false);
+  const [cacheFlushMessage, setCacheFlushMessage] = useState(null);
+  const [prewarmStatus, setPrewarmStatus] = useState({ state: "idle", message: "" });
+  const [prewarmRevision, setPrewarmRevision] = useState(0);
+  const [startTiming, setStartTiming] = useState(null);
+  const [loadingElapsedSec, setLoadingElapsedSec] = useState(0);
   const [error, setError] = useState(null);
   const [useWarmStart, setUseWarmStart] = useState(false);
   const [checkpointCatalog, setCheckpointCatalog] = useState([]);
@@ -381,8 +489,49 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     ACTIVE_PROFILE_SENTINEL
   );
   const lastSyncedAdaptiveProfileRef = useRef("");
+  const lastPrewarmKeyRef = useRef("");
+  const prewarmTimerRef = useRef(null);
+  const prewarmAbortRef = useRef(null);
 
   const strategyApiBase = (config.strategy_api_url || "").replace(/\/+$/, "");
+
+  const buildPrewarmPayload = useCallback(() => {
+    const ticker = String(config.ticker || "").trim().toUpperCase();
+    if (!ticker) return null;
+    const hasRange = Boolean(config.date_from && config.date_to);
+    const wantsL2Prewarm = Boolean(config.l2_only || config.l2_confirm_enabled);
+    const rangeSpanDays = hasRange ? inclusiveDaySpan(config.date_from, config.date_to) : NaN;
+    const canRangeL2Prewarm = (
+      hasRange
+      && wantsL2Prewarm
+      && Number.isFinite(rangeSpanDays)
+      && rangeSpanDays <= MAX_RANGE_L2_PREWARM_DAYS
+    );
+    const prewarmScope = canRangeL2Prewarm ? "range" : "ticker";
+    const enableL2Prewarm = canRangeL2Prewarm && wantsL2Prewarm;
+    const payload = {
+      ticker,
+      prewarm_scope: prewarmScope,
+      data_file: config.data_file || null,
+      allow_mock_data: false,
+      l2_only: enableL2Prewarm ? !!config.l2_only : false,
+      l2_confirm_enabled: enableL2Prewarm ? !!config.l2_confirm_enabled : false,
+      comparable_mode: !!config.comparable_mode,
+    };
+    if (canRangeL2Prewarm) {
+      payload.date_from = config.date_from;
+      payload.date_to = config.date_to;
+    }
+    return payload;
+  }, [
+    config.ticker,
+    config.date_from,
+    config.date_to,
+    config.data_file,
+    config.l2_only,
+    config.l2_confirm_enabled,
+    config.comparable_mode,
+  ]);
 
   const hydrateExecutionConfigFromPositioning = useCallback((payload) => {
     const positioning = normalizePositioningConfig(payload);
@@ -677,6 +826,65 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   };
 
   useEffect(() => {
+    const applyAvailableData = (data) => {
+      setAvailableData(data);
+
+      if (!data?.tickers || data.tickers.length === 0) {
+        return;
+      }
+
+      const targetTicker = data.tickers[0];
+      const range = data.date_ranges?.[targetTicker];
+      const defaultDate = range?.end || new Date().toISOString().split("T")[0];
+
+      setConfig((prev) => ({
+        ...applyMuMomentumDefaults(
+          {
+            ...prev,
+            ticker: targetTicker,
+            date: defaultDate,
+            date_from: defaultDate,
+            date_to: defaultDate,
+          },
+          targetTicker,
+          prev.ticker
+        ),
+      }));
+
+      if (onTickerChange) {
+        onTickerChange(targetTicker);
+      }
+    };
+
+    const readCachedAvailableData = () => {
+      if (typeof window === "undefined") return null;
+      try {
+        const raw = window.localStorage.getItem(AVAILABLE_DATA_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.tickers)) {
+          return null;
+        }
+        return parsed;
+      } catch {
+        return null;
+      }
+    };
+
+    const writeCachedAvailableData = (data) => {
+      if (typeof window === "undefined") return;
+      try {
+        window.localStorage.setItem(AVAILABLE_DATA_CACHE_KEY, JSON.stringify(data));
+      } catch {
+        // Ignore quota/storage errors and continue with fresh fetch-only behavior.
+      }
+    };
+
+    const cachedData = readCachedAvailableData();
+    if (cachedData) {
+      applyAvailableData(cachedData);
+    }
+
     const fetchAvailableData = async () => {
       try {
         const resp = await fetch("/api/available-data");
@@ -685,27 +893,8 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         }
 
         const data = await resp.json();
-        setAvailableData(data);
-
-        if (!data.tickers || data.tickers.length === 0) {
-          return;
-        }
-
-        const targetTicker = data.tickers[0];
-        const range = data.date_ranges[targetTicker];
-        const defaultDate = range?.end || new Date().toISOString().split("T")[0];
-
-        setConfig((prev) => ({
-          ...prev,
-          ticker: targetTicker,
-          date: defaultDate,
-          date_from: defaultDate,
-          date_to: defaultDate,
-        }));
-
-        if (onTickerChange) {
-          onTickerChange(targetTicker);
-        }
+        applyAvailableData(data);
+        writeCachedAvailableData(data);
       } catch (err) {
         console.error("Failed to fetch available data:", err);
       }
@@ -782,6 +971,112 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     syncAdaptiveCandidateToStrategyApi,
   ]);
 
+  useEffect(() => {
+    const payload = buildPrewarmPayload();
+    if (!payload) {
+      setPrewarmStatus({ state: "idle", message: "" });
+      return;
+    }
+
+    const prewarmKey = JSON.stringify(payload);
+    if (prewarmKey === lastPrewarmKeyRef.current) {
+      return;
+    }
+
+    if (prewarmTimerRef.current) {
+      clearTimeout(prewarmTimerRef.current);
+      prewarmTimerRef.current = null;
+    }
+    if (prewarmAbortRef.current) {
+      prewarmAbortRef.current.abort();
+      prewarmAbortRef.current = null;
+    }
+
+    prewarmTimerRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      prewarmAbortRef.current = controller;
+      let done = false;
+      const warmingIndicator = setTimeout(() => {
+        if (!done) {
+          setPrewarmStatus({ state: "warming", message: "Prewarming cache..." });
+        }
+      }, 120);
+      try {
+        const resp = await fetch("/api/run/prewarm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          throw new Error(data?.detail || `HTTP ${resp.status}`);
+        }
+        lastPrewarmKeyRef.current = prewarmKey;
+        const barsCount = Number(data?.bars || 0);
+        const useL2 = !!data?.use_l2;
+        const cacheHit = !!data?.cache_hit;
+        const prewarmScope = String(data?.prewarm_scope || "range").toLowerCase();
+        const l2GuardReason = String(data?.l2_guard_reason || "").trim();
+        const coveredMinutes = Number(data?.l2?.covered_minutes || 0);
+        const readyPrefix = cacheHit ? "Prewarm ready (cached)" : "Prewarm ready";
+        const scopeSuffix = prewarmScope === "ticker" ? " [ticker]" : "";
+        const guardSuffix = l2GuardReason ? " | L2 guard active" : "";
+        setPrewarmStatus({
+          state: "ready",
+          message: useL2
+            ? `${readyPrefix}${scopeSuffix}: ${barsCount} bars, L2 ${coveredMinutes}m${guardSuffix}`
+            : `${readyPrefix}${scopeSuffix}: ${barsCount} bars${guardSuffix}`,
+        });
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setPrewarmStatus({
+          state: "error",
+          message: `Prewarm failed: ${err.message}`,
+        });
+      } finally {
+        done = true;
+        clearTimeout(warmingIndicator);
+        if (prewarmAbortRef.current === controller) {
+          prewarmAbortRef.current = null;
+        }
+      }
+    }, 250);
+
+    return () => {
+      if (prewarmTimerRef.current) {
+        clearTimeout(prewarmTimerRef.current);
+        prewarmTimerRef.current = null;
+      }
+    };
+  }, [buildPrewarmPayload, prewarmRevision]);
+
+  useEffect(() => {
+    return () => {
+      if (prewarmTimerRef.current) {
+        clearTimeout(prewarmTimerRef.current);
+        prewarmTimerRef.current = null;
+      }
+      if (prewarmAbortRef.current) {
+        prewarmAbortRef.current.abort();
+        prewarmAbortRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingElapsedSec(0);
+      return undefined;
+    }
+    const startedAtMs = Date.now();
+    setLoadingElapsedSec(0);
+    const timer = setInterval(() => {
+      setLoadingElapsedSec((Date.now() - startedAtMs) / 1000);
+    }, 100);
+    return () => clearInterval(timer);
+  }, [loading]);
+
   const getDateRange = () => {
     if (!availableData || !config.ticker) {
       return { min: null, max: null };
@@ -796,7 +1091,9 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setStartTiming(null);
     setError(null);
+    setCacheFlushMessage(null);
 
     try {
       const comparableMode = !!config.comparable_mode;
@@ -806,17 +1103,18 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         throw new Error("Fixed stop-loss % must be > 0 when stop mode is fixed or capped.");
       }
 
+      let profileChanged = false;
       if (config.ticker) {
         const selectedProfileId =
           selectedAdaptiveProfileId === ACTIVE_PROFILE_SENTINEL
             ? ""
             : String(selectedAdaptiveProfileId || "").trim();
-        if (selectedProfileId) {
+        const activeProfileId = String(activeAdaptiveProfileId || "").trim();
+        if (selectedProfileId && selectedProfileId !== activeProfileId) {
           try {
             await applyAdaptiveProfile(config.ticker, selectedProfileId);
             setActiveAdaptiveProfileId(selectedProfileId);
-            await fetchTickerAosConfig(config.ticker, { hydrateExecution: true });
-            await fetchAdaptiveProfiles(config.ticker);
+            profileChanged = true;
           } catch (profileErr) {
             throw new Error(`Failed to apply adaptive profile: ${profileErr.message}`);
           }
@@ -852,6 +1150,10 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         l2_min_signed_aggression: Number(config.l2_min_signed_aggression),
         l2_lookback_bars: Number(config.l2_lookback_bars),
         comparable_mode: comparableMode,
+        orchestrator_reset_scope: comparableMode
+          ? "all"
+          : (config.fast_start_session_reset ? "session" : "all"),
+        apply_aos_optimizations_on_start: !!config.apply_aos_optimizations_on_start,
         // Strategy overrides are used as FE defaults; do not re-apply them at run start.
         apply_ticker_overrides_on_start: false,
         cold_start_each_day: comparableMode ? true : !!config.cold_start_each_day,
@@ -872,8 +1174,19 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         // No checkpoint available - proceed with cold start (no blocking)
         console.info("Warm start enabled but no checkpoint selected, proceeding with cold start.");
       }
-      await onStart(payload);
+      const startResult = await onStart(payload);
+      const timingPayload = startResult?.start_timing;
+      if (timingPayload && typeof timingPayload === "object") {
+        setStartTiming(timingPayload);
+      }
+      if (profileChanged && config.ticker) {
+        Promise.allSettled([
+          fetchTickerAosConfig(config.ticker, { hydrateExecution: true }),
+          fetchAdaptiveProfiles(config.ticker),
+        ]).catch(() => null);
+      }
     } catch (err) {
+      setStartTiming(null);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -882,6 +1195,28 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
 
   const handleChange = (field, value) => {
     setConfig((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleFlushRunCache = async () => {
+    setCacheFlushLoading(true);
+    setError(null);
+    setCacheFlushMessage(null);
+    try {
+      const resp = await fetch("/api/run/cache/flush?include_disk=true", { method: "POST" });
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(payload?.detail || `HTTP ${resp.status}`);
+      }
+      const beforeMem = Number(payload?.before?.memory?.base_bars_entries || 0);
+      const afterMem = Number(payload?.after?.memory?.base_bars_entries || 0);
+      setCacheFlushMessage(`Run cache flushed (memory bars ${beforeMem} -> ${afterMem}).`);
+      lastPrewarmKeyRef.current = "";
+      setPrewarmRevision((prev) => prev + 1);
+    } catch (err) {
+      setError(`Cache flush failed: ${err.message}`);
+    } finally {
+      setCacheFlushLoading(false);
+    }
   };
 
   const handleMomentumSleeveChange = (index, field, value) => {
@@ -939,19 +1274,23 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   };
 
   const handleTickerChange = (ticker) => {
-    const range = availableData?.date_ranges[ticker];
+    const upperTicker = String(ticker || "").trim().toUpperCase();
+    const range = availableData?.date_ranges[upperTicker];
     const defaultDate = range?.end;
 
-    setConfig((prev) => ({
-      ...prev,
-      ticker,
-      date: defaultDate || prev.date,
-      date_from: defaultDate || range?.start || prev.date_from,
-      date_to: defaultDate || range?.end || prev.date_to,
-    }));
+    setConfig((prev) => {
+      const nextDraft = {
+        ...prev,
+        ticker: upperTicker,
+        date: defaultDate || prev.date,
+        date_from: defaultDate || range?.start || prev.date_from,
+        date_to: defaultDate || range?.end || prev.date_to,
+      };
+      return applyMuMomentumDefaults(nextDraft, upperTicker, prev.ticker);
+    });
 
     if (onTickerChange) {
-      onTickerChange(ticker);
+      onTickerChange(upperTicker);
     }
   };
 
@@ -1015,6 +1354,15 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const activeComparableMode = Boolean(
     effectiveConfig.comparable_mode ?? config.comparable_mode
   );
+  const activeAosOptimizationsOnStart = Boolean(
+    effectiveConfig.apply_aos_optimizations_on_start ?? config.apply_aos_optimizations_on_start
+  );
+  const activeOrchestratorResetScope = String(
+    effectiveConfig.orchestrator_reset_scope
+      || (activeComparableMode
+        ? "all"
+        : (config.fast_start_session_reset ? "session" : "all"))
+  ).toLowerCase();
   const activeStrategySelectionMode = normalizeStrategySelectionMode(
     effectiveConfig.strategy_selection_mode ?? aosTickerConfig?.strategy_selection_mode ?? "adaptive_top_n"
   );
@@ -1215,6 +1563,20 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             </div>
           </div>
           <div className="form-group">
+            <label>Reset Scope</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeOrchestratorResetScope === "session"
+                ? "Session-only (fast)"
+                : (activeOrchestratorResetScope === "learning" ? "Learning-only" : "All (cold)")}
+            </div>
+          </div>
+          <div className="form-group">
+            <label>AOS Sync On Start</label>
+            <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
+              {activeAosOptimizationsOnStart ? "Enabled" : "Disabled (fast)"}
+            </div>
+          </div>
+          <div className="form-group">
             <label>Checkpoint Auto-save</label>
             <div style={{ color: "var(--text-primary)", fontSize: "0.9rem" }}>
               {config.auto_save_checkpoint ? "Enabled" : "Disabled"}
@@ -1301,7 +1663,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
                 id="ticker"
                 type="text"
                 value={config.ticker}
-                onChange={(e) => handleChange("ticker", e.target.value.toUpperCase())}
+                onChange={(e) => handleTickerChange(e.target.value.toUpperCase())}
                 placeholder="Loading..."
                 required
               />
@@ -1647,7 +2009,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
           <div style={executionSectionStyle}>
             <div style={executionSectionTitleStyle}>Momentum Diversification Override</div>
             <div style={executionSectionHintStyle}>
-              Voliteľný run-level override pre adaptive momentum routing (L2/CVD prahy, route a fail-fast).
+              Voliteľný run-level override pre adaptive momentum routing (L2/CVD + price-action prahy, route a fail-fast).
               Keď je vypnutý, použije sa aktívny Adaptive Profile/AOS config.
             </div>
 
@@ -1776,6 +2138,78 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
                       step="0.01"
                       value={config.momentum_min_imbalance}
                       onChange={(e) => handleChange("momentum_min_imbalance", Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_cvd">Min CVD (Directional)</label>
+                    <input
+                      id="momentum_min_cvd"
+                      type="number"
+                      min="-1000000000"
+                      max="1000000000"
+                      step="1"
+                      value={config.momentum_min_cvd}
+                      onChange={(e) => handleChange("momentum_min_cvd", Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_directional_price_change_pct">
+                      Min Directional Price Change %
+                    </label>
+                    <input
+                      id="momentum_min_directional_price_change_pct"
+                      type="number"
+                      min="-100"
+                      max="100"
+                      step="0.01"
+                      value={config.momentum_min_directional_price_change_pct}
+                      onChange={(e) =>
+                        handleChange("momentum_min_directional_price_change_pct", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_price_trend_efficiency">Min Price Trend Efficiency</label>
+                    <input
+                      id="momentum_min_price_trend_efficiency"
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={config.momentum_min_price_trend_efficiency}
+                      onChange={(e) =>
+                        handleChange("momentum_min_price_trend_efficiency", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_last_bar_body_ratio">Min Last Bar Body Ratio</label>
+                    <input
+                      id="momentum_min_last_bar_body_ratio"
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={config.momentum_min_last_bar_body_ratio}
+                      onChange={(e) =>
+                        handleChange("momentum_min_last_bar_body_ratio", Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="momentum_min_last_bar_close_location">
+                      Min Last Bar Close Location
+                    </label>
+                    <input
+                      id="momentum_min_last_bar_close_location"
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={config.momentum_min_last_bar_close_location}
+                      onChange={(e) =>
+                        handleChange("momentum_min_last_bar_close_location", Number(e.target.value))
+                      }
                     />
                   </div>
                   <div className="form-group">
@@ -2187,6 +2621,87 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
                               />
                             </div>
                             <div className="form-group">
+                              <label>Min CVD (Directional)</label>
+                              <input
+                                type="number"
+                                min="-1000000000"
+                                max="1000000000"
+                                step="1"
+                                value={sleeve?.min_cvd ?? 0}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(index, "min_cvd", Number(e.target.value))
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Min Directional Price Change %</label>
+                              <input
+                                type="number"
+                                min="-100"
+                                max="100"
+                                step="0.01"
+                                value={sleeve?.min_directional_price_change_pct ?? 0}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "min_directional_price_change_pct",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Min Price Trend Efficiency</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={sleeve?.min_price_trend_efficiency ?? 0}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "min_price_trend_efficiency",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Min Last Bar Body Ratio</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={sleeve?.min_last_bar_body_ratio ?? 0}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "min_last_bar_body_ratio",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>Min Last Bar Close Location</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={sleeve?.min_last_bar_close_location ?? 0}
+                                onChange={(e) =>
+                                  handleMomentumSleeveChange(
+                                    index,
+                                    "min_last_bar_close_location",
+                                    Number(e.target.value)
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="form-group">
                               <label>Min Delta Acceleration</label>
                               <input
                                 type="number"
@@ -2355,6 +2870,31 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             </label>
             <div className="preset-copy">
               Isolates each market day (including L2 feature build) so range runs match day-by-day audit behavior.
+            </div>
+
+            <label className="field-row">
+              <span>Fast Session Reset (skip full cold reset)</span>
+              <input
+                type="checkbox"
+                checked={!!config.fast_start_session_reset && !config.comparable_mode}
+                disabled={!!config.comparable_mode}
+                onChange={(e) => handleChange("fast_start_session_reset", e.target.checked)}
+              />
+            </label>
+            <div className="preset-copy">
+              Uses orchestrator reset scope `session` for faster run start while preserving broader learning state.
+            </div>
+
+            <label className="field-row">
+              <span>Apply AOS/Adaptive Sync On Start (slower)</span>
+              <input
+                type="checkbox"
+                checked={!!config.apply_aos_optimizations_on_start}
+                onChange={(e) => handleChange("apply_aos_optimizations_on_start", e.target.checked)}
+              />
+            </label>
+            <div className="preset-copy">
+              Keeps startup deterministic by pushing AOS/adaptive strategy params to strategy API at run start.
             </div>
 
             <div className="form-group" style={{ marginBottom: "var(--spacing-sm)" }}>
@@ -2554,8 +3094,83 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             }
             style={{ width: "100%", marginTop: "var(--spacing-sm)" }}
           >
-            {loading ? "Starting..." : "Start Backtest"}
+            {loading ? `Starting... ${loadingElapsedSec.toFixed(1)}s` : "Start Backtest"}
           </button>
+
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleFlushRunCache}
+            disabled={loading || cacheFlushLoading}
+            style={{ width: "100%", marginTop: "8px" }}
+          >
+            {cacheFlushLoading ? "Flushing Cache..." : "Flush Run Cache"}
+          </button>
+
+          {cacheFlushMessage && (
+            <div
+              style={{
+                color: "var(--accent-green)",
+                fontSize: "0.8rem",
+                marginTop: "6px",
+              }}
+            >
+              {cacheFlushMessage}
+            </div>
+          )}
+
+          {prewarmStatus.message && (
+            <div
+              style={{
+                color:
+                  prewarmStatus.state === "error"
+                    ? "var(--accent-red)"
+                    : prewarmStatus.state === "ready"
+                      ? "var(--accent-green)"
+                      : "var(--text-muted)",
+                fontSize: "0.78rem",
+                marginTop: "6px",
+              }}
+            >
+              {prewarmStatus.message}
+            </div>
+          )}
+
+          {startTiming && (
+            <div
+              style={{
+                color: "var(--text-muted)",
+                fontSize: "0.78rem",
+                marginTop: "8px",
+                borderTop: "1px solid var(--border-color)",
+                paddingTop: "8px",
+              }}
+            >
+              <div style={{ color: "var(--text-primary)", marginBottom: "4px" }}>
+                Start timing: total {formatStartTimingMs(startTiming?.total_ms)}
+                {startTiming?.slowest_phase && (
+                  <>
+                    {" "} | slowest {formatStartTimingPhaseLabel(startTiming.slowest_phase)}{" "}
+                    {formatStartTimingMs(startTiming?.slowest_phase_ms)}
+                  </>
+                )}
+              </div>
+              {startTiming?.context && (
+                <div style={{ marginBottom: "4px" }}>
+                  {String(startTiming.context.ticker || "")}{" "}
+                  {String(startTiming.context.range_start || "")} → {String(startTiming.context.range_end || "")}{" "}
+                  | bars {Number(startTiming.context.bars_loaded || 0)} | ref{" "}
+                  {Number(startTiming.context.reference_bars_loaded || 0)} | aos-sync{" "}
+                  {startTiming.context.apply_aos_optimizations_on_start ? "on" : "off"}
+                </div>
+              )}
+              {Object.entries(startTiming?.phases_ms || {}).map(([phaseKey, ms]) => (
+                <div key={phaseKey}>
+                  {formatStartTimingPhaseLabel(phaseKey)}: {formatStartTimingMs(ms)}
+                </div>
+              ))}
+            </div>
+          )}
         </form>
       </div>
     </div>

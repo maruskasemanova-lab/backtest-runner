@@ -2,11 +2,15 @@ function PlaybackControls({
   runState, 
   isPlaying, 
   speed, 
+  tradeEvaluationMode,
+  isReloading,
   onSpeedChange,
+  onTradeEvaluationModeChange,
   onStep, 
   onPlay, 
   onPause, 
   onStop,
+  onReload,
   onReset 
 }) {
   const progress = runState?.progress_pct || 0;
@@ -21,6 +25,11 @@ function PlaybackControls({
     if (s === '2hz') return '2/sec';
     if (s === '1hz') return '1/sec';
     return `${s}ms`;
+  };
+
+  const getTradeModeLabel = (mode) => {
+    if (mode === 'intrabar_1s') return '1s intrabar';
+    return 'standard bars';
   };
   
   return (
@@ -83,6 +92,14 @@ function PlaybackControls({
             title="Stop"
           >
             ⏹
+          </button>
+          <button
+            className="btn btn-secondary btn-icon"
+            onClick={onReload}
+            disabled={!!isReloading || isPlaying}
+            title="Restart from first bar using already loaded run data"
+          >
+            {isReloading ? '⟳' : '↻'}
           </button>
           <button 
             className="btn btn-danger btn-icon"
@@ -176,6 +193,49 @@ function PlaybackControls({
               onClick={() => onSpeedChange(200)}
             >
               0.2s
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginTop: '10px' }}>
+          <div style={{ 
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontSize: '0.8rem',
+            color: 'var(--text-secondary)',
+            marginBottom: '8px'
+          }}>
+            <span>Trade Eval</span>
+            <span>{getTradeModeLabel(tradeEvaluationMode)}</span>
+          </div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <button
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.7rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                background: tradeEvaluationMode === 'standard' ? 'var(--accent-blue)' : 'transparent',
+                color: tradeEvaluationMode === 'standard' ? 'white' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+              onClick={() => onTradeEvaluationModeChange('standard')}
+            >
+              Fast (bar)
+            </button>
+            <button
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.7rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                background: tradeEvaluationMode === 'intrabar_1s' ? 'var(--accent-blue)' : 'transparent',
+                color: tradeEvaluationMode === 'intrabar_1s' ? 'white' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+              onClick={() => onTradeEvaluationModeChange('intrabar_1s')}
+            >
+              1s Intrabar
             </button>
           </div>
         </div>

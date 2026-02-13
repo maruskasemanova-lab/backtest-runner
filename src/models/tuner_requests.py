@@ -64,6 +64,11 @@ class AdaptiveTunerRequest(BaseModel):
     momentum_min_directional_consistency_options: Optional[List[float]] = None
     momentum_min_signed_aggression_options: Optional[List[float]] = None
     momentum_min_imbalance_options: Optional[List[float]] = None
+    momentum_min_cvd_options: Optional[List[float]] = None
+    momentum_min_directional_price_change_pct_options: Optional[List[float]] = None
+    momentum_min_price_trend_efficiency_options: Optional[List[float]] = None
+    momentum_min_last_bar_body_ratio_options: Optional[List[float]] = None
+    momentum_min_last_bar_close_location_options: Optional[List[float]] = None
     momentum_min_delta_acceleration_options: Optional[List[float]] = None
     momentum_min_delta_price_divergence_options: Optional[List[float]] = None
     momentum_route_flow_score_impulse_options: Optional[List[float]] = None

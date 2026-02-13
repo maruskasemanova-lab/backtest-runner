@@ -42,7 +42,14 @@ class _DummyRunner:
         return {"phase": "IDLE"}
 
 
-def _patch_start_run_dependencies(monkeypatch, apply_calls, *, apply_aos_result=None, configure_spy=None):
+def _patch_start_run_dependencies(
+    monkeypatch,
+    apply_calls,
+    *,
+    apply_aos_result=None,
+    configure_spy=None,
+    aos_spy=None,
+):
     async def _noop_async(*args, **kwargs):
         return None
 
@@ -50,6 +57,9 @@ def _patch_start_run_dependencies(monkeypatch, apply_calls, *, apply_aos_result=
         return {"success": True, "scope": "all"}
 
     async def _apply_aos(*args, **kwargs):
+        if aos_spy is not None:
+            aos_spy["args"] = list(args)
+            aos_spy["kwargs"] = dict(kwargs)
         return dict(apply_aos_result or {})
 
     async def _configure(*args, **kwargs):
@@ -91,6 +101,10 @@ def test_start_run_applies_ticker_overrides_by_default(monkeypatch):
         assert result["success"] is True
         assert result["strategy_overrides_applied"] is True
         assert apply_calls["count"] == 1
+        assert isinstance(result.get("start_timing"), dict)
+        assert float(result["start_timing"].get("total_ms", -1)) >= 0
+        assert isinstance(result["start_timing"].get("phases_ms"), dict)
+        assert "load_run_bars" in result["start_timing"]["phases_ms"]
     finally:
         api_server.active_runners.clear()
 
@@ -176,6 +190,36 @@ def test_start_run_strategy_selection_request_overrides_aos(monkeypatch):
         assert configure_spy["kwargs"]["max_active_strategies"] == 12
         assert result["execution_config"]["strategy_selection_mode"] == "all_enabled"
         assert result["execution_config"]["max_active_strategies"] == 12
+    finally:
+        api_server.active_runners.clear()
+
+
+def test_start_run_can_skip_aos_remote_sync(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    aos_spy = {}
+    _patch_start_run_dependencies(
+        monkeypatch,
+        apply_calls,
+        apply_aos_result={"strategy_selection_mode": "adaptive_top_n", "max_active_strategies": 3},
+        aos_spy=aos_spy,
+    )
+
+    request = api_server.StartRunRequest(
+        run_id="test-skip-aos-sync",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+        apply_aos_optimizations_on_start=False,
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        assert aos_spy["kwargs"]["remote_sync"] is False
+        assert result["execution_config"]["apply_aos_optimizations_on_start"] is False
+        assert result["start_timing"]["context"]["apply_aos_optimizations_on_start"] is False
     finally:
         api_server.active_runners.clear()
 

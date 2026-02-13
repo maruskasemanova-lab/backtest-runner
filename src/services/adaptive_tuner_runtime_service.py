@@ -325,6 +325,13 @@ async def evaluate_v2_candidate(
             "l2_min_signed_aggression": candidate.get("l2_min_signed_aggression"),
             "base_threshold": candidate.get("base_threshold"),
             "min_confirming_sources": candidate.get("min_confirming_sources"),
+            "momentum_min_cvd": candidate.get("momentum_min_cvd"),
+            "momentum_min_directional_price_change_pct": candidate.get(
+                "momentum_min_directional_price_change_pct"
+            ),
+            "momentum_min_price_trend_efficiency": candidate.get(
+                "momentum_min_price_trend_efficiency"
+            ),
         },
         "day_results": day_results,
         "completed_at": datetime.utcnow().isoformat() + "Z",

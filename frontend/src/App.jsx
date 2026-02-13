@@ -121,6 +121,47 @@ const scoreMarkerMatch = (candidate, target) => {
   return score;
 };
 
+const parseRunKey = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const parts = raw.split(':');
+  if (parts.length < 3) return null;
+  const date = parts.pop();
+  const ticker = parts.pop();
+  const runId = parts.join(':');
+  if (!runId || !ticker || !date) return null;
+  return { runId, ticker, date };
+};
+
+const buildRunApiBase = (runParts) => {
+  if (!runParts) return null;
+  return `/api/run/${encodeURIComponent(runParts.runId)}/${encodeURIComponent(runParts.ticker)}/${encodeURIComponent(runParts.date)}`;
+};
+
+const toChartBar = (bar) => {
+  if (!bar || typeof bar !== 'object') return null;
+  const time = toUnixSeconds(bar.timestamp ?? bar.time);
+  const open = Number(bar.open);
+  const high = Number(bar.high);
+  const low = Number(bar.low);
+  const close = Number(bar.close);
+  const volume = Number(bar.volume);
+
+  if (!Number.isFinite(time)) return null;
+  if (!Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+    return null;
+  }
+
+  return {
+    time,
+    open,
+    high,
+    low,
+    close,
+    volume: Number.isFinite(volume) ? volume : 0,
+  };
+};
+
 function App() {
   // Run state
   const [runKey, setRunKey] = useState(null);
@@ -163,14 +204,34 @@ function App() {
   // ...
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isReloadingSnapshot, setIsReloadingSnapshot] = useState(false);
   const [speed, setSpeed] = useState('10hz'); // Default: 10 updates per second (string for hz, number for ms)
+  const [tradeEvaluationMode, setTradeEvaluationMode] = useState('standard'); // Faster default: minute-bar eval even during open trades
+  const [runtimeNotice, setRuntimeNotice] = useState('');
   
   // WebSocket
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const isMountedRef = useRef(true); // Track mount status
-  const activeRunId = runKey ? String(runKey).split(':')[0] : null;
-  const activeRunTicker = runKey ? String(runKey).split(':')[1] : null;
+  const activeRun = useMemo(() => parseRunKey(runKey), [runKey]);
+  const activeRunId = activeRun?.runId || null;
+  const activeRunTicker = activeRun?.ticker || null;
+  const activeRunApiBase = useMemo(() => buildRunApiBase(activeRun), [activeRun]);
+
+  const clearActiveRunState = useCallback((notice = '') => {
+    setRunKey(null);
+    setRunState(null);
+    setEffectiveExecutionConfig(null);
+    setBars([]);
+    setMarkers([]);
+    setSelectedMarker(null);
+    setCurrentBar(null);
+    setSelectedIntrabar(null);
+    setIsPlaying(false);
+    if (notice) {
+      setRuntimeNotice(notice);
+    }
+  }, []);
 
   // Track mount status
   useEffect(() => {
@@ -180,9 +241,70 @@ function App() {
     };
   }, []);
 
+  const hydrateRunSnapshot = useCallback(async (targetRunKey, options = {}) => {
+    const { showBusy = true } = options;
+    const parsed = parseRunKey(targetRunKey);
+    if (!parsed) return false;
+
+    if (showBusy) {
+      setIsReloadingSnapshot(true);
+    }
+
+    try {
+      const runApiBase = buildRunApiBase(parsed);
+      if (!runApiBase) return false;
+
+      const [stateResp, barsResp, markersResp] = await Promise.all([
+        fetch(`${runApiBase}/state`),
+        fetch(`${runApiBase}/bars`),
+        fetch(`${runApiBase}/markers`),
+      ]);
+
+      if (!stateResp.ok || !barsResp.ok) {
+        return false;
+      }
+
+      const statePayload = await stateResp.json();
+      const barsPayload = await barsResp.json();
+      const markersPayload = markersResp.ok ? await markersResp.json() : [];
+
+      const rawBars = Array.isArray(barsPayload?.bars) ? barsPayload.bars : [];
+      const chartBars = rawBars
+        .map((bar) => toChartBar(bar))
+        .filter(Boolean)
+        .sort((a, b) => a.time - b.time);
+      const nextMarkers = Array.isArray(markersPayload) ? markersPayload : [];
+
+      setRunKey(targetRunKey);
+      setRunState(statePayload && typeof statePayload === 'object' ? statePayload : null);
+      setBars(chartBars);
+      setMarkers(nextMarkers);
+      setCurrentBar(rawBars.length ? rawBars[rawBars.length - 1] : null);
+      setSelectedIntrabar(null);
+      setSelectedMarker((prevSelected) => {
+        if (!prevSelected?.id) return null;
+        return nextMarkers.find((candidate) => candidate?.id === prevSelected.id) || null;
+      });
+      setSelectedTicker(parsed.ticker || null);
+      setIsPlaying(Boolean(statePayload?.is_running && !statePayload?.is_paused));
+      return true;
+    } catch (error) {
+      console.error('Snapshot reload failed:', error);
+      return false;
+    } finally {
+      if (showBusy) {
+        setIsReloadingSnapshot(false);
+      }
+    }
+  }, []);
+
   // Connect WebSocket - dependent only on hostname
   useEffect(() => {
+    let disposed = false;
+
     const connectWs = () => {
+      if (disposed) return;
+
       // Avoid multiple connections
       if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
         return;
@@ -195,11 +317,14 @@ function App() {
         wsRef.current = null;
       }
 
-      const ws = new WebSocket(`ws://${window.location.hostname}:8002/ws/live`);
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const wsHost =
+        window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+      const ws = new WebSocket(`${wsProtocol}://${wsHost}:8002/ws/live`);
       wsRef.current = ws;
       
       ws.onopen = () => {
-        if (!isMountedRef.current) {
+        if (disposed || !isMountedRef.current) {
             ws.close();
             return;
         }
@@ -209,7 +334,7 @@ function App() {
       };
       
       ws.onmessage = (event) => {
-        if (!isMountedRef.current) return;
+        if (disposed || !isMountedRef.current) return;
         try {
             const data = JSON.parse(event.data);
             handleWsMessage(data);
@@ -219,7 +344,7 @@ function App() {
       };
       
       ws.onclose = () => {
-        if (!isMountedRef.current) return;
+        if (disposed || !isMountedRef.current) return;
         console.log('WebSocket disconnected');
         setIsConnected(false);
         wsRef.current = null;
@@ -238,18 +363,15 @@ function App() {
     connectWs();
     
     return () => {
+      disposed = true;
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      // In Strict Mode, we DO NOT want to close the socket immediately if we just opened it.
-      // But we must clean up if we are truly unmounting.
-      // We can check if we are unmounting by using the ref, but the ref cleanup runs after this?
-      // Actually, simple ref-based protection in onopen/onmessage is enough for safety.
-      // For the socket itself:
-      if (wsRef.current && isMountedRef.current === false) { 
-         // Only close if we are sure we are unmounting (ref should be false by now? No, ref cleanup runs before or same time?)
-         // React effects cleanup runs before the next effect or on unmount.
-         // Let's just rely on the fact that if we re-run, we check readyState.
-         wsRef.current.close();
-         wsRef.current = null;
+      if (wsRef.current) {
+        try {
+          wsRef.current.close();
+        } catch (error) {
+          console.debug('WS close during cleanup failed:', error);
+        }
+        wsRef.current = null;
       }
     };
   }, []); // Empty dependency array - connect once on mount
@@ -292,16 +414,19 @@ function App() {
   
   // Handle new bar from WebSocket
   const handleNewBar = useCallback((bar) => {
-    const chartBar = {
-      time: new Date(bar.timestamp).getTime() / 1000,
-      open: bar.open,
-      high: bar.high,
-      low: bar.low,
-      close: bar.close,
-      volume: bar.volume
-    };
+    const chartBar = toChartBar(bar);
+    if (!chartBar) return;
     
-    setBars(prev => [...prev, chartBar]);
+    setBars((prev) => {
+      if (!prev.length) return [chartBar];
+      const last = prev[prev.length - 1];
+      if (Math.abs(Number(last?.time || 0) - Number(chartBar.time || 0)) < 0.0001) {
+        const next = [...prev];
+        next[next.length - 1] = chartBar;
+        return next;
+      }
+      return [...prev, chartBar];
+    });
     setCurrentBar(bar);
     setRunState(prev => {
       if (!prev) return null;
@@ -509,6 +634,7 @@ function App() {
   // Start a new run
   const handleStartRun = async (config) => {
     try {
+      setRuntimeNotice('');
       setSelectedTicker(config.ticker || null);
       setStrategyApiUrl(config.strategy_api_url || "http://localhost:8001");
       const resp = await fetch('/api/run/start', {
@@ -523,7 +649,12 @@ function App() {
       }
       
       const data = await resp.json();
-      const key = data.run_key;
+      const key = String(data.run_key || '');
+      const parsedRun = parseRunKey(key);
+      if (!parsedRun) {
+        throw new Error('Invalid run key returned by backend.');
+      }
+
       setRunKey(key);
       setEffectiveExecutionConfig(data.execution_config || null);
       
@@ -532,16 +663,21 @@ function App() {
       setMarkers([]);
       setSelectedMarker(null);
       setCurrentBar(null);
+      setSelectedIntrabar(null);
+      setIsPlaying(false);
       
       // Fetch initial state
-      const parts = key.split(':');
-      const stateResp = await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/state`);
+      const runApiBase = buildRunApiBase(parsedRun);
+      const stateResp = await fetch(`${runApiBase}/state`);
+      if (!stateResp.ok) {
+        throw new Error(`Failed to load run state: HTTP ${stateResp.status}`);
+      }
       const state = await stateResp.json();
       setRunState(state);
       
       // Subscribe WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'subscribe', run_id: config.run_id }));
+        wsRef.current.send(JSON.stringify({ type: 'subscribe', run_id: parsedRun.runId }));
       }
       
       return data;
@@ -553,11 +689,10 @@ function App() {
   
   // Step forward one bar
   const handleStep = async () => {
-    if (!runKey) return;
+    if (!activeRunApiBase) return;
     
-    const parts = runKey.split(':');
     try {
-      const resp = await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/step`, {
+      const resp = await fetch(`${activeRunApiBase}/step`, {
         method: 'POST'
       });
       const data = await resp.json();
@@ -592,10 +727,9 @@ function App() {
   };
   
   // Play/auto-advance
-  const handlePlay = async () => {
-    if (!runKey) return;
+  const handlePlay = useCallback(async () => {
+    if (!activeRunApiBase) return;
     
-    const parts = runKey.split(':');
     try {
       // Support both hz (string) and ms (number) formats
       let speedParam;
@@ -608,30 +742,47 @@ function App() {
         speedParam = speed;
       }
       
-      const response = await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/play`, {
+      const response = await fetch(`${activeRunApiBase}/play`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ speed_ms: speedParam })
+        body: JSON.stringify({
+          speed_ms: speedParam,
+          trade_eval_mode: tradeEvaluationMode
+        })
       });
       if (!response.ok) {
+        let detailMessage = `HTTP ${response.status}`;
+        try {
+          const detail = await response.json();
+          if (detail?.detail) detailMessage = String(detail.detail);
+          else if (detail?.error) detailMessage = String(detail.error);
+        } catch (_) {}
+        if (response.status === 404) {
+          clearActiveRunState(
+            'Active run no longer exists on backend (likely after restart/reload). Start backtest again.'
+          );
+          return;
+        }
+        setRuntimeNotice(`Play failed: ${detailMessage}`);
         setIsPlaying(false);
-        console.error('Play request failed:', response.status, response.statusText);
+        console.error('Play request failed:', response.status, detailMessage);
         return;
       }
+      setRuntimeNotice('');
       setIsPlaying(true);
     } catch (error) {
+      setRuntimeNotice(`Play error: ${error?.message || 'Unknown error'}`);
       setIsPlaying(false);
       console.error('Play error:', error);
     }
-  };
+  }, [activeRunApiBase, clearActiveRunState, speed, tradeEvaluationMode]);
   
   // Pause
   const handlePause = async () => {
-    if (!runKey) return;
+    if (!activeRunApiBase) return;
     
-    const parts = runKey.split(':');
     try {
-      await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/pause`, {
+      await fetch(`${activeRunApiBase}/pause`, {
         method: 'POST'
       });
       setIsPlaying(false);
@@ -642,16 +793,13 @@ function App() {
 
   // Poll run state while playing so phase/progress stay in sync in range runs.
   useEffect(() => {
-    if (!runKey || !isPlaying) return undefined;
-
-    const parts = runKey.split(':');
-    if (parts.length !== 3) return undefined;
+    if (!activeRunApiBase || !isPlaying) return undefined;
 
     let cancelled = false;
     const pollState = async () => {
       if (cancelled) return;
       try {
-        const resp = await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/state`);
+        const resp = await fetch(`${activeRunApiBase}/state`);
         if (!resp.ok) {
           if (resp.status === 404) {
             if (!cancelled) {
@@ -690,15 +838,14 @@ function App() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [runKey, isPlaying]);
+  }, [activeRunApiBase, isPlaying]);
   
   // Stop
   const handleStop = async () => {
-    if (!runKey) return;
+    if (!activeRunApiBase) return;
     
-    const parts = runKey.split(':');
     try {
-      await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}/stop`, {
+      await fetch(`${activeRunApiBase}/stop`, {
         method: 'POST'
       });
       setIsPlaying(false);
@@ -709,25 +856,45 @@ function App() {
   
   // Reset run
   const handleReset = async () => {
-    if (!runKey) return;
+    if (!activeRunApiBase) return;
     
-    const parts = runKey.split(':');
     try {
-      await fetch(`/api/run/${parts[0]}/${parts[1]}/${parts[2]}`, {
+      await fetch(activeRunApiBase, {
         method: 'DELETE'
       });
-      setRunKey(null);
-      setRunState(null);
-      setEffectiveExecutionConfig(null);
-      setBars([]);
-      setMarkers([]);
-      setSelectedMarker(null);
-      setCurrentBar(null);
-      setIsPlaying(false);
+      clearActiveRunState('');
+      setRuntimeNotice('');
     } catch (error) {
       console.error('Reset error:', error);
     }
   };
+
+  const handleReloadBacktest = useCallback(async () => {
+    if (!runKey || !activeRunApiBase) return;
+
+    setIsReloadingSnapshot(true);
+    try {
+      const restartResp = await fetch(`${activeRunApiBase}/restart`, { method: 'POST' });
+      if (!restartResp.ok) {
+        // Backward-compatible fallback while backend restart endpoint is unavailable.
+        const fallbackReloaded = await hydrateRunSnapshot(runKey, { showBusy: false });
+        if (!fallbackReloaded) {
+          const detail = await restartResp.json().catch(() => ({}));
+          throw new Error(detail?.detail || `HTTP ${restartResp.status}`);
+        }
+        return;
+      }
+
+      const reloaded = await hydrateRunSnapshot(runKey, { showBusy: false });
+      if (!reloaded) {
+        console.warn('Backtest restart completed, but snapshot refresh failed.');
+      }
+    } catch (error) {
+      console.error('Backtest restart failed:', error);
+    } finally {
+      setIsReloadingSnapshot(false);
+    }
+  }, [activeRunApiBase, hydrateRunSnapshot, runKey]);
   
   // Click marker on chart
   const handleMarkerClick = useCallback((markerOrId) => {
@@ -825,6 +992,22 @@ function App() {
       <main className="app-content">
         {/* Left Sidebar */}
         <aside className="sidebar">
+          {runtimeNotice && (
+            <div
+              style={{
+                marginBottom: '10px',
+                padding: '8px 10px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color)',
+                background: 'rgba(239, 68, 68, 0.08)',
+                color: 'var(--accent-red)',
+                fontSize: '0.82rem',
+                lineHeight: 1.35,
+              }}
+            >
+              {runtimeNotice}
+            </div>
+          )}
           {/* Run Config */}
           <RunConfig 
             onStart={handleStartRun} 
@@ -842,11 +1025,15 @@ function App() {
               runState={runState}
               isPlaying={isPlaying}
               speed={speed}
+              tradeEvaluationMode={tradeEvaluationMode}
+              isReloading={isReloadingSnapshot}
               onSpeedChange={setSpeed}
+              onTradeEvaluationModeChange={setTradeEvaluationMode}
               onStep={handleStep}
               onPlay={handlePlay}
               onPause={handlePause}
               onStop={handleStop}
+              onReload={handleReloadBacktest}
               onReset={handleReset}
             />
           )}
@@ -993,11 +1180,11 @@ function App() {
             </div>
           )}
           {/* Intrabar Panel - shown when a bar is clicked */}
-          {selectedIntrabar && runKey && (
+          {selectedIntrabar && activeRun && (
             <IntrabarPanel
-              runId={runKey.split(':')[0]}
-              ticker={runKey.split(':')[1]}
-              date={runKey.split(':')[2]}
+              runId={activeRun.runId}
+              ticker={activeRun.ticker}
+              date={activeRun.date}
               selectedBar={selectedIntrabar}
               onClose={() => setSelectedIntrabar(null)}
             />

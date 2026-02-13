@@ -182,6 +182,36 @@ def build_v2_search_space(
             min_value=0.0,
             max_value=1.0,
         ),
+        "momentum_min_cvd": _normalize_float_options(
+            request.momentum_min_cvd_options,
+            default=[float(momentum_cfg.get("min_cvd", 0.0)), 1000.0, 3000.0],
+            min_value=-1_000_000_000.0,
+            max_value=1_000_000_000.0,
+        ),
+        "momentum_min_directional_price_change_pct": _normalize_float_options(
+            request.momentum_min_directional_price_change_pct_options,
+            default=[float(momentum_cfg.get("min_directional_price_change_pct", 0.0)), 0.05, 0.15],
+            min_value=-100.0,
+            max_value=100.0,
+        ),
+        "momentum_min_price_trend_efficiency": _normalize_float_options(
+            request.momentum_min_price_trend_efficiency_options,
+            default=[float(momentum_cfg.get("min_price_trend_efficiency", 0.0)), 0.22, 0.35],
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "momentum_min_last_bar_body_ratio": _normalize_float_options(
+            request.momentum_min_last_bar_body_ratio_options,
+            default=[float(momentum_cfg.get("min_last_bar_body_ratio", 0.0)), 0.30, 0.45],
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "momentum_min_last_bar_close_location": _normalize_float_options(
+            request.momentum_min_last_bar_close_location_options,
+            default=[float(momentum_cfg.get("min_last_bar_close_location", 0.0)), 0.55, 0.70],
+            min_value=0.0,
+            max_value=1.0,
+        ),
         "momentum_min_delta_acceleration": _normalize_float_options(
             request.momentum_min_delta_acceleration_options,
             default=[float(momentum_cfg.get("min_delta_acceleration", 0.0)), 500.0, 1500.0],
@@ -245,6 +275,11 @@ def v2_candidate_key(candidate: Dict[str, Any], deps: AdaptiveTunerV2Deps) -> tu
         candidate.get("momentum_min_directional_consistency"),
         candidate.get("momentum_min_signed_aggression"),
         candidate.get("momentum_min_imbalance"),
+        candidate.get("momentum_min_cvd"),
+        candidate.get("momentum_min_directional_price_change_pct"),
+        candidate.get("momentum_min_price_trend_efficiency"),
+        candidate.get("momentum_min_last_bar_body_ratio"),
+        candidate.get("momentum_min_last_bar_close_location"),
         candidate.get("momentum_min_delta_acceleration"),
         candidate.get("momentum_min_delta_price_divergence"),
         candidate.get("momentum_route_flow_score_impulse"),
@@ -297,6 +332,11 @@ def build_v2_baseline_candidate(
         "momentum_min_directional_consistency": _first("momentum_min_directional_consistency"),
         "momentum_min_signed_aggression": _first("momentum_min_signed_aggression"),
         "momentum_min_imbalance": _first("momentum_min_imbalance"),
+        "momentum_min_cvd": _first("momentum_min_cvd"),
+        "momentum_min_directional_price_change_pct": _first("momentum_min_directional_price_change_pct"),
+        "momentum_min_price_trend_efficiency": _first("momentum_min_price_trend_efficiency"),
+        "momentum_min_last_bar_body_ratio": _first("momentum_min_last_bar_body_ratio"),
+        "momentum_min_last_bar_close_location": _first("momentum_min_last_bar_close_location"),
         "momentum_min_delta_acceleration": _first("momentum_min_delta_acceleration"),
         "momentum_min_delta_price_divergence": _first("momentum_min_delta_price_divergence"),
         "momentum_route_flow_score_impulse": _first("momentum_route_flow_score_impulse"),
@@ -336,6 +376,9 @@ def build_v2_random_candidates(
         "momentum_diversification_enabled", "momentum_route_enabled",
         "momentum_min_flow_score", "momentum_min_directional_consistency",
         "momentum_min_signed_aggression", "momentum_min_imbalance",
+        "momentum_min_cvd", "momentum_min_directional_price_change_pct",
+        "momentum_min_price_trend_efficiency", "momentum_min_last_bar_body_ratio",
+        "momentum_min_last_bar_close_location",
         "momentum_min_delta_acceleration", "momentum_min_delta_price_divergence",
         "momentum_route_flow_score_impulse", "momentum_fail_fast_exit_enabled",
         "momentum_fail_fast_max_bars",
@@ -408,6 +451,19 @@ def build_v2_random_candidates(
                 search_space["momentum_min_signed_aggression"]
             ),
             "momentum_min_imbalance": rng.choice(search_space["momentum_min_imbalance"]),
+            "momentum_min_cvd": rng.choice(search_space["momentum_min_cvd"]),
+            "momentum_min_directional_price_change_pct": rng.choice(
+                search_space["momentum_min_directional_price_change_pct"]
+            ),
+            "momentum_min_price_trend_efficiency": rng.choice(
+                search_space["momentum_min_price_trend_efficiency"]
+            ),
+            "momentum_min_last_bar_body_ratio": rng.choice(
+                search_space["momentum_min_last_bar_body_ratio"]
+            ),
+            "momentum_min_last_bar_close_location": rng.choice(
+                search_space["momentum_min_last_bar_close_location"]
+            ),
             "momentum_min_delta_acceleration": rng.choice(
                 search_space["momentum_min_delta_acceleration"]
             ),
@@ -530,6 +586,11 @@ def build_v2_candidate_config(
         "momentum_min_directional_consistency": "min_directional_consistency",
         "momentum_min_signed_aggression": "min_signed_aggression",
         "momentum_min_imbalance": "min_imbalance",
+        "momentum_min_cvd": "min_cvd",
+        "momentum_min_directional_price_change_pct": "min_directional_price_change_pct",
+        "momentum_min_price_trend_efficiency": "min_price_trend_efficiency",
+        "momentum_min_last_bar_body_ratio": "min_last_bar_body_ratio",
+        "momentum_min_last_bar_close_location": "min_last_bar_close_location",
         "momentum_min_delta_acceleration": "min_delta_acceleration",
         "momentum_min_delta_price_divergence": "min_delta_price_divergence",
         "momentum_route_flow_score_impulse": "route_flow_score_impulse",

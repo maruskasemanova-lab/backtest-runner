@@ -401,6 +401,11 @@ def test_v2_build_search_space_defaults() -> None:
     # Momentum diversification options
     assert "momentum_diversification_enabled" in space
     assert "momentum_min_flow_score" in space
+    assert "momentum_min_cvd" in space
+    assert "momentum_min_directional_price_change_pct" in space
+    assert "momentum_min_price_trend_efficiency" in space
+    assert "momentum_min_last_bar_body_ratio" in space
+    assert "momentum_min_last_bar_close_location" in space
     assert True in space["momentum_diversification_enabled"]
 
 
@@ -446,6 +451,11 @@ def test_v2_candidate_config_injects_all_dimensions() -> None:
         "momentum_min_directional_consistency": 0.44,
         "momentum_min_signed_aggression": 0.08,
         "momentum_min_imbalance": 0.06,
+        "momentum_min_cvd": 1800.0,
+        "momentum_min_directional_price_change_pct": 0.12,
+        "momentum_min_price_trend_efficiency": 0.30,
+        "momentum_min_last_bar_body_ratio": 0.42,
+        "momentum_min_last_bar_close_location": 0.63,
         "momentum_min_delta_acceleration": 1200.0,
         "momentum_min_delta_price_divergence": -0.15,
         "momentum_route_flow_score_impulse": 70.0,
@@ -483,6 +493,11 @@ def test_v2_candidate_config_injects_all_dimensions() -> None:
     assert momentum_cfg["route_enabled"] is True
     assert momentum_cfg["min_flow_score"] == 64.0
     assert momentum_cfg["min_directional_consistency"] == 0.44
+    assert momentum_cfg["min_cvd"] == 1800.0
+    assert momentum_cfg["min_directional_price_change_pct"] == 0.12
+    assert momentum_cfg["min_price_trend_efficiency"] == 0.30
+    assert momentum_cfg["min_last_bar_body_ratio"] == 0.42
+    assert momentum_cfg["min_last_bar_close_location"] == 0.63
     assert momentum_cfg["fail_fast_exit_enabled"] is True
     assert momentum_cfg["fail_fast_max_bars"] == 4
 
@@ -495,6 +510,7 @@ def test_extract_profile_runtime_overrides_includes_momentum_diversification() -
             "momentum_diversification_enabled": True,
             "momentum_route_enabled": True,
             "momentum_min_flow_score": 62.0,
+            "momentum_min_cvd": 1500.0,
             "momentum_fail_fast_exit_enabled": True,
             "momentum_fail_fast_max_bars": 3,
         }
@@ -503,6 +519,7 @@ def test_extract_profile_runtime_overrides_includes_momentum_diversification() -
     assert runtime["momentum_diversification"]["enabled"] is True
     assert runtime["momentum_diversification"]["route_enabled"] is True
     assert runtime["momentum_diversification"]["min_flow_score"] == 62.0
+    assert runtime["momentum_diversification"]["min_cvd"] == 1500.0
     assert runtime["momentum_diversification"]["fail_fast_exit_enabled"] is True
 
 

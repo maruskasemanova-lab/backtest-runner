@@ -257,10 +257,10 @@ class IntrabarFrameBuilder:
         end_date = end_dt_utc.strftime("%Y-%m-%d")
         
         loaded = self.manager.load_data(ticker, start_date, end_date)
-        if loaded is None or ticker not in self.manager.data:
+        if loaded is None:
             return pd.DataFrame()
 
-        df = self.manager.data[ticker]
+        df = loaded
         df = self.manager._normalize_datetime_index_utc(df)
         
         # Filter to time range

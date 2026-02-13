@@ -51,6 +51,11 @@ class MomentumDiversificationConfig:
     min_directional_consistency: float = 0.0
     min_signed_aggression: float = 0.0
     min_imbalance: float = 0.0
+    min_cvd: float = 0.0
+    min_directional_price_change_pct: float = 0.0
+    min_price_trend_efficiency: float = 0.0
+    min_last_bar_body_ratio: float = 0.0
+    min_last_bar_close_location: float = 0.0
     allowed_micro_regimes: List[str] = field(default_factory=list)
     blocked_micro_regimes: List[str] = field(default_factory=list)
     route_enabled: bool = False
@@ -75,6 +80,11 @@ class MomentumDiversificationConfig:
             "min_directional_consistency": self.min_directional_consistency,
             "min_signed_aggression": self.min_signed_aggression,
             "min_imbalance": self.min_imbalance,
+            "min_cvd": self.min_cvd,
+            "min_directional_price_change_pct": self.min_directional_price_change_pct,
+            "min_price_trend_efficiency": self.min_price_trend_efficiency,
+            "min_last_bar_body_ratio": self.min_last_bar_body_ratio,
+            "min_last_bar_close_location": self.min_last_bar_close_location,
             "allowed_micro_regimes": self.allowed_micro_regimes,
             "blocked_micro_regimes": self.blocked_micro_regimes,
             "route_enabled": self.route_enabled,
@@ -127,6 +137,11 @@ def normalize_momentum_diversification_payload(
         "min_directional_consistency": (0.0, 1.0),
         "min_signed_aggression": (0.0, 1.0),
         "min_imbalance": (0.0, 1.0),
+        "min_cvd": (-1_000_000_000.0, 1_000_000_000.0),
+        "min_directional_price_change_pct": (-100.0, 100.0),
+        "min_price_trend_efficiency": (0.0, 1.0),
+        "min_last_bar_body_ratio": (0.0, 1.0),
+        "min_last_bar_close_location": (0.0, 1.0),
         "min_delta_acceleration": (-1_000_000_000.0, 1_000_000_000.0),
         "min_delta_price_divergence": (-10.0, 10.0),
         "route_flow_score_impulse": (0.0, 100.0),

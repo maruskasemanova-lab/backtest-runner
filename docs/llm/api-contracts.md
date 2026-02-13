@@ -20,6 +20,14 @@ Important request fields:
 - intrabar execution realism: optional `intrabar_execution_recalc_1s` (defaults to auto-on when L2 is available)
 - reset semantics: `comparable_mode`, `cold_start_each_day`, `checkpoint_path`, `auto_save_checkpoint`
 - strategy defaults behavior: `apply_ticker_overrides_on_start` (`true` keeps legacy runner-side override apply; `false` preserves manual FE strategy edits)
+- AOS sync behavior: `apply_aos_optimizations_on_start` (`true` applies remote strategy/AOS sync during start; `false` keeps local effective config only and skips slower remote fanout)
+
+Runtime safety notes:
+
+- long-range runs can auto-disable L2 enrichment by default when date span exceeds `BACKTEST_RUN_L2_MAX_DAYS` (default `10`) to prevent memory exhaustion; override with `BACKTEST_RUN_L2_FORCE=1`.
+- raw L2 dataframe cache is bounded by `BACKTEST_L2_CACHE_MAX_TICKERS`, `BACKTEST_L2_CACHE_MAX_ROWS`, and `BACKTEST_L2_CACHE_MAX_BYTES` (defaults favor memory safety over aggressive reuse).
+- strategy update fanout (`/api/strategies/update` bursts during run start) is concurrency-limited by `BACKTEST_STRATEGY_UPDATE_MAX_CONCURRENCY` (default `8`) to reduce start latency without unbounded request pressure.
+- runner->strategy API HTTP calls use bounded timeout `BACKTEST_STRATEGY_API_TIMEOUT_SECONDS` (default `6.0`) to fail fast when strategy API is slow/unreachable.
 
 Important response fields:
 
@@ -29,17 +37,35 @@ Important response fields:
 - `l2_applied` (effective L2 parameters and coverage stats)
 - `execution_config` (effective execution defaults)
   - includes effective `strategy_selection_mode` and `max_active_strategies`
+  - includes `apply_aos_optimizations_on_start` (whether remote AOS sync was executed during start)
   - includes `momentum_diversification_applied`, `momentum_diversification_source` (`request|adaptive_profile|aos_config|none`), and effective `momentum_diversification`
   - active strategy-parameter combo application details are exposed through `aos_applied.strategy_combo` when present
+- `start_timing` (start-phase timing diagnostics for FE/ops: `total_ms`, `slowest_phase`, `phases_ms`, and basic run context)
 
-### `POST /api/run/{run_id}/{ticker}/{date}/step|play|pause|resume|stop`
+### `POST /api/run/prewarm`
+
+Purpose: Warm run-start caches (bars/reference/L2 enrichment) for a ticker and date range without creating a run.
+
+Compatibility notes:
+
+- accepts `ticker` with `date` or `date_from/date_to` (scope `range`) and optional `prewarm_scope=ticker` to warm full available ticker coverage, plus optional L2 flags (`l2_only`, `l2_confirm_enabled`, `comparable_mode`).
+- guardrail: ticker-scope prewarm auto-disables L2 enrichment for large ranges by default (`BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS`, default `7`) to avoid runaway memory; override only with `BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE=1`.
+- guardrail: range-scope prewarm also auto-disables L2 enrichment when requested range exceeds run L2 window (`BACKTEST_RUN_L2_MAX_DAYS`, default `10`, unless `BACKTEST_RUN_L2_FORCE=1`) to prevent startup-memory spikes.
+- uses local AOS snapshot for time-filter/L2 defaults; does not reset or mutate remote strategy session state.
+- returns `cache_hit` (`true` when identical request was already prewarmed in-memory during current backend process).
+- server startup can auto-prewarm configured tickers (defaults to `MU`) via envs: `BACKTEST_STARTUP_PREWARM_ENABLED`, `BACKTEST_STARTUP_PREWARM_TICKERS`, `BACKTEST_STARTUP_PREWARM_L2_CONFIRM` (default `false` for memory safety).
+- ticker-scope prewarm can be reused for narrower date sub-ranges in later `POST /api/run/start` calls (same ticker/files/time-filter signature), so changing date windows no longer forces full file reload.
+
+### `POST /api/run/{run_id}/{ticker}/{date}/step|play|pause|resume|stop|restart`
 
 Purpose: Control progression of an initialized run.
 
 Compatibility notes:
 
-- `play` accepts body or query speed format (`max`, `10hz`, integer ms).
+- `play` accepts body or query speed format (`max`, `10hz`, integer ms) and optional `trade_eval_mode` (`standard|intrabar_1s`) to switch in-trade execution evaluation path without restarting run.
+- `restart` rewinds the existing in-memory run to bar zero (no re-load of source bars), clears remote strategy session state for that run+ticker, and reapplies stored session config before replay.
 - marker/event ordering must remain stable for frontend playback.
+- `POST /api/run/cache/flush?include_disk=true|false` clears run-start caches (bars/reference/L2 enrichment); use when reclaiming memory or forcing re-read from source files.
 
 ### `GET /api/run/{run_id}/{ticker}/{date}/markers|summary|bars|state`
 
@@ -145,6 +171,9 @@ Important request fields (`POST /api/adaptive-tuner/run`):
   - `momentum_diversification_enabled_options`, `momentum_route_enabled_options`
   - `momentum_min_flow_score_options`, `momentum_min_directional_consistency_options`
   - `momentum_min_signed_aggression_options`, `momentum_min_imbalance_options`
+  - `momentum_min_cvd_options`, `momentum_min_directional_price_change_pct_options`
+  - `momentum_min_price_trend_efficiency_options`, `momentum_min_last_bar_body_ratio_options`
+  - `momentum_min_last_bar_close_location_options`
   - `momentum_min_delta_acceleration_options`, `momentum_min_delta_price_divergence_options`
   - `momentum_route_flow_score_impulse_options`
   - `momentum_fail_fast_exit_enabled_options`, `momentum_fail_fast_max_bars_options`

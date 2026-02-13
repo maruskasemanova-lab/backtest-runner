@@ -2,6 +2,7 @@ import databento as db
 import pandas as pd
 import numpy as np
 import os
+from collections import OrderedDict
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -9,6 +10,16 @@ from typing import List, Optional
 from .system_settings import SystemSettings
 
 class L2DataManager:
+    @staticmethod
+    def _parse_positive_int_env(name: str, default: int) -> int:
+        raw = os.getenv(name)
+        if raw is None:
+            return max(0, int(default))
+        try:
+            return max(0, int(str(raw).strip()))
+        except (TypeError, ValueError):
+            return max(0, int(default))
+
     def __init__(self, data_dir: Optional[str] = None, data_dirs: Optional[List[str]] = None):
         if data_dirs:
             self.data_dirs = [str(Path(d).expanduser().resolve()) for d in data_dirs]
@@ -21,7 +32,13 @@ class L2DataManager:
             ]
 
         self.data_dir = self.data_dirs[0]  # Backward compatibility for callers that inspect this attr.
-        self.data = {} # Cache likely needed, or stream reading
+        self.max_cached_tickers = self._parse_positive_int_env("BACKTEST_L2_CACHE_MAX_TICKERS", 1)
+        self.max_cached_rows = self._parse_positive_int_env("BACKTEST_L2_CACHE_MAX_ROWS", 2_000_000)
+        self.max_cached_bytes = self._parse_positive_int_env(
+            "BACKTEST_L2_CACHE_MAX_BYTES",
+            512 * 1024 * 1024,
+        )
+        self.data: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
 
     @staticmethod
     def _normalize_datetime_index_utc(df: pd.DataFrame) -> pd.DataFrame:
@@ -110,6 +127,7 @@ class L2DataManager:
                         
                         # Relaxed check: valid if we cover the requested range
                         if c_min <= q_start and c_max >= q_end:
+                             self.data.move_to_end(ticker)
                              print(f"Using cached L2 data for {ticker} ({len(cached_df)} rows)")
                              return cached_df
                 except Exception as e:
@@ -144,8 +162,38 @@ class L2DataManager:
             # preserve distinct events that legitimately share the same timestamp.
             dedupe_mask = ~merged.reset_index().duplicated(keep="last")
             merged = merged.loc[dedupe_mask.to_numpy()]
+            merged_bytes = int(merged.memory_usage(index=True, deep=True).sum())
 
-            self.data[ticker] = merged
+            should_cache = (
+                self.max_cached_tickers > 0
+                and self.max_cached_rows > 0
+                and self.max_cached_bytes > 0
+                and len(merged) <= self.max_cached_rows
+                and merged_bytes <= self.max_cached_bytes
+            )
+            if should_cache:
+                self.data[ticker] = merged
+                self.data.move_to_end(ticker)
+                while len(self.data) > self.max_cached_tickers:
+                    evicted_ticker, _ = self.data.popitem(last=False)
+                    if evicted_ticker != ticker:
+                        print(f"Evicted L2 cache ticker {evicted_ticker}")
+            else:
+                if ticker in self.data:
+                    del self.data[ticker]
+                if (
+                    self.max_cached_tickers <= 0
+                    or self.max_cached_rows <= 0
+                    or self.max_cached_bytes <= 0
+                ):
+                    print(f"L2 cache disabled; not caching {ticker} ({len(merged)} rows, {merged_bytes} bytes)")
+                else:
+                    print(
+                        f"Skipping L2 in-memory cache for {ticker}: {len(merged)} rows exceeds "
+                        f"limits BACKTEST_L2_CACHE_MAX_ROWS={self.max_cached_rows} or "
+                        f"BACKTEST_L2_CACHE_MAX_BYTES={self.max_cached_bytes} "
+                        f"(payload={merged_bytes} bytes)"
+                    )
             print(f"Loaded {len(merged)} rows for {ticker}")
             return merged
 
@@ -161,12 +209,18 @@ class L2DataManager:
         - volume, delta
         - levels: { price: { buy_vol, sell_vol } }
         """
-        if ticker not in self.data:
-            # Try to infer file from dates if not loaded? 
-            # For now assume loaded.
-            return []
-            
-        df = self.data[ticker]
+        if ticker in self.data:
+            df = self.data[ticker]
+        else:
+            if isinstance(start_time, str):
+                s_date = start_time.split("T")[0]
+                e_date = end_time.split("T")[0]
+            else:
+                s_date = start_time.strftime("%Y-%m-%d")
+                e_date = end_time.strftime("%Y-%m-%d")
+            df = self.load_data(ticker, s_date, e_date)
+            if df is None:
+                return []
         
         # Filter by time
         mask = (df.index >= start_time) & (df.index <= end_time)

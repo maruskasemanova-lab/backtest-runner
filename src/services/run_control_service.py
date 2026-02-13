@@ -18,6 +18,7 @@ class RunControlDeps:
     reports_dir: Path
     save_remote_checkpoint: Any
     clear_remote_strategy_sessions: Any
+    configure_session: Any
 
 
 def get_run_state(run_id: str, ticker: str, date: str, deps: RunControlDeps):
@@ -42,16 +43,14 @@ async def play_run(
 ):
     _, runner = deps.run_registry.require(run_id, ticker, date)
 
-    if runner.is_running and runner.is_paused:
-        runner.resume()
-        return {
-            "success": True,
-            "resumed": True,
-            "speed_ms": runner.last_run_speed if hasattr(runner, "last_run_speed") else "unknown",
-        }
-
-    if runner.is_running:
-        return {"success": False, "error": "Run already in progress"}
+    payload: Optional[Dict[str, Any]] = None
+    if raw_request is not None:
+        try:
+            parsed_payload = await raw_request.json()
+            if isinstance(parsed_payload, dict):
+                payload = parsed_payload
+        except Exception:
+            payload = None
 
     raw_speed = None
     request_speed = getattr(request, "speed_ms", None) if request is not None else None
@@ -59,15 +58,43 @@ async def play_run(
         raw_speed = request_speed
     elif speed_ms is not None:
         raw_speed = speed_ms
-    else:
-        try:
-            if raw_request is not None:
-                payload = await raw_request.json()
-                raw_speed = payload.get("speed_ms") if isinstance(payload, dict) else None
-        except Exception:
-            raw_speed = None
+    elif payload is not None:
+        raw_speed = payload.get("speed_ms")
     if raw_speed is None:
         raw_speed = "max"
+
+    raw_trade_mode = getattr(request, "trade_eval_mode", None) if request is not None else None
+    if raw_trade_mode is None and payload is not None:
+        raw_trade_mode = payload.get("trade_eval_mode")
+
+    normalized_trade_mode: Optional[str] = None
+    if isinstance(raw_trade_mode, bool):
+        normalized_trade_mode = "intrabar_1s" if raw_trade_mode else "standard"
+    elif isinstance(raw_trade_mode, str):
+        normalized = raw_trade_mode.strip().lower()
+        if normalized in {"standard", "bar", "bars", "fast", "default", "minute", "false", "0", "off"}:
+            normalized_trade_mode = "standard"
+        elif normalized in {"intrabar_1s", "intrabar", "1s", "second", "seconds", "true", "1", "on"}:
+            normalized_trade_mode = "intrabar_1s"
+
+    if normalized_trade_mode is not None:
+        runner.config.intrabar_execution_recalc_1s = normalized_trade_mode == "intrabar_1s"
+
+    effective_trade_mode = (
+        "intrabar_1s" if bool(getattr(runner.config, "intrabar_execution_recalc_1s", False)) else "standard"
+    )
+
+    if runner.is_running and runner.is_paused:
+        runner.resume()
+        return {
+            "success": True,
+            "resumed": True,
+            "speed_ms": runner.last_run_speed if hasattr(runner, "last_run_speed") else "unknown",
+            "trade_eval_mode": effective_trade_mode,
+        }
+
+    if runner.is_running:
+        return {"success": False, "error": "Run already in progress"}
 
     if isinstance(raw_speed, str):
         normalized = raw_speed.strip().lower()
@@ -104,7 +131,7 @@ async def play_run(
                 )
 
     asyncio.create_task(_run_and_maybe_save())
-    return {"success": True, "speed_ms": raw_speed}
+    return {"success": True, "speed_ms": raw_speed, "trade_eval_mode": effective_trade_mode}
 
 
 def pause_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
@@ -123,6 +150,50 @@ def stop_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
     _, runner = deps.run_registry.require(run_id, ticker, date)
     runner.stop()
     return {"success": True, "stopped": True}
+
+
+async def restart_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
+    _, runner = deps.run_registry.require(run_id, ticker, date)
+
+    if getattr(runner, "is_running", False):
+        raise HTTPException(409, "Cannot restart while run is active. Pause/stop first.")
+
+    restart_config = getattr(runner, "_restart_session_config", None)
+    if not isinstance(restart_config, dict):
+        raise HTTPException(409, "Run cannot be restarted (missing session config snapshot).")
+
+    await deps.clear_remote_strategy_sessions(
+        runner.config.strategy_api_url,
+        runner.config.run_id,
+        runner.config.ticker,
+    )
+
+    restart_date = str(
+        getattr(runner, "_restart_session_date", None)
+        or runner.config.date_from
+        or runner.config.date
+    )
+
+    await deps.configure_session(
+        runner.config.strategy_api_url,
+        runner.config.run_id,
+        runner.config.ticker,
+        restart_date,
+        **restart_config,
+    )
+
+    if hasattr(runner, "reset_for_replay"):
+        runner.reset_for_replay()
+    else:
+        # Safety fallback for older runner objects.
+        runner.current_bar_index = 0
+        runner.is_running = False
+        runner.is_paused = False
+        runner.phase = "INITIALIZED"
+        runner.last_response = None
+        runner.session_summary = None
+
+    return {"success": True, "restarted": True, "state": runner.get_state()}
 
 
 def get_processed_bars(run_id: str, ticker: str, date: str, deps: RunControlDeps):

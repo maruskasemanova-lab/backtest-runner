@@ -8,6 +8,7 @@ __pycache__/
 !.claude/commands/**
 .claude/settings.local.json
 .codex/
+.cache/
 
 # Runtime logs
 *.log
