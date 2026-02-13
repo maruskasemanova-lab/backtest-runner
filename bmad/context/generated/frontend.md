@@ -20,16 +20,16 @@ Own playback UI, chart rendering, and operational diagnostics.
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `frontend/src/App.jsx` | yes | 1216 | `b21f28a 2026-02-11` |
+| `frontend/src/App.jsx` | yes | 1216 | `0452b19 2026-02-13` |
 | `frontend/src/components/CandlestickChart.jsx` | yes | 773 | `5ba62b7 2026-02-08` |
 | `frontend/src/components/DecisionPanel.jsx` | yes | 607 | `64da33c 2026-02-10` |
 | `frontend/src/components/SessionSummary.jsx` | yes | 99 | `36d343c 2026-02-03` |
-| `frontend/src/components/RunConfig.jsx` | yes | 3159 | `b21f28a 2026-02-11` |
-| `frontend/src/components/PlaybackControls.jsx` | yes | 247 | `36d343c 2026-02-03` |
+| `frontend/src/components/RunConfig.jsx` | yes | 3180 | `0452b19 2026-02-13` |
+| `frontend/src/components/PlaybackControls.jsx` | yes | 247 | `0452b19 2026-02-13` |
 | `frontend/src/components/DataManager.jsx` | yes | 696 | `baf7110 2026-02-07` |
 | `frontend/src/components/AdaptiveStrategyStudio.jsx` | yes | 1442 | `a60ac04 2026-02-11` |
-| `frontend/src/components/StrategySettings.jsx` | yes | 934 | `b21f28a 2026-02-11` |
-| `frontend/src/components/AOSOptimizations.jsx` | yes | 1422 | `b21f28a 2026-02-11` |
+| `frontend/src/components/StrategySettings.jsx` | yes | 934 | `0452b19 2026-02-13` |
+| `frontend/src/components/AOSOptimizations.jsx` | yes | 1422 | `0452b19 2026-02-13` |
 | `frontend/src/components/IntrabarPanel.jsx` | yes | 186 | `5ba62b7 2026-02-08` |
 
 ## Change Checks

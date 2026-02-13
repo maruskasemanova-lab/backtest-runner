@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-13T08:30:50.566108+00:00",
+  "generated_at": "2026-02-13T08:34:47.332937+00:00",
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -62,7 +62,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/api_server.py",
           "exists": true,
           "lines": 1879,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "function",
@@ -765,7 +765,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/session_runner.py",
           "exists": true,
           "lines": 848,
-          "last_commit": "17d2b9d 2026-02-11",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -895,7 +895,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/context.py",
           "exists": true,
           "lines": 42,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -1376,7 +1376,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/run_routes.py",
           "exists": true,
           "lines": 186,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "async_function",
@@ -1587,7 +1587,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/run_start_routes.py",
           "exists": true,
           "lines": 33,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "async_function",
@@ -1668,7 +1668,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/models/run_requests.py",
           "exists": true,
           "lines": 103,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -1694,7 +1694,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/models/tuner_requests.py",
           "exists": true,
           "lines": 83,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -1823,7 +1823,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/run_control_service.py",
           "exists": true,
           "lines": 294,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -1966,7 +1966,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_core_service.py",
           "exists": true,
           "lines": 508,
-          "last_commit": "-",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "function",
@@ -2087,7 +2087,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_search_service.py",
           "exists": true,
           "lines": 270,
-          "last_commit": "-",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "function",
@@ -2138,7 +2138,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_runtime_service.py",
           "exists": true,
           "lines": 419,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -2169,7 +2169,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_v2_service.py",
           "exists": true,
           "lines": 796,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -2215,7 +2215,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_types.py",
           "exists": true,
           "lines": 23,
-          "last_commit": "-",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -2231,7 +2231,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_updates_service.py",
           "exists": true,
           "lines": 206,
-          "last_commit": "-",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "function",
@@ -2282,7 +2282,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_profiles_service.py",
           "exists": true,
           "lines": 390,
-          "last_commit": "-",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "function",
@@ -2328,7 +2328,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_session_service.py",
           "exists": true,
           "lines": 245,
-          "last_commit": "-",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "function",
@@ -2373,8 +2373,8 @@
           "path": "src/services/start_run_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_service.py",
           "exists": true,
-          "lines": 891,
-          "last_commit": "da07c20 2026-02-12",
+          "lines": 907,
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "function",
@@ -2445,7 +2445,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_data_service.py",
           "exists": true,
           "lines": 1013,
-          "last_commit": "-",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "function",
@@ -2631,7 +2631,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_execution_config_service.py",
           "exists": true,
           "lines": 454,
-          "last_commit": "-",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "function",
@@ -3225,7 +3225,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/day_trading_manager.py",
           "exists": true,
           "lines": 5052,
-          "last_commit": "247e30c 2026-02-11",
+          "last_commit": "6e4761c 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -3722,7 +3722,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/l2_data_manager.py",
           "exists": true,
           "lines": 564,
-          "last_commit": "5ba62b7 2026-02-08",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -3754,7 +3754,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/order_flow_engine.py",
           "exists": true,
           "lines": 336,
-          "last_commit": "5ba62b7 2026-02-08",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -3775,7 +3775,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/intrabar_frame_builder.py",
           "exists": true,
           "lines": 314,
-          "last_commit": "5ba62b7 2026-02-08",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [
             {
               "kind": "class",
@@ -4404,7 +4404,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/App.jsx",
           "exists": true,
           "lines": 1216,
-          "last_commit": "b21f28a 2026-02-11",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -4443,8 +4443,8 @@
           "path": "frontend/src/components/RunConfig.jsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/RunConfig.jsx",
           "exists": true,
-          "lines": 3159,
-          "last_commit": "b21f28a 2026-02-11",
+          "lines": 3180,
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -4454,7 +4454,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/PlaybackControls.jsx",
           "exists": true,
           "lines": 247,
-          "last_commit": "36d343c 2026-02-03",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -4484,7 +4484,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/StrategySettings.jsx",
           "exists": true,
           "lines": 934,
-          "last_commit": "b21f28a 2026-02-11",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -4494,7 +4494,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/AOSOptimizations.jsx",
           "exists": true,
           "lines": 1422,
-          "last_commit": "b21f28a 2026-02-11",
+          "last_commit": "0452b19 2026-02-13",
           "symbols": [],
           "routes": [],
           "parse_error": null

@@ -21,42 +21,42 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `api_server.py` | yes | 1879 | `da07c20 2026-02-12` |
-| `session_runner.py` | yes | 848 | `17d2b9d 2026-02-11` |
+| `api_server.py` | yes | 1879 | `0452b19 2026-02-13` |
+| `session_runner.py` | yes | 848 | `0452b19 2026-02-13` |
 | `data_loader.py` | yes | 300 | `baf7110 2026-02-07` |
 | `available_data.py` | yes | 224 | `baf7110 2026-02-07` |
 | `decision_tracker.py` | yes | 440 | `64da33c 2026-02-10` |
 | `performance_tracker.py` | yes | 822 | `13f270b 2026-02-06` |
-| `src/routes/context.py` | yes | 42 | `da07c20 2026-02-12` |
+| `src/routes/context.py` | yes | 42 | `0452b19 2026-02-13` |
 | `src/routes/system_routes.py` | yes | 31 | `da07c20 2026-02-12` |
 | `src/routes/l2_routes.py` | yes | 51 | `da07c20 2026-02-12` |
 | `src/routes/data_loader_routes.py` | yes | 236 | `da07c20 2026-02-12` |
 | `src/routes/live_trader_routes.py` | yes | 68 | `da07c20 2026-02-12` |
 | `src/routes/config_read_routes.py` | yes | 78 | `da07c20 2026-02-12` |
 | `src/routes/config_write_routes.py` | yes | 64 | `da07c20 2026-02-12` |
-| `src/routes/run_routes.py` | yes | 186 | `da07c20 2026-02-12` |
+| `src/routes/run_routes.py` | yes | 186 | `0452b19 2026-02-13` |
 | `src/routes/adaptive_tuner_routes.py` | yes | 38 | `da07c20 2026-02-12` |
-| `src/routes/run_start_routes.py` | yes | 33 | `da07c20 2026-02-12` |
+| `src/routes/run_start_routes.py` | yes | 33 | `0452b19 2026-02-13` |
 | `src/models/config_requests.py` | yes | 32 | `da07c20 2026-02-12` |
-| `src/models/run_requests.py` | yes | 103 | `da07c20 2026-02-12` |
-| `src/models/tuner_requests.py` | yes | 83 | `da07c20 2026-02-12` |
+| `src/models/run_requests.py` | yes | 103 | `0452b19 2026-02-13` |
+| `src/models/tuner_requests.py` | yes | 83 | `0452b19 2026-02-13` |
 | `src/services/live_trader_service.py` | yes | 255 | `da07c20 2026-02-12` |
 | `src/services/run_registry.py` | yes | 21 | `da07c20 2026-02-12` |
 | `src/services/config_write_service.py` | yes | 264 | `da07c20 2026-02-12` |
-| `src/services/run_control_service.py` | yes | 294 | `da07c20 2026-02-12` |
+| `src/services/run_control_service.py` | yes | 294 | `0452b19 2026-02-13` |
 | `src/services/adaptive_tuner_orchestration_service.py` | yes | 161 | `da07c20 2026-02-12` |
 | `src/services/adaptive_tuner_worker_service.py` | yes | 601 | `da07c20 2026-02-12` |
-| `src/services/adaptive_tuner_core_service.py` | yes | 508 | `-` |
-| `src/services/adaptive_tuner_search_service.py` | yes | 270 | `-` |
-| `src/services/adaptive_tuner_runtime_service.py` | yes | 419 | `da07c20 2026-02-12` |
-| `src/services/adaptive_tuner_v2_service.py` | yes | 796 | `da07c20 2026-02-12` |
-| `src/services/strategy_api_types.py` | yes | 23 | `-` |
-| `src/services/strategy_api_updates_service.py` | yes | 206 | `-` |
-| `src/services/strategy_api_profiles_service.py` | yes | 390 | `-` |
-| `src/services/strategy_api_session_service.py` | yes | 245 | `-` |
-| `src/services/start_run_service.py` | yes | 891 | `da07c20 2026-02-12` |
-| `src/services/start_run_data_service.py` | yes | 1013 | `-` |
-| `src/services/start_run_execution_config_service.py` | yes | 454 | `-` |
+| `src/services/adaptive_tuner_core_service.py` | yes | 508 | `0452b19 2026-02-13` |
+| `src/services/adaptive_tuner_search_service.py` | yes | 270 | `0452b19 2026-02-13` |
+| `src/services/adaptive_tuner_runtime_service.py` | yes | 419 | `0452b19 2026-02-13` |
+| `src/services/adaptive_tuner_v2_service.py` | yes | 796 | `0452b19 2026-02-13` |
+| `src/services/strategy_api_types.py` | yes | 23 | `0452b19 2026-02-13` |
+| `src/services/strategy_api_updates_service.py` | yes | 206 | `0452b19 2026-02-13` |
+| `src/services/strategy_api_profiles_service.py` | yes | 390 | `0452b19 2026-02-13` |
+| `src/services/strategy_api_session_service.py` | yes | 245 | `0452b19 2026-02-13` |
+| `src/services/start_run_service.py` | yes | 907 | `0452b19 2026-02-13` |
+| `src/services/start_run_data_service.py` | yes | 1013 | `0452b19 2026-02-13` |
+| `src/services/start_run_execution_config_service.py` | yes | 454 | `0452b19 2026-02-13` |
 | `src/config_io.py` | yes | 28 | `64da33c 2026-02-10` |
 | `src/system_settings.py` | yes | 172 | `baf7110 2026-02-07` |
 | `src/databento_service.py` | yes | 1106 | `64da33c 2026-02-10` |
