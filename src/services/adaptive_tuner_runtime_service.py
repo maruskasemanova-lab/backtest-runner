@@ -20,6 +20,7 @@ class AdaptiveTunerRuntimeDeps:
     compute_tuner_score: Callable[..., float]
     compute_tuner_score_robust: Callable[[List[Dict[str, Any]]], float]
     apply_strategy_param_map: Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]]
+    apply_orchestrator_config: Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]]
     adaptive_tuner_merge_lock: Any
     load_aos_config: Callable[[], Dict[str, Any]]
     save_aos_config: Callable[[Dict[str, Any]], bool]
@@ -175,6 +176,7 @@ async def evaluate_v2_candidate(
     _compute_tuner_score = deps.compute_tuner_score
     _compute_tuner_score_robust = deps.compute_tuner_score_robust
     _apply_strategy_param_map = deps.apply_strategy_param_map
+    _apply_orchestrator_config = deps.apply_orchestrator_config
     start_run = deps.start_run
     active_runners = deps.active_runners
 
@@ -235,6 +237,43 @@ async def evaluate_v2_candidate(
                             await _apply_strategy_param_map(request.strategy_api_url, param_map)
                         except Exception:
                             pass  # best-effort
+
+            # Push orchestrator-level gates (these are not strategy params).
+            orchestrator_payload: Dict[str, Any] = {}
+            if candidate.get("base_threshold") is not None:
+                try:
+                    orchestrator_payload["base_threshold"] = float(candidate.get("base_threshold"))
+                except (TypeError, ValueError):
+                    pass
+            if candidate.get("min_confirming_sources") is not None:
+                try:
+                    orchestrator_payload["min_confirming_sources"] = int(
+                        candidate.get("min_confirming_sources")
+                    )
+                except (TypeError, ValueError):
+                    pass
+            if candidate.get("min_margin_over_threshold") is not None:
+                try:
+                    orchestrator_payload["min_margin_over_threshold"] = float(
+                        candidate.get("min_margin_over_threshold")
+                    )
+                except (TypeError, ValueError):
+                    pass
+            if candidate.get("single_source_min_margin") is not None:
+                try:
+                    orchestrator_payload["single_source_min_margin"] = float(
+                        candidate.get("single_source_min_margin")
+                    )
+                except (TypeError, ValueError):
+                    pass
+            if orchestrator_payload:
+                try:
+                    await _apply_orchestrator_config(
+                        request.strategy_api_url,
+                        orchestrator_payload,
+                    )
+                except Exception:
+                    pass  # best-effort
 
             await runner.run_all(speed_ms=0)
             summary_payload = runner.get_summary()

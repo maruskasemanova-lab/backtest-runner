@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import pickle
 from threading import RLock
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from fastapi import HTTPException
@@ -295,6 +295,57 @@ def _canonical_trading_hours(raw_hours: Any) -> Tuple[int, ...]:
     return tuple(sorted(normalized))
 
 
+def _coerce_include_extended_hours(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return None
+
+
+def _filter_regular_session_only(*, df: pd.DataFrame, data_loader: Any) -> pd.DataFrame:
+    """
+    Restrict bars to regular market hours (ET 09:30-16:00 inclusive close print).
+
+    This is a run-level override used when caller disables pre/post-market bars.
+    """
+    if df is None or df.empty:
+        return df.reset_index(drop=True)
+
+    market_ts = None
+    try:
+        if hasattr(data_loader, "_market_timestamp_series"):
+            market_ts = data_loader._market_timestamp_series(df)
+    except Exception:
+        market_ts = None
+
+    if market_ts is None:
+        try:
+            market_ts = pd.to_datetime(df["timestamp"], utc=True)
+            if getattr(market_ts.dt, "tz", None) is not None:
+                market_ts = market_ts.dt.tz_convert("America/New_York")
+        except Exception:
+            return df.reset_index(drop=True)
+
+    try:
+        hours = market_ts.dt.hour
+        minutes = market_ts.dt.minute
+        open_mask = (hours > 9) | ((hours == 9) & (minutes >= 30))
+        close_mask = (hours < 16) | ((hours == 16) & (minutes == 0))
+        mask = open_mask & close_mask
+        return df.loc[mask].reset_index(drop=True)
+    except Exception:
+        return df.reset_index(drop=True)
+
+
 def _file_identity(path_value: str) -> Tuple[str, int, int]:
     resolved = str(Path(path_value).resolve())
     try:
@@ -312,6 +363,7 @@ def _build_base_bars_cache_key(
     data_files: List[str],
     time_filter_enabled: bool,
     trading_hours: Tuple[int, ...],
+    regular_session_only: bool,
 ) -> str:
     file_identities = tuple(_file_identity(file) for file in data_files)
     key_payload = (
@@ -320,6 +372,7 @@ def _build_base_bars_cache_key(
         str(range_end),
         bool(time_filter_enabled),
         trading_hours,
+        bool(regular_session_only),
         file_identities,
     )
     return repr(key_payload)
@@ -361,6 +414,50 @@ def _iso_day_token(value: Any) -> str:
     if len(text) >= 10:
         return text[:10]
     return text
+
+
+def _summarize_days(days: List[str], *, max_days: int = 8) -> str:
+    ordered = [str(day) for day in days if str(day).strip()]
+    if not ordered:
+        return ""
+    if len(ordered) <= max_days:
+        return ",".join(ordered)
+    preview = ",".join(ordered[:max_days])
+    return f"{preview},...(+{len(ordered) - max_days} more)"
+
+
+def _compute_l2_day_coverage(
+    *,
+    bars: List[Dict[str, Any]],
+    feature_map: Dict[int, Dict[str, Any]],
+    to_utc_datetime: Any,
+) -> Dict[str, Any]:
+    bar_day_counts: Dict[str, int] = {}
+    l2_day_counts: Dict[str, int] = {}
+    for bar in bars:
+        ts_value = bar.get("timestamp")
+        if ts_value is None:
+            continue
+        try:
+            ts_utc = to_utc_datetime(ts_value)
+        except Exception:
+            continue
+        day = ts_utc.strftime("%Y-%m-%d")
+        bar_day_counts[day] = int(bar_day_counts.get(day, 0)) + 1
+        minute_key = int(ts_utc.timestamp() // 60)
+        if feature_map.get(minute_key):
+            l2_day_counts[day] = int(l2_day_counts.get(day, 0)) + 1
+
+    bar_days = sorted(bar_day_counts.keys())
+    l2_days = sorted(l2_day_counts.keys())
+    missing_days = sorted(day for day in bar_days if day not in l2_day_counts)
+    return {
+        "bar_days": bar_days,
+        "l2_days": l2_days,
+        "missing_days": missing_days,
+        "bar_day_counts": bar_day_counts,
+        "l2_day_counts": l2_day_counts,
+    }
 
 
 def _iso_day_ordinal(day: Any) -> int | None:
@@ -472,6 +569,7 @@ def _build_base_bars_meta(
     range_end: str,
     time_filter_enabled: bool,
     trading_hours: Tuple[int, ...],
+    regular_session_only: bool,
     file_identities: Tuple[Tuple[str, int, int], ...],
 ) -> Dict[str, Any]:
     return {
@@ -480,6 +578,7 @@ def _build_base_bars_meta(
         "range_end": str(range_end),
         "time_filter_enabled": bool(time_filter_enabled),
         "trading_hours": tuple(trading_hours),
+        "regular_session_only": bool(regular_session_only),
         "file_identities": tuple(file_identities),
     }
 
@@ -506,6 +605,7 @@ def _find_base_bars_superset_in_memory(
     range_end: str,
     time_filter_enabled: bool,
     trading_hours: Tuple[int, ...],
+    regular_session_only: bool,
     file_identities: Tuple[Tuple[str, int, int], ...],
 ) -> Tuple[List[Dict[str, Any]], List[str], str, str] | None:
     best_key = None
@@ -520,6 +620,8 @@ def _find_base_bars_superset_in_memory(
             if bool(meta.get("time_filter_enabled")) != bool(time_filter_enabled):
                 continue
             if tuple(meta.get("trading_hours", ())) != tuple(trading_hours):
+                continue
+            if bool(meta.get("regular_session_only", False)) != bool(regular_session_only):
                 continue
             if tuple(meta.get("file_identities", ())) != tuple(file_identities):
                 continue
@@ -636,6 +738,17 @@ def load_run_bars(
 
     time_filter_enabled = bool(aos_applied.get("time_filter_enabled") and aos_applied.get("trading_hours"))
     trading_hours = _canonical_trading_hours(aos_applied.get("trading_hours"))
+    regular_session_only = False
+    include_extended_hours = _coerce_include_extended_hours(
+        getattr(request, "include_extended_hours", None)
+    )
+    if include_extended_hours is True:
+        time_filter_enabled = False
+        trading_hours = tuple()
+    elif include_extended_hours is False:
+        time_filter_enabled = False
+        trading_hours = tuple()
+        regular_session_only = True
     bars_cache_key = None
     bars_meta = None
     if data_files:
@@ -647,6 +760,7 @@ def load_run_bars(
             data_files=data_files,
             time_filter_enabled=time_filter_enabled,
             trading_hours=trading_hours,
+            regular_session_only=regular_session_only,
         )
         bars_meta = _build_base_bars_meta(
             ticker=ticker,
@@ -654,6 +768,7 @@ def load_run_bars(
             range_end=range_end,
             time_filter_enabled=time_filter_enabled,
             trading_hours=trading_hours,
+            regular_session_only=regular_session_only,
             file_identities=file_identities,
         )
         cached_bars_payload = _cache_get(_BASE_BARS_CACHE, bars_cache_key)
@@ -673,6 +788,7 @@ def load_run_bars(
             range_end=range_end,
             time_filter_enabled=time_filter_enabled,
             trading_hours=trading_hours,
+            regular_session_only=regular_session_only,
             file_identities=file_identities,
         )
         if superset_payload is not None:
@@ -743,7 +859,9 @@ def load_run_bars(
         df = pd.concat(dfs, ignore_index=True)
         df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
         df = data_loader.filter_trading_range(df, range_start, range_end)
-        if time_filter_enabled and trading_hours:
+        if regular_session_only:
+            df = _filter_regular_session_only(df=df, data_loader=data_loader)
+        elif time_filter_enabled and trading_hours:
             df = data_loader.filter_trading_hours(df, list(trading_hours))
     else:
         if not request.allow_mock_data:
@@ -869,20 +987,49 @@ def enrich_bars_with_l2(
                 )
             )
         l2_stats.update(build_stats)
+        l2_day_coverage = _compute_l2_day_coverage(
+            bars=bars,
+            feature_map=feature_map,
+            to_utc_datetime=to_utc_datetime,
+        )
+        missing_l2_days = list(l2_day_coverage.get("missing_days", []))
+        l2_stats.update(
+            {
+                "bar_days_total": len(l2_day_coverage.get("bar_days", [])),
+                "l2_days_total": len(l2_day_coverage.get("l2_days", [])),
+                "missing_l2_days": missing_l2_days,
+                "missing_l2_days_count": len(missing_l2_days),
+            }
+        )
         bars, attach_stats = attach_l2_features(bars, feature_map, l2_only=requested_l2_only)
         l2_stats.update(attach_stats)
         l2_stats["has_l2"] = bool(l2_stats.get("bars_with_l2", 0) > 0)
 
+        if requested_l2_only and missing_l2_days:
+            missing_preview = _summarize_days(missing_l2_days)
+            raise HTTPException(
+                400,
+                f"L2-only mode requested but missing L2 coverage for {len(missing_l2_days)} day(s) "
+                f"for {ticker} in range {range_start} to {range_end}. Missing days: {missing_preview}.",
+            )
         if requested_l2_only and not bars:
             raise HTTPException(
                 400,
                 f"L2-only mode requested but no L2-aligned bars found for {ticker} "
                 f"in range {range_start} to {range_end}.",
             )
+        if requested_l2_confirm and missing_l2_days:
+            missing_preview = _summarize_days(missing_l2_days)
+            raise HTTPException(
+                400,
+                f"L2 confirmation requested but missing L2 coverage for {len(missing_l2_days)} day(s) "
+                f"for {ticker} in range {range_start} to {range_end}. Missing days: {missing_preview}.",
+            )
         if requested_l2_confirm and not l2_stats.get("has_l2"):
-            logger.warning(
-                f"L2 confirmation requested for {ticker}, but no L2 data was found. "
-                "Falling back to non-L2 confirmation for this run."
+            raise HTTPException(
+                400,
+                f"L2 confirmation requested but no L2 data was found for {ticker} "
+                f"in range {range_start} to {range_end}.",
             )
         l2_payload = {
             "bars": bars,

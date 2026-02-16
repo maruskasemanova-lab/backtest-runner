@@ -9,6 +9,7 @@ function StrategySettings({ apiUrl, selectedTicker }) {
   const [tickerPresets, setTickerPresets] = useState({});
   const [presetsLoaded, setPresetsLoaded] = useState(false);
   const [showCoreOnly, setShowCoreOnly] = useState(true);
+  const [strategyCategory, setStrategyCategory] = useState("all");
   const [comboProfiles, setComboProfiles] = useState([]);
   const [comboActiveProfileId, setComboActiveProfileId] = useState("");
   const [comboSelectedProfileId, setComboSelectedProfileId] = useState("");
@@ -208,9 +209,29 @@ function StrategySettings({ apiUrl, selectedTicker }) {
 
   const regimeOptions = useMemo(() => ["TRENDING", "CHOPPY", "MIXED"], []);
   const flowCoreSet = useMemo(
-    () => new Set(["momentum_flow", "absorption_reversal", "exhaustion_fade"]),
+    () => new Set(["momentum_flow", "absorption_reversal", "exhaustion_fade", "scalp_l2_intrabar"]),
     []
   );
+  const strategyCategoryMap = useMemo(
+    () => ({
+      momentum_flow: "flow",
+      absorption_reversal: "flow",
+      exhaustion_fade: "flow",
+      iceberg_defense: "flow",
+      scalp_l2_intrabar: "scalp",
+    }),
+    []
+  );
+  const resolveStrategyCategory = useCallback(
+    (name) => strategyCategoryMap[name] || "other",
+    [strategyCategoryMap]
+  );
+  const formatCategoryLabel = useCallback((categoryKey) => {
+    if (categoryKey === "all") return "All";
+    if (categoryKey === "flow") return "Flow";
+    if (categoryKey === "scalp") return "Scalp";
+    return "Other";
+  }, []);
 
   const recommendedParams = useMemo(
     () => ({
@@ -264,6 +285,41 @@ function StrategySettings({ apiUrl, selectedTicker }) {
         volume_stop_pct: 0.7,
         trailing_stop_pct: 0.4,
         allowed_regimes: ["TRENDING", "CHOPPY", "MIXED"],
+      },
+      scalp_l2_intrabar: {
+        enabled: true,
+        allowed_regimes: ["TRENDING", "CHOPPY", "MIXED"],
+        min_flow_score: 48.0,
+        min_signed_aggression: 0.045,
+        min_directional_consistency: 0.58,
+        min_imbalance: 0.03,
+        min_book_pressure: 0.02,
+        min_participation_ratio: 0.05,
+        min_flow_score_trend_3bar: -2.0,
+        min_intrabar_move_pct: 0.035,
+        min_intrabar_push_ratio: 0.12,
+        min_intrabar_coverage_points: 4,
+        min_intrabar_directional_consistency: 0.12,
+        intrabar_eval_window_seconds: 5,
+        min_intrabar_window_move_pct: 0.015,
+        min_intrabar_window_push_ratio: 0.08,
+        min_intrabar_window_directional_consistency: 0.08,
+        max_intrabar_micro_volatility_bps: 18.0,
+        max_intrabar_spread_bps: 8.0,
+        spread_penalty_floor_bps: 4.0,
+        spread_flow_score_penalty_per_bps: 0.45,
+        min_round_trip_cost_bps: 6.5,
+        spread_cost_multiplier: 1.1,
+        min_reward_to_cost_ratio: 1.7,
+        min_flow_signal_margin: 0.01,
+        max_abs_price_extension_pct: 1.8,
+        require_intrabar_confirmation: false,
+        no_intrabar_flow_buffer: 10.0,
+        min_confidence: 55.0,
+        atr_stop_multiplier: 0.66,
+        min_stop_loss_pct: 0.05,
+        rr_ratio: 1.35,
+        trailing_stop_pct: 0.28,
       },
     }),
     []
@@ -564,6 +620,13 @@ function StrategySettings({ apiUrl, selectedTicker }) {
 
   const classifyFieldGroup = (field) => {
     if (field === "allowed_regimes") return "Regime";
+    if (
+      /intrabar|spread_penalty|spread_cost|min_round_trip_cost|min_reward_to_cost|no_intrabar|require_intrabar/i.test(
+        field
+      )
+    ) {
+      return "Scalp Intrabar";
+    }
     if (/stop|trailing|rr_ratio|risk|take_profit|time_exit/i.test(field)) {
       return "Risk And Exit";
     }
@@ -577,9 +640,10 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     return "Other";
   };
 
-  const groupFieldsForEdit = (cfg) => {
+  const groupFieldsForEdit = (name, cfg) => {
     const grouped = {
       Regime: [],
+      "Scalp Intrabar": [],
       "Signal Setup": [],
       "Risk And Exit": [],
       Other: [],
@@ -594,6 +658,43 @@ function StrategySettings({ apiUrl, selectedTicker }) {
       const group = classifyFieldGroup(field);
       grouped[group].push([field, value]);
     });
+    if (name === "scalp_l2_intrabar") {
+      const scalpOrder = [
+        "min_flow_score",
+        "min_flow_score_trend_3bar",
+        "min_signed_aggression",
+        "min_directional_consistency",
+        "min_imbalance",
+        "min_book_pressure",
+        "min_participation_ratio",
+        "min_intrabar_move_pct",
+        "min_intrabar_push_ratio",
+        "min_intrabar_coverage_points",
+        "min_intrabar_directional_consistency",
+        "intrabar_eval_window_seconds",
+        "min_intrabar_window_move_pct",
+        "min_intrabar_window_push_ratio",
+        "min_intrabar_window_directional_consistency",
+        "max_intrabar_micro_volatility_bps",
+        "max_intrabar_spread_bps",
+        "spread_penalty_floor_bps",
+        "spread_flow_score_penalty_per_bps",
+        "min_round_trip_cost_bps",
+        "spread_cost_multiplier",
+        "min_reward_to_cost_ratio",
+        "require_intrabar_confirmation",
+        "no_intrabar_flow_buffer",
+      ];
+      const rank = new Map(scalpOrder.map((field, idx) => [field, idx]));
+      Object.keys(grouped).forEach((groupKey) => {
+        grouped[groupKey].sort((a, b) => {
+          const rankA = rank.has(a[0]) ? rank.get(a[0]) : Number.MAX_SAFE_INTEGER;
+          const rankB = rank.has(b[0]) ? rank.get(b[0]) : Number.MAX_SAFE_INTEGER;
+          if (rankA !== rankB) return rankA - rankB;
+          return String(a[0]).localeCompare(String(b[0]));
+        });
+      });
+    }
     return Object.entries(grouped).filter(([, entries]) => entries.length > 0);
   };
 
@@ -601,7 +702,7 @@ function StrategySettings({ apiUrl, selectedTicker }) {
     if (!strategies) {
       return [];
     }
-    const entries = Object.entries(strategies).sort((a, b) => {
+    const sorted = Object.entries(strategies).sort((a, b) => {
       const aEnabled = a[1]?.enabled ? 1 : 0;
       const bEnabled = b[1]?.enabled ? 1 : 0;
       if (aEnabled !== bEnabled) return bEnabled - aEnabled;
@@ -609,11 +710,17 @@ function StrategySettings({ apiUrl, selectedTicker }) {
       const bLabel = String(b[1]?.display_name || b[1]?.name || b[0] || "");
       return aLabel.localeCompare(bLabel);
     });
-    if (selectedTicker === "MU" && showCoreOnly) {
-      return entries.filter(([name]) => flowCoreSet.has(name));
+    const withCoreFilter =
+      selectedTicker === "MU" && showCoreOnly
+        ? sorted.filter(([name]) => flowCoreSet.has(name))
+        : sorted;
+    if (strategyCategory === "all") {
+      return withCoreFilter;
     }
-    return entries;
-  }, [strategies, selectedTicker, showCoreOnly, flowCoreSet]);
+    return withCoreFilter.filter(
+      ([name]) => resolveStrategyCategory(name) === strategyCategory
+    );
+  }, [strategies, selectedTicker, showCoreOnly, flowCoreSet, strategyCategory, resolveStrategyCategory]);
 
   const strategySummary = useMemo(() => {
     const total = strategyEntries.length;
@@ -642,6 +749,17 @@ function StrategySettings({ apiUrl, selectedTicker }) {
       <div className="card-header">
         <span className="card-title">Strategies</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <select
+            value={strategyCategory}
+            onChange={(e) => setStrategyCategory(e.target.value)}
+            style={{ minWidth: 110 }}
+            title="Filter strategy category"
+          >
+            <option value="all">All</option>
+            <option value="flow">Flow</option>
+            <option value="scalp">Scalp</option>
+            <option value="other">Other</option>
+          </select>
           {selectedTicker === "MU" && (
             <button
               className="btn btn-secondary"
@@ -800,8 +918,9 @@ function StrategySettings({ apiUrl, selectedTicker }) {
           strategyEntries.map(([name, cfg]) => {
             const displayName = cfg.display_name || cfg.name || name;
             const regimes = (cfg.allowed_regimes || cfg.regimes || []).join(", ") || "all";
+            const categoryKey = resolveStrategyCategory(name);
             const warning = getStrategyWarning(name, cfg);
-            const editableGroups = groupFieldsForEdit(cfg);
+            const editableGroups = groupFieldsForEdit(name, cfg);
             const isExpanded = !!expanded[name];
             return (
               <div
@@ -844,6 +963,30 @@ function StrategySettings({ apiUrl, selectedTicker }) {
                         {cfg.enabled ? "enabled" : "disabled"}
                       </span>
                       <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{name}</span>
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          lineHeight: 1,
+                          padding: "4px 6px",
+                          borderRadius: 999,
+                          background:
+                            categoryKey === "scalp"
+                              ? "rgba(14, 116, 144, 0.12)"
+                              : categoryKey === "flow"
+                              ? "rgba(16, 185, 129, 0.14)"
+                              : "rgba(148, 163, 184, 0.18)",
+                          color:
+                            categoryKey === "scalp"
+                              ? "#0e7490"
+                              : categoryKey === "flow"
+                              ? "#047857"
+                              : "var(--text-muted)",
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {formatCategoryLabel(categoryKey)}
+                      </span>
                     </div>
                     <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: 4 }}>
                       Regimes: {regimes}

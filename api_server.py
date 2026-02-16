@@ -200,6 +200,7 @@ from src.services.strategy_api_profiles_service import (
     resolve_active_adaptive_tuner_candidate as service_resolve_active_adaptive_tuner_candidate,
 )
 from src.services.strategy_api_session_service import (
+    apply_orchestrator_config as service_apply_orchestrator_config,
     clear_remote_strategy_sessions as service_clear_remote_strategy_sessions,
     configure_session as service_configure_session,
     load_remote_checkpoint as service_load_remote_checkpoint,
@@ -425,6 +426,7 @@ def _build_adaptive_tuner_runtime_deps() -> AdaptiveTunerRuntimeDeps:
         compute_tuner_score=_compute_tuner_score,
         compute_tuner_score_robust=_compute_tuner_score_robust,
         apply_strategy_param_map=_apply_strategy_param_map,
+        apply_orchestrator_config=_apply_orchestrator_config,
         adaptive_tuner_merge_lock=adaptive_tuner_merge_lock,
         load_aos_config=_load_aos_config,
         save_aos_config=_save_aos_config,
@@ -466,6 +468,7 @@ def _build_strategy_api_integration_deps() -> StrategyApiIntegrationDeps:
         get_ticker_positioning_config=_get_ticker_positioning_config,
         positioning_config_keys=POSITIONING_CONFIG_KEYS,
         apply_strategy_param_map=_apply_strategy_param_map,
+        apply_orchestrator_config=_apply_orchestrator_config,
         fetch_remote_strategies=_fetch_remote_strategies,
         apply_active_strategy_combo=_apply_active_strategy_combo,
         apply_active_adaptive_tuner_profile=_apply_active_adaptive_tuner_profile,
@@ -1247,6 +1250,17 @@ async def _reset_remote_orchestrator_state_scoped(
     )
 
 
+async def _apply_orchestrator_config(
+    strategy_api_url: str,
+    config: Dict[str, Any],
+) -> Dict[str, Any]:
+    return await service_apply_orchestrator_config(
+        strategy_api_url,
+        config,
+        _build_strategy_api_integration_deps(),
+    )
+
+
 async def _load_remote_checkpoint(
     strategy_api_url: str, checkpoint_path: str
 ) -> Optional[Dict]:
@@ -1282,7 +1296,7 @@ def _build_l2_feature_map(
     ticker: str,
     start_dt_utc: datetime,
     end_dt_utc: datetime,
-) -> tuple[Dict[int, Dict[str, float]], Dict[str, Any]]:
+) -> tuple[Dict[int, Dict[str, Any]], Dict[str, Any]]:
     return l2_features.build_feature_map(
         ticker=ticker,
         start_dt_utc=start_dt_utc,
@@ -1292,7 +1306,7 @@ def _build_l2_feature_map(
 
 def _attach_l2_features(
     bars: List[Dict[str, Any]],
-    feature_map: Dict[int, Dict[str, float]],
+    feature_map: Dict[int, Dict[str, Any]],
     l2_only: bool = False,
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     return l2_features.attach_features(
@@ -1303,7 +1317,7 @@ def _attach_l2_features(
 
 
 def _normalize_l2_feature_map_for_market_day_sessions(
-    feature_map: Dict[int, Dict[str, float]],
+    feature_map: Dict[int, Dict[str, Any]],
     bars: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """

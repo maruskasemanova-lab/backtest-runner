@@ -20,6 +20,7 @@ const DEFAULT_STRATEGIES = [
   "gap_liquidity",
   "absorption_reversal",
   "momentum_flow",
+  "scalp_l2_intrabar",
   "exhaustion_fade",
 ];
 
@@ -27,6 +28,7 @@ const DEFAULT_FLOW_BIAS_STRATEGIES = [
   "momentum_flow",
   "absorption_reversal",
   "exhaustion_fade",
+  "scalp_l2_intrabar",
 ];
 
 const DEFAULT_REGIME_PREFERENCES = {
@@ -35,6 +37,7 @@ const DEFAULT_REGIME_PREFERENCES = {
     "momentum",
     "pullback",
     "gap_liquidity",
+    "scalp_l2_intrabar",
     "volume_profile",
     "vwap_magnet",
   ],
@@ -43,6 +46,7 @@ const DEFAULT_REGIME_PREFERENCES = {
     "exhaustion_fade",
     "mean_reversion",
     "vwap_magnet",
+    "scalp_l2_intrabar",
     "volume_profile",
   ],
   MIXED: [
@@ -50,6 +54,7 @@ const DEFAULT_REGIME_PREFERENCES = {
     "absorption_reversal",
     "volume_profile",
     "gap_liquidity",
+    "scalp_l2_intrabar",
     "mean_reversion",
     "vwap_magnet",
     "rotation",
@@ -57,11 +62,11 @@ const DEFAULT_REGIME_PREFERENCES = {
 };
 
 const DEFAULT_MICRO_PREFERENCES = {
-  TRENDING_UP: ["momentum_flow", "momentum", "pullback", "gap_liquidity"],
-  TRENDING_DOWN: ["momentum_flow", "momentum", "gap_liquidity", "pullback"],
+  TRENDING_UP: ["momentum_flow", "momentum", "pullback", "gap_liquidity", "scalp_l2_intrabar"],
+  TRENDING_DOWN: ["momentum_flow", "momentum", "gap_liquidity", "pullback", "scalp_l2_intrabar"],
   CHOPPY: ["absorption_reversal", "exhaustion_fade", "mean_reversion", "vwap_magnet"],
   ABSORPTION: ["absorption_reversal", "exhaustion_fade", "vwap_magnet"],
-  BREAKOUT: ["momentum_flow", "momentum", "gap_liquidity"],
+  BREAKOUT: ["momentum_flow", "momentum", "gap_liquidity", "scalp_l2_intrabar"],
   MIXED: ["exhaustion_fade", "volume_profile", "rotation"],
 };
 

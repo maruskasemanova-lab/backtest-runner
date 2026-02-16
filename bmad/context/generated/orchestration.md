@@ -21,14 +21,14 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `api_server.py` | yes | 1886 | `0452b19 2026-02-13` |
-| `session_runner.py` | yes | 854 | `0452b19 2026-02-13` |
+| `api_server.py` | yes | 1900 | `38387c6 2026-02-13` |
+| `session_runner.py` | yes | 921 | `38387c6 2026-02-13` |
 | `data_loader.py` | yes | 300 | `baf7110 2026-02-07` |
 | `available_data.py` | yes | 224 | `baf7110 2026-02-07` |
 | `decision_tracker.py` | yes | 440 | `64da33c 2026-02-10` |
 | `performance_tracker.py` | yes | 822 | `13f270b 2026-02-06` |
-| `src/routes/context.py` | yes | 43 | `0452b19 2026-02-13` |
-| `src/routes/system_routes.py` | yes | 31 | `da07c20 2026-02-12` |
+| `src/routes/context.py` | yes | 43 | `38387c6 2026-02-13` |
+| `src/routes/system_routes.py` | yes | 1245 | `da07c20 2026-02-12` |
 | `src/routes/l2_routes.py` | yes | 51 | `da07c20 2026-02-12` |
 | `src/routes/data_loader_routes.py` | yes | 236 | `da07c20 2026-02-12` |
 | `src/routes/live_trader_routes.py` | yes | 68 | `da07c20 2026-02-12` |
@@ -36,27 +36,27 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/routes/config_write_routes.py` | yes | 64 | `da07c20 2026-02-12` |
 | `src/routes/run_routes.py` | yes | 186 | `0452b19 2026-02-13` |
 | `src/routes/adaptive_tuner_routes.py` | yes | 38 | `da07c20 2026-02-12` |
-| `src/routes/run_start_routes.py` | yes | 42 | `0452b19 2026-02-13` |
+| `src/routes/run_start_routes.py` | yes | 334 | `38387c6 2026-02-13` |
 | `src/models/config_requests.py` | yes | 32 | `da07c20 2026-02-12` |
-| `src/models/run_requests.py` | yes | 103 | `0452b19 2026-02-13` |
-| `src/models/tuner_requests.py` | yes | 93 | `0452b19 2026-02-13` |
+| `src/models/run_requests.py` | yes | 111 | `0452b19 2026-02-13` |
+| `src/models/tuner_requests.py` | yes | 93 | `38387c6 2026-02-13` |
 | `src/services/live_trader_service.py` | yes | 255 | `da07c20 2026-02-12` |
 | `src/services/run_registry.py` | yes | 21 | `da07c20 2026-02-12` |
 | `src/services/config_write_service.py` | yes | 264 | `da07c20 2026-02-12` |
-| `src/services/run_control_service.py` | yes | 294 | `0452b19 2026-02-13` |
+| `src/services/run_control_service.py` | yes | 312 | `0452b19 2026-02-13` |
 | `src/services/adaptive_tuner_orchestration_service.py` | yes | 161 | `da07c20 2026-02-12` |
 | `src/services/adaptive_tuner_worker_service.py` | yes | 601 | `da07c20 2026-02-12` |
 | `src/services/adaptive_tuner_core_service.py` | yes | 508 | `0452b19 2026-02-13` |
 | `src/services/adaptive_tuner_search_service.py` | yes | 270 | `0452b19 2026-02-13` |
-| `src/services/adaptive_tuner_runtime_service.py` | yes | 419 | `0452b19 2026-02-13` |
-| `src/services/adaptive_tuner_v2_service.py` | yes | 923 | `0452b19 2026-02-13` |
-| `src/services/strategy_api_types.py` | yes | 23 | `0452b19 2026-02-13` |
+| `src/services/adaptive_tuner_runtime_service.py` | yes | 458 | `0452b19 2026-02-13` |
+| `src/services/adaptive_tuner_v2_service.py` | yes | 923 | `38387c6 2026-02-13` |
+| `src/services/strategy_api_types.py` | yes | 24 | `0452b19 2026-02-13` |
 | `src/services/strategy_api_updates_service.py` | yes | 206 | `0452b19 2026-02-13` |
-| `src/services/strategy_api_profiles_service.py` | yes | 396 | `0452b19 2026-02-13` |
-| `src/services/strategy_api_session_service.py` | yes | 245 | `0452b19 2026-02-13` |
-| `src/services/start_run_service.py` | yes | 1042 | `0452b19 2026-02-13` |
-| `src/services/start_run_data_service.py` | yes | 1036 | `0452b19 2026-02-13` |
-| `src/services/start_run_execution_config_service.py` | yes | 504 | `0452b19 2026-02-13` |
+| `src/services/strategy_api_profiles_service.py` | yes | 529 | `38387c6 2026-02-13` |
+| `src/services/strategy_api_session_service.py` | yes | 273 | `0452b19 2026-02-13` |
+| `src/services/start_run_service.py` | yes | 1104 | `38387c6 2026-02-13` |
+| `src/services/start_run_data_service.py` | yes | 1183 | `38387c6 2026-02-13` |
+| `src/services/start_run_execution_config_service.py` | yes | 504 | `38387c6 2026-02-13` |
 | `src/config_io.py` | yes | 28 | `64da33c 2026-02-10` |
 | `src/system_settings.py` | yes | 172 | `baf7110 2026-02-07` |
 | `src/databento_service.py` | yes | 1106 | `64da33c 2026-02-10` |
@@ -87,23 +87,23 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 ## Key Symbols
 
 ### `api_server.py`
-- `function` `_parse_bool_env` (line 251)
-- `function` `_parse_startup_prewarm_tickers` (line 262)
-- `function` `_run_startup_prewarm_request_sync` (line 289)
-- `function` `_refresh_runtime_data_services` (line 294)
-- `async_function` `_broadcast_with_api_services` (line 305)
-- `function` `_build_config_write_deps` (line 341)
-- `function` `_build_run_control_deps` (line 363)
-- `function` `_build_adaptive_tuner_deps` (line 376)
-- `function` `_build_adaptive_tuner_worker_deps` (line 392)
-- `function` `_build_adaptive_tuner_runtime_deps` (line 418)
-- `function` `_build_adaptive_tuner_v2_deps` (line 438)
-- `function` `_build_strategy_api_integration_deps` (line 456)
-- ... 126 more symbols
+- `function` `_parse_bool_env` (line 252)
+- `function` `_parse_startup_prewarm_tickers` (line 263)
+- `function` `_run_startup_prewarm_request_sync` (line 290)
+- `function` `_refresh_runtime_data_services` (line 295)
+- `async_function` `_broadcast_with_api_services` (line 306)
+- `function` `_build_config_write_deps` (line 342)
+- `function` `_build_run_control_deps` (line 364)
+- `function` `_build_adaptive_tuner_deps` (line 377)
+- `function` `_build_adaptive_tuner_worker_deps` (line 393)
+- `function` `_build_adaptive_tuner_runtime_deps` (line 419)
+- `function` `_build_adaptive_tuner_v2_deps` (line 440)
+- `function` `_build_strategy_api_integration_deps` (line 458)
+- ... 127 more symbols
 
 ### `session_runner.py`
 - `class` `RunConfig` (line 19)
-- `class` `SessionRunner` (line 34)
+- `class` `SessionRunner` (line 37)
 
 ### `data_loader.py`
 - `class` `DataLoader` (line 15)
@@ -131,10 +131,19 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `function` `get_api_services` (line 39)
 
 ### `src/routes/system_routes.py`
-- `async_function` `root` (line 9)
-- `async_function` `health` (line 18)
-- `async_function` `get_available_data` (line 23)
-- `async_function` `list_data_files` (line 29)
+- `function` `_project_root` (line 17)
+- `function` `_sanitize_segment` (line 21)
+- `function` `_coerce_non_negative_int` (line 31)
+- `function` `_normalize_iso_date` (line 41)
+- `function` `_parse_report_saved_at` (line 48)
+- `function` `_parse_run_day_from_label` (line 61)
+- `function` `_collect_strategy_names_from_trades` (line 71)
+- `function` `_collect_strategy_names_from_markers` (line 84)
+- `function` `_normalize_strategy_token` (line 97)
+- `function` `_expand_strategy_aliases` (line 120)
+- `function` `_extract_profile_metadata` (line 136)
+- `function` `_match_profile_filter` (line 184)
+- ... 34 more symbols
 
 ### `src/routes/l2_routes.py`
 - `async_function` `get_footprint_data` (line 11)
@@ -198,10 +207,16 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `async_function` `list_adaptive_tuner_jobs_endpoint` (line 33)
 
 ### `src/routes/run_start_routes.py`
-- `async_function` `start_run_endpoint` (line 11)
-- `async_function` `prewarm_run_endpoint` (line 20)
-- `async_function` `prewarm_status_endpoint` (line 29)
-- `async_function` `flush_run_cache_endpoint` (line 38)
+- `function` `_request_to_dict` (line 13)
+- `function` `_preview_days` (line 19)
+- `function` `_classify_start_error` (line 30)
+- `function` `_inclusive_day_span` (line 49)
+- `function` `_safe_range_coverage` (line 58)
+- `async_function` `start_run_endpoint` (line 93)
+- `async_function` `prewarm_run_endpoint` (line 102)
+- `async_function` `prewarm_status_endpoint` (line 111)
+- `async_function` `diagnose_run_start_endpoint` (line 120)
+- `async_function` `flush_run_cache_endpoint` (line 330)
 
 ### `src/models/config_requests.py`
 - `class` `AdaptiveTunerProfileApplyRequest` (line 6)
@@ -212,8 +227,8 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 ### `src/models/run_requests.py`
 - `class` `StartRunRequest` (line 6)
-- `class` `PrewarmRunRequest` (line 72)
-- `class` `PlayRequest` (line 97)
+- `class` `PrewarmRunRequest` (line 77)
+- `class` `PlayRequest` (line 104)
 
 ### `src/models/tuner_requests.py`
 - `class` `AdaptiveTunerRequest` (line 6)
@@ -245,14 +260,14 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `function` `get_run_state` (line 24)
 - `async_function` `step_run` (line 29)
 - `async_function` `play_run` (line 34)
-- `function` `pause_run` (line 137)
-- `function` `resume_run` (line 143)
-- `function` `stop_run` (line 149)
-- `async_function` `restart_run` (line 155)
-- `function` `get_processed_bars` (line 199)
-- `function` `get_bar_details` (line 208)
-- `function` `get_markers` (line 254)
-- `function` `get_chart_annotations` (line 271)
+- `function` `pause_run` (line 155)
+- `function` `resume_run` (line 161)
+- `function` `stop_run` (line 167)
+- `async_function` `restart_run` (line 173)
+- `function` `get_processed_bars` (line 217)
+- `function` `get_bar_details` (line 226)
+- `function` `get_markers` (line 272)
+- `function` `get_chart_annotations` (line 289)
 - ... 3 more symbols
 
 ### `src/services/adaptive_tuner_orchestration_service.py`
@@ -293,9 +308,9 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 ### `src/services/adaptive_tuner_runtime_service.py`
 - `class` `AdaptiveTunerRuntimeDeps` (line 14)
-- `async_function` `evaluate_adaptive_tuner_candidate` (line 32)
-- `async_function` `evaluate_v2_candidate` (line 160)
-- `async_function` `persist_tuner_result_to_primary_aos` (line 341)
+- `async_function` `evaluate_adaptive_tuner_candidate` (line 33)
+- `async_function` `evaluate_v2_candidate` (line 161)
+- `async_function` `persist_tuner_result_to_primary_aos` (line 380)
 
 ### `src/services/adaptive_tuner_v2_service.py`
 - `class` `AdaptiveTunerV2Deps` (line 12)
@@ -324,9 +339,9 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `function` `normalize_strategy_key` (line 31)
 - `function` `resolve_active_adaptive_tuner_candidate` (line 38)
 - `function` `extract_profile_runtime_overrides` (line 65)
-- `async_function` `apply_active_strategy_combo` (line 171)
-- `async_function` `apply_active_adaptive_tuner_profile` (line 215)
-- `async_function` `apply_aos_optimizations` (line 269)
+- `async_function` `apply_active_strategy_combo` (line 188)
+- `async_function` `apply_active_adaptive_tuner_profile` (line 232)
+- `async_function` `apply_aos_optimizations` (line 388)
 
 ### `src/services/strategy_api_session_service.py`
 - `function` `_parse_positive_float_env` (line 11)
@@ -334,8 +349,9 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `async_function` `clear_remote_strategy_sessions` (line 126)
 - `async_function` `reset_remote_orchestrator_state` (line 151)
 - `async_function` `reset_remote_orchestrator_state_scoped` (line 174)
-- `async_function` `load_remote_checkpoint` (line 191)
-- `async_function` `save_remote_checkpoint` (line 213)
+- `async_function` `apply_orchestrator_config` (line 191)
+- `async_function` `load_remote_checkpoint` (line 219)
+- `async_function` `save_remote_checkpoint` (line 241)
 
 ### `src/services/start_run_service.py`
 - `function` `_parse_non_negative_int_env` (line 27)
@@ -346,11 +362,11 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `class` `StartRunDeps` (line 97)
 - `function` `_resolve_request_range` (line 124)
 - `function` `_resolve_local_aos_applied` (line 132)
-- `function` `_canonical_trading_hours` (line 194)
-- `function` `_build_prewarm_cache_key` (line 211)
-- `function` `_resolve_prewarm_scope_range` (line 239)
-- `function` `_inclusive_day_span` (line 285)
-- ... 4 more symbols
+- `function` `_build_report_metadata` (line 194)
+- `function` `_canonical_trading_hours` (line 232)
+- `function` `_build_prewarm_cache_key` (line 249)
+- `function` `_resolve_prewarm_scope_range` (line 280)
+- ... 5 more symbols
 
 ### `src/services/start_run_data_service.py`
 - `function` `_parse_positive_int_env` (line 17)
@@ -365,7 +381,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `function` `_count_disk_cache_entries` (line 184)
 - `function` `_disk_cache_total_bytes` (line 191)
 - `function` `_prune_all_disk_caches` (line 205)
-- ... 23 more symbols
+- ... 27 more symbols
 
 ### `src/services/start_run_execution_config_service.py`
 - `function` `resolve_execution_config` (line 6)
@@ -394,8 +410,12 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `WEBSOCKET` | `/ws/live` | `websocket_endpoint` | `api_server.py` |
 | `GET` | `/` | `root` | `src/routes/system_routes.py` |
 | `GET` | `/api/health` | `health` | `src/routes/system_routes.py` |
+| `GET` | `/api/system/l2/runtime` | `get_l2_runtime` | `src/routes/system_routes.py` |
+| `POST` | `/api/system/l2/runtime` | `update_l2_runtime` | `src/routes/system_routes.py` |
 | `GET` | `/api/available-data` | `get_available_data` | `src/routes/system_routes.py` |
 | `GET` | `/api/data/files` | `list_data_files` | `src/routes/system_routes.py` |
+| `GET` | `/api/reports/diagnostic/{ticker}` | `get_diagnostic_report` | `src/routes/system_routes.py` |
+| `GET` | `/api/reports/history/{ticker}` | `get_saved_run_history` | `src/routes/system_routes.py` |
 | `GET` | `/api/l2/footprint/{ticker}` | `get_footprint_data` | `src/routes/l2_routes.py` |
 | `GET` | `/api/l2/icebergs/{ticker}` | `get_icebergs` | `src/routes/l2_routes.py` |
 | `GET` | `/api/data-loader/catalog` | `get_data_catalog` | `src/routes/data_loader_routes.py` |
@@ -445,6 +465,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `POST` | `/api/run/start` | `start_run_endpoint` | `src/routes/run_start_routes.py` |
 | `POST` | `/api/run/prewarm` | `prewarm_run_endpoint` | `src/routes/run_start_routes.py` |
 | `POST` | `/api/run/prewarm/status` | `prewarm_status_endpoint` | `src/routes/run_start_routes.py` |
+| `POST` | `/api/run/diagnose` | `diagnose_run_start_endpoint` | `src/routes/run_start_routes.py` |
 | `POST` | `/api/run/cache/flush` | `flush_run_cache_endpoint` | `src/routes/run_start_routes.py` |
 
 ## Prompt Primer

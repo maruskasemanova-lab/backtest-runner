@@ -17,6 +17,7 @@ class StrategyApiIntegrationDeps:
     get_ticker_positioning_config: Callable[..., Dict[str, Any]]
     positioning_config_keys: Iterable[str]
     apply_strategy_param_map: Callable[[str, Dict[str, Dict[str, Any]]], Awaitable[Dict[str, Any]]]
+    apply_orchestrator_config: Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]]
     fetch_remote_strategies: Callable[[str], Awaitable[Dict[str, Any]]]
     apply_active_strategy_combo: Callable[[str, str, Dict[str, Any]], Awaitable[Dict[str, Any]]]
     apply_active_adaptive_tuner_profile: Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]]

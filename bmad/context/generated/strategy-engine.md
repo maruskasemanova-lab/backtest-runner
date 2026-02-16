@@ -21,19 +21,19 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 828 | `247e30c 2026-02-11` |
-| `../market_regime_detection/src/api_models.py` | yes | 109 | `247e30c 2026-02-11` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 1424 | `6e4761c 2026-02-13` |
+| `../market_regime_detection/api_server.py` | yes | 875 | `04e0601 2026-02-13` |
+| `../market_regime_detection/src/api_models.py` | yes | 116 | `04e0601 2026-02-13` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 1490 | `04e0601 2026-02-13` |
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 60 | `5e15927 2026-02-10` |
 | `../market_regime_detection/src/trading_orchestrator.py` | yes | 464 | `5e15927 2026-02-10` |
-| `../market_regime_detection/src/feature_store.py` | yes | 871 | `cf2281d 2026-02-08` |
+| `../market_regime_detection/src/feature_store.py` | yes | 874 | `cf2281d 2026-02-08` |
 | `../market_regime_detection/src/ensemble_combiner.py` | yes | 446 | `5e15927 2026-02-10` |
 | `../market_regime_detection/src/edge_monitor.py` | yes | 364 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/checkpoint.py` | yes | 284 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/adaptive_regime.py` | yes | 400 | `cf2281d 2026-02-08` |
 | `../market_regime_detection/src/position_sizing.py` | yes | 145 | `d33cc78 2026-02-07` |
-| `../market_regime_detection/src/evidence_decision.py` | yes | 543 | `5e15927 2026-02-10` |
-| `../market_regime_detection/src/strategy_factory.py` | yes | 37 | `0d786b7 2026-02-11` |
+| `../market_regime_detection/src/evidence_decision.py` | yes | 543 | `04e0601 2026-02-13` |
+| `../market_regime_detection/src/strategy_factory.py` | yes | 38 | `0d786b7 2026-02-11` |
 | `../market_regime_detection/src/strategies/base_strategy.py` | yes | 355 | `0d786b7 2026-02-11` |
 | `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 172 | `0d786b7 2026-02-11` |
 | `../market_regime_detection/src/strategies/absorption_reversal.py` | yes | 173 | `0d786b7 2026-02-11` |
@@ -89,11 +89,11 @@ Own regime detection, signal generation, position management, learning component
 - `class` `StrategyUpdate` (line 16)
 - `class` `TrailingStopConfig` (line 21)
 - `class` `BarInput` (line 28)
-- `class` `SessionQuery` (line 74)
-- `class` `TradingConfig` (line 82)
+- `class` `SessionQuery` (line 76)
+- `class` `TradingConfig` (line 84)
 
 ### `../market_regime_detection/src/day_trading_manager.py`
-- `class` `DayTradingManager` (line 79)
+- `class` `DayTradingManager` (line 80)
 
 ### `../market_regime_detection/src/multi_layer_decision.py`
 - `class` `DecisionResult` (line 11)
@@ -152,7 +152,7 @@ Own regime detection, signal generation, position management, learning component
 - `class` `EvidenceDecisionEngine` (line 48)
 
 ### `../market_regime_detection/src/strategy_factory.py`
-- `function` `build_strategy_registry` (line 22)
+- `function` `build_strategy_registry` (line 23)
 
 ### `../market_regime_detection/src/strategies/base_strategy.py`
 - `class` `SignalType` (line 11)

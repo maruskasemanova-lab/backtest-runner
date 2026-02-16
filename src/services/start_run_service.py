@@ -50,7 +50,7 @@ def _parse_bool_env(name: str, default: bool) -> bool:
 # overwhelm local machines. Limit it by default, but allow explicit override.
 PREWARM_TICKER_SCOPE_L2_MAX_DAYS = _parse_non_negative_int_env(
     "BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS",
-    0,
+    10,
 )
 PREWARM_TICKER_SCOPE_L2_FORCE = _parse_bool_env(
     "BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE",
@@ -191,6 +191,44 @@ def _resolve_local_aos_applied(
     return applied
 
 
+def _build_report_metadata(
+    *,
+    run_key: str,
+    run_date_label: str,
+    aos_applied: Dict[str, Any],
+) -> Dict[str, Any]:
+    adaptive_meta = (
+        aos_applied.get("adaptive_profile", {})
+        if isinstance(aos_applied.get("adaptive_profile"), dict)
+        else {}
+    )
+    strategy_combo_meta = (
+        aos_applied.get("strategy_combo", {})
+        if isinstance(aos_applied.get("strategy_combo"), dict)
+        else {}
+    )
+    adaptive_profile_id = (
+        str(adaptive_meta.get("active_profile_id") or "").strip()
+        or str(adaptive_meta.get("profile_id") or "").strip()
+        or None
+    )
+    adaptive_profile_name = str(adaptive_meta.get("profile_name") or "").strip() or None
+    strategy_combo_profile_id = (
+        str(strategy_combo_meta.get("active_profile_id") or "").strip()
+        or str(strategy_combo_meta.get("profile_id") or "").strip()
+        or None
+    )
+    strategy_combo_profile_name = str(strategy_combo_meta.get("profile_name") or "").strip() or None
+    return {
+        "run_key": str(run_key),
+        "run_date_label": str(run_date_label),
+        "adaptive_profile_id": adaptive_profile_id,
+        "adaptive_profile_name": adaptive_profile_name,
+        "strategy_combo_profile_id": strategy_combo_profile_id,
+        "strategy_combo_profile_name": strategy_combo_profile_name,
+    }
+
+
 def _canonical_trading_hours(raw_hours: Any) -> tuple[int, ...]:
     if not isinstance(raw_hours, list):
         return tuple()
@@ -229,6 +267,9 @@ def _build_prewarm_cache_key(
         "comparable_mode": bool(request.comparable_mode),
         "requested_l2_only": bool(requested_l2_only),
         "requested_l2_confirm": bool(requested_l2_confirm),
+        "include_extended_hours": (
+            None if getattr(request, "include_extended_hours", None) is None else bool(request.include_extended_hours)
+        ),
         "time_filter_enabled": bool(aos_applied.get("time_filter_enabled", False)),
         "trading_hours": _canonical_trading_hours(aos_applied.get("trading_hours")),
         "aos_config_path": str(getattr(request, "aos_config_path", "") or ""),
@@ -628,16 +669,20 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
     async def on_bar(bar):
         await broadcast({
             "type": "bar",
+            "run_key": run_key,
             "run_id": request.run_id,
             "ticker": ticker,
+            "date": run_date_label,
             "bar": bar
         })
     
     async def on_decision(marker):
         await broadcast({
             "type": "decision",
+            "run_key": run_key,
             "run_id": request.run_id,
             "ticker": ticker,
+            "date": run_date_label,
             "marker": marker
         })
     
@@ -672,6 +717,75 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         "l2_has_data": bool(l2_stats.get("has_l2")),
     }
 
+    execution_config_payload = {
+        "account_size_usd": request.account_size_usd,
+        "positioning_config_enabled": positioning_cfg_requested,
+        "positioning_config_applied": bool(positioning_cfg),
+        "risk_per_trade_pct": effective_risk_per_trade_pct,
+        "risk_per_trade_pct_source": risk_per_trade_source,
+        "max_position_notional_pct": effective_max_position_notional_pct,
+        "max_position_notional_pct_source": max_position_notional_source,
+        "max_fill_participation_rate": effective_max_fill_participation_rate,
+        "max_fill_participation_rate_source": max_fill_participation_source,
+        "min_fill_ratio": effective_min_fill_ratio,
+        "min_fill_ratio_source": min_fill_ratio_source,
+        "enable_partial_take_profit": effective_enable_partial_take_profit,
+        "enable_partial_take_profit_source": partial_take_profit_enabled_source,
+        "partial_take_profit_rr": effective_partial_take_profit_rr,
+        "partial_take_profit_rr_source": partial_take_profit_rr_source,
+        "partial_take_profit_fraction": effective_partial_take_profit_fraction,
+        "partial_take_profit_fraction_source": partial_take_profit_fraction_source,
+        "trailing_activation_pct": effective_trailing_activation_pct,
+        "trailing_activation_pct_source": trailing_activation_source,
+        "break_even_buffer_pct": effective_break_even_buffer_pct,
+        "break_even_buffer_pct_source": break_even_buffer_source,
+        "break_even_min_hold_bars": effective_break_even_min_hold_bars,
+        "break_even_min_hold_bars_source": break_even_min_hold_source,
+        "trailing_enabled_in_choppy": effective_trailing_enabled_in_choppy,
+        "trailing_enabled_in_choppy_source": trailing_enabled_in_choppy_source,
+        "time_exit_bars": effective_time_exit_bars,
+        "time_exit_bars_source": time_exit_source,
+        "adverse_flow_exit_enabled": effective_adverse_flow_exit_enabled,
+        "adverse_flow_exit_enabled_source": adverse_flow_exit_enabled_source,
+        "adverse_flow_threshold": effective_adverse_flow_threshold,
+        "adverse_flow_threshold_source": adverse_flow_threshold_source,
+        "adverse_flow_min_hold_bars": effective_adverse_flow_min_hold_bars,
+        "adverse_flow_min_hold_bars_source": adverse_flow_min_hold_source,
+        "adverse_flow_consistency_threshold": effective_adverse_flow_consistency_threshold,
+        "adverse_flow_consistency_threshold_source": adverse_flow_consistency_source,
+        "adverse_book_pressure_threshold": effective_adverse_book_pressure_threshold,
+        "adverse_book_pressure_threshold_source": adverse_book_pressure_source,
+        "stop_loss_mode": effective_stop_loss_mode,
+        "stop_loss_mode_source": stop_loss_mode_source,
+        "fixed_stop_loss_pct": effective_fixed_stop_loss_pct,
+        "fixed_stop_loss_pct_source": fixed_stop_loss_source,
+        "intrabar_execution_recalc_1s": effective_intrabar_execution_recalc_1s,
+        "cold_start_each_day": effective_cold_start_each_day,
+        "comparable_mode": comparable_mode,
+        "orchestrator_reset_scope": effective_reset_scope,
+        "apply_aos_optimizations_on_start": apply_aos_optimizations_on_start,
+        "strategy_selection_mode": effective_strategy_selection_mode,
+        "max_active_strategies": effective_max_active_strategies,
+        "include_extended_hours": (
+            bool(request.include_extended_hours)
+            if request.include_extended_hours is not None
+            else not bool(
+                aos_applied.get("time_filter_enabled")
+                and _canonical_trading_hours(aos_applied.get("trading_hours"))
+            )
+        ),
+        "momentum_diversification_applied": bool(effective_momentum_diversification),
+        "momentum_diversification_source": momentum_diversification_source,
+        "momentum_diversification": effective_momentum_diversification or {},
+    }
+    runner._aos_applied = dict(aos_applied) if isinstance(aos_applied, dict) else {}
+    runner._execution_config = dict(execution_config_payload)
+    runner._report_metadata = _build_report_metadata(
+        run_key=run_key,
+        run_date_label=run_date_label,
+        aos_applied=runner._aos_applied,
+    )
+
     logger.info(f"Started run {run_key} with {len(bars)} bars")
 
     return {
@@ -699,59 +813,7 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
             "l2_min_signed_aggression": l2_min_signed_aggression,
             "sessionized_by_market_day": l2_sessionized_by_market_day,
         },
-        "execution_config": {
-            "account_size_usd": request.account_size_usd,
-            "positioning_config_enabled": positioning_cfg_requested,
-            "positioning_config_applied": bool(positioning_cfg),
-            "risk_per_trade_pct": effective_risk_per_trade_pct,
-            "risk_per_trade_pct_source": risk_per_trade_source,
-            "max_position_notional_pct": effective_max_position_notional_pct,
-            "max_position_notional_pct_source": max_position_notional_source,
-            "max_fill_participation_rate": effective_max_fill_participation_rate,
-            "max_fill_participation_rate_source": max_fill_participation_source,
-            "min_fill_ratio": effective_min_fill_ratio,
-            "min_fill_ratio_source": min_fill_ratio_source,
-            "enable_partial_take_profit": effective_enable_partial_take_profit,
-            "enable_partial_take_profit_source": partial_take_profit_enabled_source,
-            "partial_take_profit_rr": effective_partial_take_profit_rr,
-            "partial_take_profit_rr_source": partial_take_profit_rr_source,
-            "partial_take_profit_fraction": effective_partial_take_profit_fraction,
-            "partial_take_profit_fraction_source": partial_take_profit_fraction_source,
-            "trailing_activation_pct": effective_trailing_activation_pct,
-            "trailing_activation_pct_source": trailing_activation_source,
-            "break_even_buffer_pct": effective_break_even_buffer_pct,
-            "break_even_buffer_pct_source": break_even_buffer_source,
-            "break_even_min_hold_bars": effective_break_even_min_hold_bars,
-            "break_even_min_hold_bars_source": break_even_min_hold_source,
-            "trailing_enabled_in_choppy": effective_trailing_enabled_in_choppy,
-            "trailing_enabled_in_choppy_source": trailing_enabled_in_choppy_source,
-            "time_exit_bars": effective_time_exit_bars,
-            "time_exit_bars_source": time_exit_source,
-            "adverse_flow_exit_enabled": effective_adverse_flow_exit_enabled,
-            "adverse_flow_exit_enabled_source": adverse_flow_exit_enabled_source,
-            "adverse_flow_threshold": effective_adverse_flow_threshold,
-            "adverse_flow_threshold_source": adverse_flow_threshold_source,
-            "adverse_flow_min_hold_bars": effective_adverse_flow_min_hold_bars,
-            "adverse_flow_min_hold_bars_source": adverse_flow_min_hold_source,
-            "adverse_flow_consistency_threshold": effective_adverse_flow_consistency_threshold,
-            "adverse_flow_consistency_threshold_source": adverse_flow_consistency_source,
-            "adverse_book_pressure_threshold": effective_adverse_book_pressure_threshold,
-            "adverse_book_pressure_threshold_source": adverse_book_pressure_source,
-            "stop_loss_mode": effective_stop_loss_mode,
-            "stop_loss_mode_source": stop_loss_mode_source,
-            "fixed_stop_loss_pct": effective_fixed_stop_loss_pct,
-            "fixed_stop_loss_pct_source": fixed_stop_loss_source,
-            "intrabar_execution_recalc_1s": effective_intrabar_execution_recalc_1s,
-            "cold_start_each_day": effective_cold_start_each_day,
-            "comparable_mode": comparable_mode,
-            "orchestrator_reset_scope": effective_reset_scope,
-            "apply_aos_optimizations_on_start": apply_aos_optimizations_on_start,
-            "strategy_selection_mode": effective_strategy_selection_mode,
-            "max_active_strategies": effective_max_active_strategies,
-            "momentum_diversification_applied": bool(effective_momentum_diversification),
-            "momentum_diversification_source": momentum_diversification_source,
-            "momentum_diversification": effective_momentum_diversification or {},
-        },
+        "execution_config": execution_config_payload,
         "start_timing": start_timing,
         "first_bar": bars[0] if bars else None,
         "last_bar": bars[-1] if bars else None

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -26,6 +27,7 @@ from .l2_data_manager import L2DataManager
 
 # Schema version for L2 feature vector contract
 L2_SCHEMA_VERSION = "l2fv-1.0"
+MARKET_TZ = ZoneInfo("America/New_York")
 
 
 @dataclass
@@ -71,11 +73,39 @@ class OrderFlowEngine:
     def _minute_key(cls, value: Any) -> int:
         return int(cls._to_utc_datetime(value).timestamp() // 60)
 
+    @classmethod
+    def _market_day_key_from_ts(cls, value: Any) -> str:
+        return cls._to_utc_datetime(value).astimezone(MARKET_TZ).date().isoformat()
+
+    @staticmethod
+    def _market_day_key_from_minute_key(minute_key: int) -> str:
+        dt_utc = datetime.fromtimestamp(int(minute_key) * 60, tz=timezone.utc)
+        return dt_utc.astimezone(MARKET_TZ).date().isoformat()
+
     @staticmethod
     def _safe_div(numerator: float, denominator: float, default: float = 0.0) -> float:
         if denominator == 0:
             return default
         return numerator / denominator
+
+    @staticmethod
+    def _clip_depth_outliers(depth_rows: pd.DataFrame) -> pd.DataFrame:
+        """Cap fat-finger depth spikes using robust quantile/MAD thresholds."""
+        clipped = depth_rows.copy()
+        for col in depth_rows.columns:
+            series = pd.to_numeric(depth_rows[col], errors="coerce").fillna(0.0).clip(lower=0.0)
+            if len(series) >= 8:
+                median = float(series.median())
+                mad = float((series - median).abs().median())
+                robust_sigma = 1.4826 * mad if mad > 0 else 0.0
+                robust_cap = median + (5.0 * robust_sigma if robust_sigma > 0 else 0.0)
+                pct_cap = float(series.quantile(0.99))
+                cap_candidates = [cap for cap in (robust_cap, pct_cap) if cap > 0.0]
+                if cap_candidates:
+                    upper_cap = max(median, min(cap_candidates))
+                    series = series.clip(upper=upper_cap)
+            clipped[col] = series
+        return clipped
 
     def _load_chunk(
         self,
@@ -118,9 +148,9 @@ class OrderFlowEngine:
         ticker: str,
         start_dt_utc: datetime,
         end_dt_utc: datetime,
-    ) -> Tuple[Dict[int, Dict[str, float]], Dict[str, Any]]:
+    ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, Any]]:
         chunk = self._load_chunk(ticker, start_dt_utc, end_dt_utc)
-        out: Dict[int, Dict[str, float]] = {}
+        out: Dict[int, Dict[str, Any]] = {}
         stats = {"depth_minutes": 0}
         if chunk.empty:
             return out, stats
@@ -137,8 +167,12 @@ class OrderFlowEngine:
                 continue
             minute_key = self._minute_key(ts)
 
-            bid_depth_rows = group[bid_cols].astype(float).clip(lower=0.0)
-            ask_depth_rows = group[ask_cols].astype(float).clip(lower=0.0)
+            bid_depth_rows = self._clip_depth_outliers(
+                group[bid_cols].astype(float).clip(lower=0.0)
+            )
+            ask_depth_rows = self._clip_depth_outliers(
+                group[ask_cols].astype(float).clip(lower=0.0)
+            )
 
             bid_depth_total = float(bid_depth_rows.sum(axis=1).mean())
             ask_depth_total = float(ask_depth_rows.sum(axis=1).mean())
@@ -162,11 +196,15 @@ class OrderFlowEngine:
             pressure_keys.append(minute_key)
 
         pressure_keys.sort()
-        prev_pressure = 0.0
-        for idx, minute_key in enumerate(pressure_keys):
+        prev_pressure_by_day: Dict[str, float] = {}
+        for minute_key in pressure_keys:
+            day_key = self._market_day_key_from_minute_key(minute_key)
             current = float(out[minute_key].get("book_pressure", 0.0))
-            out[minute_key]["book_pressure_delta"] = current - prev_pressure if idx > 0 else 0.0
-            prev_pressure = current
+            prev_pressure = prev_pressure_by_day.get(day_key)
+            out[minute_key]["book_pressure_delta"] = (
+                0.0 if prev_pressure is None else (current - prev_pressure)
+            )
+            prev_pressure_by_day[day_key] = current
 
         stats["depth_minutes"] = len(out)
         return out, stats
@@ -176,9 +214,9 @@ class OrderFlowEngine:
         ticker: str,
         start_dt_utc: datetime,
         end_dt_utc: datetime,
-    ) -> Tuple[Dict[int, Dict[str, float]], Dict[str, Any]]:
+    ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, Any]]:
         chunk = self._load_chunk(ticker, start_dt_utc, end_dt_utc)
-        out: Dict[int, Dict[str, float]] = {}
+        out: Dict[int, Dict[str, Any]] = {}
         stats = {"trade_minutes": 0, "trade_events": 0}
         if chunk.empty:
             return out, stats
@@ -196,10 +234,16 @@ class OrderFlowEngine:
         minute_keys = []
         running_cumulative = 0.0
         prev_delta = 0.0
+        prev_day_key: str | None = None
         for ts, group in trades.groupby(pd.Grouper(freq="1min")):
             if group.empty:
                 continue
             minute_key = self._minute_key(ts)
+            day_key = self._market_day_key_from_ts(ts)
+            if prev_day_key != day_key:
+                running_cumulative = 0.0
+                prev_delta = 0.0
+                prev_day_key = day_key
 
             buy_volume = 0.0
             sell_volume = 0.0
@@ -256,15 +300,21 @@ class OrderFlowEngine:
         ticker: str,
         start_dt_utc: datetime,
         end_dt_utc: datetime,
-    ) -> Tuple[Dict[int, Dict[str, float]], Dict[str, Any]]:
+    ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, Any]]:
         trade_map, trade_stats = self.compute_trade_flow(ticker, start_dt_utc, end_dt_utc)
         book_map, book_stats = self.compute_book_pressure(ticker, start_dt_utc, end_dt_utc)
 
-        feature_map: Dict[int, Dict[str, float]] = {}
+        feature_map: Dict[int, Dict[str, Any]] = {}
         all_keys = sorted(set(trade_map.keys()) | set(book_map.keys()))
         running_cumulative = 0.0
         prev_delta = 0.0
+        prev_day_key: str | None = None
         for minute_key in all_keys:
+            day_key = self._market_day_key_from_minute_key(minute_key)
+            if prev_day_key != day_key:
+                running_cumulative = 0.0
+                prev_delta = 0.0
+                prev_day_key = day_key
             trade = trade_map.get(minute_key, {})
             book = book_map.get(minute_key, {})
 
@@ -316,13 +366,33 @@ class OrderFlowEngine:
                 # Quality metrics
                 "l2_quality_trade_ticks": snapshot.trade_ticks,
                 "l2_quality_book_updates": snapshot.book_updates,
+                "l2_quality_flags": list(snapshot.quality_flags),
             }
 
         # Calculate coverage ratio
         expected_minutes = int((end_dt_utc - start_dt_utc).total_seconds() / 60)
         coverage_ratio = len(feature_map) / expected_minutes if expected_minutes > 0 else 0.0
         for minute_key in feature_map:
-            feature_map[minute_key]["l2_quality_coverage_ratio"] = coverage_ratio
+            features = feature_map[minute_key]
+            features["l2_quality_coverage_ratio"] = coverage_ratio
+
+            flags = features.get("l2_quality_flags", [])
+            if not isinstance(flags, list):
+                flags = []
+            if coverage_ratio < 0.5 and "LOW_COVERAGE" not in flags:
+                flags.append("LOW_COVERAGE")
+            trade_ticks = int(features.get("l2_quality_trade_ticks", 0) or 0)
+            book_updates = int(features.get("l2_quality_book_updates", 0) or 0)
+            if trade_ticks <= 0 and book_updates <= 0 and "NO_DATA" not in flags:
+                flags.append("NO_DATA")
+            features["l2_quality_flags"] = flags
+            features["l2_quality"] = {
+                "coverage_ratio": coverage_ratio,
+                "flags": list(flags),
+                "trade_ticks": trade_ticks,
+                "book_updates": book_updates,
+                "has_l2": bool(trade_ticks > 0 or book_updates > 0),
+            }
 
         stats = {
             "has_l2": bool(feature_map),

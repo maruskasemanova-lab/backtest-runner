@@ -3,7 +3,7 @@
   "tickers": {
     "MU": {
       "risk_per_trade_pct": 2.0,
-      "max_position_notional_pct": 80.0,
+      "max_position_notional_pct": 50.0,
       "max_fill_participation_rate": 0.15,
       "min_fill_ratio": 0.45,
       "enable_partial_take_profit": true,
@@ -13,12 +13,12 @@
       "break_even_buffer_pct": 0.0,
       "break_even_min_hold_bars": 3,
       "trailing_enabled_in_choppy": false,
-      "time_exit_bars": 35,
+      "time_exit_bars": 40,
       "adverse_flow_exit_enabled": true,
       "adverse_flow_threshold": 0.14,
       "adverse_flow_min_hold_bars": 5,
-      "adverse_flow_consistency_threshold": 0.18,
-      "adverse_book_pressure_threshold": 0.12,
+      "adverse_flow_consistency_threshold": 0.45,
+      "adverse_book_pressure_threshold": 0.15,
       "stop_loss_mode": "strategy",
       "fixed_stop_loss_pct": 0.0
     }

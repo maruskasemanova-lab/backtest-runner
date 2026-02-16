@@ -1,0 +1,3 @@
+# Pattern Library Directory
+# This directory stores discovered pattern libraries in JSON format
+# Files are named: {TICKER}_patterns_{version}.json

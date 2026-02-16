@@ -267,6 +267,7 @@
         "frontend/src/components/PlaybackControls.jsx",
         "frontend/src/components/DataManager.jsx",
         "frontend/src/components/AdaptiveStrategyStudio.jsx",
+        "frontend/src/components/DiagnosticCalendar.jsx",
         "frontend/src/components/StrategySettings.jsx",
         "frontend/src/components/AOSOptimizations.jsx",
         "frontend/src/components/IntrabarPanel.jsx"

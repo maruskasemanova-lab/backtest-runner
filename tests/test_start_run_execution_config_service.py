@@ -32,7 +32,7 @@ def test_resolve_execution_config_emits_trading_config_payload() -> None:
     assert trading_config["max_active_strategies"] == 20
 
 
-def test_resolve_execution_config_trading_config_respects_profile_overrides() -> None:
+def test_resolve_execution_config_trading_config_prefers_request_overrides() -> None:
     request = StartRunRequest(
         run_id="cfg-2",
         ticker="MU",
@@ -53,7 +53,7 @@ def test_resolve_execution_config_trading_config_respects_profile_overrides() ->
     )
 
     trading_config = result["trading_config"]
-    assert trading_config["strategy_selection_mode"] == "all_enabled"
-    assert trading_config["max_active_strategies"] == 9
+    assert trading_config["strategy_selection_mode"] == "adaptive_top_n"
+    assert trading_config["max_active_strategies"] == 3
     assert trading_config["l2_min_delta"] == 123.0
     assert trading_config["l2_confirm_enabled"] is True

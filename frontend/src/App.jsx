@@ -11,6 +11,7 @@ import IntrabarPanel from './components/IntrabarPanel';
 import AdaptiveStrategyStudio from './components/AdaptiveStrategyStudio';
 import AdaptiveTuner from './components/AdaptiveTuner';
 import LiveTraderMonitor from './components/LiveTraderMonitor';
+import DiagnosticCalendar from './components/DiagnosticCalendar';
 
 const toUnixSeconds = (value) => {
   if (value === null || value === undefined) return null;
@@ -133,6 +134,15 @@ const parseRunKey = (value) => {
   return { runId, ticker, date };
 };
 
+const buildRunKeyFromState = (runStateRow) => {
+  if (!runStateRow || typeof runStateRow !== 'object') return null;
+  const runId = String(runStateRow.run_id || '').trim();
+  const ticker = String(runStateRow.ticker || '').trim();
+  const date = String(runStateRow.date || '').trim();
+  if (!runId || !ticker || !date) return null;
+  return `${runId}:${ticker}:${date}`;
+};
+
 const buildRunApiBase = (runParts) => {
   if (!runParts) return null;
   return `/api/run/${encodeURIComponent(runParts.runId)}/${encodeURIComponent(runParts.ticker)}/${encodeURIComponent(runParts.date)}`;
@@ -168,6 +178,7 @@ function App() {
   const [runState, setRunState] = useState(null);
   const [effectiveExecutionConfig, setEffectiveExecutionConfig] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [activeRuns, setActiveRuns] = useState([]);
   
   // Data
   const [bars, setBars] = useState([]);
@@ -179,7 +190,7 @@ function App() {
   const [strategyApiUrl, setStrategyApiUrl] = useState("http://localhost:8001");
   
   // View navigation
-  const [activeView, setActiveView] = useState("backtest"); // "backtest" | "data-manager" | "adaptive-studio" | "adaptive-tuner" | "live-trader"
+  const [activeView, setActiveView] = useState("backtest"); // "backtest" | "data-manager" | "adaptive-studio" | "adaptive-tuner" | "diagnostics" | "live-trader"
   const [downloadProgress, setDownloadProgress] = useState(null);
 
   // L2 Data
@@ -216,7 +227,36 @@ function App() {
   const activeRun = useMemo(() => parseRunKey(runKey), [runKey]);
   const activeRunId = activeRun?.runId || null;
   const activeRunTicker = activeRun?.ticker || null;
+  const activeRunDate = activeRun?.date || null;
   const activeRunApiBase = useMemo(() => buildRunApiBase(activeRun), [activeRun]);
+  const hasActiveAttachedRun = useMemo(() => {
+    if (!runState || typeof runState !== 'object') return false;
+    if (runState.is_running || runState.is_paused) return true;
+    const phase = String(runState.phase || '').trim().toUpperCase();
+    return phase === 'INITIALIZED';
+  }, [runState]);
+
+  const fetchActiveRuns = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/runs');
+      if (!resp.ok) return;
+      const payload = await resp.json();
+      const rows = Array.isArray(payload) ? payload : [];
+      const normalized = rows
+        .map((row) => {
+          const key = buildRunKeyFromState(row);
+          if (!key) return null;
+          return {
+            ...row,
+            run_key: key,
+          };
+        })
+        .filter(Boolean);
+      setActiveRuns(normalized);
+    } catch (error) {
+      console.debug('Failed to refresh active runs:', error);
+    }
+  }, []);
 
   const clearActiveRunState = useCallback((notice = '') => {
     setRunKey(null);
@@ -381,7 +421,7 @@ function App() {
      const subscribe = () => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && activeRunId) {
             console.log(`Subscribing to run: ${activeRunId}`);
-            wsRef.current.send(JSON.stringify({ type: 'subscribe', run_id: activeRunId }));
+            wsRef.current.send(JSON.stringify({ type: 'subscribe', run_id: activeRunId, run_key: runKey || null }));
         }
      };
 
@@ -392,16 +432,20 @@ function App() {
          // The onopen handler in the connection effect could handle this, 
          // but since we split them, we can just watch isConnected here.
      }
-  }, [activeRunId, isConnected]);
+  }, [activeRunId, isConnected, runKey]);
 
   const handleWsMessage = useCallback((data) => {
+    const msgRunKey = data?.run_key ? String(data.run_key) : null;
     const msgRunId = data?.run_id ? String(data.run_id) : null;
     const msgTicker = data?.ticker ? String(data.ticker).toUpperCase() : null;
+    const msgDate = data?.date ? String(data.date) : null;
     const currentTicker = activeRunTicker ? String(activeRunTicker).toUpperCase() : null;
 
     // Backend broadcasts all runs; ignore frames that do not belong to the active run.
+    if (runKey && msgRunKey && msgRunKey !== runKey) return;
     if (activeRunId && msgRunId && msgRunId !== activeRunId) return;
     if (currentTicker && msgTicker && msgTicker !== currentTicker) return;
+    if (activeRunDate && msgDate && msgDate !== activeRunDate) return;
     
     if (data.type === 'bar') {
       handleNewBar(data.bar);
@@ -410,7 +454,21 @@ function App() {
     } else if (data.type === 'download_progress') {
       setDownloadProgress(data);
     }
-  }, [activeRunId, activeRunTicker]);
+  }, [activeRunDate, activeRunId, activeRunTicker, runKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      if (cancelled) return;
+      await fetchActiveRuns();
+    };
+    refresh();
+    const timer = setInterval(refresh, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [fetchActiveRuns]);
   
   // Handle new bar from WebSocket
   const handleNewBar = useCallback((bar) => {
@@ -656,7 +714,14 @@ function App() {
       }
 
       setRunKey(key);
+      fetchActiveRuns().catch(() => null);
       setEffectiveExecutionConfig(data.execution_config || null);
+      if (typeof data?.execution_config?.intrabar_execution_recalc_1s === 'boolean') {
+        setTradeEvaluationMode((prev) => {
+          if (!data.execution_config.intrabar_execution_recalc_1s) return 'standard';
+          return prev === 'intrabar_5s' ? 'intrabar_5s' : 'intrabar_1s';
+        });
+      }
       
       // Reset state
       setBars([]);
@@ -677,7 +742,9 @@ function App() {
       
       // Subscribe WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'subscribe', run_id: parsedRun.runId }));
+        wsRef.current.send(
+          JSON.stringify({ type: 'subscribe', run_id: parsedRun.runId, run_key: key })
+        );
       }
       
       return data;
@@ -768,6 +835,11 @@ function App() {
         console.error('Play request failed:', response.status, detailMessage);
         return;
       }
+      const playPayload = await response.json().catch(() => ({}));
+      const effectiveTradeMode = String(playPayload?.trade_eval_mode || '').trim().toLowerCase();
+      if (effectiveTradeMode === 'intrabar_5s' || effectiveTradeMode === 'intrabar_1s' || effectiveTradeMode === 'standard') {
+        setTradeEvaluationMode(effectiveTradeMode);
+      }
       setRuntimeNotice('');
       setIsPlaying(true);
     } catch (error) {
@@ -849,6 +921,7 @@ function App() {
         method: 'POST'
       });
       setIsPlaying(false);
+      fetchActiveRuns().catch(() => null);
     } catch (error) {
       console.error('Stop error:', error);
     }
@@ -864,6 +937,7 @@ function App() {
       });
       clearActiveRunState('');
       setRuntimeNotice('');
+      fetchActiveRuns().catch(() => null);
     } catch (error) {
       console.error('Reset error:', error);
     }
@@ -895,6 +969,15 @@ function App() {
       setIsReloadingSnapshot(false);
     }
   }, [activeRunApiBase, hydrateRunSnapshot, runKey]);
+
+  const handleAttachActiveRun = useCallback(async (targetRunKey) => {
+    const ok = await hydrateRunSnapshot(targetRunKey, { showBusy: true });
+    if (!ok) {
+      setRuntimeNotice('Failed to attach selected run snapshot.');
+      return;
+    }
+    setRuntimeNotice('');
+  }, [hydrateRunSnapshot]);
   
   // Click marker on chart
   const handleMarkerClick = useCallback((markerOrId) => {
@@ -959,6 +1042,12 @@ function App() {
             Adaptive Tuner
           </button>
           <button
+            className={`nav-tab ${activeView === 'diagnostics' ? 'active' : ''}`}
+            onClick={() => setActiveView('diagnostics')}
+          >
+            Diagnostics
+          </button>
+          <button
             className={`nav-tab ${activeView === 'live-trader' ? 'active' : ''}`}
             onClick={() => setActiveView('live-trader')}
           >
@@ -986,6 +1075,8 @@ function App() {
           onTickerChange={setSelectedTicker}
           strategyApiUrl={strategyApiUrl}
         />
+      ) : activeView === 'diagnostics' ? (
+        <DiagnosticCalendar />
       ) : activeView === 'live-trader' ? (
         <LiveTraderMonitor />
       ) : (
@@ -1011,9 +1102,12 @@ function App() {
           {/* Run Config */}
           <RunConfig 
             onStart={handleStartRun} 
-            isRunning={!!runKey}
+            isRunning={hasActiveAttachedRun}
             onTickerChange={setSelectedTicker}
             effectiveExecutionConfig={effectiveExecutionConfig}
+            activeRuns={activeRuns}
+            activeRunKey={runKey}
+            onAttachRun={handleAttachActiveRun}
           />
 
           {/* Strategy Settings */}

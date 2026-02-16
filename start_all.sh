@@ -23,6 +23,8 @@ sleep 2
 # Start Backtest Runner on port 8002
 echo "🎯 Starting Backtest Runner API on port 8002..."
 cd /Users/hotovo/.gemini/antigravity/scratch/backtest-runner
+# Keep startup responsive for manual diagnostics by skipping heavy ticker-scope prewarm.
+export BACKTEST_STARTUP_PREWARM_ENABLED=0
 python3 -m uvicorn api_server:app --port 8002 --reload &
 RUNNER_PID=$!
 sleep 2

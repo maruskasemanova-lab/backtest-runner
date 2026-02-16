@@ -58,8 +58,8 @@ def resolve_execution_config(
     if requested_strategy_selection_mode not in {"adaptive_top_n", "all_enabled"}:
         requested_strategy_selection_mode = ""
     effective_strategy_selection_mode = (
-        profile_strategy_selection_mode
-        or requested_strategy_selection_mode
+        requested_strategy_selection_mode
+        or profile_strategy_selection_mode
         or str(aos_applied.get("strategy_selection_mode", "adaptive_top_n")).strip().lower()
         or "adaptive_top_n"
     )
@@ -78,8 +78,8 @@ def resolve_execution_config(
     except (TypeError, ValueError):
         aos_max_active_strategies = 3
     effective_max_active_strategies = (
-        profile_max_active_strategies
-        or requested_max_active_strategies
+        requested_max_active_strategies
+        or profile_max_active_strategies
         or aos_max_active_strategies
         or 3
     )

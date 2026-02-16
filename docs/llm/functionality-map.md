@@ -11,11 +11,11 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 ## Core Runtime Flow
 
 1. Client calls `POST /api/run/start` on runner.
-2. Runner resolves data, conditionally applies ticker strategy overrides (`apply_ticker_overrides_on_start`), applies AOS config (including per-ticker strategy-selection mode, active strategy-parameter combination profile, and adaptive strategy preferences), optional L2 enrichment.
+2. Runner resolves data, conditionally applies ticker strategy overrides (`apply_ticker_overrides_on_start`), applies AOS config (including per-ticker strategy-selection mode, active strategy-parameter combination profile, and adaptive strategy preferences), applies optional run-level session scope override (`include_extended_hours`), optional L2 enrichment.
 3. Runner configures strategy session via `POST /api/session/config` (risk/L2 + strategy-selection settings).
 4. Runner creates `SessionRunner` and stores it in active run registry.
 5. On `step/play`, runner sends each bar to strategy `POST /api/session/bar`.
-6. When execution is active (open position or pending next-bar entry), runner may attach 1-second intrabar top-of-book quotes for that minute (`intrabar_quotes_1s`) to improve intrabar SL/TP ordering.
+6. When intrabar execution mode is enabled, runner may attach 1-second intrabar top-of-book quotes for that minute (`intrabar_quotes_1s`) on each processed bar to support entry/exit logic.
 7. Strategy returns decision payload; runner maps it to markers and summary state.
 8. Runner broadcasts bar + decision updates over `/ws/live`.
 9. Frontend consumes updates and renders timeline/summary.
@@ -36,7 +36,7 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 3. Optional intrabar second-level artifacts built by `src/intrabar_frame_builder.py`.
 4. 1s -> 1m aggregation/sanity in `src/l2_feature_aggregator.py`.
 5. Features attached to runner bars via `src/l2_feature_service.py`.
-6. Optional execution-time intrabar quote replay (`intrabar_quotes_1s`) is loaded lazily per-minute and sent only on execution bars.
+6. Optional execution-time intrabar quote replay (`intrabar_quotes_1s`) is loaded lazily per-minute and sent on each processed bar when intrabar mode is enabled.
 7. Optional sessionized daily reset for cumulative L2 metrics in runner API.
 
 ## Strategy Engine Internals
@@ -60,7 +60,7 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 ## Frontend Behavioral Ownership
 
 - `App.jsx`: orchestration of controls + data fetches + socket handling.
-- `RunConfig.jsx`: run/session execution parameters, including optional selection of a saved adaptive tuned profile (applied before next run start) and optional momentum-diversification override (`single` or `sleeves[]` multi-sleeve JSON).
+- `RunConfig.jsx`: run/session execution parameters, including optional selection of a saved adaptive tuned profile (applied before next run start), optional pre/post-market inclusion toggle (`include_extended_hours`), and optional momentum-diversification override (`single` or `sleeves[]` multi-sleeve JSON).
 - `DecisionPanel.jsx`: marker timeline and explanation details.
 - `CandlestickChart.jsx` + related components: visual representation of bars/markers.
 - `StrategySettings.jsx`: strategy toggles + per-strategy parameter editing with capture/apply strategy-combination profiles per ticker.

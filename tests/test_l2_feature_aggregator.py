@@ -118,6 +118,8 @@ def test_aggregate_minute_low_coverage_flag():
     
     assert result.coverage_ratio == pytest.approx(20/60)
     assert any("LOW_COVERAGE" in f for f in result.sanity_flags)
+    assert "l2_quality_flags" in result.features
+    assert result.features["l2_quality"]["has_l2"] is True
 
 
 def test_aggregate_session():
@@ -160,3 +162,5 @@ def test_aggregate_empty():
     
     assert result.coverage_ratio == 0.0
     assert "NO_DATA" in result.sanity_flags
+    assert "NO_DATA" in result.features["l2_quality_flags"]
+    assert result.features["l2_quality"]["has_l2"] is False

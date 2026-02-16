@@ -11,6 +11,7 @@ Purpose: Initialize run, load data, configure strategy session defaults, and pre
 Important request fields:
 
 - identity: `run_id`, `ticker`, `date` OR `date_from` + `date_to`
+- session scope override: optional `include_extended_hours` (`true` => include pre/post-market bars, `false` => regular session only, `null/omitted` => keep AOS time-filter behavior)
 - execution realism: `account_size_usd`, `risk_per_trade_pct`, `max_fill_participation_rate`, `min_fill_ratio`
 - stop-risk policy: `stop_loss_mode` (`strategy|fixed|capped`), `fixed_stop_loss_pct`
 - exit behavior: `enable_partial_take_profit`, `partial_take_profit_rr`, `time_exit_bars`, `adverse_flow_*`, `adverse_flow_consistency_threshold`, `adverse_book_pressure_threshold`
@@ -25,6 +26,7 @@ Important request fields:
 Runtime safety notes:
 
 - long-range runs can auto-disable L2 enrichment by default when date span exceeds `BACKTEST_RUN_L2_MAX_DAYS` (default `10`) to prevent memory exhaustion; override with `BACKTEST_RUN_L2_FORCE=1`.
+- when `l2_only=true` or `l2_confirm_enabled=true`, missing L2 day coverage is treated as a hard start error (`HTTP 400`), not a silent fallback.
 - raw L2 dataframe cache is bounded by `BACKTEST_L2_CACHE_MAX_TICKERS`, `BACKTEST_L2_CACHE_MAX_ROWS`, and `BACKTEST_L2_CACHE_MAX_BYTES` (defaults favor memory safety over aggressive reuse).
 - strategy update fanout (`/api/strategies/update` bursts during run start) is concurrency-limited by `BACKTEST_STRATEGY_UPDATE_MAX_CONCURRENCY` (default `8`) to reduce start latency without unbounded request pressure.
 - runner->strategy API HTTP calls use bounded timeout `BACKTEST_STRATEGY_API_TIMEOUT_SECONDS` (default `6.0`) to fail fast when strategy API is slow/unreachable.
@@ -49,12 +51,39 @@ Purpose: Warm run-start caches (bars/reference/L2 enrichment) for a ticker and d
 Compatibility notes:
 
 - accepts `ticker` with `date` or `date_from/date_to` (scope `range`) and optional `prewarm_scope=ticker` to warm full available ticker coverage, plus optional L2 flags (`l2_only`, `l2_confirm_enabled`, `comparable_mode`).
-- ticker-scope prewarm keeps full-range behavior by default (`BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS=0` => no day-span cap). Set a positive day cap to limit L2 prewarm memory footprint when needed.
+- ticker-scope prewarm limits L2 by default (`BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS=10`) to avoid large startup-memory spikes on wide ticker coverage. Set `0` to remove the cap or set `BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE=1` to force L2 prewarm regardless of span.
 - guardrail: range-scope prewarm also auto-disables L2 enrichment when requested range exceeds run L2 window (`BACKTEST_RUN_L2_MAX_DAYS`, default `10`, unless `BACKTEST_RUN_L2_FORCE=1`) to prevent startup-memory spikes.
 - uses local AOS snapshot for time-filter/L2 defaults; does not reset or mutate remote strategy session state.
+- accepts optional `include_extended_hours` session-scope override (same semantics as run start).
 - returns `cache_hit` (`true` when identical request was already prewarmed in-memory during current backend process).
 - server startup can auto-prewarm configured tickers (defaults to `MU`) via envs: `BACKTEST_STARTUP_PREWARM_ENABLED`, `BACKTEST_STARTUP_PREWARM_TICKERS`, `BACKTEST_STARTUP_PREWARM_L2_CONFIRM` (default `true`).
 - ticker-scope prewarm can be reused for narrower date sub-ranges in later `POST /api/run/start` calls (same ticker/files/time-filter signature), so changing date windows no longer forces full file reload.
+
+### `POST /api/run/diagnose`
+
+Purpose: preflight diagnostics for one concrete run request (single day or range), with explicit reason codes for start failures.
+
+Request contract:
+
+- body follows `PrewarmRunRequest` shape (`ticker`, `date` or `date_from/date_to`, `l2_only`, `l2_confirm_enabled`, `comparable_mode`, ...)
+- query: `probe_start` (`false` by default). When `true`, endpoint also runs heavy prewarm/start-probe for exact parity with start pipeline.
+
+Response contract:
+
+- always returns structured diagnostics payload (even when run would fail):
+  - `ok` (`true|false`)
+  - `mode` (`coverage_only` or probe mode)
+  - `resolved` (effective range + L2 flags from prewarm status)
+  - `coverage.ohlcv_1m` (covered/missing days metadata)
+  - `coverage.l2_schemas[]` (per-schema covered/missing days metadata)
+  - when `ok=false`: `status_code`, `error_kind`, `error`
+  - when `ok=true`: `probe` summary (`bars`, `reference_bars`, L2 stats snapshot)
+
+Behavioral notes:
+
+- endpoint reuses run-start/prewarm validation path so diagnostics match real start behavior.
+- in default `coverage_only` mode, endpoint also performs short-range OHLCV probe (L2 disabled) to catch calendar/file-range false positives such as market holidays with zero bars.
+- common `error_kind` values include: `no_ohlcv_data`, `missing_l2_coverage`, `no_l2_aligned_bars`, `no_l2_data`.
 
 ### `POST /api/run/{run_id}/{ticker}/{date}/step|play|pause|resume|stop|restart`
 
@@ -62,7 +91,7 @@ Purpose: Control progression of an initialized run.
 
 Compatibility notes:
 
-- `play` accepts body or query speed format (`max`, `10hz`, integer ms) and optional `trade_eval_mode` (`standard|intrabar_1s`) to switch in-trade execution evaluation path without restarting run.
+- `play` accepts body or query speed format (`max`, `10hz`, integer ms) and optional `trade_eval_mode` (`standard|intrabar_1s`) to switch execution evaluation path without restarting run.
 - `restart` rewinds the existing in-memory run to bar zero (no re-load of source bars), clears remote strategy session state for that run+ticker, and reapplies stored session config before replay.
 - marker/event ordering must remain stable for frontend playback.
 - `POST /api/run/cache/flush?include_disk=true|false` clears run-start caches (bars/reference/L2 enrichment); use when reclaiming memory or forcing re-read from source files.
@@ -131,6 +160,65 @@ Snapshot contract (`GET /api/live-trader/snapshot/{run_id}`):
 - returns per-stream existence/count/latest row for dashboard status cards
 - includes aggregate `status` (`active|idle|finished|error`), `updated_at`, and top-level `runtime` latest summary
 
+### `GET /api/reports/diagnostic/{ticker}`
+
+Purpose: expose saved JSON diagnostic reports for frontend day-level analytics (calendar/funnel debugging).
+
+Query contract:
+
+- `phase` (default `0`) -> resolves `phase{phase}_diagnostic.json`
+- `profile` (default `diagnostic`) -> resolves directory `reports/{ticker_lower}_{profile}`
+
+Behavioral notes:
+
+- endpoint returns explicit errors on missing or invalid report artifacts (no fallback substitution):
+  - `404` when target file does not exist
+  - `400` when route/query tokens are invalid
+  - `500` when file cannot be read or JSON is malformed
+
+### `GET /api/reports/history/{ticker}`
+
+Purpose: expose calendar-friendly aggregates from historical run artifacts (`reports/*/session_summary.json`) so frontend Diagnostics can inspect previous runs and adaptive profile usage per day.
+
+Query contract:
+
+- `limit` (default `300`, max `5000`) limits number of matched report files processed.
+- `run_id` optional exact run-id filter (recommended for UI dropdown filtering).
+- `run_id_contains` optional substring filter for historical run IDs.
+- `adaptive_profile_id` optional adaptive profile filter. Exact metadata match is preferred; legacy report IDs with matching short token (e.g. `c4`) may be surfaced as hint matches.
+  - additional legacy heuristic: when profile-id metadata is missing in report artifacts, endpoint may classify matches as `strategy_hint` by comparing report strategy names with strategy set saved in `aos_config` profile candidate.
+- `include_multi_day` (default `true`) expands `YYYY-MM-DD_to_YYYY-MM-DD` labels into day-level calendar rows even when a day has zero closed trades.
+
+Response notes:
+
+- returns report-level day aggregates merged by calendar day under `day_results[]` with:
+  - day PnL (`pnl_pct`, `pnl_dollars`)
+  - day trade count (`total_trades`)
+  - day signal/regime counts from markers (`signals`, `regime_evaluations`)
+  - day bars when resolvable (`processed_bars`, `total_bars`; often `null` for multi-day range artifacts)
+  - `trade_details[]` including entry/exit reasons when available
+  - `runs[]` summaries (run id, saved-at, profile metadata, per-run day PnL/trades, plus run-level totals: `run_total_trades`, `run_total_pnl_pct`, `run_total_pnl_dollars`, `run_signals`, `run_regime_evaluations`, `run_processed_bars`, `run_total_bars`)
+- includes `filter_options` payload for diagnostics dropdowns:
+  - `filter_options.run_ids[]` with `run_id` and `latest_saved_at`
+  - `filter_options.adaptive_profiles[]` merged from history metadata and `aos_optimization/aos_config.json`
+- report artifacts with zero closed trades are excluded from history payload and run dropdown options.
+- includes calendar metadata: `split`, `metrics`, `matched_reports`, `scanned_reports`.
+- malformed historical artifacts are skipped and counted under `skipped_invalid_reports`.
+
+### `GET /api/system/l2/runtime` / `POST /api/system/l2/runtime`
+
+Purpose: inspect and adjust runner-side L2 runtime knobs without restarting the API (useful for diagnostics/tuning fast-mode).
+
+Runtime fields:
+
+- `iceberg_detection_enabled` (`bool`) toggles expensive iceberg sequence detection during L2 feature-map build.
+- `cache_max_tickers`, `cache_max_rows`, `cache_max_bytes` control raw L2 in-memory cache thresholds.
+
+Compatibility notes:
+
+- values apply to the current backend process only (runtime state, not persisted config files).
+- `POST` validates cache fields as non-negative integers and returns both `updated` keys and full effective `runtime`.
+
 ### `GET /api/adaptive-tuner/options/{ticker}` / `POST /api/adaptive-tuner/profiles/apply` / `POST /api/adaptive-tuner/run` / `GET /api/adaptive-tuner/{job_id}` / `GET /api/adaptive-tuner`
 
 Purpose: expose real ticker coverage for L2-aware tuning, manage saved tuned profiles, run adaptive strategy-selection tuning jobs (Adaptive Studio v1), poll job status/results, and list recent jobs.
@@ -196,6 +284,7 @@ Key settings passed from runner:
 - risk/fill: `risk_per_trade_pct`, `max_position_notional_pct`, `max_fill_participation_rate`, `min_fill_ratio`
 - stop-risk policy: `stop_loss_mode`, `fixed_stop_loss_pct`
 - exits: `time_exit_bars`, `partial_take_profit_*`, `adverse_flow_*`, `adverse_flow_consistency_threshold`, `adverse_book_pressure_threshold`
+- global risk guardrails (via `/api/config/trading`): `portfolio_drawdown_halt_pct` (run-level halt), `headwind_activation_score` (cross-asset threshold boost trigger)
 - L2 confirmation: `l2_confirm_enabled`, `l2_min_*`, `l2_lookback_bars`
 - strategy selection: `strategy_selection_mode`, `max_active_strategies`
 - momentum diversification override transport: `momentum_diversification_json` (JSON string; strategy API validates/normalizes into session defaults, including optional `sleeves[]` multi-sleeve definitions with per-sleeve thresholds)
@@ -214,6 +303,7 @@ Optional fields:
 
 - `vwap`
 - L2 feature vector fields (`l2_*`)
+- L2 data-quality metadata (`l2_quality_flags`, `l2_quality`) for degraded-feed awareness
 - optional 1-second intrabar quotes for current minute (`intrabar_quotes_1s`: `[{"s","bid","ask"}]`)
 - cross-asset reference bar (`ref_*`)
 

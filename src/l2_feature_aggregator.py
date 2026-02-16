@@ -17,7 +17,7 @@ import pandas as pd
 class AggregationResult:
     """Result of 1s → 1m aggregation with quality metrics."""
     
-    features: Dict[str, float]
+    features: Dict[str, Any]
     minute_key: int
     coverage_ratio: float
     seconds_with_data: int
@@ -89,11 +89,20 @@ class L2FeatureAggregator:
             AggregationResult with aggregated features and quality metrics
         """
         sanity_flags: List[str] = []
-        features: Dict[str, float] = {}
+        features: Dict[str, Any] = {}
         
         if df_1s.empty:
             return AggregationResult(
-                features={},
+                features={
+                    "l2_quality_flags": ["NO_DATA"],
+                    "l2_quality": {
+                        "coverage_ratio": 0.0,
+                        "book_coverage_ratio": 0.0,
+                        "seconds_with_data": 0,
+                        "flags": ["NO_DATA"],
+                        "has_l2": False,
+                    },
+                },
                 minute_key=minute_key,
                 coverage_ratio=0.0,
                 seconds_with_data=0,
@@ -157,6 +166,15 @@ class L2FeatureAggregator:
         # Check 3: coverage warning
         if coverage_ratio < 0.5:
             sanity_flags.append(f"LOW_COVERAGE: {coverage_ratio*100:.0f}%")
+
+        features["l2_quality_flags"] = list(sanity_flags)
+        features["l2_quality"] = {
+            "coverage_ratio": coverage_ratio,
+            "book_coverage_ratio": book_coverage,
+            "seconds_with_data": seconds_with_data,
+            "flags": list(sanity_flags),
+            "has_l2": seconds_with_data > 0,
+        }
         
         return AggregationResult(
             features=features,

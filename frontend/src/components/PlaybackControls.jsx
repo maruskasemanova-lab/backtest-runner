@@ -28,6 +28,7 @@ function PlaybackControls({
   };
 
   const getTradeModeLabel = (mode) => {
+    if (mode === 'intrabar_5s') return '5s intrabar';
     if (mode === 'intrabar_1s') return '1s intrabar';
     return 'standard bars';
   };
@@ -209,6 +210,20 @@ function PlaybackControls({
             <span>{getTradeModeLabel(tradeEvaluationMode)}</span>
           </div>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <button
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.7rem',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                background: tradeEvaluationMode === 'intrabar_5s' ? 'var(--accent-blue)' : 'transparent',
+                color: tradeEvaluationMode === 'intrabar_5s' ? 'white' : 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+              onClick={() => onTradeEvaluationModeChange('intrabar_5s')}
+            >
+              5s Intrabar
+            </button>
             <button
               style={{
                 padding: '4px 8px',

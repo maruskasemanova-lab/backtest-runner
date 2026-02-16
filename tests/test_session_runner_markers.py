@@ -197,6 +197,29 @@ def test_pattern_marker_ignored_even_without_engine_hint() -> None:
     assert all(marker["marker_type"] != "pattern_detected" for marker in markers)
 
 
+def test_summary_includes_report_context_when_provided() -> None:
+    config = RunConfig(run_id="r3b", ticker="MU", date="2026-02-06")
+    runner = SessionRunner(config)
+    runner._report_metadata = {
+        "adaptive_profile_id": "c4bb2197e651",
+        "adaptive_profile_name": "c4 adaptive",
+    }
+    runner._aos_applied = {
+        "adaptive_profile": {
+            "active_profile_id": "c4bb2197e651",
+            "enabled_strategies": ["momentum"],
+        }
+    }
+    runner._execution_config = {"apply_aos_optimizations_on_start": True}
+
+    summary = runner.get_summary()
+    assert summary["adaptive_profile_id"] == "c4bb2197e651"
+    assert summary["adaptive_profile_name"] == "c4 adaptive"
+    assert summary["report_metadata"]["adaptive_profile_id"] == "c4bb2197e651"
+    assert summary["aos_applied"]["adaptive_profile"]["active_profile_id"] == "c4bb2197e651"
+    assert summary["execution_config"]["apply_aos_optimizations_on_start"] is True
+
+
 def test_regime_explanation_does_not_claim_high_te_when_low() -> None:
     config = RunConfig(run_id="r4", ticker="MU", date="2026-02-06")
     runner = SessionRunner(config)

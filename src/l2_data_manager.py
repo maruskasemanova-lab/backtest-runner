@@ -20,6 +20,18 @@ class L2DataManager:
         except (TypeError, ValueError):
             return max(0, int(default))
 
+    @staticmethod
+    def _parse_bool_env(name: str, default: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None:
+            return bool(default)
+        normalized = str(raw).strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+        return bool(default)
+
     def __init__(self, data_dir: Optional[str] = None, data_dirs: Optional[List[str]] = None):
         if data_dirs:
             self.data_dirs = [str(Path(d).expanduser().resolve()) for d in data_dirs]
@@ -39,6 +51,17 @@ class L2DataManager:
             512 * 1024 * 1024,
         )
         self.data: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
+        # Dedicated runtime cache for intrabar access. Intrabar workloads query one-minute
+        # windows repeatedly; keeping one raw ticker dataframe hot avoids repeated disk reads.
+        self.intrabar_runtime_cache_enabled = self._parse_bool_env(
+            "BACKTEST_INTRABAR_RUNTIME_CACHE_ENABLED",
+            True,
+        )
+        self.intrabar_runtime_cache_max_tickers = self._parse_positive_int_env(
+            "BACKTEST_INTRABAR_RUNTIME_CACHE_MAX_TICKERS",
+            1,
+        )
+        self._intrabar_runtime_data: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
 
     @staticmethod
     def _normalize_datetime_index_utc(df: pd.DataFrame) -> pd.DataFrame:
@@ -561,4 +584,70 @@ class L2DataManager:
             end_time = end_time.replace(tzinfo=timezone.utc)
         
         builder = IntrabarFrameBuilder(manager=self)
-        return builder.build_frames(ticker, start_time, end_time)
+        loaded = self._get_intrabar_runtime_data(
+            ticker=ticker,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        if loaded is None:
+            return pd.DataFrame()
+        return builder.build_frames_from_loaded(loaded, start_time, end_time)
+
+    def _get_intrabar_runtime_data(
+        self,
+        *,
+        ticker: str,
+        start_time,
+        end_time,
+    ) -> Optional[pd.DataFrame]:
+        """Load once per ticker and reuse for intrabar minute-window extraction."""
+        if isinstance(start_time, str):
+            start_time = pd.to_datetime(start_time)
+        if isinstance(end_time, str):
+            end_time = pd.to_datetime(end_time)
+        start_time = pd.Timestamp(start_time)
+        end_time = pd.Timestamp(end_time)
+        if start_time.tzinfo is None:
+            start_time = start_time.tz_localize("UTC")
+        else:
+            start_time = start_time.tz_convert("UTC")
+        if end_time.tzinfo is None:
+            end_time = end_time.tz_localize("UTC")
+        else:
+            end_time = end_time.tz_convert("UTC")
+
+        if self.intrabar_runtime_cache_enabled and ticker in self._intrabar_runtime_data:
+            cached = self._intrabar_runtime_data[ticker]
+            if not cached.empty:
+                try:
+                    c_min = cached.index.min()
+                    c_max = cached.index.max()
+                    # Reuse cached data when requested window overlaps cached coverage.
+                    # Intrabar extraction tolerates partial-minute coverage (missing seconds
+                    # simply yield fewer quote checkpoints), so strict full-window coverage
+                    # is unnecessary and causes expensive reloads.
+                    if c_min <= end_time and c_max >= start_time:
+                        self._intrabar_runtime_data.move_to_end(ticker)
+                        return cached
+                except Exception:
+                    pass
+
+        loaded = self.load_data(
+            ticker=ticker,
+            start_date=start_time.strftime("%Y-%m-%d"),
+            end_date=end_time.strftime("%Y-%m-%d"),
+        )
+        if loaded is None:
+            return None
+
+        loaded = self._normalize_datetime_index_utc(loaded)
+        if not loaded.index.is_monotonic_increasing:
+            loaded = loaded.sort_index()
+
+        if self.intrabar_runtime_cache_enabled and self.intrabar_runtime_cache_max_tickers > 0:
+            self._intrabar_runtime_data[ticker] = loaded
+            self._intrabar_runtime_data.move_to_end(ticker)
+            while len(self._intrabar_runtime_data) > self.intrabar_runtime_cache_max_tickers:
+                self._intrabar_runtime_data.popitem(last=False)
+
+        return loaded

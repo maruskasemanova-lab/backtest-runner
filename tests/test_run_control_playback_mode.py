@@ -16,6 +16,7 @@ class _DummyConfig:
     date_from: str = "2026-02-03"
     strategy_api_url: str = "http://localhost:8001"
     intrabar_execution_recalc_1s: bool = True
+    intrabar_eval_step_seconds: int = 1
 
 
 class _DummyRunner:
@@ -64,6 +65,7 @@ def test_play_resume_sets_standard_trade_eval_mode():
     assert result["resumed"] is True
     assert result["trade_eval_mode"] == "standard"
     assert runner.config.intrabar_execution_recalc_1s is False
+    assert runner.config.intrabar_eval_step_seconds == 1
     assert runner.is_paused is False
 
 
@@ -84,3 +86,20 @@ def test_play_resume_sets_intrabar_trade_eval_mode_from_bool_payload():
     assert result["resumed"] is True
     assert result["trade_eval_mode"] == "intrabar_1s"
     assert runner.config.intrabar_execution_recalc_1s is True
+    assert runner.config.intrabar_eval_step_seconds == 1
+
+
+def test_play_resume_sets_intrabar_5s_trade_eval_mode():
+    runner = _DummyRunner()
+    runner.config.intrabar_execution_recalc_1s = False
+    runner.config.intrabar_eval_step_seconds = 1
+    deps = _build_deps(runner)
+    request = SimpleNamespace(speed_ms="10hz", trade_eval_mode="intrabar_5s")
+
+    result = asyncio.run(play_run("r1", "MU", "2026-02-03", deps, request=request))
+
+    assert result["success"] is True
+    assert result["resumed"] is True
+    assert result["trade_eval_mode"] == "intrabar_5s"
+    assert runner.config.intrabar_execution_recalc_1s is True
+    assert runner.config.intrabar_eval_step_seconds == 5

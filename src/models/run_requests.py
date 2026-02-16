@@ -9,6 +9,11 @@ class StartRunRequest(BaseModel):
     date: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+    # Run-level session scope override:
+    # - True  => include pre/post-market bars
+    # - False => regular session bars only
+    # - None  => use AOS time-filter settings
+    include_extended_hours: Optional[bool] = None
     data_file: Optional[str] = None  # If None, auto-discover from available data
     strategy_api_url: str = "http://localhost:8001"
     regime_detection_minutes: int = 15
@@ -76,6 +81,8 @@ class PrewarmRunRequest(BaseModel):
     date: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+    # Optional prewarm session-scope override (same semantics as StartRunRequest).
+    include_extended_hours: Optional[bool] = None
     data_file: Optional[str] = None
     allow_mock_data: bool = False
     l2_only: bool = False
@@ -99,5 +106,6 @@ class PlayRequest(BaseModel):
     speed_ms: Optional[Union[int, str]] = 100
     # Optional playback override for in-trade evaluation path:
     # - "standard" => minute bars only (faster)
-    # - "intrabar_1s" => include 1-second intrabar quotes while active/pending
+    # - "intrabar_1s" => include 1-second intrabar quotes for each processed minute bar
+    # - "intrabar_5s" => intrabar evaluation with 5-second quote checkpoints (faster than 1s)
     trade_eval_mode: Optional[str] = None

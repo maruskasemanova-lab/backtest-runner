@@ -43,6 +43,24 @@ async def play_run(
 ):
     _, runner = deps.run_registry.require(run_id, ticker, date)
 
+    def _set_trade_eval_mode(mode: str) -> None:
+        normalized = str(mode or "").strip().lower()
+        if normalized == "standard":
+            runner.config.intrabar_execution_recalc_1s = False
+            runner.config.intrabar_eval_step_seconds = 1
+            return
+        runner.config.intrabar_execution_recalc_1s = True
+        runner.config.intrabar_eval_step_seconds = 5 if normalized == "intrabar_5s" else 1
+
+    def _effective_trade_eval_mode() -> str:
+        if not bool(getattr(runner.config, "intrabar_execution_recalc_1s", False)):
+            return "standard"
+        try:
+            step = int(getattr(runner.config, "intrabar_eval_step_seconds", 1))
+        except (TypeError, ValueError):
+            step = 1
+        return "intrabar_5s" if step >= 5 else "intrabar_1s"
+
     payload: Optional[Dict[str, Any]] = None
     if raw_request is not None:
         try:
@@ -74,15 +92,15 @@ async def play_run(
         normalized = raw_trade_mode.strip().lower()
         if normalized in {"standard", "bar", "bars", "fast", "default", "minute", "false", "0", "off"}:
             normalized_trade_mode = "standard"
+        elif normalized in {"intrabar_5s", "intrabar-5s", "intrabar5s", "5s", "5sec", "5secs", "5second", "5seconds"}:
+            normalized_trade_mode = "intrabar_5s"
         elif normalized in {"intrabar_1s", "intrabar", "1s", "second", "seconds", "true", "1", "on"}:
             normalized_trade_mode = "intrabar_1s"
 
     if normalized_trade_mode is not None:
-        runner.config.intrabar_execution_recalc_1s = normalized_trade_mode == "intrabar_1s"
+        _set_trade_eval_mode(normalized_trade_mode)
 
-    effective_trade_mode = (
-        "intrabar_1s" if bool(getattr(runner.config, "intrabar_execution_recalc_1s", False)) else "standard"
-    )
+    effective_trade_mode = _effective_trade_eval_mode()
 
     if runner.is_running and runner.is_paused:
         runner.resume()

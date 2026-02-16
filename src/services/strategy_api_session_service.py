@@ -188,6 +188,34 @@ async def reset_remote_orchestrator_state_scoped(
         return False
 
 
+async def apply_orchestrator_config(
+    strategy_api_url: str,
+    config: Dict[str, Any],
+    deps: StrategyApiIntegrationDeps,
+) -> Dict[str, Any]:
+    """Best-effort update of remote orchestrator runtime config."""
+    if not isinstance(config, dict) or not config:
+        return {}
+    try:
+        async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+            async with session.post(
+                f"{strategy_api_url}/api/orchestrator/config",
+                json=config,
+            ) as resp:
+                if resp.status == 200:
+                    payload = await resp.json()
+                    return payload if isinstance(payload, dict) else {}
+                deps.logger.warning(
+                    "Remote orchestrator config update failed (HTTP %s) at %s",
+                    resp.status,
+                    strategy_api_url,
+                )
+                return {}
+    except Exception as exc:
+        deps.logger.warning(f"Remote orchestrator config update error: {exc}")
+        return {}
+
+
 async def load_remote_checkpoint(
     strategy_api_url: str,
     checkpoint_path: str,

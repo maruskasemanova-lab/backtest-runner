@@ -27,6 +27,9 @@ class RunConfig:
     account_size_usd: float = 10_000.0
     regime_detection_minutes: int = 15
     intrabar_execution_recalc_1s: bool = False
+    # Intrabar quote sampling step used during playback evaluation.
+    # 1 => full 1s quotes, 5 => downsampled 5s checkpoints (faster).
+    intrabar_eval_step_seconds: int = 1
     auto_close_eod: bool = True
     eod_close_time: time = field(default_factory=lambda: time(15, 55))
 
@@ -50,6 +53,8 @@ class SessionRunner:
         "l2_quality_coverage_ratio",
         "l2_quality_trade_ticks",
         "l2_quality_book_updates",
+        "l2_quality_flags",
+        "l2_quality",
         # Extended L2 features: previously computed but not transmitted
         "l2_cumulative_delta",
         "l2_signed_aggression",
@@ -76,6 +81,10 @@ class SessionRunner:
         self.phase = "INITIALIZED"
         self.last_response: Optional[Dict[str, Any]] = None
         self.session_summary: Optional[Dict[str, Any]] = None
+        # Optional run-level metadata injected by start_run service for reports.
+        self._report_metadata: Dict[str, Any] = {}
+        self._aos_applied: Dict[str, Any] = {}
+        self._execution_config: Dict[str, Any] = {}
         self._session_end_marker_keys: Set[str] = set()
         self._position_active: bool = False
         self._pending_entry: bool = False
@@ -164,11 +173,49 @@ class SessionRunner:
         return dt.astimezone(timezone.utc)
 
     def _should_attach_intrabar_quotes(self, include_pending_entry: bool = False) -> bool:
-        return (
-            bool(self.config.intrabar_execution_recalc_1s)
-            and bool(self.l2_manager is not None)
-            and (self._position_active or self._pending_entry or include_pending_entry)
-        )
+        # In intrabar mode, strategies may depend on 1s quotes before the first entry.
+        # Keep gating tied to mode+availability only (no execution-state gate).
+        _ = include_pending_entry
+        return bool(self.config.intrabar_execution_recalc_1s) and bool(self.l2_manager is not None)
+
+    def _intrabar_eval_step_seconds(self) -> int:
+        raw = getattr(self.config, "intrabar_eval_step_seconds", 1)
+        try:
+            parsed = int(raw)
+        except (TypeError, ValueError):
+            parsed = 1
+        return max(1, min(60, parsed))
+
+    def _apply_intrabar_eval_step(self, quotes: Optional[List[Dict[str, float]]]) -> Optional[List[Dict[str, float]]]:
+        if not quotes:
+            return None
+        step = self._intrabar_eval_step_seconds()
+        if step <= 1:
+            return quotes
+
+        last_index = len(quotes) - 1
+        selected: List[Dict[str, float]] = []
+        for idx, quote in enumerate(quotes):
+            sec_raw = quote.get("s")
+            try:
+                sec = int(sec_raw)
+            except (TypeError, ValueError):
+                sec = -1
+            include = idx == 0 or idx == last_index or (sec >= 0 and sec % step == 0)
+            if not include:
+                continue
+            if selected:
+                prev_sec = selected[-1].get("s")
+                try:
+                    if int(prev_sec) == sec:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            selected.append(quote)
+
+        if not selected:
+            return quotes
+        return selected
 
     def _load_intrabar_quotes(self, timestamp: datetime) -> Optional[List[Dict[str, float]]]:
         """
@@ -184,7 +231,8 @@ class SessionRunner:
         minute_start = ts_utc.replace(second=0, microsecond=0)
         minute_key = int(minute_start.timestamp())
         if minute_key in self._intrabar_quote_cache:
-            return self._intrabar_quote_cache[minute_key]
+            cached_quotes = self._intrabar_quote_cache[minute_key]
+            return self._apply_intrabar_eval_step(cached_quotes)
 
         minute_end = minute_start + timedelta(seconds=59, microseconds=999999)
         try:
@@ -234,7 +282,7 @@ class SessionRunner:
         quote_rows.sort(key=lambda item: item["s"])
         cached = quote_rows if quote_rows else None
         self._intrabar_quote_cache[minute_key] = cached
-        return cached
+        return self._apply_intrabar_eval_step(cached)
 
     def _update_execution_state(self, response: Dict[str, Any]) -> None:
         """Track whether next bar needs execution-level intrabar payload."""
@@ -537,6 +585,12 @@ class SessionRunner:
             await self._notify_decision(marker.to_dict())
 
             # Record in Performance Tracker
+            # Note: position_closed payload uses 'cost_usd', not 'total_costs'
+            cost_usd = pos.get('cost_usd', 0.0) or 0.0
+            # Fallback: extract from costs dict if cost_usd not present
+            if cost_usd == 0.0 and 'costs' in pos:
+                cost_usd = pos['costs'].get('total', 0.0) or 0.0
+            
             self.perf_tracker.record_trade(
                 strategy=pos.get('strategy', 'unknown'),
                 regime=pos.get('regime', 'unknown'),
@@ -550,7 +604,7 @@ class SessionRunner:
                 pnl_pct=pos.get('pnl_pct', 0.0),
                 pnl_dollars=pos.get('pnl_dollars', 0.0),
                 gross_pnl_pct=pos.get('gross_pnl_pct', 0.0),
-                total_costs=pos.get('total_costs', 0.0),
+                total_costs=cost_usd,
                 exit_reason=pos.get('exit_reason', 'unknown'),
                 bars_held=pos.get('bars_held', 0),
                 flow_strategy=pos.get('flow_strategy', False),
@@ -743,7 +797,7 @@ class SessionRunner:
     def get_summary(self) -> Dict[str, Any]:
         """Get session summary."""
         summary = self._build_session_summary()
-        return {
+        payload: Dict[str, Any] = {
             "run_id": self.config.run_id,
             "ticker": self.config.ticker,
             "date": self.config.date,
@@ -753,6 +807,19 @@ class SessionRunner:
             "markers": self.decision_tracker.get_markers(),
             "session_summary": summary
         }
+        if isinstance(self._report_metadata, dict) and self._report_metadata:
+            payload["report_metadata"] = dict(self._report_metadata)
+            adaptive_profile_id = str(self._report_metadata.get("adaptive_profile_id") or "").strip()
+            adaptive_profile_name = str(self._report_metadata.get("adaptive_profile_name") or "").strip()
+            if adaptive_profile_id:
+                payload["adaptive_profile_id"] = adaptive_profile_id
+            if adaptive_profile_name:
+                payload["adaptive_profile_name"] = adaptive_profile_name
+        if isinstance(self._aos_applied, dict) and self._aos_applied:
+            payload["aos_applied"] = dict(self._aos_applied)
+        if isinstance(self._execution_config, dict) and self._execution_config:
+            payload["execution_config"] = dict(self._execution_config)
+        return payload
 
     def _build_session_summary(self) -> Optional[Dict[str, Any]]:
         """

@@ -38,6 +38,7 @@ STRATEGY_FAMILY_MAP: Dict[str, str] = {
     "gap_liquidity": "level-based",
     "rotation": "sector",
     "iceberg_defense": "institutional",
+    "scalp_l2_intrabar": "scalp",
 }
 
 

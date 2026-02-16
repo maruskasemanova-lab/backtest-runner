@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 const normalizeStrategySelectionMode = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -14,8 +14,15 @@ const parseMaxActiveStrategies = (value, fallback = 3) => {
 };
 
 const ACTIVE_PROFILE_SENTINEL = "__ACTIVE__";
+const ACTIVE_COMBO_SENTINEL = "__ACTIVE_COMBO__";
 const AVAILABLE_DATA_CACHE_KEY = "backtest_runner_available_data_v1";
 const MU_TICKER = "MU";
+const MU_REPRO_PROFILE_ID = "c4bb2197e651";
+const MU_REPRO_DATE_FROM = "2026-01-13";
+const MU_REPRO_DATE_TO = "2026-01-30";
+const MU_SCALP_PROFILE_ID = "mu_scalp_intrabar_fee_v1";
+const MU_SCALP_DATE_FROM = "2026-02-10";
+const MU_SCALP_DATE_TO = "2026-02-11";
 const AUTO_PREWARM_TICKERS = new Set([MU_TICKER]);
 const MU_DEFAULT_MOMENTUM_APPLY_TO_STRATEGIES = [
   "mean_reversion",
@@ -27,6 +34,7 @@ const MU_DEFAULT_MOMENTUM_APPLY_TO_STRATEGIES = [
   "gap_liquidity",
   "absorption_reversal",
   "momentum_flow",
+  "scalp_l2_intrabar",
   "exhaustion_fade",
 ].join(",");
 
@@ -38,8 +46,13 @@ const applyMuMomentumDefaults = (draft, ticker, previousTicker) => {
   }
   return {
     ...draft,
-    momentum_diversification_override_enabled: true,
+    // Keep MU starts deterministic and aligned with reproducible backtests.
+    momentum_diversification_override_enabled: false,
     momentum_apply_to_strategies: MU_DEFAULT_MOMENTUM_APPLY_TO_STRATEGIES,
+    include_extended_hours: false,
+    apply_aos_optimizations_on_start: true,
+    fast_start_session_reset: false,
+    comparable_mode: true,
   };
 };
 
@@ -70,6 +83,14 @@ const formatAdaptiveProfileLabel = (profile) => {
   const score = Number(profile?.score || 0).toFixed(4);
   const stamp = formatProfileTimestamp(profile?.created_at);
   return `${profileId} | score ${score} | ${stamp}`;
+};
+
+const formatComboProfileLabel = (profile) => {
+  const profileId = String(profile?.profile_id || "profile");
+  const profileName = String(profile?.profile_name || profileId);
+  const strategyCount = Object.keys(profile?.strategy_params || {}).length;
+  const stamp = formatProfileTimestamp(profile?.updated_at || profile?.created_at);
+  return `${profileName} | ${strategyCount} strategies | ${stamp}`;
 };
 
 const START_TIMING_PHASE_LABELS = {
@@ -148,6 +169,41 @@ const normalizeStopLossMode = (value, fallback = "strategy") => {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "fixed" || normalized === "capped") return normalized;
   return fallback;
+};
+
+const normalizeIsoDay = (value) => {
+  const text = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+};
+
+const clampIsoDayToRange = (day, range) => {
+  const normalized = normalizeIsoDay(day);
+  if (!normalized) return "";
+  const min = normalizeIsoDay(range?.start);
+  const max = normalizeIsoDay(range?.end);
+  if (min && normalized < min) return min;
+  if (max && normalized > max) return max;
+  return normalized;
+};
+
+const resolveDateRangeWithFallback = ({ range, from, to, fallbackDate }) => {
+  const fallback = clampIsoDayToRange(fallbackDate, range) || normalizeIsoDay(fallbackDate);
+  let nextFrom = clampIsoDayToRange(from, range) || fallback;
+  let nextTo = clampIsoDayToRange(to, range) || fallback || nextFrom;
+  if (nextFrom && nextTo && nextTo < nextFrom) {
+    nextTo = nextFrom;
+  }
+  if (!nextFrom && nextTo) {
+    nextFrom = nextTo;
+  }
+  if (!nextTo && nextFrom) {
+    nextTo = nextFrom;
+  }
+  return {
+    date_from: nextFrom || "",
+    date_to: nextTo || "",
+    date: nextFrom || nextTo || fallback || "",
+  };
 };
 
 const parseCsvTokens = (value, normalizeToken) => {
@@ -403,7 +459,15 @@ const l2GateFieldConfig = [
   },
 ];
 
-function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfig }) {
+function RunConfig({
+  onStart,
+  isRunning,
+  onTickerChange,
+  effectiveExecutionConfig,
+  activeRuns = [],
+  activeRunKey = "",
+  onAttachRun,
+}) {
   const [availableData, setAvailableData] = useState(null);
   const [config, setConfig] = useState({
     run_id: `backtest-${Date.now()}`,
@@ -411,6 +475,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     date: "",
     date_from: "",
     date_to: "",
+    include_extended_hours: false,
     data_file: null,
     strategy_api_url: `http://${window.location.hostname}:8001`,
     risk_per_trade_pct: 1.0,
@@ -464,9 +529,9 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     checkpoint_path: null,
     auto_save_checkpoint: true,
     cold_start_each_day: false,
-    comparable_mode: false,
-    fast_start_session_reset: true,
-    apply_aos_optimizations_on_start: false,
+    comparable_mode: true,
+    fast_start_session_reset: false,
+    apply_aos_optimizations_on_start: true,
   });
 
   const [loading, setLoading] = useState(false);
@@ -492,6 +557,11 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const [selectedAdaptiveProfileId, setSelectedAdaptiveProfileId] = useState(
     ACTIVE_PROFILE_SENTINEL
   );
+  const [comboProfilesLoading, setComboProfilesLoading] = useState(false);
+  const [comboProfilesError, setComboProfilesError] = useState(null);
+  const [comboProfiles, setComboProfiles] = useState([]);
+  const [activeComboProfileId, setActiveComboProfileId] = useState("");
+  const [selectedComboProfileId, setSelectedComboProfileId] = useState(ACTIVE_COMBO_SENTINEL);
   const lastSyncedAdaptiveProfileRef = useRef("");
   const lastPrewarmKeyRef = useRef("");
   const activePrewarmRequestKeyRef = useRef("");
@@ -499,6 +569,16 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const prewarmAbortRef = useRef(null);
 
   const strategyApiBase = (config.strategy_api_url || "").replace(/\/+$/, "");
+  const runningRunOptions = useMemo(() => {
+    const rows = Array.isArray(activeRuns) ? activeRuns : [];
+    return rows.filter((row) => {
+      if (!row || typeof row !== "object") return false;
+      const running = !!row.is_running;
+      const paused = !!row.is_paused;
+      const phase = String(row.phase || "").trim().toUpperCase();
+      return running || paused || phase === "INITIALIZED";
+    });
+  }, [activeRuns]);
 
   const buildPrewarmPayload = useCallback(() => {
     const ticker = String(config.ticker || "").trim().toUpperCase();
@@ -512,9 +592,10 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       allow_mock_data: false,
       l2_only: false,
       l2_confirm_enabled: true,
+      include_extended_hours: !!config.include_extended_hours,
       comparable_mode: false,
     };
-  }, [config.ticker]);
+  }, [config.include_extended_hours, config.ticker]);
 
   const hydrateExecutionConfigFromPositioning = useCallback((payload) => {
     const positioning = normalizePositioningConfig(payload);
@@ -685,6 +766,46 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     }
   };
 
+  const fetchStrategyComboProfiles = async (ticker) => {
+    const upperTicker = String(ticker || "").trim().toUpperCase();
+    if (!upperTicker) return null;
+    setComboProfilesLoading(true);
+    setComboProfilesError(null);
+    try {
+      const resp = await fetch(`/api/strategy-combos/${upperTicker}`);
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const payload = await resp.json();
+      const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+      const activeProfileId = String(payload?.active_profile_id || "").trim();
+      const knownIds = new Set(
+        profiles
+          .map((profile) => String(profile?.profile_id || "").trim())
+          .filter(Boolean)
+      );
+      setComboProfiles(profiles);
+      setActiveComboProfileId(activeProfileId);
+      setSelectedComboProfileId((prev) => {
+        const prevId = String(prev || "").trim();
+        if (prevId && prevId !== ACTIVE_COMBO_SENTINEL && knownIds.has(prevId)) {
+          return prevId;
+        }
+        return ACTIVE_COMBO_SENTINEL;
+      });
+      return payload;
+    } catch (err) {
+      console.error("Failed to fetch strategy combo profiles:", err);
+      setComboProfilesError("Failed to load strategy combo profiles.");
+      setComboProfiles([]);
+      setActiveComboProfileId("");
+      setSelectedComboProfileId(ACTIVE_COMBO_SENTINEL);
+      return null;
+    } finally {
+      setComboProfilesLoading(false);
+    }
+  };
+
   const normalizeStrategyKey = (value) =>
     String(value || "")
       .trim()
@@ -770,6 +891,27 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     return await resp.json();
   };
 
+  const applyStrategyComboProfile = async (ticker, profileId, options = {}) => {
+    const upperTicker = String(ticker || "").trim().toUpperCase();
+    const targetProfileId = String(profileId || "").trim();
+    if (!upperTicker || !targetProfileId) return null;
+    const resp = await fetch("/api/strategy-combos/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker: upperTicker,
+        profile_id: targetProfileId,
+        strategy_api_url: config.strategy_api_url,
+        apply_now: !!options.applyNow,
+      }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data?.detail || `HTTP ${resp.status}`);
+    }
+    return await resp.json();
+  };
+
   const handleSaveCheckpointNow = async () => {
     if (!strategyApiBase) {
       setCheckpointMessage("Strategy API URL is missing.");
@@ -816,26 +958,43 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         return;
       }
 
-      const targetTicker = data.tickers[0];
-      const range = data.date_ranges?.[targetTicker];
-      const defaultDate = range?.end || new Date().toISOString().split("T")[0];
-
-      setConfig((prev) => ({
-        ...applyMuMomentumDefaults(
+      let changedTickerToNotify = "";
+      setConfig((prev) => {
+        const prevTicker = String(prev.ticker || "").trim().toUpperCase();
+        const hasPrevTicker = !!prevTicker && data.tickers.includes(prevTicker);
+        const targetTicker = hasPrevTicker ? prevTicker : data.tickers[0];
+        if (targetTicker && targetTicker !== prevTicker) {
+          changedTickerToNotify = targetTicker;
+        }
+        const range = data.date_ranges?.[targetTicker];
+        const defaultDate = normalizeIsoDay(range?.end) || new Date().toISOString().split("T")[0];
+        const dateSeed = hasPrevTicker
+          ? resolveDateRangeWithFallback({
+              range,
+              from: prev.date_from,
+              to: prev.date_to,
+              fallbackDate: defaultDate,
+            })
+          : resolveDateRangeWithFallback({
+              range,
+              from: defaultDate,
+              to: defaultDate,
+              fallbackDate: defaultDate,
+            });
+        const next = applyMuMomentumDefaults(
           {
             ...prev,
             ticker: targetTicker,
-            date: defaultDate,
-            date_from: defaultDate,
-            date_to: defaultDate,
+            ...dateSeed,
           },
           targetTicker,
           prev.ticker
-        ),
-      }));
+        );
+        return next;
+      });
 
-      if (onTickerChange) {
-        onTickerChange(targetTicker);
+      if (onTickerChange && changedTickerToNotify) {
+        onTickerChange(changedTickerToNotify);
       }
     };
 
@@ -899,11 +1058,16 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       setActiveAdaptiveProfileId("");
       setSelectedAdaptiveProfileId(ACTIVE_PROFILE_SENTINEL);
       setAdaptiveProfilesError(null);
+      setComboProfiles([]);
+      setActiveComboProfileId("");
+      setSelectedComboProfileId(ACTIVE_COMBO_SENTINEL);
+      setComboProfilesError(null);
       return;
     }
 
     fetchTickerAosConfig(config.ticker, { hydrateExecution: true });
     fetchAdaptiveProfiles(config.ticker);
+    fetchStrategyComboProfiles(config.ticker);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.ticker]);
 
@@ -1115,6 +1279,8 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       }
 
       let profileChanged = false;
+      let comboChanged = false;
+      let comboAppliedProfileId = "";
       if (config.ticker) {
         const selectedProfileId =
           selectedAdaptiveProfileId === ACTIVE_PROFILE_SENTINEL
@@ -1130,6 +1296,25 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
             throw new Error(`Failed to apply adaptive profile: ${profileErr.message}`);
           }
         }
+
+        const selectedComboId =
+          selectedComboProfileId === ACTIVE_COMBO_SENTINEL
+            ? ""
+            : String(selectedComboProfileId || "").trim();
+        const activeComboId = String(activeComboProfileId || "").trim();
+        const comboToApplyId = selectedComboId || activeComboId;
+        if (comboToApplyId) {
+          try {
+            await applyStrategyComboProfile(config.ticker, comboToApplyId, { applyNow: true });
+            comboAppliedProfileId = comboToApplyId;
+            if (comboToApplyId !== activeComboId) {
+              setActiveComboProfileId(comboToApplyId);
+              comboChanged = true;
+            }
+          } catch (comboErr) {
+            throw new Error(`Failed to apply strategy combo profile: ${comboErr.message}`);
+          }
+        }
       }
 
       const payload = {
@@ -1137,6 +1322,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
         ticker: String(config.ticker || "").trim().toUpperCase(),
         date_from: config.date_from,
         date_to: config.date_to,
+        include_extended_hours: !!config.include_extended_hours,
         strategy_api_url: config.strategy_api_url,
         regime_detection_minutes: Number(config.regime_detection_minutes),
         account_size_usd: Number(config.account_size_usd),
@@ -1181,6 +1367,11 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       if (config.data_file) {
         payload.data_file = config.data_file;
       }
+      if (comboAppliedProfileId === MU_SCALP_PROFILE_ID) {
+        payload.strategy_selection_mode = "all_enabled";
+        payload.max_active_strategies = 1;
+        payload.intrabar_execution_recalc_1s = true;
+      }
       if (!comparableMode && useWarmStart && !payload.checkpoint_path) {
         // No checkpoint available - proceed with cold start (no blocking)
         console.info("Warm start enabled but no checkpoint selected, proceeding with cold start.");
@@ -1190,10 +1381,11 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
       if (timingPayload && typeof timingPayload === "object") {
         setStartTiming(timingPayload);
       }
-      if (profileChanged && config.ticker) {
+      if ((profileChanged || comboChanged) && config.ticker) {
         Promise.allSettled([
           fetchTickerAosConfig(config.ticker, { hydrateExecution: true }),
           fetchAdaptiveProfiles(config.ticker),
+          fetchStrategyComboProfiles(config.ticker),
         ]).catch(() => null);
       }
     } catch (err) {
@@ -1287,15 +1479,28 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
   const handleTickerChange = (ticker) => {
     const upperTicker = String(ticker || "").trim().toUpperCase();
     const range = availableData?.date_ranges[upperTicker];
-    const defaultDate = range?.end;
+    const defaultDate = normalizeIsoDay(range?.end);
 
     setConfig((prev) => {
+      const prevTicker = String(prev.ticker || "").trim().toUpperCase();
+      const tickerChanged = upperTicker !== prevTicker;
+      const dateSeed = tickerChanged
+        ? resolveDateRangeWithFallback({
+            range,
+            from: defaultDate || range?.start,
+            to: defaultDate || range?.end,
+            fallbackDate: defaultDate || range?.start || prev.date_from || prev.date_to || prev.date,
+          })
+        : resolveDateRangeWithFallback({
+            range,
+            from: prev.date_from,
+            to: prev.date_to,
+            fallbackDate: defaultDate || prev.date_from || prev.date_to || prev.date,
+          });
       const nextDraft = {
         ...prev,
         ticker: upperTicker,
-        date: defaultDate || prev.date,
-        date_from: defaultDate || range?.start || prev.date_from,
-        date_to: defaultDate || range?.end || prev.date_to,
+        ...dateSeed,
       };
       return applyMuMomentumDefaults(nextDraft, upperTicker, prev.ticker);
     });
@@ -1310,7 +1515,57 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     await Promise.all([
       fetchTickerAosConfig(config.ticker, { hydrateExecution: true }),
       fetchAdaptiveProfiles(config.ticker),
+      fetchStrategyComboProfiles(config.ticker),
     ]);
+  };
+
+  const handleApplyMuReproPreset = () => {
+    setConfig((prev) => {
+      if (String(prev.ticker || "").trim().toUpperCase() !== MU_TICKER) {
+        return prev;
+      }
+      return {
+        ...prev,
+        date: MU_REPRO_DATE_TO,
+        date_from: MU_REPRO_DATE_FROM,
+        date_to: MU_REPRO_DATE_TO,
+        include_extended_hours: false,
+        apply_aos_optimizations_on_start: true,
+        fast_start_session_reset: false,
+        momentum_diversification_override_enabled: false,
+        comparable_mode: true,
+        cold_start_each_day: false,
+      };
+    });
+    setSelectedAdaptiveProfileId(MU_REPRO_PROFILE_ID);
+  };
+
+  const handleApplyMuScalpPreset = () => {
+    setConfig((prev) => {
+      if (String(prev.ticker || "").trim().toUpperCase() !== MU_TICKER) {
+        return prev;
+      }
+      return {
+        ...prev,
+        date: MU_SCALP_DATE_TO,
+        date_from: MU_SCALP_DATE_FROM,
+        date_to: MU_SCALP_DATE_TO,
+        include_extended_hours: false,
+        l2_only: true,
+        l2_confirm_enabled: true,
+        l2_min_imbalance: 0.02,
+        l2_min_directional_consistency: 0.25,
+        l2_min_signed_aggression: 0.02,
+        l2_lookback_bars: 3,
+        comparable_mode: true,
+        cold_start_each_day: true,
+        fast_start_session_reset: false,
+        apply_aos_optimizations_on_start: false,
+        momentum_diversification_override_enabled: false,
+      };
+    });
+    setSelectedAdaptiveProfileId(ACTIVE_PROFILE_SENTINEL);
+    setSelectedComboProfileId(MU_SCALP_PROFILE_ID);
   };
 
   const momentumSleeves = Array.isArray(config.momentum_sleeves) ? config.momentum_sleeves : [];
@@ -1397,13 +1652,24 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
     selectedAdaptiveProfileId === ACTIVE_PROFILE_SENTINEL
       ? ""
       : String(selectedAdaptiveProfileId || "").trim();
+  const requestedComboProfileId =
+    selectedComboProfileId === ACTIVE_COMBO_SENTINEL
+      ? ""
+      : String(selectedComboProfileId || "").trim();
   const selectedAdaptiveProfile =
     requestedAdaptiveProfileId
       ? adaptiveProfiles.find(
           (profile) => String(profile?.profile_id || "").trim() === requestedAdaptiveProfileId
         ) || null
       : null;
+  const selectedComboProfile =
+    requestedComboProfileId
+      ? comboProfiles.find(
+          (profile) => String(profile?.profile_id || "").trim() === requestedComboProfileId
+        ) || null
+      : null;
   const effectiveAdaptiveProfileId = requestedAdaptiveProfileId || String(activeAdaptiveProfileId || "").trim();
+  const effectiveComboProfileId = requestedComboProfileId || String(activeComboProfileId || "").trim();
 
   if (isRunning) {
     return (
@@ -1426,6 +1692,21 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
               {config.date_from && config.date_to
                 ? `${config.date_from} → ${config.date_to}`
                 : config.date}
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="field-row" htmlFor="run_info_include_extended_hours">
+              <span>Include Pre/Post-Market Bars</span>
+              <input
+                id="run_info_include_extended_hours"
+                type="checkbox"
+                checked={!!config.include_extended_hours}
+                disabled
+                readOnly
+              />
+            </label>
+            <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: "4px" }}>
+              This value is set before run start in Run Config.
             </div>
           </div>
           <div className="form-group">
@@ -1632,6 +1913,52 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
               required
             />
           </div>
+          <div className="form-group">
+            <label htmlFor="active_run_select">
+              Running Processes
+              <span style={{ color: "var(--text-muted)", fontWeight: "normal", fontSize: "0.75rem" }}>
+                {` (${runningRunOptions.length})`}
+              </span>
+            </label>
+            <select
+              id="active_run_select"
+              value={String(activeRunKey || "")}
+              onChange={(e) => {
+                const targetRunKey = String(e.target.value || "");
+                if (!targetRunKey) return;
+                const selected = runningRunOptions.find(
+                  (row) => String(row.run_key || "") === targetRunKey
+                );
+                if (selected?.run_id) {
+                  handleChange("run_id", String(selected.run_id));
+                }
+                if (typeof onAttachRun === "function") {
+                  onAttachRun(targetRunKey);
+                }
+              }}
+            >
+              <option value="">Select running run...</option>
+              {runningRunOptions.map((row) => {
+                const runKey = String(row.run_key || "");
+                const runId = String(row.run_id || "");
+                const ticker = String(row.ticker || "").toUpperCase();
+                const date = String(row.date || "");
+                const phase = String(row.phase || "UNKNOWN");
+                const bars = Number(row.current_bar_index || 0);
+                const total = Number(row.total_bars || 0);
+                const progress = Number(row.progress_pct || 0);
+                const statusLabel = row.is_running ? "RUNNING" : (row.is_paused ? "PAUSED" : phase);
+                return (
+                  <option key={runKey} value={runKey}>
+                    {`${runId} | ${ticker} | ${date} | ${statusLabel} | ${bars}/${total} (${progress.toFixed(1)}%)`}
+                  </option>
+                );
+              })}
+            </select>
+            <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: "4px" }}>
+              Pick a running/paused run to attach the UI to it.
+            </div>
+          </div>
 
           <div className="form-group">
             <label htmlFor="ticker">
@@ -1712,6 +2039,21 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
               onChange={(e) => handleDateToChange(e.target.value)}
               required
             />
+          </div>
+
+          <div className="form-group">
+            <label className="field-row" htmlFor="include_extended_hours">
+              <span>Include Pre/Post-Market Bars</span>
+              <input
+                id="include_extended_hours"
+                type="checkbox"
+                checked={!!config.include_extended_hours}
+                onChange={(e) => handleChange("include_extended_hours", e.target.checked)}
+              />
+            </label>
+            <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: "4px" }}>
+              Off = regular session only (ET 09:30-16:00), faster runs. On = include pre/post market.
+            </div>
           </div>
 
           <div className="form-group">
@@ -1935,19 +2277,83 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
           <div className="preset-box">
             <div className="preset-header">
               <span className="preset-title">Adaptive Profile ({config.ticker || "Ticker"})</span>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleReloadAosAndProfiles}
-                disabled={aosLoading || adaptiveProfilesLoading || !config.ticker}
-                style={{ padding: "6px 10px", fontSize: "0.78rem" }}
-              >
-                {aosLoading || adaptiveProfilesLoading ? "Loading..." : "Reload"}
-              </button>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleApplyMuReproPreset}
+                  disabled={String(config.ticker || "").trim().toUpperCase() !== MU_TICKER}
+                  style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+                >
+                  Use MU Repro Preset
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleApplyMuScalpPreset}
+                  disabled={String(config.ticker || "").trim().toUpperCase() !== MU_TICKER}
+                  style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+                >
+                  Use MU Scalp 1s Preset
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleReloadAosAndProfiles}
+                  disabled={
+                    aosLoading ||
+                    adaptiveProfilesLoading ||
+                    comboProfilesLoading ||
+                    !config.ticker
+                  }
+                  style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+                >
+                  {aosLoading || adaptiveProfilesLoading || comboProfilesLoading ? "Loading..." : "Reload"}
+                </button>
+              </div>
             </div>
             <div className="preset-copy">
               Runtime adaptive/AOS hodnoty sa berú priamo z API (Adaptive Studio/Tuner). Tu vyberieš len profil,
               ktorý sa má aktivovať pred štartom runu.
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="aos_combo_profile">Strategy Combination Profile (for this run)</label>
+              <select
+                id="aos_combo_profile"
+                value={selectedComboProfileId}
+                onChange={(e) => setSelectedComboProfileId(e.target.value)}
+                disabled={aosLoading || comboProfilesLoading || !config.ticker}
+              >
+                <option value={ACTIVE_COMBO_SENTINEL}>
+                  Use active combo from AOS
+                  {activeComboProfileId ? ` (${activeComboProfileId})` : " (none)"}
+                </option>
+                {comboProfiles
+                  .filter((profile) => String(profile?.profile_id || "").trim())
+                  .map((profile, idx) => {
+                    const profileId = String(profile?.profile_id || "").trim();
+                    return (
+                      <option key={profileId || `combo-${idx}`} value={profileId}>
+                        {formatComboProfileLabel(profile)}
+                      </option>
+                    );
+                  })}
+              </select>
+            </div>
+            <div className="preset-copy">
+              Zvolený combo profil sa aktivuje pred runom a okamžite sa aplikuje na Strategy API.
+            </div>
+            <div className="preset-copy">
+              Aktívny combo profil: {effectiveComboProfileId || "none"}
+            </div>
+            {selectedComboProfile && (
+              <div className="preset-copy">
+                Selected combo: {formatComboProfileLabel(selectedComboProfile)}
+              </div>
+            )}
+            <div className="preset-copy">
+              Pre intrabar scalp drž krátke okná (2-3 dni), inak je run výrazne pomalší.
             </div>
 
             <div className="form-group">
@@ -2013,6 +2419,19 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
                 }}
               >
                 {adaptiveProfilesError}
+              </div>
+            )}
+            {comboProfilesError && (
+              <div
+                style={{
+                  color: "var(--accent-red)",
+                  fontSize: "0.8rem",
+                  background: "rgba(239, 68, 68, 0.1)",
+                  padding: "var(--spacing-xs)",
+                  borderRadius: "var(--border-radius-sm)",
+                }}
+              >
+                {comboProfilesError}
               </div>
             )}
           </div>
@@ -3099,6 +3518,7 @@ function RunConfig({ onStart, isRunning, onTickerChange, effectiveExecutionConfi
               loading ||
               aosLoading ||
               adaptiveProfilesLoading ||
+              comboProfilesLoading ||
               !config.ticker ||
               !config.date_from ||
               !config.date_to

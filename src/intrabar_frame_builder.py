@@ -260,12 +260,24 @@ class IntrabarFrameBuilder:
         if loaded is None:
             return pd.DataFrame()
 
-        df = loaded
-        df = self.manager._normalize_datetime_index_utc(df)
-        
-        # Filter to time range
-        mask = (df.index >= start_dt_utc) & (df.index <= end_dt_utc)
-        df = df.loc[mask].copy()
+        return self.build_frames_from_loaded(loaded, start_dt_utc, end_dt_utc)
+
+    def build_frames_from_loaded(
+        self,
+        loaded: pd.DataFrame,
+        start_dt_utc: datetime,
+        end_dt_utc: datetime,
+    ) -> pd.DataFrame:
+        """Build 1-second frames using already loaded raw L2 data."""
+        if loaded is None:
+            return pd.DataFrame()
+
+        df = self.manager._normalize_datetime_index_utc(loaded)
+        if not df.index.is_monotonic_increasing:
+            df = df.sort_index()
+
+        # Fast indexed time-slice (avoids full O(n) boolean mask per minute).
+        df = df.loc[start_dt_utc:end_dt_utc].copy()
 
         if df.empty:
             return pd.DataFrame()

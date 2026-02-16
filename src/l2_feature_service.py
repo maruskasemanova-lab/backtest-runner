@@ -20,6 +20,7 @@ class L2FeatureService:
 
     manager: L2DataManager
     logger: logging.Logger
+    iceberg_detection_enabled: bool = True
 
     @staticmethod
     def to_utc_datetime(value: Any) -> datetime:
@@ -45,7 +46,7 @@ class L2FeatureService:
         ticker: str,
         start_dt_utc: datetime,
         end_dt_utc: datetime,
-    ) -> Tuple[Dict[int, Dict[str, float]], Dict[str, Any]]:
+    ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, Any]]:
         """
         Build minute-level L2 features keyed by UTC epoch-minute.
 
@@ -57,7 +58,7 @@ class L2FeatureService:
         - l2_book_pressure / l2_book_pressure_change
         - l2_iceberg_buy_count / l2_iceberg_sell_count / l2_iceberg_bias
         """
-        feature_map: Dict[int, Dict[str, float]] = {}
+        feature_map: Dict[int, Dict[str, Any]] = {}
         stats = {
             "has_l2": False,
             "footprint_bars": 0,
@@ -84,17 +85,21 @@ class L2FeatureService:
                 }
             )
 
-        try:
-            icebergs = self.manager.detect_icebergs(
-                ticker=ticker,
-                start_time=start_dt_utc,
-                end_time=end_dt_utc,
-            )
-        except Exception as e:
-            self.logger.warning(f"L2 iceberg detection failed for {ticker}: {e}")
+        if self.iceberg_detection_enabled:
+            try:
+                icebergs = self.manager.detect_icebergs(
+                    ticker=ticker,
+                    start_time=start_dt_utc,
+                    end_time=end_dt_utc,
+                )
+            except Exception as e:
+                self.logger.warning(f"L2 iceberg detection failed for {ticker}: {e}")
+                icebergs = []
+        else:
             icebergs = []
 
         stats["icebergs"] = len(icebergs)
+        stats["icebergs_enabled"] = bool(self.iceberg_detection_enabled)
         for ice in icebergs:
             ts = ice.get("time")
             if not ts:
@@ -129,6 +134,14 @@ class L2FeatureService:
                     "l2_quality_trade_ticks": 0,
                     "l2_quality_book_updates": 0,
                     "l2_quality_coverage_ratio": 0.0,
+                    "l2_quality_flags": ["NO_DATA"],
+                    "l2_quality": {
+                        "coverage_ratio": 0.0,
+                        "flags": ["NO_DATA"],
+                        "trade_ticks": 0,
+                        "book_updates": 0,
+                        "has_l2": False,
+                    },
                 },
             )
             bucket.setdefault("l2_iceberg_buy_count", 0.0)
@@ -151,7 +164,7 @@ class L2FeatureService:
     def attach_features(
         cls,
         bars: List[Dict[str, Any]],
-        feature_map: Dict[int, Dict[str, float]],
+        feature_map: Dict[int, Dict[str, Any]],
         l2_only: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """Attach minute-aligned L2 features to bars."""
