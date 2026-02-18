@@ -9,6 +9,7 @@ class StrategyApiIntegrationDeps:
     load_strategy_overrides: Callable[[], Dict[str, Any]]
     sanitize_strategy_params: Callable[[Any], Dict[str, Any]]
     normalize_strategy_combo_profiles: Callable[[Any], List[Dict[str, Any]]]
+    normalize_unified_profiles: Callable[[Any], List[Dict[str, Any]]]
     normalize_tuner_profiles: Callable[[Any], List[Dict[str, Any]]]
     normalize_strategy_selection_mode: Callable[[Any], str]
     normalize_clamped_int: Callable[..., int]

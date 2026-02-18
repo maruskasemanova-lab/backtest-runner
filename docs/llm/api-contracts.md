@@ -4,9 +4,116 @@ Contract summary for runner, strategy, and cross-service coupling.
 
 ## Runner API (Port 8002) - Key Contracts
 
+### `GET /api/v2/auth/me` / `GET /api/v2/plans` / `GET /api/v2/usage`
+
+Purpose: v2 SaaS auth/profile/limits surface for multi-tenant clients.
+
+Auth contract:
+
+- `Authorization: Bearer <JWT>` is required for all `/api/v2/*` endpoints except Stripe webhook.
+- JWT verification uses `BACKTEST_JWT_SECRET` (fallback `SUPABASE_JWT_SECRET`).
+- dev override: `BACKTEST_ALLOW_UNVERIFIED_JWT=1` allows payload decode without signature check.
+- optional invite-only rollout gate: when `BACKTEST_INVITE_ONLY_BETA=1`, non-admin users must match one allowlist (`BACKTEST_INVITE_ALLOWLIST_USERS|TENANTS|EMAILS`) or receive `403 invite_only_beta`.
+
+Response notes:
+
+- v2 responses include `request_id`, `tenant_id`, `plan_tier`, and quota context.
+- quota snapshots expose per-plan limits (`concurrent_runs`, `max_range_days`, `req_per_min`, `retention_days`).
+- retention is hard-enforced server-side: terminal `runs/jobs` and old usage rows beyond `retention_days` are pruned during authenticated v2 traffic (active/queued records are preserved).
+
+### `GET /api/v2/user/settings` / `PUT /api/v2/user/settings`
+
+Purpose: persist authenticated user UI preferences/drafts as JSON settings on runner side.
+
+Behavioral notes:
+
+- settings are user-scoped (keyed by authenticated `user_id`); cross-user reads/writes are isolated.
+- `GET` returns full settings object (`{}` when missing).
+- `PUT` accepts `{ "settings": { ... } }` and merges top-level keys into existing settings.
+- payload must remain JSON-serializable and is size-limited to `262144` bytes.
+- current frontend integration stores run draft under `settings.run_config_draft` (ticker/date/profile intent).
+- storage backend:
+  - default: local SQLite (`user_settings` table in SaaS state DB).
+  - optional prod: Supabase PostgREST adapter when `BACKTEST_SUPABASE_USER_SETTINGS_ENABLED=1` and backend has `BACKTEST_SUPABASE_URL` + `BACKTEST_SUPABASE_SERVICE_ROLE_KEY`.
+
+### `GET /api/v2/ops/metrics`
+
+Purpose: admin-only operational metrics for queue pressure, runtime HTTP health, and local SaaS DB footprint.
+
+Behavioral notes:
+
+- requires admin role (`role=admin` or `plan_tier=admin`); non-admin callers receive `403 forbidden`.
+- queue payload includes `queued|running|completed|failed` heavy-job counters plus backlog utilization and heavy-job fail-rate.
+- websocket payload includes active client count vs max configured capacity.
+- runtime payload proxies in-process HTTP telemetry snapshot (`p50/p95` latency, 5xx error rate).
+- storage payload exposes current SaaS DB path/existence/size for quick operational checks.
+
+### `GET /api/v2/strategies/adaptive` / `POST /api/v2/strategies/adaptive` / `DELETE /api/v2/strategies/adaptive/{profile_id}`
+
+Purpose: multi-tenant adaptive strategy profile storage with per-user and superuser-global scopes.
+
+Behavioral notes:
+
+- profile scope:
+  - `user`: owned by authenticated user (default).
+  - `global`: superuser/admin only.
+- non-admin callers cannot create/update/delete `global` profiles.
+- list endpoint returns caller-owned user profiles and (optionally) global profiles.
+- delete endpoint enforces ownership (`user` owner or admin).
+- payload fields include `ticker`, `profile_name`, `adaptive_version`, `candidate`, `metadata`.
+
+### `POST /api/v2/runs` / `GET /api/v2/jobs/{job_id}`
+
+Purpose: authenticated run orchestration with quota enforcement and async job polling.
+
+Behavioral notes:
+
+- run start is queued and returned as `job_id` (status `queued|running|completed|failed`).
+- optional `Idempotency-Key`/`X-Idempotency-Key` request header deduplicates repeated submissions and returns original `job_id` (`idempotent_replay=true`).
+- queue dispatch is bounded by `BACKTEST_V2_WORKER_CONCURRENCY`; queued-heavy backlog is guarded by `BACKTEST_V2_MAX_QUEUE_BACKLOG`.
+- transient job failures are retried with bounded attempts (`BACKTEST_V2_JOB_MAX_ATTEMPTS*`) and exponential backoff (`BACKTEST_V2_JOB_RETRY_*`).
+- incident kill switch: when `BACKTEST_V2_HEAVY_OPS_ENABLED=0`, heavy ops return `503 heavy_ops_disabled` for non-admin callers.
+- plan limit failures return `402` with `plan_limit_exceeded` payload.
+- request-rate failures return `429` with `rate_limited` payload.
+- backlog saturation returns `429` with `queue_backlog_exceeded`.
+- non-admin callers cannot steer runner egress: `strategy_api_url` is forced to internal URL (`BACKTEST_INTERNAL_STRATEGY_API_URL`).
+- admin callers may override `strategy_api_url` only when URL is in allowlist (`BACKTEST_STRATEGY_API_ALLOWLIST`).
+- `GET /api/v2/jobs/{job_id}` includes `attempts`, `max_attempts`, and `idempotency_key` in the job payload.
+
+### `POST /api/v2/adaptive-tuner/run` / `POST /api/v2/data/download`
+
+Purpose: authenticated async queue wrappers for heavy tuner/download operations.
+
+Behavioral notes:
+
+- both endpoints reuse v2 plan limits (`max_range_days`, `concurrent_runs`) and share heavy-job concurrency pool.
+- both enqueue jobs in the same `/api/v2/jobs/{job_id}` lifecycle (`queued|running|completed|failed`).
+- both support optional idempotency-key dedupe and bounded retry semantics identical to `POST /api/v2/runs`.
+- `adaptive-tuner/run` applies the same strategy URL policy as `v2/runs` (non-admin forced to internal strategy URL).
+- `data/download` returns queued job immediately; result payload is delivered through job polling.
+
+### `POST /api/v2/billing/checkout` / `POST /api/v2/billing/portal` / `POST /api/v2/billing/webhook/stripe`
+
+Purpose: Stripe billing lifecycle integration for FREE -> PREMIUM.
+
+Behavioral notes:
+
+- checkout/portal require authenticated caller and configured `STRIPE_SECRET_KEY`.
+- webhook endpoint deduplicates events by Stripe `event_id` before processing.
+- subscription lifecycle supports:
+  - `cancel_at_period_end` scheduled downgrade (premium remains active until `current_period_end`).
+  - grace workflow for payment failures (`invoice.payment_failed`) with configurable `BACKTEST_BILLING_GRACE_DAYS`.
+  - automatic fallback to `free` after grace/period expiry.
+- webhook processing writes an internal billing audit trail (`billing_audit_events`).
+
 ### `POST /api/run/start`
 
 Purpose: Initialize run, load data, configure strategy session defaults, and prepare runner state.
+
+Deployment note:
+
+- `/api/run/*` playback endpoints are stateful (in-memory run registry). They require a persistent backend process.
+- Serverless targets (for example Vercel/Lambda) are blocked with `HTTP 503`.
 
 Important request fields:
 
@@ -14,6 +121,8 @@ Important request fields:
 - session scope override: optional `include_extended_hours` (`true` => include pre/post-market bars, `false` => regular session only, `null/omitted` => keep AOS time-filter behavior)
 - execution realism: `account_size_usd`, `risk_per_trade_pct`, `max_fill_participation_rate`, `min_fill_ratio`
 - stop-risk policy: `stop_loss_mode` (`strategy|fixed|capped`), `fixed_stop_loss_pct`
+- strategy trailing baseline: optional `trailing_stop_pct` (global trailing distance in %, applied as `global_trailing_stop_pct` on strategy API side)
+- strategy exit/risk baselines: optional `global_exit_rr_ratio`, `global_risk_atr_stop_multiplier`, `global_risk_volume_stop_pct`, `global_risk_min_stop_loss_pct` (fanout as `global_*` strategy params)
 - exit behavior: `enable_partial_take_profit`, `partial_take_profit_rr`, `time_exit_bars`, `adverse_flow_*`, `adverse_flow_consistency_threshold`, `adverse_book_pressure_threshold`
 - L2 gating: `l2_only`, `l2_confirm_enabled`, `l2_min_*`, `l2_lookback_bars`
 - strategy selection: `strategy_selection_mode` (`adaptive_top_n|all_enabled`), `max_active_strategies`
@@ -41,7 +150,8 @@ Important response fields:
   - includes effective `strategy_selection_mode` and `max_active_strategies`
   - includes `apply_aos_optimizations_on_start` (whether remote AOS sync was executed during start)
   - includes `momentum_diversification_applied`, `momentum_diversification_source` (`request|adaptive_profile|aos_config|none`), and effective `momentum_diversification`
-  - active strategy-parameter combo application details are exposed through `aos_applied.strategy_combo` when present
+  - active unified profile metadata is exposed via `aos_applied.unified_profile` when present
+  - legacy combo/adaptive metadata remains for backward compatibility when unified profile is not active
 - `start_timing` (start-phase timing diagnostics for FE/ops: `total_ms`, `slowest_phase`, `phases_ms`, and basic run context)
 
 ### `POST /api/run/prewarm`
@@ -56,8 +166,48 @@ Compatibility notes:
 - uses local AOS snapshot for time-filter/L2 defaults; does not reset or mutate remote strategy session state.
 - accepts optional `include_extended_hours` session-scope override (same semantics as run start).
 - returns `cache_hit` (`true` when identical request was already prewarmed in-memory during current backend process).
-- server startup can auto-prewarm configured tickers (defaults to `MU`) via envs: `BACKTEST_STARTUP_PREWARM_ENABLED`, `BACKTEST_STARTUP_PREWARM_TICKERS`, `BACKTEST_STARTUP_PREWARM_L2_CONFIRM` (default `true`).
+- server startup can auto-prewarm configured tickers (defaults to `MU`) via envs: `BACKTEST_STARTUP_PREWARM_ENABLED`, `BACKTEST_STARTUP_PREWARM_TICKERS`, `BACKTEST_STARTUP_PREWARM_L2_CONFIRM` (default `false`).
 - ticker-scope prewarm can be reused for narrower date sub-ranges in later `POST /api/run/start` calls (same ticker/files/time-filter signature), so changing date windows no longer forces full file reload.
+
+### `POST /api/data-loader/catalog/remote-sync`
+
+Purpose: ingest remote catalog manifest entries (e.g. Cloudflare R2 manifest JSON) into local data catalog.
+
+Request contract:
+
+- optional query `url`; when omitted, service uses `BACKTEST_REMOTE_MANIFEST_URL`.
+
+Response contract:
+
+- returns `status`, `synced_entries`, and effective `manifest_url`.
+
+Behavioral notes:
+
+- remote entries are stored as unmanaged catalog rows (`managed=false`) and may point to `https://...` or `s3://bucket/key` objects.
+- for `mbp-10` remote entries, coverage checks treat manifest rows as available; files are downloaded lazily into local cache on first range file resolution.
+- cache target is controlled by `BACKTEST_REMOTE_CACHE_DIR`; HTTP timeout by `BACKTEST_REMOTE_TIMEOUT_SEC`.
+- private S3/R2 fetches use `BACKTEST_REMOTE_S3_ENDPOINT` (or `BACKTEST_REMOTE_S3_ACCOUNT_ID`) + optional credentials `BACKTEST_REMOTE_S3_ACCESS_KEY_ID`/`BACKTEST_REMOTE_S3_SECRET_ACCESS_KEY`.
+
+### `GET /api/available-data`
+
+Purpose: expose available ticker/date coverage for run setup and tuner UX.
+
+Request contract:
+
+- optional query `refresh` (`true|false`, default `false`) to force catalog rescan before summarizing.
+
+Response contract:
+
+- `tickers[]`: symbols with discovered OHLCV and/or L2 catalog coverage.
+- `l2_tickers[]`: symbols with discovered `mbp-10` coverage.
+- `date_ranges.{ticker}`: effective OHLCV range (`start`, `end`, `files[]`).
+- `l2_date_ranges.{ticker}`: L2 range (`start`, `end`, `files[]`).
+- `l2_overlap_date_ranges.{ticker}`: calendar overlap window between OHLCV and L2 ranges.
+
+Behavioral notes:
+
+- OHLCV range uses effective file coverage (derived from timestamps), not only filename dates.
+- `l2_overlap_date_ranges` is provided for L2-only UX clamping while keeping backward compatibility with existing `date_ranges`.
 
 ### `POST /api/run/diagnose`
 
@@ -91,6 +241,7 @@ Purpose: Control progression of an initialized run.
 
 Compatibility notes:
 
+- playback contract assumes the same backend process retains active run state across requests.
 - `play` accepts body or query speed format (`max`, `10hz`, integer ms) and optional `trade_eval_mode` (`standard|intrabar_1s`) to switch execution evaluation path without restarting run.
 - `restart` rewinds the existing in-memory run to bar zero (no re-load of source bars), clears remote strategy session state for that run+ticker, and reapplies stored session config before replay.
 - marker/event ordering must remain stable for frontend playback.
@@ -105,6 +256,7 @@ Compatibility notes:
 - marker schema changes require frontend compatibility checks.
 - summary fields are consumed by reports and regression workflows.
 - `total_pnl_pct` in runner summary is normalized from `total_pnl_dollars / account_size_usd` to keep percent and dollar PnL directionally consistent.
+- run `state` payload includes `selection_warnings[]` (resolved from strategy-selection responses) so FE can surface strict-selection config gaps without fallback.
 
 ### `GET /api/aos-config` / `GET /api/aos-config/{ticker}` / `POST /api/aos-config/update`
 
@@ -116,6 +268,7 @@ Compatibility notes:
 - Adaptive selection settings are file-backed (`aos_optimization/aos_config.json`) and applied on next `POST /api/run/start`.
 - Supported adaptive switch-guard keys include `adaptive.min_active_bars_before_switch` and `adaptive.switch_cooldown_bars`.
 - Strategy combination profiles are also file-backed under each ticker (`strategy_combo_profiles`, `active_strategy_combo_profile_id`) and active profile params are applied at run start.
+- Unified profiles are file-backed per ticker (`unified_profiles`, `active_unified_profile_id`) and carry both `strategy_profile` and `execution_profile` sections.
 
 ### `GET /api/strategy-combos/{ticker}` / `POST /api/strategy-combos/capture` / `POST /api/strategy-combos/apply`
 
@@ -137,6 +290,27 @@ Apply contract (`POST /api/strategy-combos/apply`):
 - request: `ticker`, `profile_id`, optional `strategy_api_url`, `apply_now`
 - behavior: sets selected combo profile as ticker active profile in AOS config.
 - effect: next `POST /api/run/start` applies profile strategy params automatically; when `apply_now=true` they are also pushed to strategy API immediately.
+
+### `GET /api/profiles/{ticker}` / `POST /api/profiles/capture` / `POST /api/profiles/apply`
+
+Purpose: manage unified per-ticker profiles that bundle strategy and execution config into one profile entity.
+
+List contract (`GET /api/profiles/{ticker}`):
+
+- returns saved `profiles` and `active_profile_id` for ticker from AOS config.
+- each profile carries `profile_id`, `profile_name`, timestamps, `strategy_profile`, `execution_profile`.
+
+Capture contract (`POST /api/profiles/capture`):
+
+- request: `ticker`, optional `profile_name`, `strategy_api_url`, `set_active`
+- behavior: fetches live strategy params from strategy API and captures current ticker strategy/execution settings into one unified profile.
+- effect: when `set_active=true`, captured profile becomes ticker active unified profile.
+
+Apply contract (`POST /api/profiles/apply`):
+
+- request: `ticker`, `profile_id`, optional `strategy_api_url`, `apply_now`, `apply_execution`
+- behavior: marks profile as active unified profile; can apply strategy params immediately (`apply_now`) and persist execution section into positioning config (`apply_execution`).
+- effect: next `POST /api/run/start` prioritizes active unified profile over legacy combo/adaptive split paths.
 
 ### `GET /api/live-trader/runs` / `GET /api/live-trader/events/{run_id}` / `GET /api/live-trader/snapshot/{run_id}`
 
@@ -168,6 +342,8 @@ Query contract:
 
 - `phase` (default `0`) -> resolves `phase{phase}_diagnostic.json`
 - `profile` (default `diagnostic`) -> resolves directory `reports/{ticker_lower}_{profile}`
+- `summary_only` (default `false`) -> when `true`, returns compact structural summary instead of full payload body
+- `refresh_cache` (default `false`) -> when `true`, bypasses DB cache read and refreshes cached payload from file
 
 Behavioral notes:
 
@@ -175,19 +351,21 @@ Behavioral notes:
   - `404` when target file does not exist
   - `400` when route/query tokens are invalid
   - `500` when file cannot be read or JSON is malformed
+- when SaaS store is available, endpoint caches parsed payload by `(ticker, profile, phase, source_path, source_mtime_ns)` and serves from cache on repeated requests while file mtime is unchanged.
 
 ### `GET /api/reports/history/{ticker}`
 
-Purpose: expose calendar-friendly aggregates from historical run artifacts (`reports/*/session_summary.json`) so frontend Diagnostics can inspect previous runs and adaptive profile usage per day.
+Purpose: expose calendar-friendly aggregates from historical run artifacts so frontend Diagnostics can inspect previous runs and adaptive profile usage per day.
 
 Query contract:
 
-- `limit` (default `300`, max `5000`) limits number of matched report files processed.
+- `limit` (default `300`, max `5000`) limits number of matched report artifacts processed.
 - `run_id` optional exact run-id filter (recommended for UI dropdown filtering).
 - `run_id_contains` optional substring filter for historical run IDs.
 - `adaptive_profile_id` optional adaptive profile filter. Exact metadata match is preferred; legacy report IDs with matching short token (e.g. `c4`) may be surfaced as hint matches.
   - additional legacy heuristic: when profile-id metadata is missing in report artifacts, endpoint may classify matches as `strategy_hint` by comparing report strategy names with strategy set saved in `aos_config` profile candidate.
 - `include_multi_day` (default `true`) expands `YYYY-MM-DD_to_YYYY-MM-DD` labels into day-level calendar rows even when a day has zero closed trades.
+- `include_zero_trade_runs` (default `false`) includes runs with no closed trades in history payload; day rows then carry zero trade/PnL values.
 
 Response notes:
 
@@ -201,9 +379,16 @@ Response notes:
 - includes `filter_options` payload for diagnostics dropdowns:
   - `filter_options.run_ids[]` with `run_id` and `latest_saved_at`
   - `filter_options.adaptive_profiles[]` merged from history metadata and `aos_optimization/aos_config.json`
-- report artifacts with zero closed trades are excluded from history payload and run dropdown options.
+- by default, report artifacts with zero closed trades are excluded from history payload and run dropdown options; set `include_zero_trade_runs=true` to include them.
 - includes calendar metadata: `split`, `metrics`, `matched_reports`, `scanned_reports`.
+- includes source metadata for diagnostics header rendering:
+  - `source_mode` (`supabase_run_reports|sqlite_run_reports|run_reports_store|filesystem_reports`)
+  - `source_path_hint` (`run_reports_store` or `reports/*/session_summary.json`)
 - malformed historical artifacts are skipped and counted under `skipped_invalid_reports`.
+- source resolution:
+  - when run report store is configured (`app.state.run_reports_store`), endpoint reads that store as the authoritative source (Supabase in prod, SQLite in local-by-default runtime).
+  - local filesystem artifacts are read only when no run report store is configured.
+  - if no source data exists, endpoint returns `200` with empty `day_results` (no hard `404` for missing local `reports/` directory).
 
 ### `GET /api/system/l2/runtime` / `POST /api/system/l2/runtime`
 
@@ -218,6 +403,7 @@ Compatibility notes:
 
 - values apply to the current backend process only (runtime state, not persisted config files).
 - `POST` validates cache fields as non-negative integers and returns both `updated` keys and full effective `runtime`.
+- feature-map iceberg counters are disabled by default unless `BACKTEST_L2_INCLUDE_ICEBERGS_IN_FEATURE_MAP=1` is set.
 
 ### `GET /api/adaptive-tuner/options/{ticker}` / `POST /api/adaptive-tuner/profiles/apply` / `POST /api/adaptive-tuner/run` / `GET /api/adaptive-tuner/{job_id}` / `GET /api/adaptive-tuner`
 
@@ -234,6 +420,7 @@ Profile apply contract (`POST /api/adaptive-tuner/profiles/apply`):
 
 - request: `ticker`, `profile_id`
 - behavior: applies selected profile candidate into active ticker adaptive settings in `aos_config.json`
+- behavior detail: clears `active_unified_profile_id` for that ticker so unified/profile selectors fall back to current combo+adaptive derived active profile instead of stale explicit unified snapshots.
 - effect: next `POST /api/run/start` for ticker uses applied adaptive settings.
 - used by Adaptive Tuner, Adaptive Strategy Studio, and optional Backtest pre-run profile selection.
 
@@ -278,6 +465,11 @@ Important response fields:
 
 Purpose: Set per-session execution/risk/L2 defaults before bar processing.
 
+Auth note:
+
+- strategy API protects `/api/session/*`, `/api/orchestrator/*`, and strategy mutation routes when `STRATEGY_INTERNAL_API_TOKEN` is set.
+- runner must send `x-internal-token` header value that matches strategy API token (typically via `BACKTEST_STRATEGY_INTERNAL_API_TOKEN` or `STRATEGY_INTERNAL_API_TOKEN`).
+
 Key settings passed from runner:
 
 - regime cadence: `regime_detection_minutes`, `regime_refresh_bars`
@@ -288,6 +480,7 @@ Key settings passed from runner:
 - L2 confirmation: `l2_confirm_enabled`, `l2_min_*`, `l2_lookback_bars`
 - strategy selection: `strategy_selection_mode`, `max_active_strategies`
 - momentum diversification override transport: `momentum_diversification_json` (JSON string; strategy API validates/normalizes into session defaults, including optional `sleeves[]` multi-sleeve definitions with per-sleeve thresholds)
+- profile-driven runtime overrides: optional `max_daily_trades` (`0` => unlimited for that session) and optional `mu_choppy_hard_block_enabled` (session override for MU CHOPPY guard)
 - reset policy: `cold_start_each_day`
 
 ### `POST /api/session/bar`
@@ -314,6 +507,24 @@ Behavioral guarantee:
 Compatibility note:
 
 - Legacy candlestick/multi-layer config endpoints are removed; strategy execution is evidence-engine only.
+- Optional per-strategy custom formulas are evaluated in-session:
+  - entry gate: enabled `custom_entry_formula` can reject otherwise-valid entry signals.
+  - exit gate: enabled `custom_exit_formula` can force-close active position (`custom_formula_exit`).
+
+### `GET /api/strategies` / `POST /api/strategies/update`
+
+Purpose: expose/edit per-strategy runtime parameters used by strategy engine and session runtime.
+
+Custom formula fields:
+
+- `custom_entry_formula_enabled` (`bool`) + `custom_entry_formula` (`string`)
+- `custom_exit_formula_enabled` (`bool`) + `custom_exit_formula` (`string`)
+
+Behavioral notes:
+
+- formula strings are validated server-side with restricted expression grammar (safe AST; no arbitrary code).
+- update rejects invalid formulas with `HTTP 400`.
+- strategy payload exposes supported formula variables and examples to drive frontend editors.
 
 ## Cross-Service Coupling
 

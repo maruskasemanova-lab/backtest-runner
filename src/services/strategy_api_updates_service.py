@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 from fastapi import HTTPException
 
+from src.services.strategy_api_auth_headers import build_strategy_api_headers
 from src.services.strategy_api_types import StrategyApiIntegrationDeps
 
 
@@ -44,6 +45,10 @@ _STRATEGY_API_CLIENT_TIMEOUT = aiohttp.ClientTimeout(
 )
 
 
+def _strategy_api_headers(strategy_api_url: Optional[str] = None) -> Dict[str, str]:
+    return build_strategy_api_headers(strategy_api_url)
+
+
 async def _post_strategy_update(
     session: aiohttp.ClientSession,
     *,
@@ -55,6 +60,7 @@ async def _post_strategy_update(
         async with session.post(
             f"{strategy_api_url}/api/strategies/update",
             json={"strategy_name": strategy_name, "params": params},
+            headers=_strategy_api_headers(strategy_api_url),
         ) as resp:
             return strategy_name, int(resp.status), None
     except Exception as exc:
@@ -120,7 +126,10 @@ async def fetch_remote_strategies(
     deps: StrategyApiIntegrationDeps,
 ) -> Dict[str, Any]:
     async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
-        async with session.get(f"{strategy_api_url}/api/strategies") as resp:
+        async with session.get(
+            f"{strategy_api_url}/api/strategies",
+            headers=_strategy_api_headers(strategy_api_url),
+        ) as resp:
             if resp.status != 200:
                 raise HTTPException(
                     502,
@@ -169,15 +178,49 @@ async def apply_global_trailing(
     strategy_api_url: str,
     trailing_stop_pct: Optional[float],
     deps: StrategyApiIntegrationDeps,
+    *,
+    global_exit_rr_ratio: Optional[float] = None,
+    global_risk_atr_stop_multiplier: Optional[float] = None,
+    global_risk_volume_stop_pct: Optional[float] = None,
+    global_risk_min_stop_loss_pct: Optional[float] = None,
 ) -> None:
-    if trailing_stop_pct is None:
+    def _to_positive(value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed <= 0:
+            return None
+        return parsed
+
+    update_payload: Dict[str, float] = {}
+    normalized_trailing = _to_positive(trailing_stop_pct)
+    if normalized_trailing is not None:
+        update_payload["global_trailing_stop_pct"] = normalized_trailing
+    normalized_exit_rr = _to_positive(global_exit_rr_ratio)
+    if normalized_exit_rr is not None:
+        update_payload["global_rr_ratio"] = normalized_exit_rr
+    normalized_risk_atr = _to_positive(global_risk_atr_stop_multiplier)
+    if normalized_risk_atr is not None:
+        update_payload["global_atr_stop_multiplier"] = normalized_risk_atr
+    normalized_risk_volume = _to_positive(global_risk_volume_stop_pct)
+    if normalized_risk_volume is not None:
+        update_payload["global_volume_stop_pct"] = normalized_risk_volume
+    normalized_risk_min_stop = _to_positive(global_risk_min_stop_loss_pct)
+    if normalized_risk_min_stop is not None:
+        update_payload["global_min_stop_loss_pct"] = normalized_risk_min_stop
+
+    if not update_payload:
         return
-    if trailing_stop_pct <= 0:
-        deps.logger.warning("Global trailing_stop_pct ignored (must be > 0).")
-        return
+
     try:
         async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
-            async with session.get(f"{strategy_api_url}/api/strategies") as resp:
+            async with session.get(
+                f"{strategy_api_url}/api/strategies",
+                headers=_strategy_api_headers(strategy_api_url),
+            ) as resp:
                 if resp.status != 200:
                     deps.logger.warning(
                         f"Failed to fetch strategies for global trailing (HTTP {resp.status})"
@@ -188,7 +231,7 @@ async def apply_global_trailing(
             deps.logger.warning("Failed to parse strategies for global trailing (invalid payload).")
             return
         updates = [
-            (str(name), {"trailing_stop_pct": trailing_stop_pct})
+            (str(name), dict(update_payload))
             for name in strategies.keys()
         ]
         results = await _run_strategy_updates(

@@ -37,6 +37,27 @@ npm run dev
 
 Navigate to: **http://localhost:5173**
 
+## Cloud Deploy
+
+Recommended production stack (stateful + low latency):
+
+- Cloudflare Pages frontend + Fly.io APIs:
+  - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/DEPLOY_CLOUDFLARE_STACK.md`
+
+Alternative:
+
+- Fly stack guide:
+  - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/DEPLOY_FLY_STACK.md`
+- Free-stack variant (Netlify + Render + Supabase):
+  - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/DEPLOY_FREE_STACK.md`
+
+Frontend split routing supports serverless + persistent hybrid:
+
+- `VITE_API_BASE_URL` for general API (for example Vercel)
+- `VITE_PLAYBACK_API_BASE_URL` for stateful `/api/run*` playback (must be persistent backend)
+
+Important: interactive `/api/run/*` playback is stateful (in-memory). Do not host the backend on pure serverless runtimes (for example Vercel Python/Lambda).
+
 ## Usage
 
 1. Configure run parameters (Run ID, Ticker, Date)

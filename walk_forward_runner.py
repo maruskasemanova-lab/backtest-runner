@@ -27,6 +27,9 @@ class WalkForwardConfig:
     api_url: str = "http://localhost:8002"
     strategy_api_url: str = "http://localhost:8001"
     output_dir: str = "walk_forward_results"
+    strategy_selection_mode: str = "adaptive_top_n"
+    max_active_strategies: int = 3
+    parallel_all_strategies: bool = False
     verbose: bool = True
 
 
@@ -83,6 +86,22 @@ class WalkForwardRunner:
         """Get list of tickers with available data."""
         discovery = get_discovery()
         return discovery.get_tickers()
+
+    def _build_start_overrides(self) -> Dict[str, Any]:
+        """Build /api/run/start overrides used for walk-forward runs."""
+        mode = str(self.config.strategy_selection_mode or "adaptive_top_n").strip().lower()
+        if mode not in {"adaptive_top_n", "all_enabled"}:
+            mode = "adaptive_top_n"
+        max_active = max(1, min(20, int(self.config.max_active_strategies or 3)))
+
+        if self.config.parallel_all_strategies:
+            mode = "all_enabled"
+            max_active = 20
+
+        return {
+            "strategy_selection_mode": mode,
+            "max_active_strategies": max_active,
+        }
     
     async def run_single_day(
         self,
@@ -100,6 +119,7 @@ class WalkForwardRunner:
                 ticker=ticker,
                 date=date,
                 run_id=run_id,
+                start_overrides=self._build_start_overrides(),
                 verbose=False  # Keep individual runs quiet
             )
             
@@ -206,6 +226,12 @@ class WalkForwardRunner:
         print("=" * 80)
         print(f"Tickers: {', '.join(self.config.tickers)}")
         print(f"Date Range: {self.config.start_date} to {self.config.end_date}")
+        start_overrides = self._build_start_overrides()
+        print(
+            "Selection Mode: "
+            f"{start_overrides['strategy_selection_mode']} "
+            f"(max_active_strategies={start_overrides['max_active_strategies']})"
+        )
         print(f"Output: {self.output_path}")
         print("=" * 80)
         
@@ -297,7 +323,10 @@ class WalkForwardRunner:
                 'tickers': self.config.tickers,
                 'start_date': self.config.start_date,
                 'end_date': self.config.end_date,
-                'total_days': len(self._generate_dates())
+                'total_days': len(self._generate_dates()),
+                'strategy_selection_mode': self._build_start_overrides()["strategy_selection_mode"],
+                'max_active_strategies': self._build_start_overrides()["max_active_strategies"],
+                'parallel_all_strategies': bool(self.config.parallel_all_strategies),
             },
             'summary': {
                 'total_trades': total_trades,
@@ -422,6 +451,23 @@ async def main():
                         help="Backtest runner API URL")
     parser.add_argument("--strategy-url", default="http://localhost:8001",
                         help="Strategy API URL")
+    parser.add_argument(
+        "--strategy-selection-mode",
+        choices=["adaptive_top_n", "all_enabled"],
+        default="adaptive_top_n",
+        help="Strategy selection mode for each walk-forward run start",
+    )
+    parser.add_argument(
+        "--max-active-strategies",
+        type=int,
+        default=3,
+        help="Maximum active strategies when using adaptive_top_n mode",
+    )
+    parser.add_argument(
+        "--parallel-all-strategies",
+        action="store_true",
+        help="Force all_enabled mode and activate all eligible strategies in parallel",
+    )
     parser.add_argument("--quiet", "-q", action="store_true",
                         help="Quiet mode (less output)")
     
@@ -434,6 +480,9 @@ async def main():
         api_url=args.api_url,
         strategy_api_url=args.strategy_url,
         output_dir=args.output,
+        strategy_selection_mode=args.strategy_selection_mode,
+        max_active_strategies=args.max_active_strategies,
+        parallel_all_strategies=args.parallel_all_strategies,
         verbose=not args.quiet
     )
     

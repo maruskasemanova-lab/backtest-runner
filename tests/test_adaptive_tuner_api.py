@@ -236,7 +236,16 @@ def test_apply_adaptive_tuner_profile_updates_aos_config(monkeypatch, tmp_path) 
                     "MU": {
                         "strategy_selection_mode": "adaptive_top_n",
                         "max_active_strategies": 2,
+                        "active_strategy_combo_profile_id": "combo123",
+                        "active_unified_profile_id": "mu-unified-stale",
                         "adaptive": {"version": 1, "flow_bias_enabled": True},
+                        "strategy_combo_profiles": [
+                            {
+                                "profile_id": "combo123",
+                                "profile_name": "Combo 123",
+                                "strategy_params": {"momentum": {"enabled": True}},
+                            }
+                        ],
                         "adaptive_tuner_profiles": [
                             {
                                 "profile_id": "p123",
@@ -271,6 +280,10 @@ def test_apply_adaptive_tuner_profile_updates_aos_config(monkeypatch, tmp_path) 
     assert mu_cfg["adaptive"]["switch_cooldown_bars"] == 2
     assert mu_cfg["adaptive"]["flow_bias_enabled"] is False
     assert mu_cfg["active_adaptive_tuner_profile_id"] == "p123"
+    assert mu_cfg["active_unified_profile_id"] == ""
+
+    unified_payload = api_server._build_unified_profile_options_payload("MU")
+    assert unified_payload["active_profile_id"] == "legacy-unified-MU-combo123-p123"
 
 
 def test_create_isolated_tuner_aos_config_snapshot(monkeypatch, tmp_path) -> None:

@@ -224,6 +224,60 @@ def test_start_run_can_skip_aos_remote_sync(monkeypatch):
         api_server.active_runners.clear()
 
 
+def test_start_run_persists_effective_profile_identity(monkeypatch):
+    api_server.active_runners.clear()
+    apply_calls = {"count": 0}
+    _patch_start_run_dependencies(
+        monkeypatch,
+        apply_calls,
+        apply_aos_result={
+            "unified_profile": {
+                "active_profile_id": "mu-unified-v1",
+                "profile_name": "MU Unified v1",
+            },
+            "adaptive_profile": {
+                "active_profile_id": "None",
+                "profile_id": "mu-adaptive-v1",
+                "profile_name": "MU Adaptive v1",
+            },
+            "strategy_combo": {
+                "active_profile_id": "mu-combo-v1",
+                "profile_name": "MU Combo v1",
+            },
+            "strategy_selection_mode": "adaptive_top_n",
+            "max_active_strategies": 3,
+        },
+    )
+
+    request = api_server.StartRunRequest(
+        run_id="test-profile-persist",
+        ticker="QQQ",
+        date="2026-01-20",
+        strategy_api_url="http://localhost:8001",
+        allow_mock_data=True,
+        apply_aos_optimizations_on_start=False,
+    )
+
+    try:
+        result = asyncio.run(api_server.start_run(request))
+        assert result["success"] is True
+        execution = result["execution_config"]
+        assert execution["unified_profile_id"] == "mu-unified-v1"
+        assert execution["active_unified_profile_id"] == "mu-unified-v1"
+        assert execution["adaptive_profile_id"] == "mu-adaptive-v1"
+        assert execution["active_adaptive_tuner_profile_id"] == "mu-adaptive-v1"
+        assert execution["strategy_combo_profile_id"] == "mu-combo-v1"
+        assert execution["active_strategy_combo_profile_id"] == "mu-combo-v1"
+
+        run_key = str(result["run_key"])
+        runner = api_server.active_runners[run_key]
+        assert runner._report_metadata["unified_profile_id"] == "mu-unified-v1"
+        assert runner._report_metadata["adaptive_profile_id"] == "mu-adaptive-v1"
+        assert runner._report_metadata["strategy_combo_profile_id"] == "mu-combo-v1"
+    finally:
+        api_server.active_runners.clear()
+
+
 def test_start_run_applies_positioning_config_by_default(monkeypatch):
     api_server.active_runners.clear()
     apply_calls = {"count": 0}

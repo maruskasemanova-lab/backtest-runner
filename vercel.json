@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "api/index.py"
+    }
+  ],
+  "env": {
+    "BACKTEST_SAAS_DB_PATH": "/tmp/saas_state.db",
+    "BACKTEST_CORS_ALLOW_ORIGINS": "https://backtest-runner-fe-1771256082.netlify.app,https://6993395e2f5a302a0d7ad14f--backtest-runner-fe-1771256082.netlify.app,http://localhost:5173,http://127.0.0.1:5173",
+    "BACKTEST_INTERNAL_STRATEGY_API_URL": "https://marketregimedetection.vercel.app",
+    "BACKTEST_STRATEGY_API_ALLOWLIST": "https://marketregimedetection.vercel.app,https://marketregimedetection-pa1c0kn4p-webinsons-projects.vercel.app",
+    "BACKTEST_REMOTE_MANIFEST_URL": "https://pub-2ea2a3bb282248849e01775257800b06.r2.dev/mu/manifests/mu_janfeb_manifest.json",
+    "BACKTEST_AVAILABLE_DATA_REMOTE_ONLY": "1",
+    "BACKTEST_REMOTE_MANIFEST_REQUIRED": "1",
+    "BACKTEST_DATA_CATALOG_PATH": "/tmp/backtest_data_catalog.json",
+    "BACKTEST_REMOTE_CACHE_DIR": "/tmp/backtest_remote_cache",
+    "BACKTEST_REMOTE_SYNC_MIN_INTERVAL_SEC": "15",
+    "BACKTEST_L2_INCLUDE_ICEBERGS_IN_FEATURE_MAP": "0",
+    "BACKTEST_RUNTIME_CONFIG_DIR": "/tmp/backtest-runner-config",
+    "BACKTEST_AOS_CONFIG_PATH": "/tmp/backtest-runner-config/aos_config.json",
+    "BACKTEST_POSITIONING_CONFIG_PATH": "/tmp/backtest-runner-config/positioning_config.json"
+  }
+}

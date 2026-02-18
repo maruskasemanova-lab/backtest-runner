@@ -20,6 +20,16 @@ class _StubL2Manager:
         return out
 
 
+class _CountingStubL2Manager(_StubL2Manager):
+    def __init__(self, df: pd.DataFrame):
+        super().__init__(df)
+        self.load_calls = 0
+
+    def load_data(self, ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+        self.load_calls += 1
+        return super().load_data(ticker, start_date, end_date)
+
+
 def _make_df(rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     df.index = pd.to_datetime(df.pop("ts"), utc=True)
@@ -106,3 +116,36 @@ def test_enriched_feature_map_includes_l2_quality_flags_payload() -> None:
     assert "LOW_COVERAGE" in flags
     assert isinstance(quality, dict)
     assert quality.get("flags") == flags
+
+
+def test_enriched_feature_map_loads_l2_chunk_once() -> None:
+    df = _make_df(
+        [
+            {
+                "ts": "2026-01-20T14:30:05Z",
+                "action": "T",
+                "side": "B",
+                "size": 100.0,
+                "price": 100.0,
+                "bid_sz_00": 120.0,
+                "ask_sz_00": 100.0,
+            },
+            {
+                "ts": "2026-01-20T14:31:05Z",
+                "action": "T",
+                "side": "A",
+                "size": 40.0,
+                "price": 99.8,
+                "bid_sz_00": 110.0,
+                "ask_sz_00": 130.0,
+            },
+        ]
+    )
+    manager = _CountingStubL2Manager(df)
+    engine = OrderFlowEngine(manager=manager)
+    start_dt = datetime(2026, 1, 20, 14, 30, tzinfo=timezone.utc)
+    end_dt = datetime(2026, 1, 20, 14, 35, tzinfo=timezone.utc)
+
+    feature_map, _ = engine.build_enriched_feature_map("MU", start_dt, end_dt)
+    assert feature_map
+    assert manager.load_calls == 1

@@ -19,6 +19,10 @@ class StartRunRequest(BaseModel):
     regime_detection_minutes: int = 15
     regime_refresh_bars: int = 12
     trailing_stop_pct: Optional[float] = None
+    global_exit_rr_ratio: Optional[float] = None
+    global_risk_atr_stop_multiplier: Optional[float] = None
+    global_risk_volume_stop_pct: Optional[float] = None
+    global_risk_min_stop_loss_pct: Optional[float] = None
     account_size_usd: float = 10_000.0
     risk_per_trade_pct: float = 1.0
     max_position_notional_pct: float = 100.0

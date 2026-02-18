@@ -1,15 +1,31 @@
-import databento as db
-import pandas as pd
-import numpy as np
 import os
 from collections import OrderedDict
-from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 from .system_settings import SystemSettings
+from .parquet_compat import read_parquet_compat
 
 class L2DataManager:
+    @staticmethod
+    def _preferred_parquet_columns() -> List[str]:
+        cols = [
+            "ts_event",
+            "action",
+            "side",
+            "price",
+            "size",
+            "bid_px_00",
+            "ask_px_00",
+        ]
+        cols.extend([f"bid_sz_{idx:02d}" for idx in range(10)])
+        cols.extend([f"ask_sz_{idx:02d}" for idx in range(10)])
+        return cols
+
     @staticmethod
     def _parse_positive_int_env(name: str, default: int) -> int:
         raw = os.getenv(name)
@@ -32,16 +48,81 @@ class L2DataManager:
             return False
         return bool(default)
 
+    @staticmethod
+    def _parse_str_env(name: str, default: str) -> str:
+        raw = os.getenv(name)
+        if raw is None:
+            return str(default)
+        value = str(raw).strip()
+        return value if value else str(default)
+
+    @staticmethod
+    def _project_data_roots() -> List[Path]:
+        project_root = Path(__file__).resolve().parents[1]
+        return [
+            (project_root / "data" / "l2").resolve(),
+            (project_root / "data").resolve(),
+        ]
+
+    @classmethod
+    def _normalize_runtime_roots(
+        cls,
+        configured_roots: List[Path],
+    ) -> List[str]:
+        """
+        Normalize configured L2 roots for current runtime.
+
+        Handles stale host absolute paths (e.g. /Users/... from macOS host)
+        when running inside Docker by adding project-local /app/data fallbacks.
+        """
+        normalized: List[str] = []
+        seen = set()
+
+        def _add(path: Optional[Path]) -> None:
+            if path is None:
+                return
+            try:
+                resolved = path.resolve()
+            except Exception:
+                resolved = path
+            token = str(resolved)
+            if token in seen:
+                return
+            seen.add(token)
+            normalized.append(token)
+
+        # Keep existing configured roots first.
+        for root in configured_roots:
+            if isinstance(root, Path) and root.exists():
+                _add(root)
+
+        # If configured roots are stale/non-existent in this runtime, add local project defaults.
+        for fallback in cls._project_data_roots():
+            if fallback.exists():
+                _add(fallback)
+
+        # Last-resort defaults even when directories do not exist yet.
+        if not normalized:
+            for fallback in cls._project_data_roots():
+                _add(fallback)
+
+        return normalized
+
     def __init__(self, data_dir: Optional[str] = None, data_dirs: Optional[List[str]] = None):
         if data_dirs:
             self.data_dirs = [str(Path(d).expanduser().resolve()) for d in data_dirs]
         elif data_dir:
             self.data_dirs = [str(Path(data_dir).expanduser().resolve())]
         else:
-            configured = SystemSettings().get_l2_dirs(existing_only=False)
-            self.data_dirs = [str(p.resolve()) for p in configured] if configured else [
-                str((Path(__file__).resolve().parents[1] / "data" / "l2").resolve())
-            ]
+            settings = SystemSettings()
+            configured_existing = settings.get_l2_dirs(existing_only=True)
+            if configured_existing:
+                configured = configured_existing
+            else:
+                configured = settings.get_l2_dirs(existing_only=False)
+            self.data_dirs = self._normalize_runtime_roots(
+                [Path(p).expanduser() for p in configured]
+            )
 
         self.data_dir = self.data_dirs[0]  # Backward compatibility for callers that inspect this attr.
         self.max_cached_tickers = self._parse_positive_int_env("BACKTEST_L2_CACHE_MAX_TICKERS", 1)
@@ -50,6 +131,8 @@ class L2DataManager:
             "BACKTEST_L2_CACHE_MAX_BYTES",
             512 * 1024 * 1024,
         )
+        # Optional runtime integration with DatabentoService for remote catalog-backed files.
+        self.databento_service = None
         self.data: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
         # Dedicated runtime cache for intrabar access. Intrabar workloads query one-minute
         # windows repeatedly; keeping one raw ticker dataframe hot avoids repeated disk reads.
@@ -62,6 +145,70 @@ class L2DataManager:
             1,
         )
         self._intrabar_runtime_data: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
+        self.precomputed_features_enabled = self._parse_bool_env(
+            "BACKTEST_L2_PRECOMPUTED_FEATURES_ENABLED",
+            True,
+        )
+        precomputed_dir_raw = self._parse_str_env("BACKTEST_L2_PRECOMPUTED_DIR", "")
+        if precomputed_dir_raw:
+            precomputed_dir = Path(precomputed_dir_raw).expanduser()
+        else:
+            project_root = Path(__file__).resolve().parents[1]
+            precomputed_dir = project_root / "data" / "l2_precomputed"
+        self.precomputed_dir = str(precomputed_dir.resolve())
+        self.precomputed_require_full_coverage = self._parse_bool_env(
+            "BACKTEST_L2_PRECOMPUTED_REQUIRE_FULL_COVERAGE",
+            True,
+        )
+
+    @staticmethod
+    def _optimize_loaded_frame(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize parquet/mbn payload for lower memory pressure.
+
+        Vercel serverless memory is tight for multi-day L2 ranges; downcasting
+        and categorical symbols avoids frequent OOM/empty-feature fallbacks.
+        """
+        if df is None or df.empty:
+            return df
+
+        # Prefer event time for deterministic matching against OHLCV bars.
+        if "ts_event" in df.columns:
+            try:
+                ts_event = pd.to_datetime(df["ts_event"], utc=True, errors="coerce")
+                valid = ts_event.notna()
+                if bool(valid.any()):
+                    df = df.loc[valid].copy()
+                    ts_event = ts_event.loc[valid]
+                    df.index = pd.DatetimeIndex(ts_event, name="ts_event")
+            except Exception:
+                pass
+
+        numeric_cols = [
+            "price",
+            "size",
+            "bid_px_00",
+            "ask_px_00",
+        ]
+        numeric_cols.extend([f"bid_sz_{idx:02d}" for idx in range(10)])
+        numeric_cols.extend([f"ask_sz_{idx:02d}" for idx in range(10)])
+        for col in numeric_cols:
+            if col not in df.columns:
+                continue
+            try:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype("float32")
+            except Exception:
+                continue
+
+        for cat_col in ("action", "side"):
+            if cat_col not in df.columns:
+                continue
+            try:
+                df[cat_col] = df[cat_col].astype("category")
+            except Exception:
+                continue
+
+        return df
 
     @staticmethod
     def _normalize_datetime_index_utc(df: pd.DataFrame) -> pd.DataFrame:
@@ -127,6 +274,24 @@ class L2DataManager:
                 matched_files = sorted(deduped)
 
         if not matched_files:
+            remote_service = getattr(self, "databento_service", None)
+            if remote_service is not None:
+                try:
+                    remote_files = remote_service.get_files_for_range(
+                        ticker=ticker,
+                        start_date=start_date,
+                        end_date=end_date,
+                        schema_prefix="mbp-10",
+                    )
+                    matched_files = [
+                        str(path)
+                        for path in remote_files
+                        if str(path).lower().endswith((".parquet", ".mbn"))
+                    ]
+                except Exception as e:
+                    print(f"Remote L2 lookup failed for {ticker}: {e}")
+
+        if not matched_files:
             print(f"No L2 data found for {ticker} ({start_date} to {end_date})")
             return None
 
@@ -135,24 +300,32 @@ class L2DataManager:
             cached_df = self.data[ticker]
             if not cached_df.empty:
                 try:
-                    # Convert query dates to timezone-aware UTC constraints
-                    q_start = pd.to_datetime(start_date).tz_localize("UTC") if pd.to_datetime(start_date).tz is None else pd.to_datetime(start_date).tz_convert("UTC")
-                    # Set end date to end of day if it's just a date string, to ensure full coverage check
-                    q_end = pd.to_datetime(end_date)
-                    if q_end.tz is None:
-                        q_end = q_end.replace(hour=23, minute=59, second=59, microsecond=999999).tz_localize("UTC")
+                    q_start = pd.Timestamp(pd.to_datetime(start_date))
+                    if q_start.tz is None:
+                        q_start = q_start.tz_localize("UTC")
                     else:
-                         q_end = q_end.tz_convert("UTC")
+                        q_start = q_start.tz_convert("UTC")
+                    q_end = pd.Timestamp(pd.to_datetime(end_date))
+                    if q_end.tz is None:
+                        q_end = q_end.tz_localize("UTC")
+                    else:
+                        q_end = q_end.tz_convert("UTC")
+                    q_start_day = q_start.normalize()
+                    q_end_day = q_end.normalize()
 
                     if len(cached_df) > 0:
                         c_min = cached_df.index.min()
                         c_max = cached_df.index.max()
-                        
-                        # Relaxed check: valid if we cover the requested range
-                        if c_min <= q_start and c_max >= q_end:
-                             self.data.move_to_end(ticker)
-                             print(f"Using cached L2 data for {ticker} ({len(cached_df)} rows)")
-                             return cached_df
+                        c_min_day = self._normalize_utc_timestamp(c_min).normalize()
+                        c_max_day = self._normalize_utc_timestamp(c_max).normalize()
+
+                        # Reuse cache when requested day-range is covered.
+                        # Raw L2 files often have no 00:00:00 or 23:59:59 rows, so
+                        # strict full-day timestamp coverage causes avoidable reloads.
+                        if c_min_day <= q_start_day and c_max_day >= q_end_day:
+                            self.data.move_to_end(ticker)
+                            print(f"Using cached L2 data for {ticker} ({len(cached_df)} rows)")
+                            return cached_df
                 except Exception as e:
                      print(f"Cache check failed: {e}")
 
@@ -162,10 +335,23 @@ class L2DataManager:
             for file_path in matched_files:
                 print(f"  - {file_path}")
                 if file_path.endswith(".parquet"):
-                    df = pd.read_parquet(file_path)
+                    preferred_columns = self._preferred_parquet_columns()
+                    try:
+                        df = read_parquet_compat(file_path, columns=preferred_columns)
+                    except Exception:
+                        # Fallback for files that miss one of the preferred columns.
+                        df = read_parquet_compat(file_path)
                 else:
+                    try:
+                        import databento as db  # type: ignore
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "Reading .mbn requires optional dependency 'databento'. "
+                            "Install databento or provide parquet L2 files."
+                        ) from exc
                     stored_data = db.DBNStore.from_file(file_path)
                     df = stored_data.to_df()
+                df = self._optimize_loaded_frame(df)
                 df = self._normalize_datetime_index_utc(df)
                 frames.append(df)
 
@@ -179,12 +365,19 @@ class L2DataManager:
                 merged = pd.concat(frames, axis=0)
 
             merged = merged.sort_index()
-
-            # Keep behavior consistent between single-day and multi-day loads:
-            # remove only exact duplicate records from overlapping imports, but
-            # preserve distinct events that legitimately share the same timestamp.
-            dedupe_mask = ~merged.reset_index().duplicated(keep="last")
-            merged = merged.loc[dedupe_mask.to_numpy()]
+            if len(frames) > 1:
+                # Fast overlap dedupe for multi-file ranges while preserving
+                # legitimate same-timestamp book updates.
+                dedupe_cols = [col for col in ("action", "side", "price", "size") if col in merged.columns]
+                if dedupe_cols:
+                    try:
+                        dedupe_frame = merged[dedupe_cols].copy()
+                        dedupe_frame.insert(0, "__ts_ns__", merged.index.view("i8"))
+                        dedupe_mask = ~dedupe_frame.duplicated(keep="last")
+                        if not bool(dedupe_mask.all()):
+                            merged = merged.loc[dedupe_mask.to_numpy()]
+                    except Exception:
+                        pass
             merged_bytes = int(merged.memory_usage(index=True, deep=True).sum())
 
             should_cache = (
@@ -223,6 +416,234 @@ class L2DataManager:
         except Exception as e:
             print(f"Error loading L2 data: {e}")
             return None
+
+    @staticmethod
+    def _normalize_utc_timestamp(value: Any) -> pd.Timestamp:
+        ts = pd.Timestamp(pd.to_datetime(value))
+        if ts.tz is None:
+            return ts.tz_localize("UTC")
+        return ts.tz_convert("UTC")
+
+    @staticmethod
+    def _iter_day_tokens(start_time: pd.Timestamp, end_time: pd.Timestamp) -> List[str]:
+        start_day = start_time.normalize()
+        end_day = end_time.normalize()
+        if end_day < start_day:
+            return []
+        return [str(day.date()) for day in pd.date_range(start_day, end_day, freq="D", tz="UTC")]
+
+    def _precomputed_file_path(self, ticker: str, day_token: str) -> Path:
+        return Path(self.precomputed_dir) / f"{str(ticker).upper()}_{day_token}.parquet"
+
+    @staticmethod
+    def _feature_defaults() -> Dict[str, Any]:
+        return {
+            "l2_delta": 0.0,
+            "l2_buy_volume": 0.0,
+            "l2_sell_volume": 0.0,
+            "l2_volume": 0.0,
+            "l2_imbalance": 0.0,
+            "l2_signed_aggression": 0.0,
+            "l2_absorption_rate": 0.0,
+            "l2_cumulative_delta": 0.0,
+            "l2_delta_price_divergence": 0.0,
+            "l2_delta_acceleration": 0.0,
+            "l2_bid_depth_total": 0.0,
+            "l2_ask_depth_total": 0.0,
+            "l2_book_pressure": 0.0,
+            "l2_book_pressure_change": 0.0,
+            "l2_top_heavy_bid": 0.0,
+            "l2_top_heavy_ask": 0.0,
+            "l2_iceberg_buy_count": 0.0,
+            "l2_iceberg_sell_count": 0.0,
+            "l2_iceberg_bias": 0.0,
+            "l2_quality_trade_ticks": 0,
+            "l2_quality_book_updates": 0,
+            "l2_quality_coverage_ratio": 0.0,
+            "l2_quality_flags": ["NO_DATA"],
+            "l2_quality": {
+                "coverage_ratio": 0.0,
+                "flags": ["NO_DATA"],
+                "trade_ticks": 0,
+                "book_updates": 0,
+                "has_l2": False,
+            },
+        }
+
+    @staticmethod
+    def _sanitize_feature_value(value: Any) -> Any:
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, float) and np.isnan(value):
+            return 0.0
+        return value
+
+    def load_precomputed_feature_map(
+        self,
+        *,
+        ticker: str,
+        start_time: Any,
+        end_time: Any,
+    ) -> Tuple[Optional[Dict[int, Dict[str, Any]]], Dict[str, Any]]:
+        """
+        Load precomputed minute-level L2 feature map from disk.
+
+        Files are expected at:
+          <BACKTEST_L2_PRECOMPUTED_DIR>/<TICKER>_<YYYY-MM-DD>.parquet
+        """
+        stats: Dict[str, Any] = {
+            "source": "precomputed",
+            "has_l2": False,
+            "covered_minutes": 0,
+            "trade_minutes": 0,
+            "trade_events": 0,
+            "depth_minutes": 0,
+            "footprint_bars": 0,
+            "icebergs": 0,
+            "icebergs_enabled": False,
+            "requested_days": 0,
+            "loaded_days": 0,
+            "missing_days": [],
+            "missing_days_count": 0,
+        }
+
+        if not bool(self.precomputed_features_enabled):
+            stats["reason"] = "disabled"
+            return None, stats
+
+        base_dir = Path(self.precomputed_dir)
+        if not base_dir.exists():
+            stats["reason"] = "missing_precomputed_dir"
+            return None, stats
+
+        start_ts = self._normalize_utc_timestamp(start_time)
+        end_ts = self._normalize_utc_timestamp(end_time)
+        day_tokens = self._iter_day_tokens(start_ts, end_ts)
+        stats["requested_days"] = len(day_tokens)
+        if not day_tokens:
+            stats["reason"] = "empty_day_range"
+            return None, stats
+
+        frames: List[pd.DataFrame] = []
+        missing_days: List[str] = []
+        for day_token in day_tokens:
+            file_path = self._precomputed_file_path(ticker, day_token)
+            if not file_path.exists():
+                missing_days.append(day_token)
+                continue
+            try:
+                day_df = read_parquet_compat(file_path)
+            except Exception:
+                missing_days.append(day_token)
+                continue
+            if day_df is None or day_df.empty:
+                continue
+            frames.append(day_df)
+
+        stats["loaded_days"] = len(frames)
+        stats["missing_days"] = list(missing_days)
+        stats["missing_days_count"] = len(missing_days)
+
+        if not frames:
+            stats["reason"] = "no_precomputed_files"
+            return None, stats
+
+        if bool(self.precomputed_require_full_coverage) and missing_days:
+            stats["reason"] = "partial_coverage_requires_fallback"
+            return None, stats
+
+        merged = pd.concat(frames, axis=0, ignore_index=True)
+        if "minute_key" not in merged.columns:
+            stats["reason"] = "missing_minute_key_column"
+            return None, stats
+
+        minute_series = pd.to_numeric(merged["minute_key"], errors="coerce")
+        merged = merged.loc[minute_series.notna()].copy()
+        if merged.empty:
+            stats["reason"] = "empty_after_minute_key_filter"
+            return None, stats
+        merged["minute_key"] = minute_series.loc[minute_series.notna()].astype(np.int64)
+
+        minute_start = int(start_ts.floor("min").timestamp() // 60)
+        minute_end = int(end_ts.floor("min").timestamp() // 60)
+        merged = merged.loc[
+            (merged["minute_key"] >= minute_start) & (merged["minute_key"] <= minute_end)
+        ].copy()
+        if merged.empty:
+            stats["reason"] = "empty_after_window_filter"
+            return None, stats
+
+        merged.sort_values("minute_key", inplace=True)
+        merged = merged.drop_duplicates(subset=["minute_key"], keep="last")
+
+        feature_map: Dict[int, Dict[str, Any]] = {}
+        base_defaults = self._feature_defaults()
+        for record in merged.to_dict(orient="records"):
+            minute_key = int(record.get("minute_key"))
+            row_features: Dict[str, Any] = {}
+            for key, value in record.items():
+                if key == "minute_key":
+                    continue
+                row_features[str(key)] = self._sanitize_feature_value(value)
+
+            for default_key, default_value in base_defaults.items():
+                if default_key not in row_features:
+                    if isinstance(default_value, list):
+                        row_features[default_key] = list(default_value)
+                    elif isinstance(default_value, dict):
+                        row_features[default_key] = dict(default_value)
+                    else:
+                        row_features[default_key] = default_value
+
+            trade_ticks = int(row_features.get("l2_quality_trade_ticks", 0) or 0)
+            book_updates = int(row_features.get("l2_quality_book_updates", 0) or 0)
+            quality = row_features.get("l2_quality")
+            if not isinstance(quality, dict):
+                coverage_ratio = float(row_features.get("l2_quality_coverage_ratio", 0.0) or 0.0)
+                flags = row_features.get("l2_quality_flags", [])
+                if not isinstance(flags, list):
+                    flags = []
+                row_features["l2_quality"] = {
+                    "coverage_ratio": coverage_ratio,
+                    "flags": list(flags),
+                    "trade_ticks": trade_ticks,
+                    "book_updates": book_updates,
+                    "has_l2": bool(trade_ticks > 0 or book_updates > 0),
+                }
+            feature_map[minute_key] = row_features
+
+        if not feature_map:
+            stats["reason"] = "no_feature_rows"
+            return None, stats
+
+        trade_minutes = 0
+        depth_minutes = 0
+        trade_events = 0
+        iceberg_total = 0
+        for features in feature_map.values():
+            trade_ticks = int(features.get("l2_quality_trade_ticks", 0) or 0)
+            book_updates = int(features.get("l2_quality_book_updates", 0) or 0)
+            if trade_ticks > 0:
+                trade_minutes += 1
+            if book_updates > 0:
+                depth_minutes += 1
+            trade_events += trade_ticks
+            iceberg_total += int(max(0.0, float(features.get("l2_iceberg_buy_count", 0.0) or 0.0)))
+            iceberg_total += int(max(0.0, float(features.get("l2_iceberg_sell_count", 0.0) or 0.0)))
+
+        stats.update(
+            {
+                "has_l2": bool(feature_map),
+                "covered_minutes": len(feature_map),
+                "trade_minutes": int(trade_minutes),
+                "trade_events": int(trade_events),
+                "depth_minutes": int(depth_minutes),
+                "footprint_bars": int(trade_minutes),
+                "icebergs": int(iceberg_total),
+                "icebergs_enabled": bool(iceberg_total > 0),
+            }
+        )
+        return feature_map, stats
 
     def get_footprint_bars(self, ticker, start_time, end_time, timeframe="1min"):
         """
@@ -432,10 +853,6 @@ class L2DataManager:
         ICEBERG_RATIO = 1.25 # Increased to 1.25 to filter noise (was 1.1)
         TIME_WINDOW_MS = 100 # Increased window to catch split trades
         
-        # Debug stats
-        seq_count = 0
-        iceberg_count = 0
-            
         for ts, row in trades.iterrows():
             size = row['size']
             price = row['price']
@@ -480,7 +897,6 @@ class L2DataManager:
             else:
                 # Finalize previous sequence
                 if current_seq['start_time'] is not None:
-                    seq_count += 1
                     vis = current_seq['initial_visible']
                     vol = current_seq['total_vol']
                     
@@ -499,7 +915,6 @@ class L2DataManager:
                             is_iceberg = True
                     
                     if is_iceberg:
-                        iceberg_count += 1
                         icebergs.append({
                              "time": current_seq['start_ts'],
                              "price": current_seq['price'],
@@ -542,7 +957,6 @@ class L2DataManager:
                      "marker_type": "iceberg_detected"
                  })
 
-        print(f"Iceberg Detection {ticker}: Processed {seq_count} sequences, Found {len(icebergs)} icebergs.")
         return icebergs
 
     def get_order_book_snapshot(self, ticker, timestamp):

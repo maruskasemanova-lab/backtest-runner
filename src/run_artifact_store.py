@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 from .intrabar_frame_builder import INTRABAR_SCHEMA_VERSION
+from .parquet_compat import read_parquet_compat, write_parquet_compat
 
 
 class RunArtifactStore:
@@ -63,7 +64,7 @@ class RunArtifactStore:
         filename = f"intrabar_1s_{date}.parquet" if date else "intrabar_1s.parquet"
         file_path = dir_path / filename
         
-        df.to_parquet(file_path, index=False)
+        write_parquet_compat(df, file_path, index=False)
         return str(file_path)
     
     def save_bars_1m(
@@ -90,7 +91,7 @@ class RunArtifactStore:
         filename = f"bars_1m_{date}.parquet" if date else "bars_1m.parquet"
         file_path = dir_path / filename
         
-        df.to_parquet(file_path, index=False)
+        write_parquet_compat(df, file_path, index=False)
         return str(file_path)
     
     def save_metadata(
@@ -161,7 +162,7 @@ class RunArtifactStore:
         
         frames = []
         for f in files:
-            df = pd.read_parquet(f)
+            df = read_parquet_compat(f)
             if "ts_sec" in df.columns:
                 # Convert to datetime if needed
                 if not pd.api.types.is_datetime64_any_dtype(df["ts_sec"]):
@@ -207,7 +208,7 @@ class RunArtifactStore:
         if not file_path.exists():
             return pd.DataFrame()
         
-        return pd.read_parquet(file_path)
+        return read_parquet_compat(file_path)
     
     def load_metadata(
         self,

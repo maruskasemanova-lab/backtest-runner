@@ -13,25 +13,27 @@ Own playback UI, chart rendering, and operational diagnostics.
 
 ## Entrypoints
 
-- `frontend/src/App.jsx`
+- `frontend/src/App.tsx`
 - `frontend/src/components`
 
 ## File Inventory
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `frontend/src/App.jsx` | yes | 1310 | `0452b19 2026-02-13` |
-| `frontend/src/components/CandlestickChart.jsx` | yes | 773 | `5ba62b7 2026-02-08` |
-| `frontend/src/components/DecisionPanel.jsx` | yes | 607 | `64da33c 2026-02-10` |
-| `frontend/src/components/SessionSummary.jsx` | yes | 99 | `36d343c 2026-02-03` |
-| `frontend/src/components/RunConfig.jsx` | yes | 3611 | `38387c6 2026-02-13` |
-| `frontend/src/components/PlaybackControls.jsx` | yes | 262 | `0452b19 2026-02-13` |
-| `frontend/src/components/DataManager.jsx` | yes | 696 | `baf7110 2026-02-07` |
-| `frontend/src/components/AdaptiveStrategyStudio.jsx` | yes | 1447 | `a60ac04 2026-02-11` |
-| `frontend/src/components/DiagnosticCalendar.jsx` | yes | 1095 | `-` |
-| `frontend/src/components/StrategySettings.jsx` | yes | 1077 | `0452b19 2026-02-13` |
-| `frontend/src/components/AOSOptimizations.jsx` | yes | 1422 | `0452b19 2026-02-13` |
-| `frontend/src/components/IntrabarPanel.jsx` | yes | 186 | `5ba62b7 2026-02-08` |
+| `frontend/src/main.tsx` | yes | 39 | `-` |
+| `frontend/src/App.tsx` | yes | 2022 | `-` |
+| `frontend/src/auth/supabaseAuth.ts` | yes | 385 | `-` |
+| `frontend/src/components/CandlestickChart.tsx` | yes | 795 | `-` |
+| `frontend/src/components/DecisionPanel.tsx` | yes | 639 | `-` |
+| `frontend/src/components/SessionSummary.tsx` | yes | 137 | `-` |
+| `frontend/src/components/RunConfig.tsx` | yes | 3080 | `-` |
+| `frontend/src/components/PlaybackControls.tsx` | yes | 262 | `-` |
+| `frontend/src/components/DataManager.tsx` | yes | 764 | `-` |
+| `frontend/src/components/AdaptiveStrategyStudio.tsx` | yes | 3004 | `-` |
+| `frontend/src/components/DiagnosticCalendar.tsx` | yes | 1224 | `-` |
+| `frontend/src/components/StrategySettings.tsx` | yes | 1652 | `-` |
+| `frontend/src/components/AOSOptimizations.tsx` | yes | 1395 | `-` |
+| `frontend/src/components/IntrabarPanel.tsx` | yes | 186 | `-` |
 
 ## Change Checks
 

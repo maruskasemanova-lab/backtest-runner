@@ -12,6 +12,7 @@ Usage:
     python wfo_optimizer.py --tickers NVDA,TSLA --train-days 10 --test-days 3
 """
 import argparse
+import importlib.util
 import itertools
 import json
 import os
@@ -24,23 +25,34 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 import pandas as pd
 
-# Add market_regime_detection to path (support both naming variants).
-_root = Path(__file__).resolve().parent.parent
-_strategy_roots = [
-    _root / "market_regime_detection",
-    _root / "market-regime-detection",
-]
-for strategy_root in _strategy_roots:
-    if strategy_root.exists():
-        sys.path.insert(0, str(strategy_root))
-
-try:
-    from src.day_trading_manager import DayTradingManager
-except Exception:
-    DayTradingManager = None
-
 from available_data import get_discovery
 from data_loader import DataLoader
+
+
+def _load_day_trading_manager() -> Any:
+    """Load DayTradingManager from sibling strategy service without clobbering local src imports."""
+    workspace_root = Path(__file__).resolve().parent.parent
+    if str(workspace_root) not in sys.path:
+        sys.path.insert(0, str(workspace_root))
+
+    try:
+        from market_regime_detection.src.day_trading_manager import DayTradingManager as dtm
+        return dtm
+    except Exception:
+        pass
+
+    hyphen_module_path = workspace_root / "market-regime-detection" / "src" / "day_trading_manager.py"
+    if hyphen_module_path.exists():
+        spec = importlib.util.spec_from_file_location("_wfo_day_trading_manager", hyphen_module_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return getattr(module, "DayTradingManager", None)
+
+    return None
+
+
+DayTradingManager = _load_day_trading_manager()
 
 
 @contextmanager
@@ -102,6 +114,46 @@ PARAM_GRIDS = {
         "max_sweep_intensity": [0.6, 0.8, 1.0],
         "min_book_pressure": [0.0, 0.02, 0.05],
         "min_confidence": [58.0, 63.0, 68.0],
+    },
+    "rotation": {
+        "lookback_period": [8, 12],
+        "rotation_threshold": [0.4, 0.7],
+        "volume_increase_ratio": [1.0, 1.1],
+        "volume_stop_pct": [0.7, 1.1],
+        "min_confidence": [48.0, 60.0],
+    },
+    "volume_profile": {
+        "profile_lookback": [45, 90],
+        "num_bins": [16, 24],
+        "pb_threshold": [0.45, 0.8],
+        "symmetry_tolerance_pct": [0.10, 0.20],
+        "min_confidence": [60.0, 70.0],
+        "atr_stop_mult": [2.0, 3.0],
+    },
+    "gap_liquidity": {
+        "gap_threshold_pct": [0.2, 0.5],
+        "swing_lookback": [14, 30],
+        "liquidity_cluster_bars": [4, 7],
+        "gap_fill_tolerance_pct": [0.08, 0.15],
+        "min_confidence": [60.0, 70.0],
+        "atr_stop_mult": [2.0, 3.0],
+    },
+    "iceberg_defense": {
+        "min_iceberg_bias": [0.35, 0.65],
+        "min_book_pressure": [0.0, 0.05],
+        "max_opposing_aggression": [0.02, 0.05],
+        "min_absorption_rate": [0.20, 0.40],
+        "min_confidence": [55.0, 65.0],
+        "atr_stop_multiplier": [1.0, 1.6],
+    },
+    "scalp_l2_intrabar": {
+        "min_flow_score": [44.0, 54.0],
+        "min_signed_aggression": [0.035, 0.055],
+        "min_directional_consistency": [0.5, 0.66],
+        "min_intrabar_move_pct": [0.025, 0.05],
+        "min_round_trip_cost_bps": [5.0, 8.0],
+        "min_reward_to_cost_ratio": [1.4, 2.0],
+        "min_confidence": [52.0, 64.0],
     },
 }
 
@@ -197,53 +249,8 @@ def grid(values: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
     return combos
 
 
-def run_single_day(
-    ticker: str,
-    date: str,
-    day_rows: List[Tuple],
-    params_by_strategy: Dict[str, Dict[str, Any]],
-    regime_detection_minutes: int = 30,
-) -> Tuple[float, int, int, float, float, Dict[str, Dict[str, float]]]:
-    """
-    Run simulation for a single day.
-    Returns:
-      (pnl_pct, total_trades, winning_trades, gross_wins, gross_losses, per_strategy_stats)
-    """
-    if DayTradingManager is None:
-        raise RuntimeError(
-            "DayTradingManager is not available. Ensure market_regime_detection is present in the sibling directory."
-        )
-
-    dtm = DayTradingManager(regime_detection_minutes=regime_detection_minutes)
-    
-    # Apply params to strategies
-    for strat_name, params in params_by_strategy.items():
-        strat = dtm.strategies.get(strat_name)
-        if not strat:
-            continue
-        for k, v in params.items():
-            if hasattr(strat, k):
-                setattr(strat, k, v)
-    
-    run_id = "wfo"
-    with suppress_output():
-        for row in day_rows:
-            ts = row.timestamp.to_pydatetime()
-            dtm.process_bar(
-                run_id=run_id,
-                ticker=ticker,
-                timestamp=ts,
-                bar_data={
-                    "open": float(row.open),
-                    "high": float(row.high),
-                    "low": float(row.low),
-                    "close": float(row.close),
-                    "volume": float(row.volume),
-                    "vwap": float(row.vwap) if hasattr(row, "vwap") else None,
-                },
-            )
-    
-    session = dtm.get_session(run_id, ticker, date)
+def _session_metrics(session: Any) -> Tuple[float, int, int, float, float, Dict[str, Dict[str, float]]]:
+    """Extract aggregate + per-strategy metrics from DayTradingManager session."""
     if not session:
         return 0.0, 0, 0, 0.0, 0.0, {}
 
@@ -275,12 +282,168 @@ def run_single_day(
             bucket["gross_losses"] += abs(pnl_pct)
 
     return (
-        float(session.total_pnl),
-        len(session.trades),
+        float(getattr(session, "total_pnl", 0.0) or 0.0),
+        len(getattr(session, "trades", []) or []),
         winning,
         float(gross_wins),
         float(gross_losses),
         per_strategy_stats,
+    )
+
+
+def _process_day_with_manager(
+    dtm: Any,
+    *,
+    ticker: str,
+    date: str,
+    day_rows: List[Tuple],
+    run_id: str,
+) -> Tuple[float, int, int, float, float, Dict[str, Dict[str, float]]]:
+    """Process one day through a configured DayTradingManager and return metrics."""
+    with suppress_output():
+        for row in day_rows:
+            ts = row.timestamp.to_pydatetime()
+            dtm.process_bar(
+                run_id=run_id,
+                ticker=ticker,
+                timestamp=ts,
+                bar_data={
+                    "open": float(row.open),
+                    "high": float(row.high),
+                    "low": float(row.low),
+                    "close": float(row.close),
+                    "volume": float(row.volume),
+                    "vwap": float(row.vwap) if hasattr(row, "vwap") else None,
+                },
+            )
+    session = dtm.get_session(run_id, ticker, date)
+    return _session_metrics(session)
+
+
+def _run_single_day_strategy_isolated(
+    *,
+    ticker: str,
+    date: str,
+    day_rows: List[Tuple],
+    strategy_name: str,
+    strategy_params: Dict[str, Any],
+    regime_detection_minutes: int,
+) -> Tuple[float, int, int, float, float, Dict[str, Dict[str, float]]]:
+    """
+    Run one strategy in isolation (all other strategies disabled) on the same day.
+    Used for true strategy-parallel portfolio simulation in WFO.
+    """
+    dtm = DayTradingManager(regime_detection_minutes=regime_detection_minutes)
+    target_strategy = dtm.strategies.get(strategy_name)
+    if not target_strategy:
+        return 0.0, 0, 0, 0.0, 0.0, {}
+
+    for name, strat in dtm.strategies.items():
+        strat.enabled = name == strategy_name
+
+    for key, value in strategy_params.items():
+        if hasattr(target_strategy, key):
+            setattr(target_strategy, key, value)
+
+    run_id = f"wfo-{strategy_name}"
+    dtm.set_run_defaults(
+        run_id=run_id,
+        ticker=ticker,
+        strategy_selection_mode="all_enabled",
+        max_active_strategies=1,
+    )
+    return _process_day_with_manager(
+        dtm,
+        ticker=ticker,
+        date=date,
+        day_rows=day_rows,
+        run_id=run_id,
+    )
+
+
+def run_single_day(
+    ticker: str,
+    date: str,
+    day_rows: List[Tuple],
+    params_by_strategy: Dict[str, Dict[str, Any]],
+    regime_detection_minutes: int = 30,
+    parallel_all_strategies: bool = False,
+) -> Tuple[float, int, int, float, float, Dict[str, Dict[str, float]]]:
+    """
+    Run simulation for a single day.
+    Returns:
+      (pnl_pct, total_trades, winning_trades, gross_wins, gross_losses, per_strategy_stats)
+    """
+    if DayTradingManager is None:
+        raise RuntimeError(
+            "DayTradingManager is not available. Ensure market_regime_detection is present in the sibling directory."
+        )
+
+    if parallel_all_strategies and len(params_by_strategy) > 1:
+        total_pnl = 0.0
+        total_trades = 0
+        total_wins = 0
+        total_gross_wins = 0.0
+        total_gross_losses = 0.0
+        per_strategy_stats: Dict[str, Dict[str, float]] = {}
+
+        for strategy_name in sorted(params_by_strategy.keys()):
+            pnl, trades, wins, gross_wins, gross_losses, strat_stats = _run_single_day_strategy_isolated(
+                ticker=ticker,
+                date=date,
+                day_rows=day_rows,
+                strategy_name=strategy_name,
+                strategy_params=params_by_strategy.get(strategy_name, {}) or {},
+                regime_detection_minutes=regime_detection_minutes,
+            )
+            total_pnl += pnl
+            total_trades += trades
+            total_wins += wins
+            total_gross_wins += gross_wins
+            total_gross_losses += gross_losses
+            for key, bucket in strat_stats.items():
+                merged = per_strategy_stats.setdefault(
+                    key,
+                    {"pnl": 0.0, "trades": 0.0, "wins": 0.0, "gross_wins": 0.0, "gross_losses": 0.0},
+                )
+                for metric in ("pnl", "trades", "wins", "gross_wins", "gross_losses"):
+                    merged[metric] += float(bucket.get(metric, 0.0) or 0.0)
+
+        return (
+            float(total_pnl),
+            int(total_trades),
+            int(total_wins),
+            float(total_gross_wins),
+            float(total_gross_losses),
+            per_strategy_stats,
+        )
+
+    dtm = DayTradingManager(regime_detection_minutes=regime_detection_minutes)
+    run_id = "wfo"
+
+    if parallel_all_strategies:
+        dtm.set_run_defaults(
+            run_id=run_id,
+            ticker=ticker,
+            strategy_selection_mode="all_enabled",
+            max_active_strategies=max(1, min(20, len(getattr(dtm, "strategies", {})))),
+        )
+    
+    # Apply params to strategies
+    for strat_name, params in params_by_strategy.items():
+        strat = dtm.strategies.get(strat_name)
+        if not strat:
+            continue
+        for k, v in params.items():
+            if hasattr(strat, k):
+                setattr(strat, k, v)
+
+    return _process_day_with_manager(
+        dtm,
+        ticker=ticker,
+        date=date,
+        day_rows=day_rows,
+        run_id=run_id,
     )
 
 
@@ -317,6 +480,7 @@ def optimize_strategy_for_dates(
     dates: List[str],
     strategy_name: str,
     param_grid: Dict[str, List[Any]],
+    parallel_all_strategies: bool = False,
 ) -> OptimizationResult:
     """Optimize a single strategy across multiple dates."""
     best = OptimizationResult(
@@ -351,6 +515,7 @@ def optimize_strategy_for_dates(
                 date=date,
                 day_rows=day_rows,
                 params_by_strategy={strategy_name: params},
+                parallel_all_strategies=parallel_all_strategies,
             )
 
             strategy_stats = per_strategy_stats.get(target_strategy)
@@ -397,6 +562,7 @@ def evaluate_on_dates(
     day_rows_map: Dict[str, List[Tuple]],
     dates: List[str],
     overrides: Dict[str, Dict[str, Any]],
+    parallel_all_strategies: bool = False,
 ) -> Tuple[float, int, int, float, float]:
     """Evaluate strategy with given overrides on test dates."""
     total_pnl = 0.0
@@ -415,6 +581,7 @@ def evaluate_on_dates(
             date=date,
             day_rows=day_rows,
             params_by_strategy=overrides,
+            parallel_all_strategies=parallel_all_strategies,
         )
         total_pnl += pnl
         total_trades += trades
@@ -431,6 +598,7 @@ def run_walk_forward(
     day_rows_map: Dict[str, List[Tuple]],
     train_days: int = 10,
     test_days: int = 3,
+    parallel_all_strategies: bool = False,
 ) -> TickerOptResult:
     """
     Run rolling walk-forward optimization for a ticker.
@@ -480,6 +648,7 @@ def run_walk_forward(
                 dates=train_dates,
                 strategy_name=strategy_name,
                 param_grid=param_grid,
+                parallel_all_strategies=parallel_all_strategies,
             )
             best_results[strategy_name] = result
 
@@ -499,12 +668,14 @@ def run_walk_forward(
             day_rows_map=day_rows_map,
             dates=train_dates,
             overrides=window_params,
+            parallel_all_strategies=parallel_all_strategies,
         )
         test_pnl, test_trades, test_wins, _, _ = evaluate_on_dates(
             ticker=ticker,
             day_rows_map=day_rows_map,
             dates=test_dates,
             overrides=window_params,
+            parallel_all_strategies=parallel_all_strategies,
         )
 
         train_pnl_total += train_pnl
@@ -547,6 +718,11 @@ def main():
                         help="Number of out-of-sample test days")
     parser.add_argument("--output", "-o", type=str, default="strategy_overrides.json",
                         help="Output file for strategy overrides")
+    parser.add_argument(
+        "--parallel-all-strategies",
+        action="store_true",
+        help="Evaluate/run WFO windows with all eligible strategies active in parallel (all_enabled mode)",
+    )
     args = parser.parse_args()
     
     print("=" * 70)
@@ -563,6 +739,7 @@ def main():
     print(f"Tickers: {', '.join(tickers)}")
     print(f"Train Days: {args.train_days}")
     print(f"Test Days: {args.test_days}")
+    print(f"Parallel All Strategies: {args.parallel_all_strategies}")
     
     loader = DataLoader()
     all_results: List[TickerOptResult] = []
@@ -607,7 +784,8 @@ def main():
             all_dates=dates,
             day_rows_map=day_rows_map,
             train_days=args.train_days,
-            test_days=args.test_days
+            test_days=args.test_days,
+            parallel_all_strategies=args.parallel_all_strategies,
         )
         
         all_results.append(result)
@@ -645,7 +823,8 @@ def main():
         "config": {
             "train_days": args.train_days,
             "test_days": args.test_days,
-            "tickers": tickers
+            "tickers": tickers,
+            "parallel_all_strategies": bool(args.parallel_all_strategies),
         },
         "results": [
             {

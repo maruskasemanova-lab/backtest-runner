@@ -32,6 +32,7 @@ def _build_deps(apply_calls: List[Dict[str, Dict[str, Any]]]) -> StrategyApiInte
         load_strategy_overrides=lambda: {},
         sanitize_strategy_params=lambda value: value if isinstance(value, dict) else {},
         normalize_strategy_combo_profiles=lambda value: value if isinstance(value, list) else [],
+        normalize_unified_profiles=lambda value: value if isinstance(value, list) else [],
         normalize_tuner_profiles=lambda value: value if isinstance(value, list) else [],
         normalize_strategy_selection_mode=lambda _value: "all_enabled",
         normalize_clamped_int=lambda value, default=3, min_value=1, max_value=20: max(
@@ -224,3 +225,101 @@ def test_apply_aos_optimizations_prefers_adaptive_trading_hours() -> None:
     assert result["trading_hours"] == [16, 17, 19]
     assert result["trading_hours_source"] == "adaptive_profile"
     assert result["time_filter_enabled"] is True
+
+
+def test_apply_aos_optimizations_does_not_emit_placeholder_profile_ids() -> None:
+    deps = _build_deps([])
+    deps.load_aos_config = lambda *_args, **_kwargs: {
+        "tickers": {
+            "MU": {
+                "strategy": "vwap_magnet",
+                "params": {},
+                "active_adaptive_tuner_profile_id": None,
+                "active_strategy_combo_profile_id": None,
+                "adaptive_tuner_profiles": [],
+                "strategy_combo_profiles": [],
+            }
+        }
+    }
+
+    result = asyncio.run(
+        apply_aos_optimizations(
+            strategy_api_url="http://localhost:8001",
+            ticker="MU",
+            deps=deps,
+            remote_sync=False,
+        )
+    )
+
+    adaptive_profile = result.get("adaptive_profile")
+    assert isinstance(adaptive_profile, dict)
+    assert adaptive_profile.get("active_profile_id") is None
+    assert adaptive_profile.get("candidate_applied") is False
+
+
+def test_apply_aos_optimizations_uses_unified_profile_when_active() -> None:
+    calls: List[Dict[str, Dict[str, Any]]] = []
+    deps = _build_deps(calls)
+
+    async def _unexpected_combo(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
+        raise AssertionError("legacy strategy combo path should not be called for unified profile")
+
+    async def _unexpected_adaptive(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
+        raise AssertionError("legacy adaptive profile path should not be called for unified profile")
+
+    deps.apply_active_strategy_combo = _unexpected_combo
+    deps.apply_active_adaptive_tuner_profile = _unexpected_adaptive
+    deps.load_aos_config = lambda *_args, **_kwargs: {
+        "tickers": {
+            "MU": {
+                "strategy": "momentum_flow",
+                "params": {},
+                "active_unified_profile_id": "u1",
+                "active_strategy_combo_profile_id": "combo1",
+                "active_adaptive_tuner_profile_id": "p1",
+                "unified_profiles": [
+                    {
+                        "profile_id": "u1",
+                        "profile_name": "MU Unified",
+                        "strategy_profile": {
+                            "strategy_params": {
+                                "momentum": {"enabled": True, "min_confidence": 58.0}
+                            },
+                            "strategy_selection_mode": "all_enabled",
+                            "max_active_strategies": 5,
+                            "trading_hours": [10, 9, 10],
+                            "time_filter_enabled": True,
+                            "long_only": True,
+                            "l2": {"confirm_enabled": True, "min_imbalance": 0.03},
+                        },
+                        "execution_profile": {
+                            "positioning": {
+                                "risk_per_trade_pct": 0.9,
+                                "trailing_stop_pct": 0.7,
+                            }
+                        },
+                    }
+                ],
+            }
+        }
+    }
+
+    result = asyncio.run(
+        apply_aos_optimizations(
+            strategy_api_url="http://localhost:8001",
+            ticker="MU",
+            deps=deps,
+            remote_sync=True,
+        )
+    )
+
+    assert len(calls) == 1
+    assert "unified_profile" in result
+    assert result["unified_profile"]["active_profile_id"] == "u1"
+    assert result["adaptive_profile"]["unified_profile"] is True
+    assert result["strategy_selection_mode"] == "all_enabled"
+    assert result["max_active_strategies"] == 5
+    assert result["trading_hours"] == [9, 10]
+    assert result["trading_hours_source"] == "unified_profile"
+    assert result["long_only"] is True
+    assert result["positioning"]["risk_per_trade_pct"] == 0.9

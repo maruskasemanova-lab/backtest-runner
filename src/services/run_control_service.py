@@ -19,6 +19,49 @@ class RunControlDeps:
     save_remote_checkpoint: Any
     clear_remote_strategy_sessions: Any
     configure_session: Any
+    run_reports_store: Optional[Any] = None
+
+
+def _runner_date_label(runner: Any) -> str:
+    config = getattr(runner, "config", None)
+    if config is None:
+        return ""
+    date_from = str(getattr(config, "date_from", "") or "").strip()
+    date_to = str(getattr(config, "date_to", "") or "").strip()
+    if date_from and date_to:
+        return f"{date_from}_to_{date_to}"
+    return str(date_from or date_to or getattr(config, "date", "") or "").strip()
+
+
+def _runner_run_key(runner: Any) -> Optional[str]:
+    config = getattr(runner, "config", None)
+    if config is None:
+        return None
+    run_id = str(getattr(config, "run_id", "") or "").strip()
+    ticker = str(getattr(config, "ticker", "") or "").strip()
+    date_label = _runner_date_label(runner)
+    if not run_id or not ticker or not date_label:
+        return None
+    return f"{run_id}:{ticker}:{date_label}"
+
+
+async def _persist_runner_summary_to_store(runner: Any, deps: RunControlDeps) -> bool:
+    report_store = getattr(deps, "run_reports_store", None)
+    upsert = getattr(report_store, "upsert_run_summary", None)
+    if not callable(upsert):
+        return False
+
+    run_key = _runner_run_key(runner)
+    if not run_key:
+        return False
+    summary_payload = runner.get_summary()
+    payload = summary_payload if isinstance(summary_payload, dict) else {}
+    await asyncio.to_thread(
+        upsert,
+        run_key=run_key,
+        summary=payload,
+    )
+    return True
 
 
 def get_run_state(run_id: str, ticker: str, date: str, deps: RunControlDeps):
@@ -137,6 +180,11 @@ async def play_run(
         except Exception as exc:
             deps.logger.error("Failed to auto-save reports: %s", exc)
 
+        try:
+            await _persist_runner_summary_to_store(runner, deps)
+        except Exception as exc:
+            deps.logger.error("Failed to persist run summary to external report store: %s", exc)
+
         if getattr(runner, "_checkpoint_auto_save", False):
             url = getattr(runner, "_checkpoint_strategy_url", "")
             if url:
@@ -201,6 +249,8 @@ async def restart_run(run_id: str, ticker: str, date: str, deps: RunControlDeps)
     )
 
     if hasattr(runner, "reset_for_replay"):
+        if hasattr(runner, "close_http_session"):
+            await runner.close_http_session()
         runner.reset_for_replay()
     else:
         # Safety fallback for older runner objects.
@@ -299,6 +349,12 @@ def get_run_summary(run_id: str, ticker: str, date: str, deps: RunControlDeps):
 async def delete_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
     run_key, runner = deps.run_registry.require(run_id, ticker, date)
     runner.stop()
+    try:
+        await _persist_runner_summary_to_store(runner, deps)
+    except Exception as exc:
+        deps.logger.error("Failed to persist run summary during delete_run: %s", exc)
+    if hasattr(runner, "close_http_session"):
+        await runner.close_http_session()
     await deps.clear_remote_strategy_sessions(
         runner.config.strategy_api_url,
         runner.config.run_id,

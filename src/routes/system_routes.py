@@ -4,18 +4,92 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from src.routes.context import ApiServices, get_api_services
+from src.runtime_mode import is_serverless_environment, stateful_run_api_supported
 
 router = APIRouter()
 _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _RANGE_DATE_RE = re.compile(r"^(?P<start>\d{4}-\d{2}-\d{2})_to_(?P<end>\d{4}-\d{2}-\d{2})$")
+_PROFILE_PLACEHOLDER_TOKENS = {"none", "null", "n/a", "na", "undefined", "-"}
 
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _diagnostic_cache_store(request: Request):
+    app = getattr(request, "app", None)
+    state = getattr(app, "state", None)
+    v2_services = getattr(state, "v2_services", None)
+    store = getattr(v2_services, "store", None)
+    return store
+
+
+def _run_reports_store(request: Request):
+    app = getattr(request, "app", None)
+    state = getattr(app, "state", None)
+    return getattr(state, "run_reports_store", None)
+
+
+def _run_reports_source_mode(request: Request) -> str:
+    app = getattr(request, "app", None)
+    state = getattr(app, "state", None)
+    explicit = str(getattr(state, "run_reports_source_mode", "") or "").strip()
+    if explicit:
+        return explicit
+    store = getattr(state, "run_reports_store", None) if state is not None else None
+    if store is None:
+        return "filesystem_reports"
+    return "run_reports_store"
+
+
+def _external_report_dir_name(*, run_key: str, updated_at: Any, fallback_index: int) -> str:
+    normalized_run_key = re.sub(r"[^A-Za-z0-9_-]+", "_", str(run_key or "").strip()).strip("_")
+    if not normalized_run_key:
+        normalized_run_key = f"run_{max(1, int(fallback_index))}"
+
+    timestamp_prefix = "19700101_000000"
+    normalized_updated_at = _normalize_iso_timestamp(updated_at)
+    if normalized_updated_at:
+        token = normalized_updated_at.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(token)
+            timestamp_prefix = parsed.strftime("%Y%m%d_%H%M%S")
+        except ValueError:
+            pass
+
+    return f"{timestamp_prefix}_supabase_{normalized_run_key}"
+
+
+def _build_diagnostic_summary(
+    *,
+    ticker: str,
+    profile: str,
+    phase: int,
+    payload: Dict[str, Any],
+    from_cache: bool,
+) -> Dict[str, Any]:
+    top_level_sizes: Dict[str, Optional[int]] = {}
+    for key, value in payload.items():
+        if isinstance(value, (list, dict)):
+            top_level_sizes[key] = len(value)
+        else:
+            top_level_sizes[key] = None
+
+    return {
+        "source": "diagnostic_summary",
+        "ticker": ticker,
+        "profile": profile,
+        "phase": int(phase),
+        "from_cache": bool(from_cache),
+        "keys": sorted(payload.keys()),
+        "top_level_sizes": top_level_sizes,
+        "day_results_count": len(payload.get("day_results", [])) if isinstance(payload.get("day_results"), list) else 0,
+        "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
 
 
 def _sanitize_segment(value: str, *, field: str) -> str:
@@ -133,11 +207,34 @@ def _expand_strategy_aliases(token: str) -> Set[str]:
     return set(alias_map.get(canonical, {canonical}))
 
 
+def _normalize_profile_token(value: Any) -> Optional[str]:
+    token = str(value).strip() if value is not None else ""
+    if not token:
+        return None
+    if token.lower() in _PROFILE_PLACEHOLDER_TOKENS:
+        return None
+    return token
+
+
+def _first_profile_token(*values: Any) -> Optional[str]:
+    for value in values:
+        token = _normalize_profile_token(value)
+        if token:
+            return token
+    return None
+
+
 def _extract_profile_metadata(payload: Dict[str, Any]) -> Dict[str, Optional[str]]:
     report_meta = payload.get("report_metadata", {}) if isinstance(payload.get("report_metadata"), dict) else {}
     aos_applied = payload.get("aos_applied", {}) if isinstance(payload.get("aos_applied"), dict) else {}
+    execution_config = payload.get("execution_config", {}) if isinstance(payload.get("execution_config"), dict) else {}
     if not aos_applied and isinstance(report_meta.get("aos_applied"), dict):
         aos_applied = report_meta.get("aos_applied", {})
+    unified_meta = (
+        aos_applied.get("unified_profile", {})
+        if isinstance(aos_applied.get("unified_profile"), dict)
+        else {}
+    )
     adaptive_meta = (
         aos_applied.get("adaptive_profile", {})
         if isinstance(aos_applied.get("adaptive_profile"), dict)
@@ -148,32 +245,51 @@ def _extract_profile_metadata(payload: Dict[str, Any]) -> Dict[str, Optional[str
         if isinstance(aos_applied.get("strategy_combo"), dict)
         else {}
     )
-    adaptive_profile_id = (
-        str(report_meta.get("adaptive_profile_id") or "").strip()
-        or str(payload.get("adaptive_profile_id") or "").strip()
-        or str(adaptive_meta.get("active_profile_id") or "").strip()
-        or str(adaptive_meta.get("profile_id") or "").strip()
-        or None
+    adaptive_profile_id = _first_profile_token(
+        report_meta.get("adaptive_profile_id"),
+        payload.get("adaptive_profile_id"),
+        execution_config.get("adaptive_profile_id"),
+        execution_config.get("active_adaptive_tuner_profile_id"),
+        adaptive_meta.get("active_profile_id"),
+        adaptive_meta.get("profile_id"),
     )
-    adaptive_profile_name = (
-        str(report_meta.get("adaptive_profile_name") or "").strip()
-        or str(payload.get("adaptive_profile_name") or "").strip()
-        or str(adaptive_meta.get("profile_name") or "").strip()
-        or None
+    adaptive_profile_name = _first_profile_token(
+        report_meta.get("adaptive_profile_name"),
+        payload.get("adaptive_profile_name"),
+        execution_config.get("adaptive_profile_name"),
+        adaptive_meta.get("profile_name"),
     )
-    strategy_combo_profile_id = (
-        str(report_meta.get("strategy_combo_profile_id") or "").strip()
-        or str(payload.get("strategy_combo_profile_id") or "").strip()
-        or str(strategy_combo_meta.get("active_profile_id") or "").strip()
-        or None
+    strategy_combo_profile_id = _first_profile_token(
+        report_meta.get("strategy_combo_profile_id"),
+        payload.get("strategy_combo_profile_id"),
+        execution_config.get("strategy_combo_profile_id"),
+        execution_config.get("active_strategy_combo_profile_id"),
+        strategy_combo_meta.get("active_profile_id"),
+        strategy_combo_meta.get("profile_id"),
     )
-    strategy_combo_profile_name = (
-        str(report_meta.get("strategy_combo_profile_name") or "").strip()
-        or str(payload.get("strategy_combo_profile_name") or "").strip()
-        or str(strategy_combo_meta.get("profile_name") or "").strip()
-        or None
+    strategy_combo_profile_name = _first_profile_token(
+        report_meta.get("strategy_combo_profile_name"),
+        payload.get("strategy_combo_profile_name"),
+        execution_config.get("strategy_combo_profile_name"),
+        strategy_combo_meta.get("profile_name"),
+    )
+    unified_profile_id = _first_profile_token(
+        report_meta.get("unified_profile_id"),
+        payload.get("unified_profile_id"),
+        execution_config.get("unified_profile_id"),
+        execution_config.get("active_unified_profile_id"),
+        unified_meta.get("active_profile_id"),
+        unified_meta.get("profile_id"),
+    )
+    unified_profile_name = _first_profile_token(
+        report_meta.get("unified_profile_name"),
+        payload.get("unified_profile_name"),
+        execution_config.get("unified_profile_name"),
+        unified_meta.get("profile_name"),
     )
     return {
+        "unified_profile_id": unified_profile_id,
+        "unified_profile_name": unified_profile_name,
         "adaptive_profile_id": adaptive_profile_id,
         "adaptive_profile_name": adaptive_profile_name,
         "strategy_combo_profile_id": strategy_combo_profile_id,
@@ -184,17 +300,25 @@ def _extract_profile_metadata(payload: Dict[str, Any]) -> Dict[str, Optional[str
 def _match_profile_filter(
     *,
     run_id: str,
+    unified_profile_id: Optional[str],
     adaptive_profile_id: Optional[str],
+    strategy_combo_profile_id: Optional[str],
     requested_profile_id: str,
 ) -> Optional[str]:
     _ = run_id  # retained for backward-compatible signature
-    if not requested_profile_id:
-        return "none"
+    requested = _normalize_profile_token(requested_profile_id)
+    if not requested:
+        return None
 
-    requested = str(requested_profile_id).strip().lower()
-    current = str(adaptive_profile_id or "").strip().lower()
-    if current and current == requested:
-        return "exact"
+    requested_lower = requested.lower()
+    for current_raw in (
+        unified_profile_id,
+        adaptive_profile_id,
+        strategy_combo_profile_id,
+    ):
+        current = _normalize_profile_token(current_raw)
+        if current and current.lower() == requested_lower:
+            return "exact"
     return None
 
 
@@ -416,15 +540,16 @@ def _build_history_day_rows(
     payload: Dict[str, Any],
     *,
     report_dir_name: str,
+    report_saved_at: Optional[str] = None,
     include_multi_day: bool,
-    profile_match_mode: str,
+    profile_match_mode: Optional[str],
 ) -> List[Dict[str, Any]]:
     run_id = str(payload.get("run_id") or "").strip()
     if not run_id:
         return []
     ticker = str(payload.get("ticker") or "").strip().upper()
     date_label = str(payload.get("date") or "").strip()
-    saved_at = _parse_report_saved_at(report_dir_name)
+    saved_at = _normalize_iso_timestamp(report_saved_at) or _parse_report_saved_at(report_dir_name)
     markers = payload.get("markers", []) if isinstance(payload.get("markers"), list) else []
     session_summary = payload.get("session_summary", {})
     if not isinstance(session_summary, dict):
@@ -545,6 +670,8 @@ def _build_history_day_rows(
                 "strategy_names": sorted(day_strategy_names),
                 "execution_config": execution_config,
                 "aos_applied": aos_applied,
+                "unified_profile_id": profile_meta.get("unified_profile_id"),
+                "unified_profile_name": profile_meta.get("unified_profile_name"),
                 "adaptive_profile_id": profile_meta.get("adaptive_profile_id"),
                 "adaptive_profile_name": profile_meta.get("adaptive_profile_name"),
                 "strategy_combo_profile_id": profile_meta.get("strategy_combo_profile_id"),
@@ -577,6 +704,8 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
                 "trade_details": [],
                 "runs": [],
                 "strategy_names": set(),
+                "unified_profile_ids": set(),
+                "unified_profile_names": set(),
                 "adaptive_profile_ids": set(),
                 "adaptive_profile_names": set(),
                 "strategy_combo_profile_ids": set(),
@@ -605,6 +734,12 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
             token = str(name or "").strip()
             if token:
                 bucket["strategy_names"].add(token)
+        unified_profile_id = str(row.get("unified_profile_id") or "").strip()
+        if unified_profile_id:
+            bucket["unified_profile_ids"].add(unified_profile_id)
+        unified_profile_name = str(row.get("unified_profile_name") or "").strip()
+        if unified_profile_name:
+            bucket["unified_profile_names"].add(unified_profile_name)
         adaptive_profile_id = str(row.get("adaptive_profile_id") or "").strip()
         if adaptive_profile_id:
             bucket["adaptive_profile_ids"].add(adaptive_profile_id)
@@ -643,6 +778,8 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
                 "run_processed_bars": _safe_optional_int(row.get("run_processed_bars")),
                 "run_total_bars": _safe_optional_int(row.get("run_total_bars")),
                 "strategy_names": row.get("strategy_names") if isinstance(row.get("strategy_names"), list) else [],
+                "unified_profile_id": row.get("unified_profile_id"),
+                "unified_profile_name": row.get("unified_profile_name"),
                 "adaptive_profile_id": row.get("adaptive_profile_id"),
                 "adaptive_profile_name": row.get("adaptive_profile_name"),
                 "strategy_combo_profile_id": row.get("strategy_combo_profile_id"),
@@ -672,6 +809,8 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
                 str(item.get("trade_id") or ""),
             )
         )
+        unified_profile_ids = sorted(bucket.get("unified_profile_ids", set()))
+        unified_profile_names = sorted(bucket.get("unified_profile_names", set()))
         adaptive_profile_ids = sorted(bucket.get("adaptive_profile_ids", set()))
         adaptive_profile_names = sorted(bucket.get("adaptive_profile_names", set()))
         strategy_combo_profile_ids = sorted(bucket.get("strategy_combo_profile_ids", set()))
@@ -699,11 +838,15 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
             "report_count": len(runs),
             "runs": runs,
             "strategy_names": sorted(bucket.get("strategy_names", set())),
+            "unified_profile_ids": unified_profile_ids,
+            "unified_profile_names": unified_profile_names,
             "adaptive_profile_ids": adaptive_profile_ids,
             "adaptive_profile_names": adaptive_profile_names,
             "strategy_combo_profile_ids": strategy_combo_profile_ids,
             "strategy_combo_profile_names": strategy_combo_profile_names,
             "profile_match_modes": profile_match_modes,
+            "unified_profile_id": _resolve_profile_values(set(unified_profile_ids)),
+            "unified_profile_name": _resolve_profile_values(set(unified_profile_names)),
             "adaptive_profile_id": _resolve_profile_values(set(adaptive_profile_ids)),
             "adaptive_profile_name": _resolve_profile_values(set(adaptive_profile_names)),
             "strategy_combo_profile_id": _resolve_profile_values(set(strategy_combo_profile_ids)),
@@ -914,7 +1057,72 @@ def _load_aos_adaptive_profile_options(ticker: str) -> List[Dict[str, Any]]:
     return options
 
 
-def _merge_adaptive_profile_options(
+def _load_aos_unified_profile_options(ticker: str) -> List[Dict[str, Any]]:
+    config_path = _project_root() / "aos_optimization" / "aos_config.json"
+    if not config_path.exists() or not config_path.is_file():
+        return []
+    try:
+        raw = config_path.read_text(encoding="utf-8")
+        payload = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+
+    tickers_payload = payload.get("tickers", {}) if isinstance(payload.get("tickers"), dict) else {}
+    ticker_payload = tickers_payload.get(ticker, {}) if isinstance(tickers_payload.get(ticker), dict) else {}
+    active_profile_id = str(ticker_payload.get("active_unified_profile_id") or "").strip() or None
+    profiles = ticker_payload.get("unified_profiles", [])
+    if not isinstance(profiles, list):
+        profiles = []
+
+    collected: Dict[str, Dict[str, Any]] = {}
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        profile_id = str(profile.get("profile_id") or "").strip()
+        if not profile_id:
+            continue
+        profile_name = (
+            str(profile.get("profile_name") or "").strip()
+            or str(profile.get("name") or "").strip()
+            or None
+        )
+        created_at = _normalize_iso_timestamp(profile.get("created_at"))
+        existing = collected.get(profile_id)
+        if existing is None:
+            collected[profile_id] = {
+                "profile_id": profile_id,
+                "profile_name": profile_name,
+                "active": bool(active_profile_id and active_profile_id == profile_id),
+                "latest_created_at": created_at,
+                "source": "aos_unified",
+            }
+            continue
+        if not existing.get("profile_name") and profile_name:
+            existing["profile_name"] = profile_name
+        existing["active"] = bool(existing.get("active")) or bool(active_profile_id and active_profile_id == profile_id)
+        existing_created_at = str(existing.get("latest_created_at") or "")
+        if created_at and created_at > existing_created_at:
+            existing["latest_created_at"] = created_at
+
+    if active_profile_id and active_profile_id not in collected:
+        collected[active_profile_id] = {
+            "profile_id": active_profile_id,
+            "profile_name": None,
+            "active": True,
+            "latest_created_at": None,
+            "source": "aos_unified",
+        }
+
+    options = list(collected.values())
+    options.sort(key=lambda item: str(item.get("profile_id") or ""))
+    options.sort(key=lambda item: str(item.get("latest_created_at") or ""), reverse=True)
+    options.sort(key=lambda item: 0 if bool(item.get("active")) else 1)
+    return options
+
+
+def _merge_profile_options(
     history_options: List[Dict[str, Any]],
     aos_options: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -971,6 +1179,13 @@ def _merge_adaptive_profile_options(
     return options
 
 
+def _merge_adaptive_profile_options(
+    history_options: List[Dict[str, Any]],
+    aos_options: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    return _merge_profile_options(history_options, aos_options)
+
+
 @router.get("/")
 async def root(services: ApiServices = Depends(get_api_services)):
     return {
@@ -982,7 +1197,11 @@ async def root(services: ApiServices = Depends(get_api_services)):
 
 @router.get("/api/health")
 async def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "serverless_environment": bool(is_serverless_environment()),
+        "stateful_run_api_supported": bool(stateful_run_api_supported()),
+    }
 
 
 @router.get("/api/system/l2/runtime")
@@ -1036,9 +1255,15 @@ async def update_l2_runtime(
 
 
 @router.get("/api/available-data")
-async def get_available_data(services: ApiServices = Depends(get_api_services)):
+async def get_available_data(
+    refresh: bool = Query(default=False),
+    services: ApiServices = Depends(get_api_services),
+):
     """Get available tickers and date ranges from data files."""
-    return services.databento_svc.get_available_data_summary(refresh=False)
+    try:
+        return services.databento_svc.get_available_data_summary(refresh=bool(refresh))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/api/data/files")
@@ -1049,13 +1274,17 @@ async def list_data_files(services: ApiServices = Depends(get_api_services)):
 
 @router.get("/api/reports/diagnostic/{ticker}")
 async def get_diagnostic_report(
+    request: Request,
     ticker: str,
     phase: int = Query(default=0, ge=0, le=20),
     profile: str = Query(default="diagnostic", min_length=1, max_length=64),
+    summary_only: bool = Query(default=False),
+    refresh_cache: bool = Query(default=False),
 ) -> Any:
     """
     Read a diagnostic JSON report from reports/<ticker>_<profile>/phase<phase>_<profile>.json.
     Missing files are surfaced as explicit errors (no fallback behavior).
+    When cache store is available in app state, payload is cached by file mtime.
     """
     safe_ticker = _sanitize_segment(ticker, field="ticker").upper()
     safe_profile = _sanitize_segment(profile, field="profile").lower()
@@ -1070,49 +1299,108 @@ async def get_diagnostic_report(
         relative = report_file.relative_to(_project_root())
         raise HTTPException(status_code=400, detail=f"Diagnostic report path is not a file: {relative}")
 
-    try:
-        raw = report_file.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read diagnostic report: {exc}") from exc
+    store = _diagnostic_cache_store(request)
+    payload: Optional[Dict[str, Any]] = None
+    from_cache = False
 
+    source_path = str(report_file.resolve())
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=500, detail=f"Diagnostic report is not valid JSON: {exc}") from exc
+        source_mtime_ns = int(report_file.stat().st_mtime_ns)
+    except OSError:
+        source_mtime_ns = 0
 
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=500, detail="Diagnostic report root must be a JSON object.")
+    cache_key: Optional[str] = None
+    if store is not None and not refresh_cache:
+        build_key = getattr(store, "diagnostic_cache_key", None)
+        read_cache = getattr(store, "get_diagnostic_payload_cache", None)
+        if callable(build_key) and callable(read_cache):
+            try:
+                cache_key = build_key(ticker=safe_ticker, profile=safe_profile, phase=phase)
+                cached = read_cache(
+                    cache_key=cache_key,
+                    source_path=source_path,
+                    source_mtime_ns=source_mtime_ns,
+                )
+                if isinstance(cached, dict):
+                    payload = cached
+                    from_cache = True
+            except Exception:
+                payload = None
+                from_cache = False
+
+    if payload is None:
+        try:
+            raw = report_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to read diagnostic report: {exc}") from exc
+
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=500, detail=f"Diagnostic report is not valid JSON: {exc}") from exc
+
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=500, detail="Diagnostic report root must be a JSON object.")
+        payload = parsed
+
+        write_cache = getattr(store, "upsert_diagnostic_payload_cache", None) if store is not None else None
+        if callable(write_cache):
+            try:
+                if not cache_key:
+                    build_key = getattr(store, "diagnostic_cache_key", None)
+                    if callable(build_key):
+                        cache_key = build_key(ticker=safe_ticker, profile=safe_profile, phase=phase)
+                if cache_key:
+                    write_cache(
+                        cache_key=cache_key,
+                        ticker=safe_ticker,
+                        profile=safe_profile,
+                        phase=phase,
+                        source_path=source_path,
+                        source_mtime_ns=source_mtime_ns,
+                        payload=payload,
+                    )
+            except Exception:
+                # Cache write is best-effort only.
+                pass
+
+    if summary_only:
+        return _build_diagnostic_summary(
+            ticker=safe_ticker,
+            profile=safe_profile,
+            phase=phase,
+            payload=payload,
+            from_cache=from_cache,
+        )
 
     return payload
 
 
 @router.get("/api/reports/history/{ticker}")
 async def get_saved_run_history(
+    request: Request,
     ticker: str,
     limit: int = Query(default=300, ge=1, le=5000),
     run_id: str = Query(default="", max_length=128),
     run_id_contains: str = Query(default="", max_length=128),
+    unified_profile_id: str = Query(default="", max_length=128),
     adaptive_profile_id: str = Query(default="", max_length=128),
     include_multi_day: bool = Query(default=True),
+    include_zero_trade_runs: bool = Query(default=False),
 ) -> Dict[str, Any]:
     """
-    Read historical session summaries from reports/*/session_summary.json and aggregate
-    day-level PnL/trade details for the diagnostics calendar.
+    Read historical session summaries and aggregate day-level PnL/trade details
+    for the diagnostics calendar.
+
+    Source selection:
+    - if run_reports_store is configured, use that store as authoritative source.
+    - otherwise read local reports/*/session_summary.json artifacts.
     """
     safe_ticker = _sanitize_segment(ticker, field="ticker").upper()
     run_id_exact_filter = str(run_id or "").strip().lower()
     run_id_filter = str(run_id_contains or "").strip().lower()
-    requested_profile_id = str(adaptive_profile_id or "").strip()
+    requested_profile_id = _first_profile_token(unified_profile_id, adaptive_profile_id) or ""
 
-    reports_root = _project_root() / "reports"
-    if not reports_root.exists():
-        raise HTTPException(status_code=404, detail="Reports directory does not exist.")
-
-    report_files = sorted(
-        reports_root.glob("*/session_summary.json"),
-        key=lambda path: path.parent.name,
-        reverse=True,
-    )
     day_rows: List[Dict[str, Any]] = []
     matched_reports = 0
     scanned_reports = 0
@@ -1120,68 +1408,144 @@ async def get_saved_run_history(
     run_latest_saved_at: Dict[str, Optional[str]] = {}
     history_profile_names: Dict[str, Set[str]] = {}
 
-    for report_file in report_files:
-        if matched_reports >= limit:
-            break
-        scanned_reports += 1
-        report_dir_name = report_file.parent.name
-
-        try:
-            raw = report_file.read_text(encoding="utf-8")
-            payload = json.loads(raw)
-        except (OSError, json.JSONDecodeError):
-            skipped_invalid += 1
-            continue
-        if not isinstance(payload, dict):
-            skipped_invalid += 1
-            continue
+    def _process_history_payload(
+        *,
+        payload: Dict[str, Any],
+        report_dir_name: str,
+        report_saved_at: Optional[str],
+    ) -> None:
+        nonlocal matched_reports
+        run_id_value = str(payload.get("run_id") or "").strip()
+        if not run_id_value:
+            return
+        has_closed_trades = _report_has_closed_trades(payload)
+        if not has_closed_trades and not include_zero_trade_runs:
+            return
 
         payload_ticker = str(payload.get("ticker") or "").strip().upper()
         if payload_ticker != safe_ticker:
-            continue
-        run_id = str(payload.get("run_id") or "").strip()
-        if not run_id:
-            continue
-        if not _report_has_closed_trades(payload):
-            continue
-        report_saved_at = _parse_report_saved_at(report_dir_name)
-        current_latest = str(run_latest_saved_at.get(run_id) or "")
-        if report_saved_at and report_saved_at > current_latest:
-            run_latest_saved_at[run_id] = report_saved_at
-        elif run_id not in run_latest_saved_at:
-            run_latest_saved_at[run_id] = report_saved_at
+            return
+        normalized_saved_at = _normalize_iso_timestamp(report_saved_at) or _parse_report_saved_at(report_dir_name)
+        current_latest = str(run_latest_saved_at.get(run_id_value) or "")
+        if normalized_saved_at and normalized_saved_at > current_latest:
+            run_latest_saved_at[run_id_value] = normalized_saved_at
+        elif run_id_value not in run_latest_saved_at:
+            run_latest_saved_at[run_id_value] = normalized_saved_at
 
         profile_meta = _extract_profile_metadata(payload)
-        history_profile_id = str(profile_meta.get("adaptive_profile_id") or "").strip()
-        history_profile_name = str(profile_meta.get("adaptive_profile_name") or "").strip()
+        history_profile_id = (
+            str(profile_meta.get("unified_profile_id") or "").strip()
+            or str(profile_meta.get("adaptive_profile_id") or "").strip()
+        )
+        history_profile_name = (
+            str(profile_meta.get("unified_profile_name") or "").strip()
+            or str(profile_meta.get("adaptive_profile_name") or "").strip()
+        )
         if history_profile_id:
             history_profile_names.setdefault(history_profile_id, set())
             if history_profile_name:
                 history_profile_names[history_profile_id].add(history_profile_name)
 
-        if run_id_exact_filter and run_id.lower() != run_id_exact_filter:
-            continue
-        if run_id_filter and run_id_filter not in run_id.lower():
-            continue
+        if run_id_exact_filter and run_id_value.lower() != run_id_exact_filter:
+            return
+        if run_id_filter and run_id_filter not in run_id_value.lower():
+            return
 
         profile_match_mode = _match_profile_filter(
-            run_id=run_id,
+            run_id=run_id_value,
+            unified_profile_id=profile_meta.get("unified_profile_id"),
             adaptive_profile_id=profile_meta.get("adaptive_profile_id"),
+            strategy_combo_profile_id=profile_meta.get("strategy_combo_profile_id"),
             requested_profile_id=requested_profile_id,
         )
         if requested_profile_id and profile_match_mode is None:
-            continue
+            return
 
         run_day_rows = _build_history_day_rows(
             payload,
             report_dir_name=report_dir_name,
+            report_saved_at=normalized_saved_at,
             include_multi_day=include_multi_day,
-            profile_match_mode=profile_match_mode or "none",
+            profile_match_mode=profile_match_mode,
         )
         if not run_day_rows:
-            continue
+            return
         day_rows.extend(run_day_rows)
         matched_reports += 1
+
+    source_mode = _run_reports_source_mode(request)
+    source_path_hint = "run_reports_store"
+    external_store = _run_reports_store(request)
+    list_run_summaries = getattr(external_store, "list_run_summaries", None)
+    used_run_reports_store = False
+
+    if callable(list_run_summaries):
+        used_run_reports_store = True
+        try:
+            rows = list_run_summaries(limit=limit)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to read run reports store history: {exc}",
+            ) from exc
+
+        if not isinstance(rows, list):
+            rows = []
+
+        for index, row in enumerate(rows, start=1):
+            if matched_reports >= limit:
+                break
+            scanned_reports += 1
+            if not isinstance(row, dict):
+                skipped_invalid += 1
+                continue
+            payload = row.get("summary")
+            if not isinstance(payload, dict):
+                skipped_invalid += 1
+                continue
+            report_saved_at = _normalize_iso_timestamp(row.get("updated_at"))
+            report_dir_name = _external_report_dir_name(
+                run_key=str(row.get("run_key") or ""),
+                updated_at=report_saved_at,
+                fallback_index=index,
+            )
+            _process_history_payload(
+                payload=payload,
+                report_dir_name=report_dir_name,
+                report_saved_at=report_saved_at,
+            )
+
+    if not used_run_reports_store:
+        source_mode = "filesystem_reports"
+        source_path_hint = "reports/*/session_summary.json"
+        reports_root = _project_root() / "reports"
+        if reports_root.exists():
+            report_files = sorted(
+                reports_root.glob("*/session_summary.json"),
+                key=lambda path: path.parent.name,
+                reverse=True,
+            )
+            for report_file in report_files:
+                if matched_reports >= limit:
+                    break
+                scanned_reports += 1
+                report_dir_name = report_file.parent.name
+
+                try:
+                    raw = report_file.read_text(encoding="utf-8")
+                    payload = json.loads(raw)
+                except (OSError, json.JSONDecodeError):
+                    skipped_invalid += 1
+                    continue
+                if not isinstance(payload, dict):
+                    skipped_invalid += 1
+                    continue
+
+                _process_history_payload(
+                    payload=payload,
+                    report_dir_name=report_dir_name,
+                    report_saved_at=None,
+                )
 
     day_results = _aggregate_history_day_rows(day_rows)
     split: Dict[str, Optional[str]]
@@ -1220,20 +1584,29 @@ async def get_saved_run_history(
         history_profile_options,
         _load_aos_adaptive_profile_options(safe_ticker),
     )
+    unified_profile_options = _merge_profile_options(
+        history_profile_options,
+        _load_aos_unified_profile_options(safe_ticker),
+    )
 
     return {
         "source": "saved_run_history",
+        "source_mode": source_mode,
+        "source_path_hint": source_path_hint,
         "ticker": safe_ticker,
         "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "filters": {
             "limit": limit,
             "run_id": run_id_exact_filter or None,
             "run_id_contains": run_id_filter or None,
+            "unified_profile_id": requested_profile_id or None,
             "adaptive_profile_id": requested_profile_id or None,
             "include_multi_day": bool(include_multi_day),
+            "include_zero_trade_runs": bool(include_zero_trade_runs),
         },
         "filter_options": {
             "run_ids": run_options,
+            "unified_profiles": unified_profile_options,
             "adaptive_profiles": adaptive_profile_options,
         },
         "scanned_reports": scanned_reports,

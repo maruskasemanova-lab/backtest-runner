@@ -21,6 +21,7 @@ class _DummyDiscovery:
 @dataclass
 class _DummyDatabento:
     files: List[str]
+    available_summary: Dict[str, Any] | None = None
 
     def scan_existing_files(self) -> None:
         return None
@@ -37,6 +38,9 @@ class _DummyDatabento:
 
     def list_catalog(self, refresh: bool, ticker: str) -> List[Dict[str, Any]]:
         return []
+
+    def get_available_data_summary(self, refresh: bool = False) -> Dict[str, Any]:
+        return dict(self.available_summary or {})
 
 
 class _DummyDataLoader:
@@ -764,3 +768,40 @@ def test_flush_start_run_data_cache_clears_memory_and_disk(isolated_disk_cache_d
     assert result["before"]["disk"]["base_bars_entries"] >= 1
     assert result["after"]["memory"]["base_bars_entries"] == 0
     assert result["after"]["disk"]["base_bars_entries"] == 0
+
+
+def test_load_run_bars_error_includes_available_ohlcv_hint_when_no_files() -> None:
+    svc.clear_start_run_data_caches()
+
+    loader = _DummyDataLoader(_sample_df())
+    request = SimpleNamespace(data_file=None, allow_mock_data=False)
+    databento = _DummyDatabento(
+        files=[],
+        available_summary={
+            "date_ranges": {
+                "MU": {
+                    "start": "2026-01-20",
+                    "end": "2026-02-13",
+                }
+            }
+        },
+    )
+    discovery = _DummyDiscovery(files=[])
+    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+
+    with pytest.raises(svc.HTTPException) as exc:
+        svc.load_run_bars(
+            request=request,
+            ticker="MU",
+            range_start="2025-11-03",
+            range_end="2025-11-07",
+            data_loader=loader,
+            databento_svc=databento,
+            get_discovery=lambda: discovery,
+            aos_applied={"time_filter_enabled": False, "trading_hours": []},
+            logger=logger,
+        )
+
+    assert exc.value.status_code == 404
+    assert "No data files found for MU in range 2025-11-03 to 2025-11-07" in str(exc.value.detail)
+    assert "Available OHLCV range: 2026-01-20 to 2026-02-13" in str(exc.value.detail)

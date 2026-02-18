@@ -22,17 +22,17 @@ Own L2 acquisition, conversion, minute alignment, intrabar frames, and flow-feat
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `src/l2_data_manager.py` | yes | 653 | `0452b19 2026-02-13` |
-| `src/l2_feature_service.py` | yes | 190 | `38387c6 2026-02-13` |
-| `src/order_flow_engine.py` | yes | 406 | `38387c6 2026-02-13` |
-| `src/intrabar_frame_builder.py` | yes | 326 | `0452b19 2026-02-13` |
-| `src/l2_feature_aggregator.py` | yes | 244 | `38387c6 2026-02-13` |
-| `src/run_artifact_store.py` | yes | 245 | `5ba62b7 2026-02-08` |
-| `src/databento_service.py` | yes | 1106 | `64da33c 2026-02-10` |
+| `src/l2_data_manager.py` | yes | 1067 | `172e737 2026-02-16` |
+| `src/l2_feature_service.py` | yes | 222 | `172e737 2026-02-16` |
+| `src/order_flow_engine.py` | yes | 425 | `172e737 2026-02-16` |
+| `src/intrabar_frame_builder.py` | yes | 326 | `172e737 2026-02-16` |
+| `src/l2_feature_aggregator.py` | yes | 244 | `172e737 2026-02-16` |
+| `src/run_artifact_store.py` | yes | 246 | `5ba62b7 2026-02-08` |
+| `src/databento_service.py` | yes | 1728 | `64da33c 2026-02-10` |
 | `scripts/download_l2_data.py` | yes | 69 | `583f2bc 2026-02-06` |
 | `scripts/convert_l2_to_parquet.py` | yes | 43 | `583f2bc 2026-02-06` |
 | `scripts/verify_l2_data.py` | yes | 31 | `583f2bc 2026-02-06` |
-| `docs/L2_DEFINITIONS.md` | yes | 52 | `38387c6 2026-02-13` |
+| `docs/L2_DEFINITIONS.md` | yes | 73 | `38387c6 2026-02-13` |
 
 ## Change Checks
 
@@ -59,10 +59,10 @@ Own L2 acquisition, conversion, minute alignment, intrabar frames, and flow-feat
 ## Key Symbols
 
 ### `src/l2_data_manager.py`
-- `class` `L2DataManager` (line 12)
+- `class` `L2DataManager` (line 13)
 
 ### `src/l2_feature_service.py`
-- `class` `L2FeatureService` (line 18)
+- `class` `L2FeatureService` (line 19)
 
 ### `src/order_flow_engine.py`
 - `class` `OrderFlowSnapshot` (line 34)
@@ -76,12 +76,12 @@ Own L2 acquisition, conversion, minute alignment, intrabar frames, and flow-feat
 - `class` `L2FeatureAggregator` (line 32)
 
 ### `src/run_artifact_store.py`
-- `class` `RunArtifactStore` (line 23)
+- `class` `RunArtifactStore` (line 24)
 
 ### `src/databento_service.py`
-- `class` `CatalogEntry` (line 31)
-- `class` `DataCatalog` (line 50)
-- `class` `DatabentoService` (line 115)
+- `class` `CatalogEntry` (line 36)
+- `class` `DataCatalog` (line 55)
+- `class` `DatabentoService` (line 120)
 
 ### `scripts/download_l2_data.py`
 - `function` `download_l2_data` (line 6)

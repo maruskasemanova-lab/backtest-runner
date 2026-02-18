@@ -9,6 +9,12 @@ __pycache__/
 .claude/settings.local.json
 .codex/
 .cache/
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 
 # Runtime logs
 *.log
@@ -47,3 +53,7 @@ frontend/dist/
 
 # Generated runtime reports
 reports/
+
+# Local Netlify folder
+.netlify
+.vercel

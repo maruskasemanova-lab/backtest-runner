@@ -218,6 +218,61 @@ def normalize_strategy_combo_profiles(raw: Any) -> List[Dict[str, Any]]:
     return result
 
 
+def normalize_unified_profiles(raw: Any) -> List[Dict[str, Any]]:
+    """
+    Normalize unified profiles list.
+
+    Unified profile contains two sections:
+    - strategy_profile: strategy params map
+    - execution_profile: run/execution/runtime config map
+    """
+    if not isinstance(raw, list):
+        return []
+
+    result = []
+    seen_ids = set()
+
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+
+        profile_id = str(item.get("profile_id") or "").strip()
+        if not profile_id or profile_id in seen_ids:
+            continue
+        seen_ids.add(profile_id)
+
+        profile = {
+            "profile_id": profile_id,
+            "profile_name": str(item.get("profile_name") or profile_id).strip(),
+            "created_at": item.get("created_at") or datetime.utcnow().isoformat() + "Z",
+            "updated_at": item.get("updated_at") or datetime.utcnow().isoformat() + "Z",
+        }
+
+        strategy_profile = item.get("strategy_profile")
+        if isinstance(strategy_profile, dict):
+            profile["strategy_profile"] = strategy_profile
+
+        execution_profile = item.get("execution_profile")
+        if isinstance(execution_profile, dict):
+            profile["execution_profile"] = execution_profile
+
+        if isinstance(item.get("source_strategy_combo_profile_id"), str):
+            profile["source_strategy_combo_profile_id"] = str(
+                item.get("source_strategy_combo_profile_id") or ""
+            ).strip()
+        if isinstance(item.get("source_adaptive_tuner_profile_id"), str):
+            profile["source_adaptive_tuner_profile_id"] = str(
+                item.get("source_adaptive_tuner_profile_id") or ""
+            ).strip()
+
+        if isinstance(item.get("notes"), str):
+            profile["notes"] = item["notes"].strip()
+
+        result.append(profile)
+
+    return result
+
+
 def normalize_tuner_profiles(raw: Any) -> List[Dict[str, Any]]:
     """
     Normalize tuner profiles list.

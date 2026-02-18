@@ -50,3 +50,24 @@ Priority order:
 1. `side` field from source ("B" = buy, "A" = sell)
 2. Price vs BBO: price ≥ ask → buy; price ≤ bid → sell
 3. Price vs mid: price ≥ mid → buy; price < mid → sell
+
+## Precomputed Minute Features
+
+For faster run-start on large ranges, minute features can be precomputed per market day:
+
+- File pattern: `data/l2_precomputed/<TICKER>_<YYYY-MM-DD>.parquet`
+- Required key column: `minute_key` (UTC epoch-minute)
+- Runtime loader: `L2DataManager.load_precomputed_feature_map(...)`
+- Fallback: if precomputed files are missing/disabled, runner computes from raw MBP-10 (`order_flow_engine.py`)
+
+Runtime toggles:
+
+- `BACKTEST_L2_PRECOMPUTED_FEATURES_ENABLED=1`
+- `BACKTEST_L2_PRECOMPUTED_DIR=data/l2_precomputed`
+- `BACKTEST_L2_PRECOMPUTED_REQUIRE_FULL_COVERAGE=1` (fallback na raw výpočet, ak chýba niektorý deň)
+- `BACKTEST_L2_AUTO_PRECOMPUTE_ON_DOWNLOAD=1` (po úspešnom Databento `mbp-10` downloade sa automaticky vyrobí denný precomputed súbor)
+- `BACKTEST_L2_AUTO_PRECOMPUTE_INCLUDE_ICEBERGS=0`
+
+Build helper:
+
+- `python3 scripts/precompute_l2_feature_map.py --ticker MU --start-date 2026-01-01 --end-date 2026-02-10`

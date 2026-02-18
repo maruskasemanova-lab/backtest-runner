@@ -1,0 +1,10 @@
+{
+  "supabase": {
+    "enabled": false,
+    "url": "https://your-project-ref.supabase.co",
+    "table_name": "run_summaries",
+    "timeout_seconds": 8,
+    "user_id": "backtest-runner",
+    "tenant_id": ""
+  }
+}

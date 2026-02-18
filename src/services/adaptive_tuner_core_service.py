@@ -456,6 +456,17 @@ def extract_strategy_params_for_profile(
         "total_signals",
         "last_signal",
         "regimes",
+        "trailing_stop_mode",
+        "global_trailing_stop_pct",
+        "effective_trailing_stop_pct",
+        "global_rr_ratio",
+        "effective_rr_ratio",
+        "global_atr_stop_multiplier",
+        "effective_atr_stop_multiplier",
+        "global_volume_stop_pct",
+        "effective_volume_stop_pct",
+        "global_min_stop_loss_pct",
+        "effective_min_stop_loss_pct",
     }
     for raw_name, cfg in strategies_payload.items():
         strat_name = str(raw_name or "").strip()

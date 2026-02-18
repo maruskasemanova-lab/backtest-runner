@@ -1,0 +1,105 @@
+{
+  "generated_at_utc": "2026-02-17T19:31:57Z",
+  "source_path": "/Users/hotovo/.gemini/antigravity/scratch/ibkr-realtime-trader/ALL.xml",
+  "source_format": "xml",
+  "source_csv": "/Users/hotovo/.gemini/antigravity/scratch/ibkr-realtime-trader/ALL.xml",
+  "ticker": "MU",
+  "date_from": "2026-02-10",
+  "date_to": "2026-02-10",
+  "fills_in_range": 10,
+  "fills_trade_days": 1,
+  "fills_first_date": "2026-02-10",
+  "fills_last_date": "2026-02-10",
+  "matched_short_round_trips": 6,
+  "same_day_short_scalps": 6,
+  "open_short_qty_remaining": 0,
+  "unmatched_buy_qty": 0.0,
+  "daily_short_round_trip_summary": {
+    "2026-02-10": {
+      "trade_count": 6,
+      "net_pnl": -105.621608,
+      "quantity": 90.0
+    }
+  },
+  "daily_same_day_short_scalp_summary": {
+    "2026-02-10": {
+      "trade_count": 6,
+      "net_pnl": -105.621608,
+      "quantity": 90.0
+    }
+  },
+  "short_round_trips": [
+    {
+      "trade_id": 1,
+      "entry_date": "2026-02-10",
+      "exit_date": "2026-02-10",
+      "entry_time_utc": "2026-02-10T16:02:04+00:00",
+      "exit_time_utc": "2026-02-10T16:06:29+00:00",
+      "quantity": 10.0,
+      "entry_price": 371.5,
+      "exit_price": 370.3,
+      "net_pnl": 11.319536,
+      "holding_days": 0
+    },
+    {
+      "trade_id": 2,
+      "entry_date": "2026-02-10",
+      "exit_date": "2026-02-10",
+      "entry_time_utc": "2026-02-10T16:13:17+00:00",
+      "exit_time_utc": "2026-02-10T16:13:59+00:00",
+      "quantity": 29.0,
+      "entry_price": 372.5,
+      "exit_price": 372.2,
+      "net_pnl": 8.069306,
+      "holding_days": 0
+    },
+    {
+      "trade_id": 3,
+      "entry_date": "2026-02-10",
+      "exit_date": "2026-02-10",
+      "entry_time_utc": "2026-02-10T16:13:17+00:00",
+      "exit_time_utc": "2026-02-10T16:13:59+00:00",
+      "quantity": 1.0,
+      "entry_price": 372.5,
+      "exit_price": 372.2,
+      "net_pnl": 0.29033,
+      "holding_days": 0
+    },
+    {
+      "trade_id": 4,
+      "entry_date": "2026-02-10",
+      "exit_date": "2026-02-10",
+      "entry_time_utc": "2026-02-10T16:14:40+00:00",
+      "exit_time_utc": "2026-02-10T16:33:28+00:00",
+      "quantity": 30.0,
+      "entry_price": 372.5,
+      "exit_price": 375.5,
+      "net_pnl": -90.640365,
+      "holding_days": 0
+    },
+    {
+      "trade_id": 5,
+      "entry_date": "2026-02-10",
+      "exit_date": "2026-02-10",
+      "entry_time_utc": "2026-02-10T17:14:24+00:00",
+      "exit_time_utc": "2026-02-10T17:16:25+00:00",
+      "quantity": 10.0,
+      "entry_price": 375.5,
+      "exit_price": 377.2,
+      "net_pnl": -17.505336,
+      "holding_days": 0
+    },
+    {
+      "trade_id": 6,
+      "entry_date": "2026-02-10",
+      "exit_date": "2026-02-10",
+      "entry_time_utc": "2026-02-10T17:14:24+00:00",
+      "exit_time_utc": "2026-02-10T17:16:25+00:00",
+      "quantity": 10.0,
+      "entry_price": 375.5,
+      "exit_price": 377.2,
+      "net_pnl": -17.155079,
+      "holding_days": 0
+    }
+  ]
+}

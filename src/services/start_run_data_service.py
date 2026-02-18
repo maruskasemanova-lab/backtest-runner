@@ -865,10 +865,21 @@ def load_run_bars(
             df = data_loader.filter_trading_hours(df, list(trading_hours))
     else:
         if not request.allow_mock_data:
+            availability_hint = ""
+            try:
+                summary = databento_svc.get_available_data_summary(refresh=True)
+                date_ranges = summary.get("date_ranges", {}) if isinstance(summary, dict) else {}
+                ticker_range = date_ranges.get(ticker, {}) if isinstance(date_ranges, dict) else {}
+                available_start = str(ticker_range.get("start") or "").strip()
+                available_end = str(ticker_range.get("end") or "").strip()
+                if available_start and available_end:
+                    availability_hint = f" Available OHLCV range: {available_start} to {available_end}."
+            except Exception:
+                availability_hint = ""
             raise HTTPException(
                 404,
                 f"No data files found for {ticker} in range {range_start} to {range_end}. "
-                "Backtest aborted to avoid mock-data contamination.",
+                f"Backtest aborted to avoid mock-data contamination.{availability_hint}",
             )
         logger.warning(
             f"No data file found for {ticker} in range {range_start} to {range_end}, using mock data (allow_mock_data=True)"

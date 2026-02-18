@@ -1,0 +1,70 @@
+services:
+  strategy-api:
+    image: python:3.11-slim
+    working_dir: /app
+    command: >
+      sh -lc "pip install --no-cache-dir -r requirements.txt &&
+              uvicorn api_server:app --host 0.0.0.0 --port 8001"
+    environment:
+      STRATEGY_CORS_ALLOW_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8002,http://127.0.0.1:8002"
+      STRATEGY_INTERNAL_API_TOKEN: "${STRATEGY_INTERNAL_API_TOKEN:-prod-internal-token}"
+    volumes:
+      - ../market_regime_detection:/app:ro
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+
+  runner-api:
+    image: python:3.11-slim
+    working_dir: /app
+    command: >
+      sh -lc "pip install --no-cache-dir -r requirements.txt &&
+              uvicorn api_server:app --host 0.0.0.0 --port 8002"
+    depends_on:
+      - strategy-api
+    environment:
+      BACKTEST_CORS_ALLOW_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173"
+      BACKTEST_INTERNAL_STRATEGY_API_URL: "http://strategy-api:8001"
+      BACKTEST_STRATEGY_API_ALLOWLIST: "http://strategy-api:8001,http://localhost:8001,http://127.0.0.1:8001"
+      BACKTEST_STARTUP_PREWARM_ENABLED: "${BACKTEST_STARTUP_PREWARM_ENABLED:-0}"
+      STRATEGY_INTERNAL_API_TOKEN: "${STRATEGY_INTERNAL_API_TOKEN:-prod-internal-token}"
+      BACKTEST_REMOTE_MANIFEST_URL: "${BACKTEST_REMOTE_MANIFEST_URL:-}"
+      BACKTEST_REMOTE_CACHE_DIR: "/app/data/remote_cache"
+      BACKTEST_REMOTE_TIMEOUT_SEC: "${BACKTEST_REMOTE_TIMEOUT_SEC:-30}"
+      BACKTEST_REMOTE_S3_ENDPOINT: "${BACKTEST_REMOTE_S3_ENDPOINT:-}"
+      BACKTEST_REMOTE_S3_ACCOUNT_ID: "${BACKTEST_REMOTE_S3_ACCOUNT_ID:-}"
+      BACKTEST_REMOTE_S3_ACCESS_KEY_ID: "${BACKTEST_REMOTE_S3_ACCESS_KEY_ID:-}"
+      BACKTEST_REMOTE_S3_SECRET_ACCESS_KEY: "${BACKTEST_REMOTE_S3_SECRET_ACCESS_KEY:-}"
+      BACKTEST_REMOTE_S3_REGION: "${BACKTEST_REMOTE_S3_REGION:-auto}"
+    volumes:
+      - .:/app:ro
+      - runner_data:/app/data
+      - runner_reports:/app/reports
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: >
+      sh -lc "npm ci &&
+              npm run build &&
+              npm run preview -- --host 0.0.0.0 --port 5173"
+    depends_on:
+      - runner-api
+    environment:
+      VITE_PROXY_API_TARGET: "http://runner-api:8002"
+      VITE_PROXY_WS_TARGET: "ws://runner-api:8002"
+      VITE_STRATEGY_API_URL: "http://strategy-api:8001"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules_prod:/app/node_modules
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
+
+volumes:
+  runner_data:
+  runner_reports:
+  frontend_node_modules_prod:

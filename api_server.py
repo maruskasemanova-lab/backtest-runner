@@ -7,8 +7,11 @@ import copy
 import json
 import os
 import random
+import re
+import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Union
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +50,7 @@ from src.normalization import (
     normalize_regime_filter_sets,
     sanitize_strategy_params,
     normalize_strategy_combo_profiles,
+    normalize_unified_profiles,
     normalize_tuner_profiles,
     normalize_time_window_sets,
 )
@@ -76,6 +80,8 @@ from src.models.config_requests import (
     AdaptiveTunerProfileApplyRequest,
     StrategyComboCaptureRequest,
     StrategyComboApplyRequest,
+    UnifiedProfileCaptureRequest,
+    UnifiedProfileApplyRequest,
     AOSUpdateRequest,
     PositioningUpdateRequest,
 )
@@ -95,6 +101,8 @@ from src.services.live_trader_service import (
 from src.services.run_registry import RunRegistry
 from src.services.config_write_service import (
     ConfigWriteDeps,
+    capture_unified_profile as service_capture_unified_profile,
+    apply_unified_profile as service_apply_unified_profile,
     capture_strategy_combo as service_capture_strategy_combo,
     apply_strategy_combo as service_apply_strategy_combo,
     update_aos_config as service_update_aos_config,
@@ -208,6 +216,21 @@ from src.services.strategy_api_session_service import (
     reset_remote_orchestrator_state_scoped as service_reset_remote_orchestrator_state_scoped,
     save_remote_checkpoint as service_save_remote_checkpoint,
 )
+from src.security.network_policy import (
+    StrategyApiPolicyError,
+    cors_allow_origins_from_env,
+    enforce_strategy_url_allowlist_only,
+    should_allow_credentials,
+)
+from src.routes.v2_routes import router as v2_router
+from src.services.saas_service import (
+    InMemorySlidingWindowLimiter,
+    SaaSStateStore,
+    SupabaseRunReportsStore,
+    SupabaseUserSettingsStore,
+    V2Services,
+)
+from src.observability.runtime_metrics import RuntimeMetrics
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BacktestRunner")
@@ -219,10 +242,50 @@ app = FastAPI(
     version="1.0.0"
 )
 
+_cors_allow_origins = cors_allow_origins_from_env(
+    env_name="BACKTEST_CORS_ALLOW_ORIGINS",
+    default="http://localhost:5173,http://127.0.0.1:5173",
+)
+
+
+def _build_cors_allow_origin_regex(allow_origins: List[str]) -> Optional[str]:
+    """Allow Netlify deploy-preview origins for explicitly allowlisted Netlify sites."""
+    env_regex = str(os.getenv("BACKTEST_CORS_ALLOW_ORIGIN_REGEX", "") or "").strip()
+    if env_regex:
+        return env_regex
+
+    patterns: List[str] = []
+    seen: set[str] = set()
+    for origin in allow_origins:
+        try:
+            parsed = urlparse(str(origin))
+        except Exception:
+            continue
+        host = str(parsed.hostname or "").strip().lower()
+        if not host.endswith(".netlify.app"):
+            continue
+        # Allow:
+        # - canonical site: https://<site>.netlify.app
+        # - preview deploy: https://<deploy-id>--<site>.netlify.app
+        escaped_host = re.escape(host)
+        pattern = rf"https://(?:[a-z0-9-]+--)?{escaped_host}"
+        if pattern in seen:
+            continue
+        seen.add(pattern)
+        patterns.append(pattern)
+
+    if not patterns:
+        return None
+    return rf"^(?:{'|'.join(patterns)})$"
+
+
+_cors_allow_origin_regex = _build_cors_allow_origin_regex(_cors_allow_origins)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_allow_origins or ["http://localhost:5173"],
+    allow_origin_regex=_cors_allow_origin_regex,
+    allow_credentials=should_allow_credentials(_cors_allow_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -235,10 +298,12 @@ active_runners: Dict[str, SessionRunner] = {}
 run_registry = RunRegistry(active_runners)
 connected_clients: List[WebSocket] = []
 databento_svc = DatabentoService()
+l2_manager.databento_service = databento_svc
 adaptive_tuner_jobs: Dict[str, Dict[str, Any]] = {}
 MAX_PARALLEL_ADAPTIVE_TUNERS = 3
 adaptive_tuner_slots = asyncio.Semaphore(MAX_PARALLEL_ADAPTIVE_TUNERS)
 adaptive_tuner_merge_lock = asyncio.Lock()
+MAX_WS_CLIENTS = max(1, int(os.getenv("BACKTEST_MAX_WS_CLIENTS", "250")))
 STRATEGY_OVERRIDES_PATH = Path(__file__).parent / "strategy_overrides.json"
 AOS_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "aos_config.json"
 POSITIONING_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "positioning_config.json"
@@ -283,7 +348,7 @@ STARTUP_PREWARM_TICKERS = _parse_startup_prewarm_tickers(
 )
 STARTUP_PREWARM_L2_CONFIRM = _parse_bool_env(
     os.getenv("BACKTEST_STARTUP_PREWARM_L2_CONFIRM"),
-    True,
+    False,
 )
 
 
@@ -297,6 +362,7 @@ def _refresh_runtime_data_services() -> None:
     global data_loader, l2_manager
     data_loader = DataLoader()
     l2_manager = L2DataManager()
+    l2_manager.databento_service = databento_svc
     l2_features.manager = l2_manager
     api_services.data_loader = data_loader
     api_services.l2_manager = l2_manager
@@ -326,6 +392,7 @@ api_services = ApiServices(
     get_ticker_positioning_config=lambda ticker: _get_ticker_positioning_config(ticker),
     positioning_config_keys=POSITIONING_CONFIG_KEYS,
     build_adaptive_tuner_options_payload=lambda ticker: _build_adaptive_tuner_options_payload(ticker),
+    build_unified_profile_options_payload=lambda ticker: _build_unified_profile_options_payload(ticker),
     build_config_write_deps=lambda: _build_config_write_deps(),
     build_run_control_deps=lambda: _build_run_control_deps(),
     build_adaptive_tuner_deps=lambda: _build_adaptive_tuner_deps(),
@@ -339,6 +406,246 @@ api_services = ApiServices(
 app.state.api_services = api_services
 
 
+def _safe_env_int(name: str, default: int, *, min_value: int = 1) -> int:
+    raw = os.getenv(name)
+    try:
+        value = int(str(raw).strip()) if raw is not None else int(default)
+    except Exception:
+        value = int(default)
+    return max(min_value, value)
+
+
+def _safe_env_float(name: str, default: float, *, min_value: float = 0.05) -> float:
+    raw = os.getenv(name)
+    try:
+        value = float(str(raw).strip()) if raw is not None else float(default)
+    except Exception:
+        value = float(default)
+    return max(min_value, value)
+
+
+def _parse_bool_value(raw: Any, default: bool = False) -> bool:
+    if raw is None:
+        return bool(default)
+    if isinstance(raw, bool):
+        return raw
+    token = str(raw).strip().lower()
+    if token in {"1", "true", "yes", "on"}:
+        return True
+    if token in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _load_report_storage_config() -> Dict[str, Any]:
+    default_path = Path(__file__).resolve().parent / "config" / "report_storage.json"
+    raw_path = str(os.getenv("BACKTEST_REPORT_STORAGE_CONFIG_PATH") or "").strip()
+    config_path = Path(raw_path).expanduser() if raw_path else default_path
+    if not config_path.exists() or not config_path.is_file():
+        return {}
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Failed to load report storage config %s: %s", config_path, exc)
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _build_supabase_user_settings_store() -> Optional[SupabaseUserSettingsStore]:
+    enabled_raw = str(os.getenv("BACKTEST_SUPABASE_USER_SETTINGS_ENABLED", "0") or "").strip().lower()
+    enabled = enabled_raw in {"1", "true", "yes", "on"}
+    if not enabled:
+        return None
+
+    supabase_url = str(
+        os.getenv("BACKTEST_SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "",
+    ).strip()
+    service_role_key = str(
+        os.getenv("BACKTEST_SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "",
+    ).strip()
+    table_name = str(os.getenv("BACKTEST_SUPABASE_USER_SETTINGS_TABLE", "user_settings") or "").strip() or "user_settings"
+    timeout_seconds = _safe_env_float(
+        "BACKTEST_SUPABASE_USER_SETTINGS_TIMEOUT_SEC",
+        8.0,
+        min_value=1.0,
+    )
+
+    if not supabase_url or not service_role_key:
+        logger.warning(
+            "Supabase user settings store enabled but missing url/service key; falling back to local SQLite store."
+        )
+        return None
+
+    try:
+        return SupabaseUserSettingsStore(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            table_name=table_name,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize Supabase user settings store; falling back to local SQLite store: %s",
+            exc,
+        )
+        return None
+
+
+def _build_supabase_run_reports_store() -> Optional[SupabaseRunReportsStore]:
+    config = _load_report_storage_config()
+    supabase_cfg = config.get("supabase", {}) if isinstance(config.get("supabase"), dict) else {}
+    enabled = _parse_bool_value(
+        os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_ENABLED"),
+        _parse_bool_value(supabase_cfg.get("enabled"), False),
+    )
+    if not enabled:
+        return None
+
+    supabase_url = str(
+        os.getenv("BACKTEST_SUPABASE_URL")
+        or os.getenv("VITE_SUPABASE_URL")
+        or supabase_cfg.get("url")
+        or "",
+    ).strip()
+    service_role_key = str(
+        os.getenv("BACKTEST_SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or supabase_cfg.get("service_role_key")
+        or "",
+    ).strip()
+    table_name = str(
+        os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_TABLE")
+        or supabase_cfg.get("table_name")
+        or "run_summaries",
+    ).strip() or "run_summaries"
+    default_user_id = str(
+        os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_USER_ID")
+        or supabase_cfg.get("user_id")
+        or "backtest-runner",
+    ).strip() or "backtest-runner"
+    default_tenant_id = str(
+        os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_TENANT_ID")
+        or supabase_cfg.get("tenant_id")
+        or "",
+    ).strip()
+
+    timeout_raw = os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_TIMEOUT_SEC")
+    if timeout_raw is None:
+        timeout_raw = supabase_cfg.get("timeout_seconds", 8.0)
+    try:
+        timeout_seconds = max(1.0, float(timeout_raw))
+    except Exception:
+        timeout_seconds = 8.0
+
+    if not supabase_url or not service_role_key:
+        logger.warning(
+            "Supabase run reports store enabled but missing url/service key; skipping external report persistence."
+        )
+        return None
+
+    try:
+        return SupabaseRunReportsStore(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            table_name=table_name,
+            timeout_seconds=timeout_seconds,
+            default_user_id=default_user_id,
+            default_tenant_id=default_tenant_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize Supabase run reports store; skipping external report persistence: %s",
+            exc,
+        )
+        return None
+
+
+def _resolve_run_reports_store(
+    *,
+    state_store: SaaSStateStore,
+    supabase_store: Optional[SupabaseRunReportsStore],
+) -> tuple[Optional[Any], str]:
+    if supabase_store is not None:
+        return supabase_store, "supabase_run_reports"
+
+    local_enabled = _parse_bool_value(
+        os.getenv("BACKTEST_LOCAL_RUN_REPORTS_ENABLED"),
+        True,
+    )
+    if local_enabled:
+        return state_store, "sqlite_run_reports"
+    return None, "filesystem_reports"
+
+
+_v2_worker_concurrency = _safe_env_int("BACKTEST_V2_WORKER_CONCURRENCY", 4, min_value=1)
+_v2_max_queue_backlog = _safe_env_int("BACKTEST_V2_MAX_QUEUE_BACKLOG", 200, min_value=1)
+_v2_default_job_max_attempts = _safe_env_int("BACKTEST_V2_JOB_MAX_ATTEMPTS", 2, min_value=1)
+_v2_retry_base_seconds = _safe_env_float("BACKTEST_V2_JOB_RETRY_BASE_SECONDS", 0.75, min_value=0.05)
+_v2_retry_max_delay_seconds = _safe_env_float("BACKTEST_V2_JOB_RETRY_MAX_DELAY_SECONDS", 8.0, min_value=0.10)
+_runtime_metrics_window = _safe_env_int("BACKTEST_RUNTIME_METRICS_WINDOW", 2000, min_value=100)
+_supabase_user_settings_store = _build_supabase_user_settings_store()
+_supabase_run_reports_store = _build_supabase_run_reports_store()
+_saas_state_store = SaaSStateStore(os.getenv("BACKTEST_SAAS_DB_PATH", "data/saas_state.db"))
+_run_reports_store, _run_reports_source_mode = _resolve_run_reports_store(
+    state_store=_saas_state_store,
+    supabase_store=_supabase_run_reports_store,
+)
+
+v2_services = V2Services(
+    store=_saas_state_store,
+    limiter=InMemorySlidingWindowLimiter(default_window_seconds=60),
+    internal_strategy_api_url=os.getenv("BACKTEST_INTERNAL_STRATEGY_API_URL", "http://localhost:8001"),
+    ads_enabled=str(os.getenv("BACKTEST_ADS_ENABLED", "false")).strip().lower() in {"1", "true", "yes", "on"},
+    ads_provider=str(os.getenv("BACKTEST_ADS_PROVIDER", "none")).strip().lower() or "none",
+    ads_placements=[
+        item.strip()
+        for item in str(
+            os.getenv("BACKTEST_ADS_PLACEMENTS", "dashboard,diagnostics,data-manager,settings")
+        ).split(",")
+        if item.strip()
+    ],
+    user_settings_store=_supabase_user_settings_store,
+    job_semaphore=asyncio.Semaphore(_v2_worker_concurrency),
+    max_queue_backlog=_v2_max_queue_backlog,
+    default_job_max_attempts=_v2_default_job_max_attempts,
+    job_retry_base_seconds=_v2_retry_base_seconds,
+    job_retry_max_delay_seconds=max(_v2_retry_base_seconds, _v2_retry_max_delay_seconds),
+)
+if _supabase_user_settings_store is not None:
+    logger.info("v2 user settings store: Supabase (external)")
+else:
+    logger.info("v2 user settings store: SQLite (local)")
+app.state.v2_services = v2_services
+app.state.run_reports_store = _run_reports_store
+app.state.run_reports_source_mode = _run_reports_source_mode
+if _run_reports_source_mode == "supabase_run_reports":
+    logger.info("run reports store: Supabase (external)")
+elif _run_reports_source_mode == "sqlite_run_reports":
+    logger.info("run reports store: SQLite (local)")
+else:
+    logger.info("run reports store: Filesystem only")
+runtime_metrics = RuntimeMetrics(max_samples=_runtime_metrics_window)
+app.state.runtime_metrics = runtime_metrics
+app.state.connected_clients = connected_clients
+app.state.max_ws_clients = MAX_WS_CLIENTS
+
+
+@app.middleware("http")
+async def _collect_http_runtime_metrics(request: Request, call_next):
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = int(getattr(response, "status_code", 500))
+        return response
+    except Exception:
+        status_code = 500
+        raise
+    finally:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        runtime_metrics.record_http(duration_ms=elapsed_ms, status_code=status_code)
+
+
 def _build_config_write_deps() -> ConfigWriteDeps:
     """Build deps lazily so monkeypatched globals in tests are respected."""
     return ConfigWriteDeps(
@@ -348,6 +655,7 @@ def _build_config_write_deps() -> ConfigWriteDeps:
         save_positioning_config=lambda cfg: _save_positioning_config(cfg),
         get_ticker_positioning_config=_get_ticker_positioning_config,
         normalize_strategy_combo_profiles=_normalize_strategy_combo_profiles,
+        normalize_unified_profiles=_normalize_unified_profiles,
         normalize_tuner_profiles=_normalize_tuner_profiles,
         build_strategy_combo_profile_entry=_build_strategy_combo_profile_entry,
         fetch_remote_strategies=_fetch_remote_strategies,
@@ -368,6 +676,7 @@ def _build_run_control_deps() -> RunControlDeps:
         marker_type_enum=MarkerType,
         logger=logger,
         reports_dir=Path(__file__).parent / "reports",
+        run_reports_store=_run_reports_store,
         save_remote_checkpoint=_save_remote_checkpoint,
         clear_remote_strategy_sessions=_clear_remote_strategy_sessions,
         configure_session=_configure_session,
@@ -460,6 +769,7 @@ def _build_strategy_api_integration_deps() -> StrategyApiIntegrationDeps:
         load_strategy_overrides=_load_strategy_overrides,
         sanitize_strategy_params=_sanitize_strategy_params,
         normalize_strategy_combo_profiles=_normalize_strategy_combo_profiles,
+        normalize_unified_profiles=_normalize_unified_profiles,
         normalize_tuner_profiles=_normalize_tuner_profiles,
         normalize_strategy_selection_mode=_normalize_strategy_selection_mode,
         normalize_clamped_int=_normalize_clamped_int,
@@ -588,13 +898,45 @@ def _load_strategy_overrides() -> Dict[str, Any]:
 
 
 def _resolve_aos_config_path(aos_config_path: Optional[Union[str, Path]] = None) -> Path:
-    if aos_config_path is None:
+    default_payload = {"version": "1.0.0", "tickers": {}}
+    if aos_config_path is not None:
+        raw = str(aos_config_path).strip()
+        if raw:
+            path = Path(raw).expanduser()
+            return path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+
+    env_path = str(os.getenv("BACKTEST_AOS_CONFIG_PATH", "") or "").strip()
+    if env_path:
+        path = Path(env_path).expanduser()
+        resolved = path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+        try:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        if not resolved.exists():
+            seed = load_json_file(AOS_CONFIG_PATH, default=default_payload)
+            save_json_file(resolved, payload=seed)
+        return resolved
+
+    try:
+        AOS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    if os.access(AOS_CONFIG_PATH.parent, os.W_OK):
         return AOS_CONFIG_PATH
-    raw = str(aos_config_path).strip()
-    if not raw:
-        return AOS_CONFIG_PATH
-    path = Path(raw).expanduser()
-    return path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+
+    runtime_dir = str(
+        os.getenv("BACKTEST_RUNTIME_CONFIG_DIR", "/tmp/backtest-runner-config") or "/tmp/backtest-runner-config"
+    ).strip()
+    runtime_path = (Path(runtime_dir).expanduser() / "aos_config.json").resolve()
+    try:
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    if not runtime_path.exists():
+        seed = load_json_file(AOS_CONFIG_PATH, default=default_payload)
+        save_json_file(runtime_path, payload=seed)
+    return runtime_path
 
 
 def _load_aos_config(aos_config_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
@@ -606,13 +948,45 @@ def _load_aos_config(aos_config_path: Optional[Union[str, Path]] = None) -> Dict
 def _resolve_positioning_config_path(
     positioning_config_path: Optional[Union[str, Path]] = None,
 ) -> Path:
-    if positioning_config_path is None:
+    default_payload = {"version": "1.0.0", "tickers": {}}
+    if positioning_config_path is not None:
+        raw = str(positioning_config_path).strip()
+        if raw:
+            path = Path(raw).expanduser()
+            return path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+
+    env_path = str(os.getenv("BACKTEST_POSITIONING_CONFIG_PATH", "") or "").strip()
+    if env_path:
+        path = Path(env_path).expanduser()
+        resolved = path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+        try:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        if not resolved.exists():
+            seed = load_json_file(POSITIONING_CONFIG_PATH, default=default_payload)
+            save_json_file(resolved, payload=seed)
+        return resolved
+
+    try:
+        POSITIONING_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    if os.access(POSITIONING_CONFIG_PATH.parent, os.W_OK):
         return POSITIONING_CONFIG_PATH
-    raw = str(positioning_config_path).strip()
-    if not raw:
-        return POSITIONING_CONFIG_PATH
-    path = Path(raw).expanduser()
-    return path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+
+    runtime_dir = str(
+        os.getenv("BACKTEST_RUNTIME_CONFIG_DIR", "/tmp/backtest-runner-config") or "/tmp/backtest-runner-config"
+    ).strip()
+    runtime_path = (Path(runtime_dir).expanduser() / "positioning_config.json").resolve()
+    try:
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    if not runtime_path.exists():
+        seed = load_json_file(POSITIONING_CONFIG_PATH, default=default_payload)
+        save_json_file(runtime_path, payload=seed)
+    return runtime_path
 
 
 def _load_positioning_config(
@@ -925,6 +1299,10 @@ def _normalize_strategy_combo_profiles(raw_profiles: Any) -> List[Dict[str, Any]
     return service_normalize_strategy_combo_profiles(raw_profiles)
 
 
+def _normalize_unified_profiles(raw_profiles: Any) -> List[Dict[str, Any]]:
+    return normalize_unified_profiles(raw_profiles)
+
+
 def _build_strategy_combo_profile_entry(
     *,
     ticker: str,
@@ -954,6 +1332,246 @@ def _build_strategy_combo_options_payload(ticker: str) -> Dict[str, Any]:
     return {
         "ticker": ticker_upper,
         "profiles": profiles,
+        "active_profile_id": active_profile_id,
+    }
+
+
+def _extract_tuner_candidate(profile: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(profile, dict):
+        return {}
+    candidate = profile.get("candidate")
+    if isinstance(candidate, dict):
+        return candidate
+    best_trial = profile.get("best_trial")
+    if isinstance(best_trial, dict) and isinstance(best_trial.get("candidate"), dict):
+        return best_trial.get("candidate", {})
+    return {}
+
+
+def _profile_updated_ts(profile: Dict[str, Any]) -> float:
+    if not isinstance(profile, dict):
+        return 0.0
+    raw = str(profile.get("updated_at") or profile.get("created_at") or "").strip()
+    parsed = _parse_utc_iso(raw)
+    if parsed is None:
+        return 0.0
+    return float(parsed.timestamp())
+
+
+def _normalize_profile_ref_token(value: Any) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    if token.lower() in {"none", "null", "n/a", "na"}:
+        return ""
+    return token
+
+
+def _derived_unified_profile_id(
+    ticker_upper: str,
+    combo_profile_id: str,
+    adaptive_profile_id: str,
+) -> str:
+    combo_token = str(combo_profile_id or "").strip() or "none"
+    adaptive_token = str(adaptive_profile_id or "").strip() or "none"
+    return f"legacy-unified-{ticker_upper}-{combo_token}-{adaptive_token}"
+
+
+def _build_legacy_unified_profile_variants(
+    ticker_upper: str,
+    ticker_cfg: Dict[str, Any],
+    *,
+    max_profiles: int = 60,
+) -> List[Dict[str, Any]]:
+    combo_profiles = _normalize_strategy_combo_profiles(
+        ticker_cfg.get("strategy_combo_profiles", [])
+    )
+    adaptive_profiles = _normalize_tuner_profiles(
+        ticker_cfg.get("adaptive_tuner_profiles", [])
+    )
+    if not combo_profiles and not adaptive_profiles:
+        return []
+
+    active_combo_id = _normalize_profile_ref_token(
+        ticker_cfg.get("active_strategy_combo_profile_id", "")
+    )
+    active_adaptive_id = _normalize_profile_ref_token(
+        ticker_cfg.get("active_adaptive_tuner_profile_id", "")
+    )
+
+    def _ordered_rows(
+        rows: List[Dict[str, Any]],
+        active_id: str,
+    ) -> List[Dict[str, Any]]:
+        if not rows:
+            return []
+        active: List[Dict[str, Any]] = []
+        rest: List[Dict[str, Any]] = []
+        for row in rows:
+            row_id = str(row.get("profile_id") or "").strip()
+            if active_id and row_id == active_id:
+                active.append(row)
+            else:
+                rest.append(row)
+        rest.sort(key=_profile_updated_ts, reverse=True)
+        return active + rest
+
+    combo_candidates = _ordered_rows(combo_profiles, active_combo_id)
+    adaptive_candidates = _ordered_rows(adaptive_profiles, active_adaptive_id)
+    combo_candidates = combo_candidates[:12] if combo_candidates else [None]
+    adaptive_candidates = adaptive_candidates[:12] if adaptive_candidates else [None]
+
+    now_iso = datetime.utcnow().isoformat() + "Z"
+    positioning = _get_ticker_positioning_config(ticker_upper)
+    base_execution_profile = {
+        "positioning": positioning if isinstance(positioning, dict) else {},
+    }
+
+    rows: List[Dict[str, Any]] = []
+    for combo_profile in combo_candidates:
+        for adaptive_profile in adaptive_candidates:
+            combo_row = combo_profile if isinstance(combo_profile, dict) else {}
+            adaptive_row = adaptive_profile if isinstance(adaptive_profile, dict) else {}
+            combo_id = str(combo_row.get("profile_id") or "").strip()
+            adaptive_id = str(adaptive_row.get("profile_id") or "").strip()
+            if not combo_id and not adaptive_id:
+                continue
+
+            combo_name = str(combo_row.get("profile_name") or combo_id or "").strip()
+            adaptive_name = str(adaptive_row.get("profile_name") or adaptive_id or "").strip()
+            if combo_name and adaptive_name:
+                profile_name = f"legacy: {combo_name} + {adaptive_name}"
+            else:
+                profile_name = f"legacy: {combo_name or adaptive_name or ticker_upper}"
+
+            strategy_profile: Dict[str, Any] = {
+                "strategy_params": (
+                    combo_row.get("strategy_params")
+                    if isinstance(combo_row.get("strategy_params"), dict)
+                    else {}
+                ),
+                "strategy_selection_mode": _normalize_strategy_selection_mode(
+                    ticker_cfg.get("strategy_selection_mode")
+                ),
+                "max_active_strategies": _normalize_clamped_int(
+                    ticker_cfg.get("max_active_strategies"),
+                    default=3,
+                    min_value=1,
+                    max_value=20,
+                ),
+                "trading_hours": (
+                    ticker_cfg.get("trading_hours")
+                    if isinstance(ticker_cfg.get("trading_hours"), list)
+                    else []
+                ),
+                "time_filter_enabled": bool(ticker_cfg.get("time_filter_enabled", False)),
+                "long_only": bool(ticker_cfg.get("long_only", False)),
+            }
+            if isinstance(ticker_cfg.get("l2"), dict):
+                strategy_profile["l2"] = dict(ticker_cfg.get("l2", {}))
+            if isinstance(ticker_cfg.get("adaptive"), dict):
+                strategy_profile["adaptive"] = dict(ticker_cfg.get("adaptive", {}))
+            if combo_id:
+                strategy_profile["active_strategy_combo_profile_id"] = combo_id
+            if adaptive_id:
+                strategy_profile["active_adaptive_tuner_profile_id"] = adaptive_id
+            adaptive_candidate = _extract_tuner_candidate(adaptive_row)
+            if adaptive_candidate:
+                strategy_profile["adaptive_candidate"] = adaptive_candidate
+
+            created_at = (
+                str(combo_row.get("created_at") or "").strip()
+                or str(adaptive_row.get("created_at") or "").strip()
+                or now_iso
+            )
+            updated_at = (
+                str(combo_row.get("updated_at") or combo_row.get("created_at") or "").strip()
+                or str(adaptive_row.get("updated_at") or adaptive_row.get("created_at") or "").strip()
+                or now_iso
+            )
+
+            row: Dict[str, Any] = {
+                "profile_id": _derived_unified_profile_id(ticker_upper, combo_id, adaptive_id),
+                "profile_name": profile_name,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "strategy_profile": strategy_profile,
+                "execution_profile": base_execution_profile,
+            }
+            if combo_id:
+                row["source_strategy_combo_profile_id"] = combo_id
+            if adaptive_id:
+                row["source_adaptive_tuner_profile_id"] = adaptive_id
+            rows.append(row)
+
+    rows.sort(key=_profile_updated_ts, reverse=True)
+
+    preferred_derived_active_id = _derived_unified_profile_id(
+        ticker_upper,
+        active_combo_id,
+        active_adaptive_id,
+    )
+    if preferred_derived_active_id:
+        rows.sort(
+            key=lambda item: (
+                0
+                if str(item.get("profile_id") or "").strip() == preferred_derived_active_id
+                else 1
+            )
+        )
+    return rows[:max(1, int(max_profiles))]
+
+
+def _build_unified_profile_options_payload(ticker: str) -> Dict[str, Any]:
+    ticker_upper = str(ticker or "").upper().strip()
+    if not ticker_upper:
+        raise HTTPException(400, "ticker is required")
+    aos_cfg = _load_aos_config()
+    ticker_cfg = aos_cfg.get("tickers", {}).get(ticker_upper, {})
+    if not isinstance(ticker_cfg, dict):
+        ticker_cfg = {}
+    stored_profiles = _normalize_unified_profiles(ticker_cfg.get("unified_profiles", []))
+    derived_profiles = _build_legacy_unified_profile_variants(ticker_upper, ticker_cfg)
+
+    merged_profiles: List[Dict[str, Any]] = []
+    seen_profile_ids: set[str] = set()
+    for profile in stored_profiles + derived_profiles:
+        profile_id = str(profile.get("profile_id") or "").strip()
+        if not profile_id or profile_id in seen_profile_ids:
+            continue
+        seen_profile_ids.add(profile_id)
+        merged_profiles.append(profile)
+
+    active_profile_id = str(ticker_cfg.get("active_unified_profile_id", "")).strip() or None
+    if not active_profile_id:
+        active_combo_id = _normalize_profile_ref_token(
+            ticker_cfg.get("active_strategy_combo_profile_id", "")
+        )
+        active_adaptive_id = _normalize_profile_ref_token(
+            ticker_cfg.get("active_adaptive_tuner_profile_id", "")
+        )
+        derived_active = _derived_unified_profile_id(
+            ticker_upper,
+            active_combo_id,
+            active_adaptive_id,
+        )
+        if derived_active in seen_profile_ids:
+            active_profile_id = derived_active
+    if active_profile_id and active_profile_id not in seen_profile_ids:
+        active_profile_id = None
+
+    merged_profiles.sort(key=_profile_updated_ts, reverse=True)
+    if active_profile_id:
+        merged_profiles.sort(
+            key=lambda item: (
+                0
+                if str(item.get("profile_id") or "").strip() == active_profile_id
+                else 1
+            )
+        )
+    return {
+        "ticker": ticker_upper,
+        "profiles": merged_profiles[:60],
         "active_profile_id": active_profile_id,
     }
 
@@ -1113,11 +1731,16 @@ async def _apply_active_adaptive_tuner_profile(
     )
 
 
-async def _apply_global_trailing(strategy_api_url: str, trailing_stop_pct: Optional[float]) -> None:
+async def _apply_global_trailing(
+    strategy_api_url: str,
+    trailing_stop_pct: Optional[float],
+    **kwargs: Any,
+) -> None:
     return await service_apply_global_trailing(
         strategy_api_url,
         trailing_stop_pct,
         _build_strategy_api_integration_deps(),
+        **kwargs,
     )
 
 
@@ -1176,6 +1799,8 @@ async def _configure_session(
     strategy_selection_mode: str = "adaptive_top_n",
     max_active_strategies: int = 3,
     momentum_diversification_json: Optional[str] = None,
+    max_daily_trades: Optional[int] = None,
+    mu_choppy_hard_block_enabled: Optional[bool] = None,
 ) -> None:
     return await service_configure_session(
         strategy_api_url=strategy_api_url,
@@ -1217,6 +1842,8 @@ async def _configure_session(
         max_active_strategies=max_active_strategies,
         momentum_diversification_json=momentum_diversification_json,
         deps=_build_strategy_api_integration_deps(),
+        max_daily_trades=max_daily_trades,
+        mu_choppy_hard_block_enabled=mu_choppy_hard_block_enabled,
     )
 
 
@@ -1382,21 +2009,28 @@ async def broadcast(message: Dict[str, Any]):
         return
     
     message_text = json.dumps(message, default=str)
-    disconnected = []
-    
-    for client in connected_clients:
-        try:
-            await client.send_text(message_text)
-        except Exception:
+    clients = list(connected_clients)
+    results = await asyncio.gather(
+        *(client.send_text(message_text) for client in clients),
+        return_exceptions=True,
+    )
+
+    disconnected: List[WebSocket] = []
+    for client, result in zip(clients, results):
+        if isinstance(result, Exception):
             disconnected.append(client)
-    
+
     for client in disconnected:
-        connected_clients.remove(client)
+        if client in connected_clients:
+            connected_clients.remove(client)
 
 
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for live updates."""
+    if len(connected_clients) >= MAX_WS_CLIENTS:
+        await websocket.close(code=1013, reason="Too many websocket clients")
+        return
     await websocket.accept()
     connected_clients.append(websocket)
     logger.info(f"WebSocket client connected. Total: {len(connected_clients)}")
@@ -1421,7 +2055,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 pass
                 
     except WebSocketDisconnect:
-        connected_clients.remove(websocket)
+        if websocket in connected_clients:
+            connected_clients.remove(websocket)
         logger.info(f"WebSocket client disconnected. Remaining: {len(connected_clients)}")
 
 
@@ -1632,6 +2267,7 @@ app.include_router(config_write_router)
 app.include_router(run_router)
 app.include_router(adaptive_tuner_router)
 app.include_router(run_start_router)
+app.include_router(v2_router)
 
 
 async def list_live_trader_runs(limit: int = 20, active_only: bool = False):
@@ -1687,14 +2323,29 @@ async def get_strategy_combos(ticker: str):
     return _build_strategy_combo_options_payload(ticker)
 
 
+async def get_unified_profiles(ticker: str):
+    """Get saved unified strategy+execution profiles for a ticker."""
+    return _build_unified_profile_options_payload(ticker)
+
+
 async def capture_strategy_combo(request: StrategyComboCaptureRequest):
     """Capture current strategy API settings into a saved ticker combo profile."""
     return await service_capture_strategy_combo(request, _build_config_write_deps())
 
 
+async def capture_unified_profile(request: UnifiedProfileCaptureRequest):
+    """Capture current strategy/execution settings into a unified profile."""
+    return await service_capture_unified_profile(request, _build_config_write_deps())
+
+
 async def apply_strategy_combo(request: StrategyComboApplyRequest):
     """Set active strategy combo profile and optionally apply it to strategy API immediately."""
     return await service_apply_strategy_combo(request, _build_config_write_deps())
+
+
+async def apply_unified_profile(request: UnifiedProfileApplyRequest):
+    """Set active unified profile and optionally apply strategy/execution settings."""
+    return await service_apply_unified_profile(request, _build_config_write_deps())
 
 
 async def get_aos_config():
@@ -1758,6 +2409,10 @@ async def apply_adaptive_tuner_profile(request: AdaptiveTunerProfileApplyRequest
 
 async def run_adaptive_tuner(request: AdaptiveTunerRequest):
     """Start an adaptive-tuner job (v1 or v2) and return a job id for polling."""
+    try:
+        request.strategy_api_url = enforce_strategy_url_allowlist_only(request.strategy_api_url)
+    except StrategyApiPolicyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return await service_run_adaptive_tuner(request, _build_adaptive_tuner_deps())
 
 
@@ -1773,6 +2428,10 @@ async def list_adaptive_tuner_jobs(limit: int = 20):
 
 async def start_run(request: StartRunRequest):
     """Start a new backtest run."""
+    try:
+        request.strategy_api_url = enforce_strategy_url_allowlist_only(request.strategy_api_url)
+    except StrategyApiPolicyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return await service_start_run(request, _build_start_run_deps())
 
 

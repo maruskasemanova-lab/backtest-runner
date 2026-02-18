@@ -76,3 +76,9 @@ async def get_ticker_positioning_config(ticker: str, services: ApiServices = Dep
 async def get_adaptive_tuner_options(ticker: str, services: ApiServices = Depends(get_api_services)):
     """Get real coverage ranges and saved tuner profiles for a ticker."""
     return services.build_adaptive_tuner_options_payload(ticker)
+
+
+@router.get("/api/profiles/{ticker}")
+async def get_unified_profiles(ticker: str, services: ApiServices = Depends(get_api_services)):
+    """Get saved unified strategy+execution profiles for a ticker."""
+    return services.build_unified_profile_options_payload(ticker)

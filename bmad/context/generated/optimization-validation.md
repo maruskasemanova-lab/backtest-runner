@@ -22,8 +22,8 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `wfo_optimizer.py` | yes | 675 | `13f270b 2026-02-06` |
-| `walk_forward_runner.py` | yes | 447 | `13f270b 2026-02-06` |
+| `wfo_optimizer.py` | yes | 854 | `13f270b 2026-02-06` |
+| `walk_forward_runner.py` | yes | 496 | `13f270b 2026-02-06` |
 | `performance_tracker.py` | yes | 822 | `13f270b 2026-02-06` |
 | `oos_validator.py` | yes | 187 | `13f270b 2026-02-06` |
 | `monte_carlo.py` | yes | 178 | `64da33c 2026-02-10` |
@@ -55,25 +55,25 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 ## Key Symbols
 
 ### `wfo_optimizer.py`
-- `function` `suppress_output` (line 47)
-- `class` `OptimizationResult` (line 110)
-- `class` `TickerOptResult` (line 122)
-- `function` `parse_date` (line 133)
-- `function` `canonical_strategy_name` (line 137)
-- `function` `date_range` (line 152)
-- `function` `get_trading_dates` (line 165)
-- `function` `grid` (line 191)
-- `function` `run_single_day` (line 200)
-- `function` `score_result` (line 287)
-- `function` `optimize_strategy_for_dates` (line 314)
-- `function` `evaluate_on_dates` (line 395)
-- ... 2 more symbols
+- `function` `_load_day_trading_manager` (line 32)
+- `function` `suppress_output` (line 59)
+- `class` `OptimizationResult` (line 162)
+- `class` `TickerOptResult` (line 174)
+- `function` `parse_date` (line 185)
+- `function` `canonical_strategy_name` (line 189)
+- `function` `date_range` (line 204)
+- `function` `get_trading_dates` (line 217)
+- `function` `grid` (line 243)
+- `function` `_session_metrics` (line 252)
+- `function` `_process_day_with_manager` (line 294)
+- `function` `_run_single_day_strategy_isolated` (line 323)
+- ... 6 more symbols
 
 ### `walk_forward_runner.py`
 - `class` `WalkForwardConfig` (line 22)
-- `class` `DailyResult` (line 34)
-- `class` `WalkForwardRunner` (line 50)
-- `async_function` `main` (line 411)
+- `class` `DailyResult` (line 37)
+- `class` `WalkForwardRunner` (line 53)
+- `async_function` `main` (line 440)
 
 ### `performance_tracker.py`
 - `class` `Regime` (line 15)

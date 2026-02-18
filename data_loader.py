@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import os
 
 from src.system_settings import DEFAULT_EXTERNAL_DATA_DIR, SystemSettings
+from src.parquet_compat import read_parquet_compat
 
 
 class DataLoader:
@@ -78,8 +79,8 @@ class DataLoader:
     def load_parquet(self, filename: str) -> pd.DataFrame:
         """Load data from Parquet file."""
         filepath = self._resolve_file_path(filename)
-        
-        df = pd.read_parquet(filepath)
+
+        df = read_parquet_compat(filepath)
         return self._prepare_dataframe(df)
     
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:

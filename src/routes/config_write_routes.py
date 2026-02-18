@@ -6,11 +6,15 @@ from src.models.config_requests import (
     PositioningUpdateRequest,
     StrategyComboApplyRequest,
     StrategyComboCaptureRequest,
+    UnifiedProfileApplyRequest,
+    UnifiedProfileCaptureRequest,
 )
 from src.routes.context import ApiServices, get_api_services
 from src.services.config_write_service import (
+    apply_unified_profile,
     apply_adaptive_tuner_profile,
     apply_strategy_combo,
+    capture_unified_profile,
     capture_strategy_combo,
     update_aos_config,
     update_positioning_config,
@@ -62,3 +66,21 @@ async def apply_adaptive_tuner_profile_endpoint(
 ):
     """Apply a saved adaptive-tuner profile into active ticker AOS settings."""
     return apply_adaptive_tuner_profile(request, services.build_config_write_deps())
+
+
+@router.post("/api/profiles/capture")
+async def capture_unified_profile_endpoint(
+    request: UnifiedProfileCaptureRequest,
+    services: ApiServices = Depends(get_api_services),
+):
+    """Capture a unified profile with strategy and execution sections for ticker."""
+    return await capture_unified_profile(request, services.build_config_write_deps())
+
+
+@router.post("/api/profiles/apply")
+async def apply_unified_profile_endpoint(
+    request: UnifiedProfileApplyRequest,
+    services: ApiServices = Depends(get_api_services),
+):
+    """Set active unified profile and optionally apply strategy/execution sections."""
+    return await apply_unified_profile(request, services.build_config_write_deps())

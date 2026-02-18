@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v wrangler >/dev/null 2>&1; then
+  echo "wrangler is required. Install with: npm i -g wrangler"
+  exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+FRONTEND_DIR="${REPO_ROOT}/frontend"
+
+CLOUDFLARE_PAGES_PROJECT="${CLOUDFLARE_PAGES_PROJECT:-backtest-runner-fe-sseman}"
+CLOUDFLARE_PAGES_BRANCH="${CLOUDFLARE_PAGES_BRANCH:-main}"
+
+FLY_RUNNER_APP_NAME="${FLY_RUNNER_APP_NAME:-backtest-runner-api-sseman}"
+FLY_STRATEGY_APP_NAME="${FLY_STRATEGY_APP_NAME:-mrd-strategy-api-sseman}"
+
+VITE_API_BASE_URL="${VITE_API_BASE_URL:-https://${FLY_RUNNER_APP_NAME}.fly.dev}"
+VITE_PLAYBACK_API_BASE_URL="${VITE_PLAYBACK_API_BASE_URL:-https://${FLY_RUNNER_APP_NAME}.fly.dev}"
+VITE_STRATEGY_API_URL="${VITE_STRATEGY_API_URL:-https://${FLY_STRATEGY_APP_NAME}.fly.dev}"
+VITE_WS_BASE_URL="${VITE_WS_BASE_URL:-wss://${FLY_RUNNER_APP_NAME}.fly.dev}"
+
+VITE_SUPABASE_URL="${VITE_SUPABASE_URL:-}"
+VITE_SUPABASE_PUBLISHABLE_KEY="${VITE_SUPABASE_PUBLISHABLE_KEY:-${VITE_SUPABASE_ANON_KEY:-}}"
+VITE_SUPABASE_OAUTH_CALLBACK_PATH="${VITE_SUPABASE_OAUTH_CALLBACK_PATH:-/auth/callback}"
+VITE_SUPABASE_OAUTH_REDIRECT_URL="${VITE_SUPABASE_OAUTH_REDIRECT_URL:-}"
+
+if [[ -z "${VITE_SUPABASE_URL}" || -z "${VITE_SUPABASE_PUBLISHABLE_KEY}" ]]; then
+  echo "Missing Supabase frontend env vars."
+  echo "Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY before deploy."
+  exit 1
+fi
+
+cd "${FRONTEND_DIR}"
+
+echo "Building frontend for Cloudflare Pages project '${CLOUDFLARE_PAGES_PROJECT}'."
+VITE_API_BASE_URL="${VITE_API_BASE_URL}" \
+VITE_PLAYBACK_API_BASE_URL="${VITE_PLAYBACK_API_BASE_URL}" \
+VITE_STRATEGY_API_URL="${VITE_STRATEGY_API_URL}" \
+VITE_WS_BASE_URL="${VITE_WS_BASE_URL}" \
+VITE_SUPABASE_URL="${VITE_SUPABASE_URL}" \
+VITE_SUPABASE_PUBLISHABLE_KEY="${VITE_SUPABASE_PUBLISHABLE_KEY}" \
+VITE_SUPABASE_OAUTH_CALLBACK_PATH="${VITE_SUPABASE_OAUTH_CALLBACK_PATH}" \
+VITE_SUPABASE_OAUTH_REDIRECT_URL="${VITE_SUPABASE_OAUTH_REDIRECT_URL}" \
+npm run build
+
+echo "Deploying dist/ to Cloudflare Pages."
+wrangler pages deploy dist \
+  --project-name "${CLOUDFLARE_PAGES_PROJECT}" \
+  --branch "${CLOUDFLARE_PAGES_BRANCH}" \
+  --commit-dirty=true
+
+echo
+echo "Production URL: https://${CLOUDFLARE_PAGES_PROJECT}.pages.dev"

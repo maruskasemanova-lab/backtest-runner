@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import aiohttp
 
+from src.services.strategy_api_auth_headers import build_strategy_api_headers
 from src.services.strategy_api_types import StrategyApiIntegrationDeps
 
 
@@ -26,6 +27,10 @@ _STRATEGY_API_CLIENT_TIMEOUT = aiohttp.ClientTimeout(
     total=_STRATEGY_API_TIMEOUT_SECONDS,
     connect=min(_STRATEGY_API_TIMEOUT_SECONDS, 3.0),
 )
+
+
+def _strategy_api_headers(strategy_api_url: Optional[str] = None) -> Dict[str, str]:
+    return build_strategy_api_headers(strategy_api_url)
 
 
 async def configure_session(
@@ -68,6 +73,8 @@ async def configure_session(
     max_active_strategies: int,
     momentum_diversification_json: Optional[str],
     deps: StrategyApiIntegrationDeps,
+    max_daily_trades: Optional[int] = None,
+    mu_choppy_hard_block_enabled: Optional[bool] = None,
 ) -> None:
     params = {
         "run_id": run_id,
@@ -109,11 +116,16 @@ async def configure_session(
     }
     if momentum_diversification_json:
         params["momentum_diversification_json"] = str(momentum_diversification_json)
+    if max_daily_trades is not None:
+        params["max_daily_trades"] = int(max_daily_trades)
+    if mu_choppy_hard_block_enabled is not None:
+        params["mu_choppy_hard_block_enabled"] = int(bool(mu_choppy_hard_block_enabled))
     try:
         async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
             async with session.post(
                 f"{strategy_api_url}/api/session/config",
                 params=params,
+                headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
                 if resp.status != 200:
                     deps.logger.warning(
@@ -135,6 +147,7 @@ async def clear_remote_strategy_sessions(
         async with session.delete(
             f"{strategy_api_url}/api/session/run",
             params={"run_id": run_id, "ticker": normalized_ticker},
+            headers=_strategy_api_headers(strategy_api_url),
         ) as resp:
             if resp.status != 200:
                 deps.logger.warning(
@@ -157,6 +170,7 @@ async def reset_remote_orchestrator_state(
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/reset",
                 params={"scope": "all", "clear_sessions": "true"},
+                headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
                 if resp.status == 200:
                     return True
@@ -181,6 +195,7 @@ async def reset_remote_orchestrator_state_scoped(
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/reset",
                 params={"scope": scope, "clear_sessions": "true"},
+                headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
                 return resp.status == 200
     except Exception as exc:
@@ -201,6 +216,7 @@ async def apply_orchestrator_config(
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/config",
                 json=config,
+                headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
                 if resp.status == 200:
                     payload = await resp.json()
@@ -226,6 +242,7 @@ async def load_remote_checkpoint(
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/checkpoint/load",
                 params={"path": checkpoint_path},
+                headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
@@ -261,6 +278,7 @@ async def save_remote_checkpoint(
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/checkpoint/save",
                 params=params,
+                headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
                 if resp.status == 200:
                     result = await resp.json()

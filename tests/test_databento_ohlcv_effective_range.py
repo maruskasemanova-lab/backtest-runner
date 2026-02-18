@@ -95,6 +95,99 @@ def test_available_data_summary_uses_effective_ohlcv_dates(tmp_path: Path):
     assert summary["date_ranges"]["MU"]["end"] == "2026-02-04"
 
 
+def test_available_data_summary_includes_l2_and_overlap_ranges(tmp_path: Path):
+    svc = _make_service(tmp_path)
+    svc.ohlcv_dir.mkdir(parents=True, exist_ok=True)
+    svc.l2_dir.mkdir(parents=True, exist_ok=True)
+
+    ohlcv_csv = svc.ohlcv_dir / "MU_ohlcv-1m_2026-02-04_2026-02-05.csv"
+    pd.DataFrame(
+        {
+            "timestamp": [
+                "2026-02-04 09:00:00+00:00",
+                "2026-02-05 09:00:00+00:00",
+            ],
+            "open": [100.0, 101.0],
+            "high": [101.0, 102.0],
+            "low": [99.0, 100.0],
+            "close": [100.5, 101.5],
+            "volume": [1000, 1100],
+        }
+    ).to_csv(ohlcv_csv, index=False)
+
+    l2_parquet = svc.l2_dir / "MU_2026-02-03_2026-02-06.parquet"
+    l2_parquet.write_bytes(b"PAR1")
+
+    svc.catalog.upsert(
+        CatalogEntry(
+            ticker="MU",
+            schema="ohlcv-1m",
+            dataset="XNAS.ITCH",
+            start_date="2026-02-04",
+            end_date="2026-02-05",
+            file_csv=str(ohlcv_csv),
+            status="ready",
+            managed=True,
+        )
+    )
+    svc.catalog.upsert(
+        CatalogEntry(
+            ticker="MU",
+            schema="mbp-10",
+            dataset="XNAS.ITCH",
+            start_date="2026-02-03",
+            end_date="2026-02-06",
+            file_parquet=str(l2_parquet),
+            status="ready",
+            managed=True,
+        )
+    )
+
+    summary = svc.get_available_data_summary(refresh=False)
+    assert summary["l2_date_ranges"]["MU"]["start"] == "2026-02-03"
+    assert summary["l2_date_ranges"]["MU"]["end"] == "2026-02-06"
+    assert summary["l2_overlap_date_ranges"]["MU"]["start"] == "2026-02-04"
+    assert summary["l2_overlap_date_ranges"]["MU"]["end"] == "2026-02-05"
+
+
+def test_available_data_summary_remaps_stale_absolute_ohlcv_paths(tmp_path: Path):
+    svc = _make_service(tmp_path)
+    svc.ohlcv_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_path = svc.ohlcv_dir / "MU_ohlcv-1m_2026-01-20_2026-02-06.csv"
+    pd.DataFrame(
+        {
+            "timestamp": [
+                "2026-01-20 14:30:00+00:00",
+                "2026-02-06 20:59:00+00:00",
+            ],
+            "open": [100.0, 101.0],
+            "high": [101.0, 102.0],
+            "low": [99.0, 100.0],
+            "close": [100.5, 101.5],
+            "volume": [1000, 1200],
+        }
+    ).to_csv(csv_path, index=False)
+
+    stale_host_path = f"/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/data/{csv_path.name}"
+    svc.catalog.upsert(
+        CatalogEntry(
+            ticker="MU",
+            schema="ohlcv-1m",
+            dataset="XNAS.ITCH",
+            start_date="2026-01-20",
+            end_date="2026-02-06",
+            file_csv=stale_host_path,
+            status="ready",
+            managed=True,
+        )
+    )
+
+    summary = svc.get_available_data_summary(refresh=False)
+    assert summary["date_ranges"]["MU"]["start"] == "2026-01-20"
+    assert summary["date_ranges"]["MU"]["end"] == "2026-02-06"
+
+
 def test_get_files_for_range_skips_invalid_ohlcv_entries(tmp_path: Path):
     svc = _make_service(tmp_path)
     svc.ohlcv_dir.mkdir(parents=True, exist_ok=True)

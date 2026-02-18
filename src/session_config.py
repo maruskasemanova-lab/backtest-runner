@@ -54,6 +54,8 @@ async def configure_session(
     strategy_selection_mode: str = "adaptive_top_n",
     max_active_strategies: int = 3,
     momentum_diversification_json: Optional[str] = None,
+    max_daily_trades: Optional[int] = None,
+    mu_choppy_hard_block_enabled: Optional[bool] = None,
 ) -> bool:
     """
     Configure a trading session on the strategy API.
@@ -113,6 +115,10 @@ async def configure_session(
     
     if momentum_diversification_json:
         params["momentum_diversification_json"] = str(momentum_diversification_json)
+    if max_daily_trades is not None:
+        params["max_daily_trades"] = int(max_daily_trades)
+    if mu_choppy_hard_block_enabled is not None:
+        params["mu_choppy_hard_block_enabled"] = int(bool(mu_choppy_hard_block_enabled))
     
     try:
         async with aiohttp.ClientSession() as session:

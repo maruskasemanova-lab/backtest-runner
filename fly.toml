@@ -1,0 +1,48 @@
+app = "backtest-runner-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  strategy = "immediate"
+
+[env]
+  PORT = "8080"
+  PYTHONUNBUFFERED = "1"
+  BACKTEST_SAAS_DB_PATH = "/data/saas_state.db"
+  BACKTEST_RUNTIME_CONFIG_DIR = "/data/config"
+  BACKTEST_AOS_CONFIG_PATH = "/data/config/aos_config.json"
+  BACKTEST_POSITIONING_CONFIG_PATH = "/data/config/positioning_config.json"
+  BACKTEST_REMOTE_CACHE_DIR = "/data/remote_cache"
+  BACKTEST_STARTUP_PREWARM_ENABLED = "0"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 50
+    hard_limit = 70
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "15s"
+    timeout = "5s"
+    method = "GET"
+    path = "/api/health"
+
+[mounts]
+  source = "backtest_data"
+  destination = "/data"
+  initial_size = "3gb"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "1024mb"

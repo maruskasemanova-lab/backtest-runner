@@ -6,4 +6,4 @@ numpy>=1.24.0
 requests>=2.31.0
 python-dateutil>=2.8.0
 aiohttp>=3.8.0
-databento>=0.33.0
+duckdb>=1.1.0

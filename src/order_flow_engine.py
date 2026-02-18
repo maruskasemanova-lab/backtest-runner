@@ -148,8 +148,12 @@ class OrderFlowEngine:
         ticker: str,
         start_dt_utc: datetime,
         end_dt_utc: datetime,
+        chunk: pd.DataFrame | None = None,
     ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, Any]]:
-        chunk = self._load_chunk(ticker, start_dt_utc, end_dt_utc)
+        if chunk is None:
+            chunk = self._load_chunk(ticker, start_dt_utc, end_dt_utc)
+        else:
+            chunk = chunk.copy()
         out: Dict[int, Dict[str, Any]] = {}
         stats = {"depth_minutes": 0}
         if chunk.empty:
@@ -214,8 +218,10 @@ class OrderFlowEngine:
         ticker: str,
         start_dt_utc: datetime,
         end_dt_utc: datetime,
+        chunk: pd.DataFrame | None = None,
     ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, Any]]:
-        chunk = self._load_chunk(ticker, start_dt_utc, end_dt_utc)
+        if chunk is None:
+            chunk = self._load_chunk(ticker, start_dt_utc, end_dt_utc)
         out: Dict[int, Dict[str, Any]] = {}
         stats = {"trade_minutes": 0, "trade_events": 0}
         if chunk.empty:
@@ -301,8 +307,21 @@ class OrderFlowEngine:
         start_dt_utc: datetime,
         end_dt_utc: datetime,
     ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, Any]]:
-        trade_map, trade_stats = self.compute_trade_flow(ticker, start_dt_utc, end_dt_utc)
-        book_map, book_stats = self.compute_book_pressure(ticker, start_dt_utc, end_dt_utc)
+        # Load one chunk per request; downstream computations reuse it to keep
+        # serverless memory/IO bounded on multi-day ranges.
+        chunk = self._load_chunk(ticker, start_dt_utc, end_dt_utc)
+        trade_map, trade_stats = self.compute_trade_flow(
+            ticker,
+            start_dt_utc,
+            end_dt_utc,
+            chunk=chunk,
+        )
+        book_map, book_stats = self.compute_book_pressure(
+            ticker,
+            start_dt_utc,
+            end_dt_utc,
+            chunk=chunk,
+        )
 
         feature_map: Dict[int, Dict[str, Any]] = {}
         all_keys = sorted(set(trade_map.keys()) | set(book_map.keys()))

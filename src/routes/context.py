@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from fastapi import Request
 from fastapi.exceptions import HTTPException
@@ -25,6 +25,7 @@ class ApiServices:
     get_ticker_positioning_config: Callable[[str], Dict[str, Any]]
     positioning_config_keys: Any
     build_adaptive_tuner_options_payload: Callable[[str], Dict[str, Any]]
+    build_unified_profile_options_payload: Callable[[str], Dict[str, Any]]
     build_config_write_deps: Callable[[], Any]
     build_run_control_deps: Callable[[], Any]
     build_adaptive_tuner_deps: Callable[[], Any]

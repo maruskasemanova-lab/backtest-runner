@@ -6,13 +6,17 @@ import json
 import os
 import threading
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from fastapi import HTTPException
 
 from src.models.run_requests import PrewarmRunRequest, StartRunRequest
+from src.runtime_mode import (
+    stateful_run_api_supported,
+    stateful_run_api_unsupported_detail,
+)
 from src.services.start_run_data_service import (
     enrich_bars_with_l2,
     get_prewarm_result,
@@ -58,8 +62,22 @@ PREWARM_TICKER_SCOPE_L2_FORCE = _parse_bool_env(
 )
 RUN_L2_MAX_DAYS = _parse_non_negative_int_env("BACKTEST_RUN_L2_MAX_DAYS", 10)
 RUN_L2_FORCE = _parse_bool_env("BACKTEST_RUN_L2_FORCE", False)
+PROGRESSIVE_LOAD_ENABLED = _parse_bool_env("BACKTEST_PROGRESSIVE_LOAD_ENABLED", True)
+PROGRESSIVE_LOAD_MIN_DAYS = _parse_non_negative_int_env(
+    "BACKTEST_PROGRESSIVE_LOAD_MIN_DAYS",
+    10,
+)
+PROGRESSIVE_LOAD_INITIAL_DAYS = _parse_non_negative_int_env(
+    "BACKTEST_PROGRESSIVE_LOAD_INITIAL_DAYS",
+    4,
+)
+PROGRESSIVE_LOAD_CHUNK_DAYS = _parse_non_negative_int_env(
+    "BACKTEST_PROGRESSIVE_LOAD_CHUNK_DAYS",
+    4,
+)
 _PREWARM_INFLIGHT: Dict[str, concurrent.futures.Future] = {}
 _PREWARM_INFLIGHT_LOCK = threading.Lock()
+_PROFILE_PLACEHOLDER_TOKENS = {"none", "null", "n/a", "na", "undefined", "-"}
 
 
 def _acquire_prewarm_inflight(key: str) -> tuple[concurrent.futures.Future, bool]:
@@ -191,12 +209,34 @@ def _resolve_local_aos_applied(
     return applied
 
 
-def _build_report_metadata(
+def _normalize_profile_ref_token(value: Any) -> Optional[str]:
+    token = str(value).strip() if value is not None else ""
+    if not token:
+        return None
+    if token.lower() in _PROFILE_PLACEHOLDER_TOKENS:
+        return None
+    return token
+
+
+def _first_profile_ref_token(*values: Any) -> Optional[str]:
+    for value in values:
+        token = _normalize_profile_ref_token(value)
+        if token:
+            return token
+    return None
+
+
+def _extract_effective_profile_metadata(
     *,
-    run_key: str,
-    run_date_label: str,
     aos_applied: Dict[str, Any],
-) -> Dict[str, Any]:
+    execution_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Optional[str]]:
+    execution_payload = execution_config if isinstance(execution_config, dict) else {}
+    unified_meta = (
+        aos_applied.get("unified_profile", {})
+        if isinstance(aos_applied.get("unified_profile"), dict)
+        else {}
+    )
     adaptive_meta = (
         aos_applied.get("adaptive_profile", {})
         if isinstance(aos_applied.get("adaptive_profile"), dict)
@@ -207,25 +247,60 @@ def _build_report_metadata(
         if isinstance(aos_applied.get("strategy_combo"), dict)
         else {}
     )
-    adaptive_profile_id = (
-        str(adaptive_meta.get("active_profile_id") or "").strip()
-        or str(adaptive_meta.get("profile_id") or "").strip()
-        or None
+    return {
+        "unified_profile_id": _first_profile_ref_token(
+            execution_payload.get("unified_profile_id"),
+            execution_payload.get("active_unified_profile_id"),
+            unified_meta.get("active_profile_id"),
+            unified_meta.get("profile_id"),
+        ),
+        "unified_profile_name": _first_profile_ref_token(
+            execution_payload.get("unified_profile_name"),
+            unified_meta.get("profile_name"),
+        ),
+        "adaptive_profile_id": _first_profile_ref_token(
+            execution_payload.get("adaptive_profile_id"),
+            execution_payload.get("active_adaptive_tuner_profile_id"),
+            adaptive_meta.get("active_profile_id"),
+            adaptive_meta.get("profile_id"),
+        ),
+        "adaptive_profile_name": _first_profile_ref_token(
+            execution_payload.get("adaptive_profile_name"),
+            adaptive_meta.get("profile_name"),
+        ),
+        "strategy_combo_profile_id": _first_profile_ref_token(
+            execution_payload.get("strategy_combo_profile_id"),
+            execution_payload.get("active_strategy_combo_profile_id"),
+            strategy_combo_meta.get("active_profile_id"),
+            strategy_combo_meta.get("profile_id"),
+        ),
+        "strategy_combo_profile_name": _first_profile_ref_token(
+            execution_payload.get("strategy_combo_profile_name"),
+            strategy_combo_meta.get("profile_name"),
+        ),
+    }
+
+
+def _build_report_metadata(
+    *,
+    run_key: str,
+    run_date_label: str,
+    aos_applied: Dict[str, Any],
+    execution_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    profile_meta = _extract_effective_profile_metadata(
+        aos_applied=aos_applied,
+        execution_config=execution_config,
     )
-    adaptive_profile_name = str(adaptive_meta.get("profile_name") or "").strip() or None
-    strategy_combo_profile_id = (
-        str(strategy_combo_meta.get("active_profile_id") or "").strip()
-        or str(strategy_combo_meta.get("profile_id") or "").strip()
-        or None
-    )
-    strategy_combo_profile_name = str(strategy_combo_meta.get("profile_name") or "").strip() or None
     return {
         "run_key": str(run_key),
         "run_date_label": str(run_date_label),
-        "adaptive_profile_id": adaptive_profile_id,
-        "adaptive_profile_name": adaptive_profile_name,
-        "strategy_combo_profile_id": strategy_combo_profile_id,
-        "strategy_combo_profile_name": strategy_combo_profile_name,
+        "unified_profile_id": profile_meta.get("unified_profile_id"),
+        "unified_profile_name": profile_meta.get("unified_profile_name"),
+        "adaptive_profile_id": profile_meta.get("adaptive_profile_id"),
+        "adaptive_profile_name": profile_meta.get("adaptive_profile_name"),
+        "strategy_combo_profile_id": profile_meta.get("strategy_combo_profile_id"),
+        "strategy_combo_profile_name": profile_meta.get("strategy_combo_profile_name"),
     }
 
 
@@ -297,7 +372,7 @@ def _resolve_prewarm_scope_range(
         pass
 
     try:
-        summary = databento_svc.get_available_data_summary(refresh=False)
+        summary = databento_svc.get_available_data_summary(refresh=True)
     except Exception:
         summary = {}
     date_ranges = summary.get("date_ranges", {}) if isinstance(summary, dict) else {}
@@ -333,6 +408,90 @@ def _inclusive_day_span(start_iso: str, end_iso: str) -> int:
     return max(0, delta_days + 1)
 
 
+def _parse_iso_day(value: Any) -> Optional[datetime]:
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _format_iso_day(value: datetime) -> str:
+    return value.strftime("%Y-%m-%d")
+
+
+def _add_days_iso(value: str, days: int) -> Optional[str]:
+    base = _parse_iso_day(value)
+    if base is None:
+        return None
+    return _format_iso_day(base + timedelta(days=int(days)))
+
+
+def _build_progressive_chunks(
+    *,
+    range_start: str,
+    range_end: str,
+    initial_days: int,
+    chunk_days: int,
+) -> list[tuple[str, str]]:
+    start_dt = _parse_iso_day(range_start)
+    end_dt = _parse_iso_day(range_end)
+    if start_dt is None or end_dt is None or start_dt > end_dt:
+        return []
+
+    initial_span = max(1, int(initial_days))
+    chunk_span = max(1, int(chunk_days))
+    initial_end_dt = min(end_dt, start_dt + timedelta(days=initial_span - 1))
+    next_start_dt = initial_end_dt + timedelta(days=1)
+
+    chunks: list[tuple[str, str]] = []
+    while next_start_dt <= end_dt:
+        chunk_end_dt = min(end_dt, next_start_dt + timedelta(days=chunk_span - 1))
+        chunks.append((_format_iso_day(next_start_dt), _format_iso_day(chunk_end_dt)))
+        next_start_dt = chunk_end_dt + timedelta(days=1)
+    return chunks
+
+
+def _resolve_progressive_plan(
+    *,
+    range_start: str,
+    range_end: str,
+    comparable_mode: bool,
+) -> Optional[Dict[str, Any]]:
+    if not PROGRESSIVE_LOAD_ENABLED or comparable_mode:
+        return None
+
+    day_span = _inclusive_day_span(range_start, range_end)
+    min_days = max(1, int(PROGRESSIVE_LOAD_MIN_DAYS))
+    if day_span <= min_days:
+        return None
+
+    initial_days = max(1, int(PROGRESSIVE_LOAD_INITIAL_DAYS))
+    chunk_days = max(1, int(PROGRESSIVE_LOAD_CHUNK_DAYS))
+
+    initial_end = _add_days_iso(range_start, initial_days - 1) or range_end
+    if initial_end > range_end:
+        initial_end = range_end
+
+    chunks = _build_progressive_chunks(
+        range_start=range_start,
+        range_end=range_end,
+        initial_days=initial_days,
+        chunk_days=chunk_days,
+    )
+    if not chunks:
+        return None
+
+    return {
+        "initial_start": range_start,
+        "initial_end": initial_end,
+        "target_end": range_end,
+        "chunks": chunks,
+        "day_span": day_span,
+        "initial_days": initial_days,
+        "chunk_days": chunk_days,
+    }
+
+
 def _normalize_reset_scope(value: Any) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in {"session", "learning", "all"}:
@@ -342,6 +501,9 @@ def _normalize_reset_scope(value: Any) -> str:
 
 async def start_run(request: StartRunRequest, deps: StartRunDeps):
     """Start a new backtest run."""
+    if not stateful_run_api_supported():
+        raise HTTPException(503, stateful_run_api_unsupported_detail())
+
     start_wall_clock = perf_counter()
     start_timing: Dict[str, Any] = {"phases_ms": {}}
 
@@ -377,11 +539,24 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
 
     # Resolve date range
     range_start, range_end = _resolve_request_range(request)
+    full_range_start = str(range_start)
+    full_range_end = str(range_end)
+    progressive_plan = _resolve_progressive_plan(
+        range_start=full_range_start,
+        range_end=full_range_end,
+        comparable_mode=comparable_mode,
+    )
+    if progressive_plan:
+        load_range_start = str(progressive_plan["initial_start"])
+        load_range_end = str(progressive_plan["initial_end"])
+    else:
+        load_range_start = full_range_start
+        load_range_end = full_range_end
 
     run_date_label = (
-        f"{range_start}_to_{range_end}"
-        if range_start != range_end or request.date_from or request.date_to
-        else range_start
+        f"{full_range_start}_to_{full_range_end}"
+        if full_range_start != full_range_end or request.date_from or request.date_to
+        else full_range_start
     )
 
     run_key = f"{request.run_id}:{ticker}:{run_date_label}"
@@ -480,17 +655,66 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         if effective_momentum_diversification
         else None
     )
-    # Apply global trailing (best-effort, overrides per-ticker trailing)
     phase_started = perf_counter()
-    await _apply_global_trailing(request.strategy_api_url, request.trailing_stop_pct)
+    execution_cfg = resolve_execution_config(
+        request=request,
+        aos_applied=aos_applied,
+        adaptive_profile_runtime=adaptive_profile_runtime,
+    )
+    _record_phase_ms("resolve_execution_config", phase_started)
+    effective_global_trailing_stop_pct = float(execution_cfg.get("effective_trailing_stop_pct", 0.0) or 0.0)
+    if effective_global_trailing_stop_pct <= 0:
+        effective_global_trailing_stop_pct = 0.0
+    effective_global_exit_rr_ratio = float(
+        execution_cfg.get("effective_global_exit_rr_ratio", 0.0) or 0.0
+    )
+    if effective_global_exit_rr_ratio <= 0:
+        effective_global_exit_rr_ratio = 0.0
+    effective_global_risk_atr_stop_multiplier = float(
+        execution_cfg.get("effective_global_risk_atr_stop_multiplier", 0.0) or 0.0
+    )
+    if effective_global_risk_atr_stop_multiplier <= 0:
+        effective_global_risk_atr_stop_multiplier = 0.0
+    effective_global_risk_volume_stop_pct = float(
+        execution_cfg.get("effective_global_risk_volume_stop_pct", 0.0) or 0.0
+    )
+    if effective_global_risk_volume_stop_pct <= 0:
+        effective_global_risk_volume_stop_pct = 0.0
+    effective_global_risk_min_stop_loss_pct = float(
+        execution_cfg.get("effective_global_risk_min_stop_loss_pct", 0.0) or 0.0
+    )
+    if effective_global_risk_min_stop_loss_pct <= 0:
+        effective_global_risk_min_stop_loss_pct = 0.0
+
+    # Apply global trailing baseline (best-effort). Strategies in `global`
+    # mode will consume it; `custom` strategies keep their own values.
+    phase_started = perf_counter()
+    await _apply_global_trailing(
+        request.strategy_api_url,
+        effective_global_trailing_stop_pct if effective_global_trailing_stop_pct > 0 else None,
+        global_exit_rr_ratio=(
+            effective_global_exit_rr_ratio if effective_global_exit_rr_ratio > 0 else None
+        ),
+        global_risk_atr_stop_multiplier=(
+            effective_global_risk_atr_stop_multiplier
+            if effective_global_risk_atr_stop_multiplier > 0
+            else None
+        ),
+        global_risk_volume_stop_pct=(
+            effective_global_risk_volume_stop_pct if effective_global_risk_volume_stop_pct > 0 else None
+        ),
+        global_risk_min_stop_loss_pct=(
+            effective_global_risk_min_stop_loss_pct if effective_global_risk_min_stop_loss_pct > 0 else None
+        ),
+    )
     _record_phase_ms("apply_global_trailing", phase_started)
 
     phase_started = perf_counter()
     bars, data_files = load_run_bars(
         request=request,
         ticker=ticker,
-        range_start=range_start,
-        range_end=range_end,
+        range_start=load_range_start,
+        range_end=load_range_end,
         data_loader=data_loader,
         databento_svc=databento_svc,
         get_discovery=get_discovery,
@@ -499,13 +723,6 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
     )
     _record_phase_ms("load_run_bars", phase_started)
 
-    phase_started = perf_counter()
-    execution_cfg = resolve_execution_config(
-        request=request,
-        aos_applied=aos_applied,
-        adaptive_profile_runtime=adaptive_profile_runtime,
-    )
-    _record_phase_ms("resolve_execution_config", phase_started)
     requested_l2_only_raw = bool(execution_cfg["requested_l2_only"])
     requested_l2_confirm_raw = bool(execution_cfg["requested_l2_confirm"])
     requested_l2_only = requested_l2_only_raw
@@ -534,13 +751,13 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
     bars, l2_stats, l2_sessionized_by_market_day = enrich_bars_with_l2(
         bars=bars,
         ticker=ticker,
-        range_start=range_start,
-        range_end=range_end,
+        range_start=load_range_start,
+        range_end=load_range_end,
         requested_l2_only=requested_l2_only,
         requested_l2_confirm=requested_l2_confirm,
         comparable_mode=comparable_mode,
         is_multi_day_request=bool(
-            range_start != range_end or bool(request.date_from and request.date_to)
+            load_range_start != load_range_end or bool(request.date_from and request.date_to)
         ),
         aos_l2_config_applied=bool(isinstance(aos_applied.get("l2"), dict) and aos_applied.get("l2")),
         to_utc_datetime=_to_utc_datetime,
@@ -576,6 +793,26 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
     partial_take_profit_rr_source = str(execution_cfg["partial_take_profit_rr_source"])
     effective_partial_take_profit_fraction = float(execution_cfg["effective_partial_take_profit_fraction"])
     partial_take_profit_fraction_source = str(execution_cfg["partial_take_profit_fraction_source"])
+    effective_global_trailing_stop_pct = float(execution_cfg["effective_trailing_stop_pct"])
+    trailing_stop_pct_source = str(execution_cfg["trailing_stop_pct_source"])
+    effective_global_exit_rr_ratio = float(execution_cfg["effective_global_exit_rr_ratio"])
+    global_exit_rr_ratio_source = str(execution_cfg["global_exit_rr_ratio_source"])
+    effective_global_risk_atr_stop_multiplier = float(
+        execution_cfg["effective_global_risk_atr_stop_multiplier"]
+    )
+    global_risk_atr_stop_multiplier_source = str(
+        execution_cfg["global_risk_atr_stop_multiplier_source"]
+    )
+    effective_global_risk_volume_stop_pct = float(
+        execution_cfg["effective_global_risk_volume_stop_pct"]
+    )
+    global_risk_volume_stop_pct_source = str(execution_cfg["global_risk_volume_stop_pct_source"])
+    effective_global_risk_min_stop_loss_pct = float(
+        execution_cfg["effective_global_risk_min_stop_loss_pct"]
+    )
+    global_risk_min_stop_loss_pct_source = str(
+        execution_cfg["global_risk_min_stop_loss_pct_source"]
+    )
     effective_trailing_activation_pct = float(execution_cfg["effective_trailing_activation_pct"])
     trailing_activation_source = str(execution_cfg["trailing_activation_source"])
     effective_break_even_buffer_pct = float(execution_cfg["effective_break_even_buffer_pct"])
@@ -604,6 +841,14 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         execution_cfg["effective_adverse_book_pressure_threshold"]
     )
     adverse_book_pressure_source = str(execution_cfg["adverse_book_pressure_source"])
+    effective_max_daily_trades = execution_cfg.get("effective_max_daily_trades")
+    max_daily_trades_source = str(execution_cfg.get("max_daily_trades_source", "ticker_config"))
+    effective_mu_choppy_hard_block_enabled = execution_cfg.get(
+        "effective_mu_choppy_hard_block_enabled"
+    )
+    mu_choppy_hard_block_enabled_source = str(
+        execution_cfg.get("mu_choppy_hard_block_enabled_source", "ticker_config")
+    )
     
     # Configure session defaults after strategy/AOS updates and after
     # we know whether L2 confirmation is actually feasible for this run.
@@ -636,8 +881,8 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
     phase_started = perf_counter()
     ref_bars_map = load_reference_bars_map(
         ticker=ticker,
-        range_start=range_start,
-        range_end=range_end,
+        range_start=load_range_start,
+        range_end=load_range_end,
         data_loader=data_loader,
         databento_svc=databento_svc,
         get_discovery=get_discovery,
@@ -695,8 +940,156 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
     runner._checkpoint_loaded = checkpoint_loaded
     runner._restart_session_date = range_start
     runner._restart_session_config = dict(session_config_snapshot)
+    runner._progressive_loading_enabled = bool(progressive_plan)
+    runner._progressive_loading_complete = not bool(progressive_plan)
+    runner._progressive_loading_loaded_until = load_range_end if bars else None
+    runner._progressive_loading_target_end = full_range_end
+    runner._progressive_loading_pending_chunks = (
+        len(progressive_plan.get("chunks", [])) if isinstance(progressive_plan, dict) else 0
+    )
+    runner._progressive_loading_last_error = None
+    runner._progressive_loading_task = None
+    runner._progressive_wait_timeout_seconds = 90
+    runner._progressive_wait_started_at = None
 
     active_runners[run_key] = runner
+
+    if isinstance(progressive_plan, dict):
+        pending_chunks = list(progressive_plan.get("chunks", []))
+
+        def _load_chunk_payload(chunk_start: str, chunk_end: str):
+            chunk_bars, _chunk_data_files = load_run_bars(
+                request=request,
+                ticker=ticker,
+                range_start=chunk_start,
+                range_end=chunk_end,
+                data_loader=data_loader,
+                databento_svc=databento_svc,
+                get_discovery=get_discovery,
+                aos_applied=aos_applied,
+                logger=logger,
+            )
+            chunk_bars, _chunk_l2_stats, _chunk_l2_sessionized = enrich_bars_with_l2(
+                bars=chunk_bars,
+                ticker=ticker,
+                range_start=chunk_start,
+                range_end=chunk_end,
+                requested_l2_only=requested_l2_only,
+                requested_l2_confirm=requested_l2_confirm,
+                comparable_mode=comparable_mode,
+                is_multi_day_request=bool(chunk_start != chunk_end),
+                aos_l2_config_applied=bool(
+                    isinstance(aos_applied.get("l2"), dict) and aos_applied.get("l2")
+                ),
+                to_utc_datetime=_to_utc_datetime,
+                build_l2_feature_map=_build_l2_feature_map,
+                normalize_l2_feature_map_for_market_day_sessions=_normalize_l2_feature_map_for_market_day_sessions,
+                attach_l2_features=_attach_l2_features,
+                logger=logger,
+            )
+            chunk_ref_map = load_reference_bars_map(
+                ticker=ticker,
+                range_start=chunk_start,
+                range_end=chunk_end,
+                data_loader=data_loader,
+                databento_svc=databento_svc,
+                get_discovery=get_discovery,
+                logger=logger,
+            )
+            return chunk_bars, chunk_ref_map
+
+        async def _append_remaining_chunks() -> None:
+            logger.info(
+                "Progressive loading enabled for %s: initial=%s..%s, pending_chunks=%d, target=%s..%s",
+                run_key,
+                load_range_start,
+                load_range_end,
+                len(pending_chunks),
+                full_range_start,
+                full_range_end,
+            )
+            try:
+                for idx, (chunk_start, chunk_end) in enumerate(pending_chunks, start=1):
+                    if active_runners.get(run_key) is not runner:
+                        logger.info(
+                            "Progressive loading aborted for %s (runner no longer active).",
+                            run_key,
+                        )
+                        break
+
+                    chunk_bars, chunk_ref_map = await asyncio.to_thread(
+                        _load_chunk_payload,
+                        chunk_start,
+                        chunk_end,
+                    )
+
+                    last_loaded_ts = None
+                    if runner.bars:
+                        try:
+                            last_loaded_ts = _to_utc_datetime(runner.bars[-1].get("timestamp"))
+                        except Exception:
+                            last_loaded_ts = None
+
+                    appended_bars = []
+                    for bar_item in chunk_bars:
+                        if last_loaded_ts is not None:
+                            try:
+                                bar_ts = _to_utc_datetime(bar_item.get("timestamp"))
+                                if bar_ts <= last_loaded_ts:
+                                    continue
+                            except Exception:
+                                pass
+                        appended_bars.append(bar_item)
+
+                    if appended_bars:
+                        runner.bars.extend(appended_bars)
+                    if isinstance(chunk_ref_map, dict) and chunk_ref_map:
+                        runner.ref_bars_map.update(chunk_ref_map)
+
+                    runner._progressive_loading_loaded_until = chunk_end
+                    runner._progressive_loading_pending_chunks = max(
+                        0, len(pending_chunks) - idx
+                    )
+
+                    logger.info(
+                        "Progressive chunk loaded for %s: %s..%s (+%d bars, total=%d, pending=%d)",
+                        run_key,
+                        chunk_start,
+                        chunk_end,
+                        len(appended_bars),
+                        len(runner.bars),
+                        int(runner._progressive_loading_pending_chunks),
+                    )
+                    await broadcast(
+                        {
+                            "type": "run_data_extended",
+                            "run_key": run_key,
+                            "run_id": request.run_id,
+                            "ticker": ticker,
+                            "date": run_date_label,
+                            "chunk_start": chunk_start,
+                            "chunk_end": chunk_end,
+                            "added_bars": len(appended_bars),
+                            "total_bars": len(runner.bars),
+                            "pending_chunks": int(runner._progressive_loading_pending_chunks),
+                        }
+                    )
+            except Exception as exc:
+                runner._progressive_loading_last_error = str(exc)
+                logger.exception("Progressive loading failed for %s", run_key)
+            finally:
+                runner._progressive_loading_complete = True
+                runner._progressive_loading_pending_chunks = 0
+                if not runner._progressive_loading_last_error:
+                    runner._progressive_loading_loaded_until = full_range_end
+                logger.info(
+                    "Progressive loading finished for %s (error=%s)",
+                    run_key,
+                    runner._progressive_loading_last_error,
+                )
+
+        runner._progressive_loading_task = asyncio.create_task(_append_remaining_chunks())
+
     _record_phase_ms("runner_setup", phase_started)
 
     start_timing["total_ms"] = round((perf_counter() - start_wall_clock) * 1000.0, 2)
@@ -707,14 +1100,20 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         start_timing["slowest_phase_ms"] = float(slowest_phase_ms)
     start_timing["context"] = {
         "ticker": ticker,
-        "range_start": range_start,
-        "range_end": range_end,
+        "range_start": full_range_start,
+        "range_end": full_range_end,
+        "initial_loaded_range_start": load_range_start,
+        "initial_loaded_range_end": load_range_end,
         "bars_loaded": len(bars),
         "reference_bars_loaded": len(ref_bars_map),
         "orchestrator_reset_scope": effective_reset_scope,
         "apply_aos_optimizations_on_start": apply_aos_optimizations_on_start,
         "use_l2": bool(use_l2),
         "l2_has_data": bool(l2_stats.get("has_l2")),
+        "progressive_loading_enabled": bool(progressive_plan),
+        "progressive_pending_chunks": (
+            len(progressive_plan.get("chunks", [])) if isinstance(progressive_plan, dict) else 0
+        ),
     }
 
     execution_config_payload = {
@@ -735,6 +1134,16 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         "partial_take_profit_rr_source": partial_take_profit_rr_source,
         "partial_take_profit_fraction": effective_partial_take_profit_fraction,
         "partial_take_profit_fraction_source": partial_take_profit_fraction_source,
+        "trailing_stop_pct": effective_global_trailing_stop_pct,
+        "trailing_stop_pct_source": trailing_stop_pct_source,
+        "global_exit_rr_ratio": effective_global_exit_rr_ratio,
+        "global_exit_rr_ratio_source": global_exit_rr_ratio_source,
+        "global_risk_atr_stop_multiplier": effective_global_risk_atr_stop_multiplier,
+        "global_risk_atr_stop_multiplier_source": global_risk_atr_stop_multiplier_source,
+        "global_risk_volume_stop_pct": effective_global_risk_volume_stop_pct,
+        "global_risk_volume_stop_pct_source": global_risk_volume_stop_pct_source,
+        "global_risk_min_stop_loss_pct": effective_global_risk_min_stop_loss_pct,
+        "global_risk_min_stop_loss_pct_source": global_risk_min_stop_loss_pct_source,
         "trailing_activation_pct": effective_trailing_activation_pct,
         "trailing_activation_pct_source": trailing_activation_source,
         "break_even_buffer_pct": effective_break_even_buffer_pct,
@@ -778,12 +1187,48 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         "momentum_diversification_source": momentum_diversification_source,
         "momentum_diversification": effective_momentum_diversification or {},
     }
+    if effective_max_daily_trades is not None:
+        execution_config_payload["max_daily_trades"] = int(effective_max_daily_trades)
+        execution_config_payload["max_daily_trades_source"] = max_daily_trades_source
+    if effective_mu_choppy_hard_block_enabled is not None:
+        execution_config_payload["mu_choppy_hard_block_enabled"] = bool(
+            effective_mu_choppy_hard_block_enabled
+        )
+        execution_config_payload["mu_choppy_hard_block_enabled_source"] = (
+            mu_choppy_hard_block_enabled_source
+        )
+    effective_profile_meta = _extract_effective_profile_metadata(
+        aos_applied=aos_applied,
+        execution_config=execution_config_payload,
+    )
+    unified_profile_id = effective_profile_meta.get("unified_profile_id")
+    adaptive_profile_id = effective_profile_meta.get("adaptive_profile_id")
+    strategy_combo_profile_id = effective_profile_meta.get("strategy_combo_profile_id")
+    if unified_profile_id:
+        execution_config_payload["unified_profile_id"] = unified_profile_id
+        execution_config_payload["active_unified_profile_id"] = unified_profile_id
+    unified_profile_name = effective_profile_meta.get("unified_profile_name")
+    if unified_profile_name:
+        execution_config_payload["unified_profile_name"] = unified_profile_name
+    if adaptive_profile_id:
+        execution_config_payload["adaptive_profile_id"] = adaptive_profile_id
+        execution_config_payload["active_adaptive_tuner_profile_id"] = adaptive_profile_id
+    adaptive_profile_name = effective_profile_meta.get("adaptive_profile_name")
+    if adaptive_profile_name:
+        execution_config_payload["adaptive_profile_name"] = adaptive_profile_name
+    if strategy_combo_profile_id:
+        execution_config_payload["strategy_combo_profile_id"] = strategy_combo_profile_id
+        execution_config_payload["active_strategy_combo_profile_id"] = strategy_combo_profile_id
+    strategy_combo_profile_name = effective_profile_meta.get("strategy_combo_profile_name")
+    if strategy_combo_profile_name:
+        execution_config_payload["strategy_combo_profile_name"] = strategy_combo_profile_name
     runner._aos_applied = dict(aos_applied) if isinstance(aos_applied, dict) else {}
     runner._execution_config = dict(execution_config_payload)
     runner._report_metadata = _build_report_metadata(
         run_key=run_key,
         run_date_label=run_date_label,
         aos_applied=runner._aos_applied,
+        execution_config=runner._execution_config,
     )
 
     logger.info(f"Started run {run_key} with {len(bars)} bars")
@@ -793,6 +1238,20 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         "run_key": run_key,
         "ticker": ticker,
         "total_bars": len(bars),
+        "requested_range": {
+            "date_from": full_range_start,
+            "date_to": full_range_end,
+        },
+        "progressive_loading": {
+            "enabled": bool(progressive_plan),
+            "initial_range_start": load_range_start,
+            "initial_range_end": load_range_end,
+            "loaded_until": getattr(runner, "_progressive_loading_loaded_until", load_range_end),
+            "target_end": full_range_end,
+            "pending_chunks": int(getattr(runner, "_progressive_loading_pending_chunks", 0)),
+            "complete": bool(getattr(runner, "_progressive_loading_complete", True)),
+            "last_error": getattr(runner, "_progressive_loading_last_error", None),
+        },
         "strategy_state_reset": orchestrator_reset,
         "orchestrator_reset_scope": effective_reset_scope,
         "checkpoint_loaded": checkpoint_loaded,

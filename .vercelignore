@@ -1,0 +1,28 @@
+# Large local datasets and runtime artifacts (not needed for backend deploy)
+data/
+reports/
+walk_forward_results/
+aos_walk_forward_results/
+analysis/
+
+# Local logs and generated artifacts
+*.log
+mu_*.json
+mu_*.csv
+mu_oos_trades_*.csv
+mu_phase_*.json
+mu_phase_*.csv
+
+# Local/dev-only directories
+.cache/
+.pytest_cache/
+.vscode/
+__pycache__/
+.codex/
+.claude/
+
+# Frontend is deployed separately to Netlify
+frontend/
+
+# Force Vercel Python builder to use requirements.txt (avoid uv lock path)
+pyproject.toml

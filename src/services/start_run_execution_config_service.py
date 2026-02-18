@@ -105,6 +105,20 @@ def resolve_execution_config(
                 return False
         return default
 
+    def _resolve_optional_runtime_non_negative_int(key: str) -> Optional[int]:
+        if key not in adaptive_profile_runtime:
+            return None
+        raw = adaptive_profile_runtime.get(key)
+        try:
+            return max(0, int(raw))
+        except (TypeError, ValueError):
+            return None
+
+    def _resolve_optional_runtime_bool(key: str) -> Optional[bool]:
+        if key not in adaptive_profile_runtime:
+            return None
+        return _coerce_bool(adaptive_profile_runtime.get(key), default=None)
+
     def _resolve_positioning_float(
         *,
         request_value: Any,
@@ -277,6 +291,46 @@ def resolve_execution_config(
         min_value=0.05,
         max_value=0.95,
     )
+    effective_trailing_stop_pct, trailing_stop_pct_source = _resolve_positioning_float(
+        request_value=request.trailing_stop_pct,
+        request_default=0.0,
+        positioning_key="trailing_stop_pct",
+        min_value=0.0,
+        runtime_key="trailing_stop_pct",
+        runtime_positive_only=True,
+    )
+    effective_global_exit_rr_ratio, global_exit_rr_ratio_source = _resolve_positioning_float(
+        request_value=getattr(request, "global_exit_rr_ratio", 0.0),
+        request_default=0.0,
+        positioning_key="global_exit_rr_ratio",
+        min_value=0.0,
+        runtime_key="global_exit_rr_ratio",
+        runtime_positive_only=True,
+    )
+    effective_global_risk_atr_stop_multiplier, global_risk_atr_stop_multiplier_source = _resolve_positioning_float(
+        request_value=getattr(request, "global_risk_atr_stop_multiplier", 0.0),
+        request_default=0.0,
+        positioning_key="global_risk_atr_stop_multiplier",
+        min_value=0.0,
+        runtime_key="global_risk_atr_stop_multiplier",
+        runtime_positive_only=True,
+    )
+    effective_global_risk_volume_stop_pct, global_risk_volume_stop_pct_source = _resolve_positioning_float(
+        request_value=getattr(request, "global_risk_volume_stop_pct", 0.0),
+        request_default=0.0,
+        positioning_key="global_risk_volume_stop_pct",
+        min_value=0.0,
+        runtime_key="global_risk_volume_stop_pct",
+        runtime_positive_only=True,
+    )
+    effective_global_risk_min_stop_loss_pct, global_risk_min_stop_loss_pct_source = _resolve_positioning_float(
+        request_value=getattr(request, "global_risk_min_stop_loss_pct", 0.0),
+        request_default=0.0,
+        positioning_key="global_risk_min_stop_loss_pct",
+        min_value=0.0,
+        runtime_key="global_risk_min_stop_loss_pct",
+        runtime_positive_only=True,
+    )
     effective_trailing_activation_pct, trailing_activation_source = _resolve_positioning_float(
         request_value=request.trailing_activation_pct,
         request_default=0.15,
@@ -390,6 +444,16 @@ def resolve_execution_config(
             runtime_key="adverse_book_pressure_threshold",
         )
     )
+    effective_max_daily_trades = _resolve_optional_runtime_non_negative_int("max_daily_trades")
+    max_daily_trades_source = (
+        "adaptive_profile" if effective_max_daily_trades is not None else "ticker_config"
+    )
+    effective_mu_choppy_hard_block_enabled = _resolve_optional_runtime_bool(
+        "mu_choppy_hard_block_enabled"
+    )
+    mu_choppy_hard_block_enabled_source = (
+        "adaptive_profile" if effective_mu_choppy_hard_block_enabled is not None else "ticker_config"
+    )
 
     if int(request.l2_lookback_bars) != 3:
         l2_lookback_bars = max(1, int(request.l2_lookback_bars))
@@ -447,6 +511,12 @@ def resolve_execution_config(
         "strategy_selection_mode": effective_strategy_selection_mode,
         "max_active_strategies": effective_max_active_strategies,
     }
+    if effective_max_daily_trades is not None:
+        trading_config_payload["max_daily_trades"] = effective_max_daily_trades
+    if effective_mu_choppy_hard_block_enabled is not None:
+        trading_config_payload["mu_choppy_hard_block_enabled"] = (
+            effective_mu_choppy_hard_block_enabled
+        )
 
     return {
         "requested_l2_only": requested_l2_only,
@@ -476,6 +546,16 @@ def resolve_execution_config(
         "partial_take_profit_rr_source": partial_take_profit_rr_source,
         "effective_partial_take_profit_fraction": effective_partial_take_profit_fraction,
         "partial_take_profit_fraction_source": partial_take_profit_fraction_source,
+        "effective_trailing_stop_pct": effective_trailing_stop_pct,
+        "trailing_stop_pct_source": trailing_stop_pct_source,
+        "effective_global_exit_rr_ratio": effective_global_exit_rr_ratio,
+        "global_exit_rr_ratio_source": global_exit_rr_ratio_source,
+        "effective_global_risk_atr_stop_multiplier": effective_global_risk_atr_stop_multiplier,
+        "global_risk_atr_stop_multiplier_source": global_risk_atr_stop_multiplier_source,
+        "effective_global_risk_volume_stop_pct": effective_global_risk_volume_stop_pct,
+        "global_risk_volume_stop_pct_source": global_risk_volume_stop_pct_source,
+        "effective_global_risk_min_stop_loss_pct": effective_global_risk_min_stop_loss_pct,
+        "global_risk_min_stop_loss_pct_source": global_risk_min_stop_loss_pct_source,
         "effective_trailing_activation_pct": effective_trailing_activation_pct,
         "trailing_activation_source": trailing_activation_source,
         "effective_break_even_buffer_pct": effective_break_even_buffer_pct,
@@ -500,5 +580,9 @@ def resolve_execution_config(
         "adverse_flow_consistency_source": adverse_flow_consistency_source,
         "effective_adverse_book_pressure_threshold": effective_adverse_book_pressure_threshold,
         "adverse_book_pressure_source": adverse_book_pressure_source,
+        "effective_max_daily_trades": effective_max_daily_trades,
+        "max_daily_trades_source": max_daily_trades_source,
+        "effective_mu_choppy_hard_block_enabled": effective_mu_choppy_hard_block_enabled,
+        "mu_choppy_hard_block_enabled_source": mu_choppy_hard_block_enabled_source,
         "trading_config": trading_config_payload,
     }

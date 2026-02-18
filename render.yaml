@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: backtest-runner-api
+    env: python
+    plan: free
+    rootDir: .
+    autoDeploy: true
+    healthCheckPath: /api/health
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn api_server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: BACKTEST_SAAS_DB_PATH
+        value: /tmp/saas_state.db
+      - key: BACKTEST_STARTUP_PREWARM_ENABLED
+        value: "0"
+      - key: BACKTEST_INTERNAL_STRATEGY_API_URL
+        sync: false
+      - key: BACKTEST_STRATEGY_API_ALLOWLIST
+        sync: false
+      - key: BACKTEST_CORS_ALLOW_ORIGINS
+        sync: false
+      - key: BACKTEST_JWT_SECRET
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: DATABENTO_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PREMIUM_PRICE_ID
+        sync: false

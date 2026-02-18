@@ -9,17 +9,17 @@ from src.routes.context import ApiServices
 from src.routes.system_routes import router
 
 
-def _build_services(*, l2_manager, l2_features) -> ApiServices:
+def _build_services(*, l2_manager, l2_features, databento_svc=None) -> ApiServices:
     noop_async = lambda *_args, **_kwargs: None
     noop_sync = lambda *_args, **_kwargs: {}
+    if databento_svc is None:
+        databento_svc = SimpleNamespace(get_available_data_summary=lambda refresh=False: {})
     return ApiServices(
         data_loader=SimpleNamespace(),
         l2_manager=l2_manager,
         l2_features=l2_features,
         active_runners={},
-        databento_svc=SimpleNamespace(
-            get_available_data_summary=lambda refresh=False: {},
-        ),
+        databento_svc=databento_svc,
         logger=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None),
         get_live_trader_artifacts_dir=lambda: None,
         live_run_active_window_seconds=60,
@@ -31,6 +31,7 @@ def _build_services(*, l2_manager, l2_features) -> ApiServices:
         get_ticker_positioning_config=lambda _ticker: {},
         positioning_config_keys=(),
         build_adaptive_tuner_options_payload=lambda _ticker: {},
+        build_unified_profile_options_payload=lambda _ticker: {},
         build_config_write_deps=lambda: None,
         build_run_control_deps=lambda: None,
         build_adaptive_tuner_deps=lambda: None,
@@ -43,12 +44,13 @@ def _build_services(*, l2_manager, l2_features) -> ApiServices:
     )
 
 
-def _build_client(*, l2_manager, l2_features) -> TestClient:
+def _build_client(*, l2_manager, l2_features, databento_svc=None) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     app.state.api_services = _build_services(
         l2_manager=l2_manager,
         l2_features=l2_features,
+        databento_svc=databento_svc,
     )
     return TestClient(app)
 
@@ -113,3 +115,26 @@ def test_update_l2_runtime_rejects_negative_cache():
     response = client.post("/api/system/l2/runtime", json={"cache_max_rows": -1})
     assert response.status_code == 400
     assert "cache_max_rows" in response.json()["detail"]
+
+
+def test_get_available_data_passes_refresh_query():
+    calls = []
+
+    def _summary(refresh=False):
+        calls.append(bool(refresh))
+        return {"tickers": ["MU"]}
+
+    client = _build_client(
+        l2_manager=SimpleNamespace(
+            max_cached_tickers=1,
+            max_cached_rows=2_000_000,
+            max_cached_bytes=536_870_912,
+        ),
+        l2_features=SimpleNamespace(iceberg_detection_enabled=True),
+        databento_svc=SimpleNamespace(get_available_data_summary=_summary),
+    )
+
+    response = client.get("/api/available-data?refresh=1")
+    assert response.status_code == 200
+    assert response.json()["tickers"] == ["MU"]
+    assert calls == [True]

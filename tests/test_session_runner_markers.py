@@ -201,8 +201,12 @@ def test_summary_includes_report_context_when_provided() -> None:
     config = RunConfig(run_id="r3b", ticker="MU", date="2026-02-06")
     runner = SessionRunner(config)
     runner._report_metadata = {
+        "unified_profile_id": "mu-unified-v1",
+        "unified_profile_name": "MU Unified v1",
         "adaptive_profile_id": "c4bb2197e651",
         "adaptive_profile_name": "c4 adaptive",
+        "strategy_combo_profile_id": "mu-combo-v1",
+        "strategy_combo_profile_name": "MU Combo v1",
     }
     runner._aos_applied = {
         "adaptive_profile": {
@@ -213,8 +217,12 @@ def test_summary_includes_report_context_when_provided() -> None:
     runner._execution_config = {"apply_aos_optimizations_on_start": True}
 
     summary = runner.get_summary()
+    assert summary["unified_profile_id"] == "mu-unified-v1"
+    assert summary["unified_profile_name"] == "MU Unified v1"
     assert summary["adaptive_profile_id"] == "c4bb2197e651"
     assert summary["adaptive_profile_name"] == "c4 adaptive"
+    assert summary["strategy_combo_profile_id"] == "mu-combo-v1"
+    assert summary["strategy_combo_profile_name"] == "MU Combo v1"
     assert summary["report_metadata"]["adaptive_profile_id"] == "c4bb2197e651"
     assert summary["aos_applied"]["adaptive_profile"]["active_profile_id"] == "c4bb2197e651"
     assert summary["execution_config"]["apply_aos_optimizations_on_start"] is True
@@ -238,3 +246,53 @@ def test_regime_explanation_does_not_claim_high_te_when_low() -> None:
     text = runner._generate_regime_explanation(response)
     assert "high trend efficiency" not in text.lower()
     assert "low" in text.lower()
+
+
+def test_selection_warnings_propagate_to_run_state() -> None:
+    config = RunConfig(run_id="r5", ticker="MU", date="2026-02-06")
+    runner = SessionRunner(config)
+
+    ts = datetime(2026, 2, 6, 10, 0, tzinfo=timezone.utc)
+    bar = {"close": 100.5}
+    response_with_warning = {
+        "action": "regime_detected",
+        "regime": "CHOPPY",
+        "selection_warnings": ["missing micro_regime_preferences entry for micro_regime=CHOPPY"],
+    }
+
+    asyncio.run(runner._process_decision_markers(response_with_warning, bar, ts))
+    state = runner.get_state()
+    assert state["selection_warnings"] == [
+        "missing micro_regime_preferences entry for micro_regime=CHOPPY"
+    ]
+
+    response_without_warning = {
+        "action": "regime_detected",
+        "regime": "MIXED",
+        "selection_warnings": [],
+    }
+    asyncio.run(runner._process_decision_markers(response_without_warning, bar, ts))
+    state = runner.get_state()
+    assert state["selection_warnings"] == []
+
+
+def test_session_summary_preserves_selection_warnings() -> None:
+    config = RunConfig(run_id="r6", ticker="MU", date="2026-02-06")
+    runner = SessionRunner(config)
+    runner.current_bar_index = 42
+    runner.selection_warnings = [
+        "missing micro_regime_preferences entry for micro_regime=CHOPPY",
+    ]
+    runner.session_summary = {
+        "date": "2026-02-06",
+        "selection_warnings": [
+            "missing micro_regime_preferences entry for micro_regime=CHOPPY",
+        ],
+    }
+
+    summary = runner.get_summary()["session_summary"]
+    assert summary is not None
+    assert summary["selection_warnings"] == [
+        "missing micro_regime_preferences entry for micro_regime=CHOPPY"
+    ]
+    assert summary["bars_processed"] == 42

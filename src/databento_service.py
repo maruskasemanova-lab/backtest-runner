@@ -5,17 +5,22 @@ Downloads and catalogs L2, OHLCV, and trades data from Databento.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 
+from .parquet_compat import read_parquet_compat, write_parquet_compat
 from .system_settings import SystemSettings
 
 logger = logging.getLogger("DatabentoService")
@@ -121,12 +126,47 @@ class DatabentoService:
         ohlcv_dir: str = "data",
         catalog_path: str = "data/data_catalog.json",
     ):
+        resolved_catalog_path = str(
+            os.getenv("BACKTEST_DATA_CATALOG_PATH", "") or ""
+        ).strip() or catalog_path
         self.settings = SystemSettings()
-        self.catalog = DataCatalog(catalog_path)
+        self.catalog = DataCatalog(resolved_catalog_path)
         self._active_downloads: Dict[str, Dict[str, Any]] = {}
         self._project_root = Path(__file__).resolve().parents[1]
         # Cache real OHLCV ET date ranges keyed by (path, mtime_ns, size_bytes).
         self._ohlcv_range_cache: Dict[Tuple[str, int, int], Optional[Tuple[str, str]]] = {}
+        self._remote_manifest_url = str(os.getenv("BACKTEST_REMOTE_MANIFEST_URL", "") or "").strip()
+        timeout_raw = str(os.getenv("BACKTEST_REMOTE_TIMEOUT_SEC", "30") or "").strip()
+        try:
+            timeout_value = float(timeout_raw)
+        except ValueError:
+            timeout_value = 30.0
+        self._remote_request_timeout_s = max(5.0, timeout_value)
+        self._available_data_remote_only = self._env_bool(
+            "BACKTEST_AVAILABLE_DATA_REMOTE_ONLY",
+            default=False,
+        )
+        self._remote_manifest_required = self._env_bool(
+            "BACKTEST_REMOTE_MANIFEST_REQUIRED",
+            default=False,
+        )
+        sync_interval_raw = str(
+            os.getenv("BACKTEST_REMOTE_SYNC_MIN_INTERVAL_SEC", "30") or "30"
+        ).strip()
+        try:
+            sync_interval_value = float(sync_interval_raw)
+        except ValueError:
+            sync_interval_value = 30.0
+        self._remote_sync_min_interval_s = max(0.0, sync_interval_value)
+        self._last_remote_sync_epoch_s = 0.0
+        self._auto_precompute_l2_on_download = self._env_bool(
+            "BACKTEST_L2_AUTO_PRECOMPUTE_ON_DOWNLOAD",
+            default=True,
+        )
+        self._auto_precompute_l2_include_icebergs = self._env_bool(
+            "BACKTEST_L2_AUTO_PRECOMPUTE_INCLUDE_ICEBERGS",
+            default=False,
+        )
 
         self.l2_dir = Path(l2_dir)
         self.ohlcv_dir = Path(ohlcv_dir)
@@ -136,6 +176,21 @@ class DatabentoService:
 
         # Always scan at startup so the catalog includes newly added external files.
         self.scan_existing_files()
+        if self._remote_manifest_url:
+            synced = self.sync_remote_manifest(self._remote_manifest_url)
+            if synced > 0:
+                logger.info("Synced %s remote catalog entries from manifest", synced)
+
+    @staticmethod
+    def _env_bool(name: str, default: bool = False) -> bool:
+        raw = str(os.getenv(name, "") or "").strip().lower()
+        if not raw:
+            return bool(default)
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+        if raw in {"0", "false", "no", "off"}:
+            return False
+        return bool(default)
 
     def _refresh_data_roots(self) -> None:
         self.settings.reload()
@@ -143,6 +198,13 @@ class DatabentoService:
         self.l2_dir = self.settings.primary_l2_dir()
         self._ohlcv_scan_dirs = self.settings.get_ohlcv_dirs(existing_only=False)
         self._l2_scan_dirs = self.settings.get_l2_dirs(existing_only=False)
+        # Auto-create primary data directories so the app works in dev
+        # even before any data is downloaded.
+        for d in (self.ohlcv_dir, self.l2_dir):
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
 
     def get_settings(self) -> Dict[str, Any]:
         return self.settings.to_public_dict()
@@ -251,13 +313,349 @@ class DatabentoService:
             formats.append("csv")
         return formats
 
+    @staticmethod
+    def _is_remote_url(path_str: Optional[str]) -> bool:
+        raw = str(path_str or "").strip().lower()
+        return raw.startswith("https://") or raw.startswith("http://")
+
+    @staticmethod
+    def _is_s3_uri(path_str: Optional[str]) -> bool:
+        raw = str(path_str or "").strip().lower()
+        return raw.startswith("s3://")
+
+    @classmethod
+    def _is_remote_location(cls, path_str: Optional[str]) -> bool:
+        return cls._is_remote_url(path_str) or cls._is_s3_uri(path_str)
+
+    @classmethod
+    def _is_remote_catalog_entry(cls, entry: Dict[str, Any]) -> bool:
+        for key in ("file_mbn", "file_parquet", "file_csv"):
+            if cls._is_remote_location(entry.get(key)):
+                return True
+        source_root = str(entry.get("source_root", "") or "").strip()
+        if source_root.startswith("s3://") or cls._is_remote_url(source_root):
+            return True
+        return False
+
+    def _sync_remote_manifest_if_due(self, *, force: bool) -> Dict[str, Any]:
+        manifest_url = str(getattr(self, "_remote_manifest_url", "") or "").strip()
+        if not manifest_url:
+            return {
+                "enabled": False,
+                "url": "",
+                "synced_entries": 0,
+                "performed": False,
+                "forced": bool(force),
+            }
+
+        now = float(time.time())
+        last_sync = float(getattr(self, "_last_remote_sync_epoch_s", 0.0) or 0.0)
+        min_interval = float(getattr(self, "_remote_sync_min_interval_s", 30.0) or 30.0)
+        should_sync = bool(force) or last_sync <= 0.0 or (now - last_sync) >= min_interval
+        synced = 0
+        if should_sync:
+            synced = int(self.sync_remote_manifest(manifest_url))
+            if synced > 0:
+                self._last_remote_sync_epoch_s = now
+            else:
+                self._last_remote_sync_epoch_s = 0.0
+
+        return {
+            "enabled": True,
+            "url": manifest_url,
+            "synced_entries": int(synced),
+            "performed": bool(should_sync),
+            "forced": bool(force),
+        }
+
+    def _remote_cache_dir(self) -> Path:
+        configured = str(os.getenv("BACKTEST_REMOTE_CACHE_DIR", "data/remote_cache") or "").strip()
+        base = Path(configured) if configured else Path("data/remote_cache")
+        if not base.is_absolute():
+            base = (self._project_root / base).resolve()
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    def _remote_cache_path_for_url(self, url: str) -> Path:
+        return self._remote_cache_path_for_locator(url)
+
+    def _remote_cache_path_for_locator(self, locator: str) -> Path:
+        parsed = urlparse(locator)
+        suffix = Path(parsed.path).suffix
+        digest = hashlib.sha256(locator.encode("utf-8")).hexdigest()
+        filename = f"{digest}{suffix if suffix else '.bin'}"
+        return self._remote_cache_dir() / filename
+
+    @staticmethod
+    def _parse_s3_uri(uri: str) -> Optional[Tuple[str, str]]:
+        parsed = urlparse(str(uri or "").strip())
+        if parsed.scheme.lower() != "s3":
+            return None
+        bucket = str(parsed.netloc or "").strip()
+        key = str(parsed.path or "").lstrip("/")
+        if not bucket or not key:
+            return None
+        return bucket, key
+
+    def _get_s3_client(self):
+        cached = getattr(self, "_remote_s3_client", None)
+        if cached is not None:
+            return cached
+
+        endpoint = str(os.getenv("BACKTEST_REMOTE_S3_ENDPOINT", "") or "").strip()
+        if not endpoint:
+            account_id = str(os.getenv("BACKTEST_REMOTE_S3_ACCOUNT_ID", "") or "").strip()
+            if account_id:
+                endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
+        access_key = str(os.getenv("BACKTEST_REMOTE_S3_ACCESS_KEY_ID", "") or "").strip()
+        secret_key = str(os.getenv("BACKTEST_REMOTE_S3_SECRET_ACCESS_KEY", "") or "").strip()
+        region = str(os.getenv("BACKTEST_REMOTE_S3_REGION", "auto") or "auto").strip() or "auto"
+
+        try:
+            import boto3  # type: ignore
+        except Exception as exc:
+            logger.warning("S3 remote data requested but boto3 import failed: %s", exc)
+            self._remote_s3_client = None
+            return None
+
+        kwargs: Dict[str, Any] = {"region_name": region}
+        if endpoint:
+            kwargs["endpoint_url"] = endpoint
+        if access_key and secret_key:
+            kwargs["aws_access_key_id"] = access_key
+            kwargs["aws_secret_access_key"] = secret_key
+
+        try:
+            client = boto3.client("s3", **kwargs)
+        except Exception as exc:
+            logger.warning("Failed to initialize S3 client for remote data: %s", exc)
+            self._remote_s3_client = None
+            return None
+
+        self._remote_s3_client = client
+        return client
+
+    def _download_remote_file_to_cache(self, locator: str, dest: Path) -> Optional[Path]:
+        tmp_path = dest.with_suffix(dest.suffix + ".part")
+        timeout = float(getattr(self, "_remote_request_timeout_s", 30.0) or 30.0)
+        try:
+            if self._is_s3_uri(locator):
+                parsed = self._parse_s3_uri(locator)
+                if parsed is None:
+                    return None
+                bucket, key = parsed
+                client = self._get_s3_client()
+                if client is None:
+                    return None
+                response = client.get_object(Bucket=bucket, Key=key)
+                body = response.get("Body")
+                if body is None:
+                    return None
+                with tmp_path.open("wb") as handle:
+                    while True:
+                        chunk = body.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+            else:
+                last_exc: Optional[Exception] = None
+                for attempt in range(3):
+                    try:
+                        with requests.get(locator, timeout=timeout, stream=True) as response:
+                            response.raise_for_status()
+                            with tmp_path.open("wb") as handle:
+                                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                                    if chunk:
+                                        handle.write(chunk)
+                        last_exc = None
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt < 2:
+                            time.sleep(0.35 * (attempt + 1))
+                if last_exc is not None:
+                    raise last_exc
+            tmp_path.replace(dest)
+            return dest
+        except Exception as exc:
+            logger.warning("Failed to download remote file %s: %s", locator, exc)
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
+            return None
+
+    def _resolve_remote_entry_to_cache(self, locator: str) -> Optional[Path]:
+        cache_path = self._remote_cache_path_for_locator(locator)
+        if cache_path.exists() and cache_path.is_file() and cache_path.stat().st_size > 0:
+            return cache_path
+        return self._download_remote_file_to_cache(locator, cache_path)
+
+    def _fetch_remote_manifest_payload(self, manifest_locator: str) -> Optional[Any]:
+        timeout = float(getattr(self, "_remote_request_timeout_s", 30.0) or 30.0)
+        try:
+            if self._is_s3_uri(manifest_locator):
+                parsed = self._parse_s3_uri(manifest_locator)
+                if parsed is None:
+                    return None
+                bucket, key = parsed
+                client = self._get_s3_client()
+                if client is None:
+                    return None
+                response = client.get_object(Bucket=bucket, Key=key)
+                body = response.get("Body")
+                if body is None:
+                    return None
+                raw = body.read()
+                return json.loads(raw.decode("utf-8"))
+
+            last_exc: Optional[Exception] = None
+            for attempt in range(3):
+                try:
+                    response = requests.get(manifest_locator, timeout=timeout)
+                    response.raise_for_status()
+                    return response.json()
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt < 2:
+                        time.sleep(0.35 * (attempt + 1))
+            if last_exc:
+                raise last_exc
+        except Exception as exc:
+            logger.warning("Failed to fetch remote manifest %s: %s", manifest_locator, exc)
+            return None
+
+    def sync_remote_manifest(self, manifest_url: Optional[str] = None) -> int:
+        url = str(manifest_url or getattr(self, "_remote_manifest_url", "") or "").strip()
+        if not url:
+            return 0
+
+        payload = self._fetch_remote_manifest_payload(url)
+        if payload is None:
+            return 0
+
+        rows: List[Dict[str, Any]] = []
+        if isinstance(payload, list):
+            rows = [item for item in payload if isinstance(item, dict)]
+        elif isinstance(payload, dict):
+            candidates = payload.get("entries")
+            if isinstance(candidates, list):
+                rows = [item for item in candidates if isinstance(item, dict)]
+
+        synced = 0
+        for row in rows:
+            ticker = str(row.get("ticker", "")).strip().upper()
+            schema = str(row.get("schema", "")).strip().lower()
+            start_date = str(row.get("start_date", "")).strip()
+            end_date = str(row.get("end_date", "")).strip()
+            if not ticker or not schema:
+                continue
+            if not (self._is_valid_iso_date(start_date) and self._is_valid_iso_date(end_date)):
+                continue
+
+            file_mbn = str(row.get("file_mbn") or row.get("public_url_mbn") or "").strip() or None
+            file_parquet = str(row.get("file_parquet") or row.get("public_url_parquet") or "").strip() or None
+            file_csv = str(row.get("file_csv") or row.get("public_url_csv") or "").strip() or None
+            if not any((file_mbn, file_parquet, file_csv)):
+                continue
+
+            status = str(row.get("status", "ready") or "ready").strip().lower()
+            if status not in {"ready", "downloading", "converting", "error"}:
+                status = "ready"
+            dataset = str(row.get("dataset", "XNAS.ITCH") or "XNAS.ITCH").strip() or "XNAS.ITCH"
+            source_root = str(row.get("source_root", "remote_manifest") or "remote_manifest").strip()
+            downloaded_at = str(row.get("downloaded_at") or row.get("uploaded_at") or "").strip() or None
+            error_message = str(row.get("error_message") or "").strip() or None
+            try:
+                size_bytes = max(0, int(row.get("size_bytes", 0) or 0))
+            except (TypeError, ValueError):
+                size_bytes = 0
+            try:
+                row_count = max(0, int(row.get("row_count", 0) or 0))
+            except (TypeError, ValueError):
+                row_count = 0
+            try:
+                progress_pct = float(row.get("progress_pct", 100.0) or 100.0)
+            except (TypeError, ValueError):
+                progress_pct = 100.0
+
+            entry = CatalogEntry(
+                ticker=ticker,
+                schema=schema,
+                dataset=dataset,
+                start_date=start_date,
+                end_date=end_date,
+                file_mbn=file_mbn,
+                file_parquet=file_parquet,
+                file_csv=file_csv,
+                size_bytes=size_bytes,
+                row_count=row_count,
+                downloaded_at=downloaded_at,
+                status=status,
+                error_message=error_message,
+                progress_pct=progress_pct,
+                source_root=source_root,
+                managed=False,
+            )
+            self.catalog.upsert(entry)
+            synced += 1
+        return synced
+
     def _resolve_entry_path(self, path_str: Optional[str]) -> Optional[Path]:
         if not path_str:
             return None
+        if self._is_remote_location(path_str):
+            return self._resolve_remote_entry_to_cache(str(path_str))
         path = Path(path_str).expanduser()
         if path.is_absolute():
+            if path.exists():
+                return path
+
+            # Cross-environment fallback:
+            # catalog may contain host absolute paths (e.g. /Users/... or /app/...)
+            # that are not valid in current runtime. Try remapping by basename.
+            basename = str(path.name or "").strip()
+            if basename:
+                candidate_roots = []
+                seen = set()
+
+                def _add_root(root: Optional[Path]) -> None:
+                    if root is None:
+                        return
+                    try:
+                        resolved = root.resolve()
+                    except Exception:
+                        return
+                    key = str(resolved)
+                    if key in seen:
+                        return
+                    seen.add(key)
+                    candidate_roots.append(resolved)
+
+                _add_root(self._project_root / "data")
+                _add_root(self._project_root / "data" / "l2")
+                _add_root(getattr(self, "ohlcv_dir", None))
+                _add_root(getattr(self, "l2_dir", None))
+                for root in list(getattr(self, "_ohlcv_scan_dirs", []) or []):
+                    _add_root(root)
+                for root in list(getattr(self, "_l2_scan_dirs", []) or []):
+                    _add_root(root)
+
+                for root in candidate_roots:
+                    remapped = root / basename
+                    if remapped.exists():
+                        try:
+                            return remapped.resolve()
+                        except Exception:
+                            return remapped
+
             return path
-        return (self._project_root / path).resolve()
+
+        resolved_relative = (self._project_root / path).resolve()
+        if resolved_relative.exists():
+            return resolved_relative
+        return resolved_relative
 
     @staticmethod
     def _pick_timestamp_column(columns: List[str]) -> Optional[str]:
@@ -286,7 +684,7 @@ class DatabentoService:
 
         try:
             if path.suffix.lower() in (".parquet", ".parq"):
-                df = pd.read_parquet(path)
+                df = read_parquet_compat(path)
             else:
                 df = pd.read_csv(path)
         except Exception:
@@ -324,6 +722,11 @@ class DatabentoService:
             return start_date, end_date
 
         preferred_file = self._preferred_entry_file(entry)
+        if self._is_remote_location(preferred_file):
+            if self._is_valid_iso_date(start_date) and self._is_valid_iso_date(end_date):
+                return start_date, end_date
+            return "", ""
+
         preferred_path = self._resolve_entry_path(preferred_file)
         if not preferred_path or not preferred_path.exists():
             return "", ""
@@ -340,7 +743,12 @@ class DatabentoService:
 
         # Scan L2/trades files (.mbn/.parquet)
         for data_dir in self._l2_scan_dirs:
-            if not data_dir.exists() or not data_dir.is_dir():
+            if not data_dir.exists():
+                try:
+                    data_dir.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    continue
+            if not data_dir.is_dir():
                 continue
 
             grouped: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
@@ -401,7 +809,12 @@ class DatabentoService:
 
         # Scan OHLCV files (.csv/.parquet/.parq)
         for data_dir in self._ohlcv_scan_dirs:
-            if not data_dir.exists() or not data_dir.is_dir():
+            if not data_dir.exists():
+                try:
+                    data_dir.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    continue
+            if not data_dir.is_dir():
                 continue
 
             grouped: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
@@ -507,10 +920,43 @@ class DatabentoService:
         return filtered
 
     def get_available_data_summary(self, refresh: bool = False) -> Dict[str, Any]:
+        remote_manifest_info = self._sync_remote_manifest_if_due(force=bool(refresh))
         entries = self.list_catalog(refresh=refresh)
+        remote_only = bool(getattr(self, "_available_data_remote_only", False))
+        if remote_only:
+            entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
         tickers = set()
         l2_tickers = set()
         date_ranges: Dict[str, Dict[str, Any]] = {}
+        l2_date_ranges: Dict[str, Dict[str, Any]] = {}
+
+        def _merge_date_range(
+            target: Dict[str, Dict[str, Any]],
+            *,
+            ticker: str,
+            start_date: str,
+            end_date: str,
+            file_name: Optional[str] = None,
+        ) -> None:
+            if not (
+                self._is_valid_iso_date(start_date)
+                and self._is_valid_iso_date(end_date)
+            ):
+                return
+            if ticker not in target:
+                target[ticker] = {
+                    "start": start_date,
+                    "end": end_date,
+                    "files": [],
+                }
+            else:
+                if start_date < target[ticker]["start"]:
+                    target[ticker]["start"] = start_date
+                if end_date > target[ticker]["end"]:
+                    target[ticker]["end"] = end_date
+
+            if file_name and file_name not in target[ticker]["files"]:
+                target[ticker]["files"].append(file_name)
 
         for entry in entries:
             if entry.get("status") not in ("ready", "downloading", "converting"):
@@ -526,39 +972,78 @@ class DatabentoService:
                 ):
                     continue
                 tickers.add(ticker)
-                if ticker not in date_ranges:
-                    date_ranges[ticker] = {
-                        "start": start_date,
-                        "end": end_date,
-                        "files": [],
-                    }
-                else:
-                    if start_date < date_ranges[ticker]["start"]:
-                        date_ranges[ticker]["start"] = start_date
-                    if end_date > date_ranges[ticker]["end"]:
-                        date_ranges[ticker]["end"] = end_date
-
                 for key in ("file_parquet", "file_csv"):
                     file_path = entry.get(key)
-                    if file_path:
-                        file_name = Path(file_path).name
-                        if file_name not in date_ranges[ticker]["files"]:
-                            date_ranges[ticker]["files"].append(file_name)
+                    file_name = Path(file_path).name if file_path else None
+                    _merge_date_range(
+                        date_ranges,
+                        ticker=ticker,
+                        start_date=start_date,
+                        end_date=end_date,
+                        file_name=file_name,
+                    )
 
             if schema == "mbp-10":
                 l2_tickers.add(ticker)
+                for key in ("file_parquet", "file_mbn", "file_csv"):
+                    file_path = entry.get(key)
+                    file_name = Path(file_path).name if file_path else None
+                    _merge_date_range(
+                        l2_date_ranges,
+                        ticker=ticker,
+                        start_date=str(entry.get("start_date", "")).strip(),
+                        end_date=str(entry.get("end_date", "")).strip(),
+                        file_name=file_name,
+                    )
 
         # Keep compatibility: include pure-L2 tickers in ticker list as well.
         tickers.update(l2_tickers)
+        l2_overlap_date_ranges: Dict[str, Dict[str, Any]] = {}
+        for ticker in sorted(tickers):
+            ohlcv_range = date_ranges.get(ticker)
+            l2_range = l2_date_ranges.get(ticker)
+            if not ohlcv_range or not l2_range:
+                continue
+            overlap_start = max(
+                str(ohlcv_range.get("start", "")),
+                str(l2_range.get("start", "")),
+            )
+            overlap_end = min(
+                str(ohlcv_range.get("end", "")),
+                str(l2_range.get("end", "")),
+            )
+            if not (
+                self._is_valid_iso_date(overlap_start)
+                and self._is_valid_iso_date(overlap_end)
+                and overlap_start <= overlap_end
+            ):
+                continue
+            l2_overlap_date_ranges[ticker] = {
+                "start": overlap_start,
+                "end": overlap_end,
+            }
 
-        return {
+        summary = {
             "tickers": sorted(tickers),
             "l2_tickers": sorted(l2_tickers),
             "date_ranges": date_ranges,
+            "l2_date_ranges": l2_date_ranges,
+            "l2_overlap_date_ranges": l2_overlap_date_ranges,
             "data_dir": str(self.ohlcv_dir),
             "data_dirs": [str(p) for p in self._ohlcv_scan_dirs],
             "l2_dirs": [str(p) for p in self._l2_scan_dirs],
+            "remote_manifest": {
+                **remote_manifest_info,
+                "remote_only": bool(remote_only),
+            },
         }
+        require_remote = bool(getattr(self, "_remote_manifest_required", False))
+        if require_remote:
+            if not str(getattr(self, "_remote_manifest_url", "") or "").strip():
+                raise RuntimeError("BACKTEST_REMOTE_MANIFEST_URL is required but not configured.")
+            if not summary["tickers"]:
+                raise RuntimeError("Remote manifest is required but yielded no available tickers.")
+        return summary
 
     @staticmethod
     def _range_overlaps(
@@ -593,6 +1078,8 @@ class DatabentoService:
         ticker_upper = str(ticker or "").upper()
         schema_lower = str(schema or "").lower()
         rows = entries if entries is not None else self.list_catalog(refresh=False, ticker=ticker_upper)
+        if bool(getattr(self, "_available_data_remote_only", False)):
+            rows = [entry for entry in rows if self._is_remote_catalog_entry(entry)]
         for entry in rows:
             if str(entry.get("ticker", "")).upper() != ticker_upper:
                 continue
@@ -614,6 +1101,8 @@ class DatabentoService:
                 continue
 
             preferred_file = self._preferred_entry_file(entry)
+            if self._is_remote_location(preferred_file):
+                return True
             preferred_path = self._resolve_entry_path(preferred_file)
             if preferred_path and preferred_path.exists():
                 return True
@@ -626,10 +1115,22 @@ class DatabentoService:
         start_date: str,
         end_date: str,
     ) -> Dict[str, Any]:
+        self._sync_remote_manifest_if_due(force=False)
         ticker_upper = str(ticker or "").upper()
         schema_lower = str(schema or "").lower()
         days = self._iter_days(start_date, end_date)
         entries = self.list_catalog(refresh=False, ticker=ticker_upper)
+        if bool(getattr(self, "_available_data_remote_only", False)):
+            entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
+        has_schema_entries = any(
+            str(entry.get("schema", "")).lower() == schema_lower
+            for entry in entries
+        )
+        if not has_schema_entries and str(getattr(self, "_remote_manifest_url", "") or "").strip():
+            self._sync_remote_manifest_if_due(force=True)
+            entries = self.list_catalog(refresh=False, ticker=ticker_upper)
+            if bool(getattr(self, "_available_data_remote_only", False)):
+                entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
         covered_days: List[str] = []
         missing_days: List[str] = []
         for day in days:
@@ -661,9 +1162,22 @@ class DatabentoService:
         end_date: str,
         schema_prefix: str = "ohlcv-",
     ) -> List[str]:
+        self._sync_remote_manifest_if_due(force=False)
         ticker = ticker.upper()
         candidates: List[Dict[str, Any]] = []
-        for entry in self.list_catalog(refresh=False, ticker=ticker):
+        entries = self.list_catalog(refresh=False, ticker=ticker)
+        if bool(getattr(self, "_available_data_remote_only", False)):
+            entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
+        has_schema_entries = any(
+            str(entry.get("schema", "")).lower().startswith(schema_prefix.lower())
+            for entry in entries
+        )
+        if not has_schema_entries and str(getattr(self, "_remote_manifest_url", "") or "").strip():
+            self._sync_remote_manifest_if_due(force=True)
+            entries = self.list_catalog(refresh=False, ticker=ticker)
+            if bool(getattr(self, "_available_data_remote_only", False)):
+                entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
+        for entry in entries:
             if entry.get("status") != "ready":
                 continue
             entry_schema = str(entry.get("schema", "")).lower()
@@ -681,7 +1195,10 @@ class DatabentoService:
             preferred_file = entry.get("file_parquet") or entry.get("file_csv")
             if not preferred_file:
                 continue
-            preferred_path = self._resolve_entry_path(preferred_file)
+            if self._is_remote_location(preferred_file):
+                preferred_path = self._resolve_remote_entry_to_cache(str(preferred_file))
+            else:
+                preferred_path = self._resolve_entry_path(preferred_file)
             if not preferred_path or not preferred_path.exists():
                 continue
 
@@ -809,6 +1326,77 @@ class DatabentoService:
         # mbp-10 (L2)
         return f"{ticker}_{start}_{end}.mbn"
 
+    def _precomputed_l2_dir(self) -> Path:
+        configured = str(os.getenv("BACKTEST_L2_PRECOMPUTED_DIR", "data/l2_precomputed") or "").strip()
+        base = Path(configured) if configured else Path("data/l2_precomputed")
+        if not base.is_absolute():
+            base = (self._project_root / base).resolve()
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    @staticmethod
+    def _feature_rows_from_map(feature_map: Dict[int, Dict[str, Any]]) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for minute_key in sorted(feature_map.keys()):
+            features = feature_map.get(minute_key) or {}
+            row: Dict[str, Any] = {"minute_key": int(minute_key)}
+            if isinstance(features, dict):
+                row.update(features)
+            rows.append(row)
+        return rows
+
+    def _blocking_precompute_l2_day(
+        self,
+        ticker: str,
+        day: str,
+        include_icebergs: bool,
+    ) -> Dict[str, Any]:
+        from .l2_data_manager import L2DataManager
+        from .l2_feature_service import L2FeatureService
+
+        l2_dirs = [str(path) for path in getattr(self, "_l2_scan_dirs", []) if isinstance(path, Path)]
+        if not l2_dirs:
+            l2_dirs = [str(self.l2_dir)]
+
+        manager = L2DataManager(data_dirs=l2_dirs)
+        manager.precomputed_features_enabled = False
+        service = L2FeatureService(
+            manager=manager,
+            logger=logger,
+            iceberg_detection_enabled=bool(include_icebergs),
+        )
+
+        start_dt = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_dt = start_dt + timedelta(days=1) - timedelta(microseconds=1)
+        feature_map, stats = service.build_feature_map(
+            ticker=str(ticker).upper(),
+            start_dt_utc=start_dt,
+            end_dt_utc=end_dt,
+        )
+        if not feature_map:
+            return {
+                "built": False,
+                "day": day,
+                "ticker": str(ticker).upper(),
+                "reason": "no_features",
+                "minutes": 0,
+                "file": "",
+                "trade_events": int(stats.get("trade_events", 0) or 0),
+            }
+
+        rows = self._feature_rows_from_map(feature_map)
+        frame = pd.DataFrame(rows)
+        out_file = self._precomputed_l2_dir() / f"{str(ticker).upper()}_{day}.parquet"
+        write_parquet_compat(frame, out_file, index=False)
+        return {
+            "built": True,
+            "day": day,
+            "ticker": str(ticker).upper(),
+            "minutes": len(rows),
+            "file": str(out_file),
+            "trade_events": int(stats.get("trade_events", 0) or 0),
+        }
+
     def _blocking_download(
         self,
         ticker: str,
@@ -878,7 +1466,7 @@ class DatabentoService:
                 logger.info(f"Converting to Parquet: {parquet_path}")
                 stored = db.DBNStore.from_file(str(out_path))
                 df = stored.to_df()
-                df.to_parquet(str(parquet_path))
+                write_parquet_compat(df, str(parquet_path), index=True)
                 entry.file_parquet = str(parquet_path)
                 entry.row_count = len(df)
                 entry.size_bytes = parquet_path.stat().st_size
@@ -1033,6 +1621,40 @@ class DatabentoService:
                 if entry.status == "ready":
                     downloaded_days += 1
                     total_rows += int(entry.row_count or 0)
+                    should_precompute = bool(
+                        str(schema).lower() == "mbp-10"
+                        and bool(getattr(self, "_auto_precompute_l2_on_download", False))
+                    )
+                    if should_precompute:
+                        try:
+                            precompute_result = await loop.run_in_executor(
+                                None,
+                                self._blocking_precompute_l2_day,
+                                ticker,
+                                day,
+                                bool(getattr(self, "_auto_precompute_l2_include_icebergs", False)),
+                            )
+                            if bool(precompute_result.get("built")):
+                                logger.info(
+                                    "Auto-precomputed L2 features for %s %s (%s minutes)",
+                                    ticker,
+                                    day,
+                                    int(precompute_result.get("minutes", 0) or 0),
+                                )
+                            else:
+                                logger.warning(
+                                    "Skipped auto-precompute for %s %s: %s",
+                                    ticker,
+                                    day,
+                                    str(precompute_result.get("reason", "unknown")),
+                                )
+                        except Exception as precompute_exc:
+                            logger.warning(
+                                "Auto-precompute failed for %s %s: %s",
+                                ticker,
+                                day,
+                                precompute_exc,
+                            )
                 else:
                     error_days += 1
                     errors.append(f"{day}: {entry.error_message or 'download failed'}")

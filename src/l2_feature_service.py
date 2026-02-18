@@ -3,6 +3,7 @@ L2 feature extraction and minute-level bar enrichment.
 """
 from __future__ import annotations
 
+import os
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +22,18 @@ class L2FeatureService:
     manager: L2DataManager
     logger: logging.Logger
     iceberg_detection_enabled: bool = True
+
+    @staticmethod
+    def _env_bool(name: str, default: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None:
+            return bool(default)
+        normalized = str(raw).strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return bool(default)
 
     @staticmethod
     def to_utc_datetime(value: Any) -> datetime:
@@ -66,6 +79,21 @@ class L2FeatureService:
             "covered_minutes": 0,
         }
 
+        precomputed_map: Dict[int, Dict[str, Any]] | None = None
+        try:
+            precomputed_map, precomputed_stats = self.manager.load_precomputed_feature_map(
+                ticker=ticker,
+                start_time=start_dt_utc,
+                end_time=end_dt_utc,
+            )
+            if precomputed_map is not None:
+                stats.update(precomputed_stats)
+                stats["covered_minutes"] = len(precomputed_map)
+                stats["has_l2"] = bool(precomputed_map)
+                return precomputed_map, stats
+        except Exception as e:
+            self.logger.warning(f"Precomputed L2 feature-map load failed for {ticker}: {e}")
+
         try:
             flow_engine = OrderFlowEngine(manager=self.manager)
             feature_map, flow_stats = flow_engine.build_enriched_feature_map(
@@ -85,7 +113,11 @@ class L2FeatureService:
                 }
             )
 
-        if self.iceberg_detection_enabled:
+        include_icebergs = bool(self.iceberg_detection_enabled) and self._env_bool(
+            "BACKTEST_L2_INCLUDE_ICEBERGS_IN_FEATURE_MAP",
+            False,
+        )
+        if include_icebergs:
             try:
                 icebergs = self.manager.detect_icebergs(
                     ticker=ticker,
@@ -99,7 +131,7 @@ class L2FeatureService:
             icebergs = []
 
         stats["icebergs"] = len(icebergs)
-        stats["icebergs_enabled"] = bool(self.iceberg_detection_enabled)
+        stats["icebergs_enabled"] = bool(include_icebergs)
         for ice in icebergs:
             ts = ice.get("time")
             if not ts:

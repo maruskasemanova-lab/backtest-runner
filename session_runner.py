@@ -3,6 +3,8 @@ Session Runner - Orchestrates the connection between data source and strategy ev
 """
 import asyncio
 import aiohttp
+import os
+import time as time_module
 from datetime import datetime, time, timedelta, timezone
 from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field
@@ -10,9 +12,25 @@ import logging
 
 from decision_tracker import DecisionTracker, MarkerType
 from performance_tracker import PerformanceTracker
+from strategy_api_auth_headers import build_strategy_api_headers
+
+try:
+    import numpy as _np
+except Exception:  # pragma: no cover - numpy may be unavailable in some envs
+    _np = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SessionRunner")
+_PROFILE_PLACEHOLDER_TOKENS = {"none", "null", "n/a", "na", "undefined", "-"}
+
+
+def _normalize_profile_token(value: Any) -> str:
+    token = str(value).strip() if value is not None else ""
+    if not token:
+        return ""
+    if token.lower() in _PROFILE_PLACEHOLDER_TOKENS:
+        return ""
+    return token
 
 
 @dataclass
@@ -81,6 +99,7 @@ class SessionRunner:
         self.phase = "INITIALIZED"
         self.last_response: Optional[Dict[str, Any]] = None
         self.session_summary: Optional[Dict[str, Any]] = None
+        self.selection_warnings: List[str] = []
         # Optional run-level metadata injected by start_run service for reports.
         self._report_metadata: Dict[str, Any] = {}
         self._aos_applied: Dict[str, Any] = {}
@@ -93,6 +112,17 @@ class SessionRunner:
         self.ref_bars_map: Dict[str, Dict[str, Any]] = {}
         self.l2_manager: Optional[Any] = None
         self._intrabar_quote_cache: Dict[int, Optional[List[Dict[str, float]]]] = {}
+        self._strategy_http_session: Optional[aiohttp.ClientSession] = None
+        # Optional progressive loader state (set by start_run service).
+        self._progressive_loading_enabled: bool = False
+        self._progressive_loading_complete: bool = True
+        self._progressive_loading_loaded_until: Optional[str] = None
+        self._progressive_loading_target_end: Optional[str] = None
+        self._progressive_loading_pending_chunks: int = 0
+        self._progressive_loading_last_error: Optional[str] = None
+        self._progressive_wait_timeout_seconds: float = 90.0
+        self._progressive_wait_started_at: Optional[float] = None
+        self._progressive_loading_task: Optional[asyncio.Task] = None
 
         # Callbacks for real-time updates
         self._on_bar_callbacks: List[callable] = []
@@ -132,7 +162,9 @@ class SessionRunner:
         """Load bars for the session."""
         self.bars = bars
         self.current_bar_index = 0
+        self._progressive_wait_started_at = None
         self._session_end_marker_keys.clear()
+        self.selection_warnings = []
         self._position_active = False
         self._pending_entry = False
         self._intrabar_quote_cache.clear()
@@ -147,6 +179,8 @@ class SessionRunner:
         self.phase = "INITIALIZED"
         self.last_response = None
         self.session_summary = None
+        self.selection_warnings = []
+        self._progressive_wait_started_at = None
         self._session_end_marker_keys.clear()
         self._position_active = False
         self._pending_entry = False
@@ -171,6 +205,54 @@ class SessionRunner:
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
+
+    @staticmethod
+    def _normalize_selection_warnings(raw_value: Any) -> List[str]:
+        if not isinstance(raw_value, list):
+            return []
+        normalized: List[str] = []
+        seen = set()
+        for item in raw_value:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
+
+    def _extract_response_selection_warnings(self, response: Dict[str, Any]) -> Optional[List[str]]:
+        if not isinstance(response, dict):
+            return None
+        if "selection_warnings" in response:
+            return self._normalize_selection_warnings(response.get("selection_warnings"))
+        regime_update = response.get("regime_update")
+        if isinstance(regime_update, dict) and "selection_warnings" in regime_update:
+            return self._normalize_selection_warnings(regime_update.get("selection_warnings"))
+        return None
+
+    @staticmethod
+    def _to_json_safe(value: Any) -> Any:
+        """Recursively normalize payload values to JSON-serializable primitives."""
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {str(k): SessionRunner._to_json_safe(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [SessionRunner._to_json_safe(v) for v in value]
+        if _np is not None:
+            if isinstance(value, _np.ndarray):
+                return [SessionRunner._to_json_safe(v) for v in value.tolist()]
+            if isinstance(value, _np.generic):
+                return value.item()
+        item_method = getattr(value, "item", None)
+        if callable(item_method):
+            try:
+                return SessionRunner._to_json_safe(item_method())
+            except Exception:
+                pass
+        return value
 
     def _should_attach_intrabar_quotes(self, include_pending_entry: bool = False) -> bool:
         # In intrabar mode, strategies may depend on 1s quotes before the first entry.
@@ -284,6 +366,33 @@ class SessionRunner:
         self._intrabar_quote_cache[minute_key] = cached
         return self._apply_intrabar_eval_step(cached)
 
+    def _strategy_api_headers(self) -> Dict[str, str]:
+        return build_strategy_api_headers(self.config.strategy_api_url)
+
+    async def _get_strategy_http_session(self) -> aiohttp.ClientSession:
+        if self._strategy_http_session is not None and not self._strategy_http_session.closed:
+            return self._strategy_http_session
+        try:
+            timeout_total = float(os.getenv("BACKTEST_STRATEGY_API_TIMEOUT_SECONDS", "6.0"))
+        except (TypeError, ValueError):
+            timeout_total = 6.0
+        timeout = aiohttp.ClientTimeout(
+            total=max(0.1, timeout_total),
+            connect=3.0,
+        )
+        try:
+            self._strategy_http_session = aiohttp.ClientSession(timeout=timeout)
+        except TypeError:
+            # Test doubles may not accept keyword args; fall back to defaults.
+            self._strategy_http_session = aiohttp.ClientSession()
+        return self._strategy_http_session
+
+    async def close_http_session(self) -> None:
+        session = self._strategy_http_session
+        self._strategy_http_session = None
+        if session is not None and not session.closed:
+            await session.close()
+
     def _update_execution_state(self, response: Dict[str, Any]) -> None:
         """Track whether next bar needs execution-level intrabar payload."""
         action = str(response.get("action", "") or "")
@@ -316,6 +425,20 @@ class SessionRunner:
                    Set to False when batch processing for performance.
         """
         if self.current_bar_index >= len(self.bars):
+            progressive_waiting = bool(
+                self._progressive_loading_enabled and not self._progressive_loading_complete
+            )
+            if progressive_waiting:
+                return {
+                    "success": True,
+                    "waiting_for_data": True,
+                    "phase": self.phase,
+                    "bar_index": self.current_bar_index,
+                    "total_bars": len(self.bars),
+                    "progress_pct": (
+                        (self.current_bar_index / len(self.bars) * 100) if self.bars else 0
+                    ),
+                }
             return {
                 "success": False,
                 "error": "No more bars to process",
@@ -388,24 +511,29 @@ class SessionRunner:
             payload['ref_low'] = ref_bar.get('low')
             payload['ref_close'] = ref_bar.get('close')
             payload['ref_volume'] = ref_bar.get('volume')
+        payload = self._to_json_safe(payload)
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.config.strategy_api_url}/api/session/bar",
-                    json=payload
-                ) as resp:
-                    if resp.status != 200:
-                        error_text = await resp.text()
-                        if consume_pending_entry:
-                            self._pending_entry = True
-                        return {
-                            "success": False,
-                            "error": f"API error {resp.status}: {error_text}",
-                            "bar_index": self.current_bar_index
-                        }
-                    
-                    result = await resp.json()
+            session = await self._get_strategy_http_session()
+            post_kwargs: Dict[str, Any] = {"json": payload}
+            headers = self._strategy_api_headers()
+            if headers:
+                post_kwargs["headers"] = headers
+            async with session.post(
+                f"{self.config.strategy_api_url}/api/session/bar",
+                **post_kwargs,
+            ) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    if consume_pending_entry:
+                        self._pending_entry = True
+                    return {
+                        "success": False,
+                        "error": f"API error {resp.status}: {error_text}",
+                        "bar_index": self.current_bar_index
+                    }
+
+                result = await resp.json()
         except aiohttp.ClientError as e:
             if consume_pending_entry:
                 self._pending_entry = True
@@ -439,6 +567,10 @@ class SessionRunner:
         timestamp: datetime
     ):
         """Extract and record decision markers from API response."""
+        resolved_warnings = self._extract_response_selection_warnings(response)
+        if resolved_warnings is not None:
+            self.selection_warnings = resolved_warnings
+
         action = response.get('action', '')
         
         # Regime detected (allow one per day by relying on action flag)
@@ -620,6 +752,13 @@ class SessionRunner:
             and isinstance(response.get('session_summary'), dict)
         ):
             self.session_summary = response['session_summary']
+            summary_warnings = self._normalize_selection_warnings(
+                self.session_summary.get("selection_warnings")
+            )
+            if summary_warnings:
+                self.selection_warnings = summary_warnings
+            elif self.selection_warnings:
+                self.session_summary["selection_warnings"] = list(self.selection_warnings)
             marker_key = str(
                 self.session_summary.get("date")
                 or (timestamp.date().isoformat() if hasattr(timestamp, "date") else timestamp)
@@ -736,18 +875,44 @@ class SessionRunner:
         delay_seconds = max(delay_ms, 0) / 1000.0
         logger.info(f"Starting run_all with normalized delay {delay_seconds:.4f}s per bar (raw={speed_ms})")
 
-        while self.current_bar_index < len(self.bars) and self.is_running:
+        while self.is_running:
             if self.is_paused:
                 await asyncio.sleep(0.05)
                 continue
 
-            await self.step(notify=True)
+            if self.current_bar_index < len(self.bars):
+                self._progressive_wait_started_at = None
+                await self.step(notify=True)
 
-            # Yield to event loop; add delay when requested
-            if delay_seconds > 0:
-                await asyncio.sleep(delay_seconds)
-            else:
-                await asyncio.sleep(0)  # cooperative yield, no throttle
+                # Yield to event loop; add delay when requested
+                if delay_seconds > 0:
+                    await asyncio.sleep(delay_seconds)
+                else:
+                    await asyncio.sleep(0)  # cooperative yield, no throttle
+                continue
+
+            # Dynamic run-range mode: wait for background chunks to append bars.
+            if self._progressive_loading_enabled and not self._progressive_loading_complete:
+                if self._progressive_wait_started_at is None:
+                    self._progressive_wait_started_at = time_module.monotonic()
+                waited = time_module.monotonic() - self._progressive_wait_started_at
+                wait_timeout = max(1.0, float(self._progressive_wait_timeout_seconds or 0))
+                if waited <= wait_timeout:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                timeout_msg = (
+                    f"Timed out waiting for progressive data chunks after {wait_timeout:.1f}s"
+                )
+                logger.warning("%s (run_id=%s)", timeout_msg, self.config.run_id)
+                if not self._progressive_loading_last_error:
+                    self._progressive_loading_last_error = timeout_msg
+                self._progressive_loading_complete = True
+                task = self._progressive_loading_task
+                if task is not None and not task.done():
+                    task.cancel()
+
+            break
 
         self.is_running = False
         logger.info("run_all completed")
@@ -764,10 +929,20 @@ class SessionRunner:
     def stop(self):
         """Stop the run."""
         self.is_running = False
+        task = self._progressive_loading_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._progressive_loading_complete = True
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.close_http_session())
+        except RuntimeError:
+            # No running event loop (defensive; typically not expected in API runtime).
+            pass
     
     def get_state(self) -> Dict[str, Any]:
         """Get current runner state."""
-        return {
+        state = {
             "run_id": self.config.run_id,
             "ticker": self.config.ticker,
             "date": self.config.date,
@@ -779,8 +954,19 @@ class SessionRunner:
             "phase": self.phase,
             "is_running": self.is_running,
             "is_paused": self.is_paused,
-            "markers_count": len(self.decision_tracker.markers)
+            "markers_count": len(self.decision_tracker.markers),
+            "selection_warnings": list(self.selection_warnings),
         }
+        if self._progressive_loading_enabled:
+            state["data_loading"] = {
+                "enabled": True,
+                "complete": bool(self._progressive_loading_complete),
+                "loaded_until": self._progressive_loading_loaded_until,
+                "target_end": self._progressive_loading_target_end,
+                "pending_chunks": int(self._progressive_loading_pending_chunks),
+                "last_error": self._progressive_loading_last_error,
+            }
+        return state
     
     def get_markers(self) -> List[Dict[str, Any]]:
         """Get all decision markers."""
@@ -809,12 +995,21 @@ class SessionRunner:
         }
         if isinstance(self._report_metadata, dict) and self._report_metadata:
             payload["report_metadata"] = dict(self._report_metadata)
-            adaptive_profile_id = str(self._report_metadata.get("adaptive_profile_id") or "").strip()
-            adaptive_profile_name = str(self._report_metadata.get("adaptive_profile_name") or "").strip()
-            if adaptive_profile_id:
-                payload["adaptive_profile_id"] = adaptive_profile_id
-            if adaptive_profile_name:
-                payload["adaptive_profile_name"] = adaptive_profile_name
+            report_profile_fields = {
+                "unified_profile_id": _normalize_profile_token(self._report_metadata.get("unified_profile_id")),
+                "unified_profile_name": _normalize_profile_token(self._report_metadata.get("unified_profile_name")),
+                "adaptive_profile_id": _normalize_profile_token(self._report_metadata.get("adaptive_profile_id")),
+                "adaptive_profile_name": _normalize_profile_token(self._report_metadata.get("adaptive_profile_name")),
+                "strategy_combo_profile_id": _normalize_profile_token(
+                    self._report_metadata.get("strategy_combo_profile_id")
+                ),
+                "strategy_combo_profile_name": _normalize_profile_token(
+                    self._report_metadata.get("strategy_combo_profile_name")
+                ),
+            }
+            for field, token in report_profile_fields.items():
+                if token:
+                    payload[field] = token
         if isinstance(self._aos_applied, dict) and self._aos_applied:
             payload["aos_applied"] = dict(self._aos_applied)
         if isinstance(self._execution_config, dict) and self._execution_config:
@@ -837,6 +1032,10 @@ class SessionRunner:
                 base_summary.setdefault("ticker", self.config.ticker)
                 base_summary.setdefault("date", self.config.date)
                 base_summary["bars_processed"] = self.current_bar_index
+                base_summary.setdefault(
+                    "selection_warnings",
+                    list(self.selection_warnings),
+                )
                 return base_summary
             return None
 
@@ -865,6 +1064,12 @@ class SessionRunner:
             peak = max(peak, running)
             max_drawdown_dollars = max(max_drawdown_dollars, peak - running)
 
+        selection_warnings = self._normalize_selection_warnings(
+            base_summary.get("selection_warnings")
+        )
+        if not selection_warnings and self.selection_warnings:
+            selection_warnings = list(self.selection_warnings)
+
         merged = {
             "ticker": self.config.ticker,
             "date": self.config.date,
@@ -890,6 +1095,7 @@ class SessionRunner:
             "max_drawdown_dollars": round(max_drawdown_dollars, 4),
             "bars_processed": self.current_bar_index,
             "pre_market_bars": base_summary.get("pre_market_bars", 0),
+            "selection_warnings": selection_warnings,
             "regime_history": list(base_summary.get("regime_history", [])),
             "success": total_pnl_dollars > 0.0,
         }

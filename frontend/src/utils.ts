@@ -1,0 +1,287 @@
+/**
+ * Shared utility functions for the Backtest Runner frontend.
+ *
+ * Consolidates helpers that were previously duplicated across
+ * App.tsx, RunConfig.tsx, AOSOptimizations.tsx, DecisionPanel.tsx,
+ * CandlestickChart.tsx, FootprintChart.tsx, AdaptiveTuner.tsx,
+ * StrategySettings.tsx, and AdaptiveStrategyStudio.tsx.
+ */
+
+// ─── Number helpers ───────────────────────────────────────────────
+
+export const toFiniteNumber = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+export const clamp = (value, fallback, min, max) =>
+  Math.max(min, Math.min(max, toFiniteNumber(value, fallback)));
+
+export const clampInt = (value, fallback, min, max) =>
+  Math.max(min, Math.min(max, Math.trunc(toFiniteNumber(value, fallback))));
+
+// ─── Timestamp helpers ────────────────────────────────────────────
+
+export const toUnixSeconds = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1e12 ? value / 1000 : value;
+  }
+  if (typeof value === "string") {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric > 1e12 ? numeric / 1000 : numeric;
+    }
+    const normalized = value.replace(/(\.\d{3})\d+/, "$1");
+    const parsed = Date.parse(normalized);
+    if (!Number.isNaN(parsed)) return parsed / 1000;
+  }
+  if (typeof value === "object" && value !== null) {
+    if (typeof value.timestamp === "number") return value.timestamp;
+    if (
+      Number.isFinite(value.year) &&
+      Number.isFinite(value.month) &&
+      Number.isFinite(value.day)
+    ) {
+      return Date.UTC(value.year, value.month - 1, value.day) / 1000;
+    }
+  }
+  return null;
+};
+
+export const toIsoTimestamp = (value) => {
+  const seconds = toUnixSeconds(value);
+  if (!Number.isFinite(seconds)) return null;
+  return new Date(seconds * 1000).toISOString();
+};
+
+export const formatTimestamp = (value) => {
+  if (!value) return "-";
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return String(value);
+  return new Date(parsed).toLocaleString();
+};
+
+// ─── String / text helpers ────────────────────────────────────────
+
+export const normalizeText = (value) => {
+  if (value === null || value === undefined) return "";
+  return String(value).trim().toLowerCase();
+};
+
+// ─── Date helpers ─────────────────────────────────────────────────
+
+export const normalizeIsoDay = (value) => {
+  const text = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+};
+
+// ─── Boolean helpers ──────────────────────────────────────────────
+
+export const toBool = (value, fallback) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+  }
+  return fallback;
+};
+
+// ─── CSV / token helpers ──────────────────────────────────────────
+
+export const parseCsvTokens = (value, normalizeToken) => {
+  const tokens = String(value || "").split(",");
+  const seen = new Set();
+  const normalized = [];
+  tokens.forEach((token) => {
+    const raw = String(token || "").trim();
+    if (!raw) return;
+    const next =
+      typeof normalizeToken === "function" ? normalizeToken(raw) : raw;
+    if (!next || seen.has(next)) return;
+    seen.add(next);
+    normalized.push(next);
+  });
+  return normalized;
+};
+
+export const toCsvString = (value, normalizeToken) =>
+  parseCsvTokens(
+    Array.isArray(value) ? value.join(",") : value,
+    normalizeToken,
+  ).join(",");
+
+// ─── Sleeve / config helpers ──────────────────────────────────────
+
+export const normalizeSleeveId = (value, fallback = "sleeve_1") => {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  const cleaned = raw
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return cleaned || fallback;
+};
+
+// ─── Deployment/runtime URL helpers ──────────────────────────────
+
+const trimTrailingSlashes = (value: string) => String(value || "").trim().replace(/\/+$/, "");
+
+const rewriteDockerAliasForBrowser = (value: string) => {
+  const raw = trimTrailingSlashes(value);
+  if (!raw) return raw;
+  if (typeof window === "undefined") return raw;
+
+  try {
+    const parsed = new URL(raw);
+    const alias = String(parsed.hostname || "").trim().toLowerCase();
+    if (!["strategy-api", "runner-api"].includes(alias)) {
+      return raw;
+    }
+
+    const browserHost = String(window.location.hostname || "").trim().toLowerCase();
+    if (!["localhost", "127.0.0.1"].includes(browserHost)) {
+      return raw;
+    }
+
+    parsed.hostname = browserHost;
+    return trimTrailingSlashes(parsed.toString());
+  } catch (_err) {
+    return raw;
+  }
+};
+
+const isLocalBrowserHost = () => {
+  if (typeof window === "undefined") return false;
+  const host = String(window.location.hostname || "").trim().toLowerCase();
+  return host === "localhost" || host === "127.0.0.1";
+};
+
+export const defaultStrategyApiUrl = (() => {
+  const configured = rewriteDockerAliasForBrowser(import.meta.env.VITE_STRATEGY_API_URL || "");
+  if (configured) return configured;
+  return isLocalBrowserHost() ? "http://localhost:8001" : "";
+})();
+
+export const defaultRunnerApiBaseUrl = rewriteDockerAliasForBrowser(
+  import.meta.env.VITE_API_BASE_URL || "",
+);
+
+const _isServerlessLikeHost = (value: string) => {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    const host = String(parsed.hostname || "").trim().toLowerCase();
+    return (
+      host.endsWith(".vercel.app") ||
+      host.includes("amazonaws.com") ||
+      host.includes("lambda")
+    );
+  } catch (_err) {
+    return false;
+  }
+};
+
+export const defaultPlaybackApiBaseUrl = (() => {
+  const configured = rewriteDockerAliasForBrowser(
+    import.meta.env.VITE_PLAYBACK_API_BASE_URL || "",
+  );
+  if (configured) return configured;
+  if (defaultRunnerApiBaseUrl && !_isServerlessLikeHost(defaultRunnerApiBaseUrl)) {
+    return rewriteDockerAliasForBrowser(defaultRunnerApiBaseUrl);
+  }
+  return "";
+})();
+
+const STATEFUL_RUN_API_PREFIXES = ["/api/run", "/api/runs"];
+
+export const isStatefulRunApiPath = (path: string) => {
+  const normalized = String(path || "").trim().toLowerCase();
+  return STATEFUL_RUN_API_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+};
+
+export const resolveApiRequestUrl = (input: string) => {
+  const raw = String(input || "");
+  if (!raw.startsWith("/api")) return raw;
+
+  const queryIdx = raw.indexOf("?");
+  const pathOnly = queryIdx >= 0 ? raw.slice(0, queryIdx) : raw;
+  const statefulPath = isStatefulRunApiPath(pathOnly);
+
+  const base = statefulPath
+    ? defaultPlaybackApiBaseUrl || defaultRunnerApiBaseUrl
+    : defaultRunnerApiBaseUrl || defaultPlaybackApiBaseUrl;
+
+  if (!base) return raw;
+  return `${trimTrailingSlashes(base)}${raw}`;
+};
+
+export const wsFeatureEnabled = (() => {
+  const raw = String(import.meta.env.VITE_WS_ENABLED || "").trim().toLowerCase();
+  if (!raw) return true;
+  return !["0", "false", "no", "off"].includes(raw);
+})();
+
+export const resolveRunnerApiBaseUrl = (strategyApiUrl?: string) => {
+  if (defaultPlaybackApiBaseUrl) {
+    return rewriteDockerAliasForBrowser(defaultPlaybackApiBaseUrl);
+  }
+
+  if (defaultRunnerApiBaseUrl) {
+    return rewriteDockerAliasForBrowser(defaultRunnerApiBaseUrl);
+  }
+
+  const candidate = trimTrailingSlashes(strategyApiUrl || "");
+  if (!candidate) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.port === "8001") {
+      parsed.port = "8002";
+      return rewriteDockerAliasForBrowser(trimTrailingSlashes(parsed.toString()));
+    }
+    return rewriteDockerAliasForBrowser(trimTrailingSlashes(parsed.toString()));
+  } catch (_err) {
+    const remapped = candidate.includes("8001") ? candidate.replace("8001", "8002") : candidate;
+    return rewriteDockerAliasForBrowser(remapped);
+  }
+};
+
+export const resolveWsLiveUrl = () => {
+  const configuredWsBase = trimTrailingSlashes(import.meta.env.VITE_WS_BASE_URL || "");
+  if (configuredWsBase) {
+    return `${configuredWsBase}/ws/live`;
+  }
+
+  if (defaultPlaybackApiBaseUrl) {
+    try {
+      const parsed = new URL(defaultPlaybackApiBaseUrl);
+      const wsProto = parsed.protocol === "https:" ? "wss:" : "ws:";
+      return `${wsProto}//${parsed.host}/ws/live`;
+    } catch (_err) {
+      // Fall through to runner host and host-based defaults.
+    }
+  }
+
+  if (defaultRunnerApiBaseUrl) {
+    try {
+      const parsed = new URL(defaultRunnerApiBaseUrl);
+      const wsProto = parsed.protocol === "https:" ? "wss:" : "ws:";
+      return `${wsProto}//${parsed.host}/ws/live`;
+    } catch (_err) {
+      // Fall through to host-based defaults.
+    }
+  }
+
+  const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  if (isLocal) {
+    return `${wsProtocol}://127.0.0.1:8002/ws/live`;
+  }
+  return `${wsProtocol}://${window.location.host}/ws/live`;
+};

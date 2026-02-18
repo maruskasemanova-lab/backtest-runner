@@ -1,11 +1,20 @@
 import asyncio
+import os
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from src.routes.context import ApiServices, get_api_services
+from src.security.auth import (
+    JwtValidationError,
+    allow_unverified_jwt,
+    build_auth_context,
+    decode_and_verify_jwt,
+    parse_bearer_token,
+    resolve_jwt_secret,
+)
 
 router = APIRouter()
 
@@ -43,6 +52,28 @@ class DatabentoApiKeyRequest(BaseModel):
     api_key: str
 
 
+def _require_admin_access(request: Request) -> None:
+    enforce = str(os.getenv("BACKTEST_ENFORCE_ADMIN_DATABENTO_API_KEY", "true")).strip().lower()
+    if enforce not in {"1", "true", "yes", "on"}:
+        return
+
+    try:
+        token = parse_bearer_token(request.headers.get("Authorization"))
+        claims = decode_and_verify_jwt(
+            token,
+            secret=resolve_jwt_secret(),
+            allow_unverified=allow_unverified_jwt(),
+        )
+        auth = build_auth_context(claims)
+    except JwtValidationError as exc:
+        raise HTTPException(401, f"Admin authorization required: {exc}")
+
+    role = str(auth.role or "").strip().lower()
+    plan = str(auth.plan_tier or "").strip().lower()
+    if role != "admin" and plan != "admin":
+        raise HTTPException(403, "Admin role required for Databento API key updates")
+
+
 @router.get("/api/data-loader/catalog")
 async def get_data_catalog(
     refresh: bool = False,
@@ -62,6 +93,20 @@ async def get_data_catalog(
         source=source,
         managed=managed,
     )
+
+
+@router.post("/api/data-loader/catalog/remote-sync")
+async def sync_remote_catalog(
+    url: Optional[str] = None,
+    services: ApiServices = Depends(get_api_services),
+):
+    """Sync catalog entries from a remote manifest JSON URL."""
+    synced = services.databento_svc.sync_remote_manifest(url)
+    return {
+        "status": "ok",
+        "synced_entries": int(synced),
+        "manifest_url": str(url or ""),
+    }
 
 
 @router.get("/api/data-loader/catalog/{ticker}")
@@ -100,9 +145,11 @@ async def update_data_loader_settings(
 @router.put("/api/data-loader/api-key")
 async def set_databento_api_key(
     request: DatabentoApiKeyRequest,
+    raw_request: Request,
     services: ApiServices = Depends(get_api_services),
 ):
     """Set Databento API key for this system (persisted in settings)."""
+    _require_admin_access(raw_request)
     try:
         settings = services.databento_svc.set_api_key(request.api_key)
         return {"status": "ok", **settings}
