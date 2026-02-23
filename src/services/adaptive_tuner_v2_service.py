@@ -10,7 +10,9 @@ from src.models.tuner_requests import AdaptiveTunerRequest
 
 @dataclass
 class AdaptiveTunerV2Deps:
-    build_adaptive_tuner_search_space: Callable[[AdaptiveTunerRequest], Dict[str, List[Any]]]
+    build_adaptive_tuner_search_space: Callable[
+        [AdaptiveTunerRequest], Dict[str, List[Any]]
+    ]
     normalize_momentum_diversification_payload: Callable[[Any], Any]
     normalize_strategy_sets: Callable[[Any, List[str]], Any]
     normalize_float_options: Callable[..., List[float]]
@@ -31,7 +33,9 @@ def build_v2_search_space(
     deps: AdaptiveTunerV2Deps,
 ) -> Dict[str, Any]:
     """Build multi-dimensional search space from request options + AOS ticker config defaults."""
-    _normalize_momentum_diversification_payload = deps.normalize_momentum_diversification_payload
+    _normalize_momentum_diversification_payload = (
+        deps.normalize_momentum_diversification_payload
+    )
     _normalize_strategy_sets = deps.normalize_strategy_sets
     _normalize_float_options = deps.normalize_float_options
     _normalize_regime_filter_sets = deps.normalize_regime_filter_sets
@@ -41,15 +45,20 @@ def build_v2_search_space(
     _normalize_regime_strategy_map_sets = deps.normalize_regime_strategy_map_sets
     _build_adaptive_tuner_search_space = deps.build_adaptive_tuner_search_space
 
-    l2_cfg = ticker_config.get("l2", {}) if isinstance(ticker_config.get("l2"), dict) else {}
+    l2_cfg = (
+        ticker_config.get("l2", {}) if isinstance(ticker_config.get("l2"), dict) else {}
+    )
     adaptive_cfg = (
         ticker_config.get("adaptive", {})
         if isinstance(ticker_config.get("adaptive"), dict)
         else {}
     )
-    momentum_cfg = _normalize_momentum_diversification_payload(
-        adaptive_cfg.get("momentum_diversification")
-    ) or {}
+    momentum_cfg = (
+        _normalize_momentum_diversification_payload(
+            adaptive_cfg.get("momentum_diversification")
+        )
+        or {}
+    )
 
     enabled_strategies: List[str] = []
     strategy_name = ticker_config.get("strategy", "")
@@ -84,7 +93,12 @@ def build_v2_search_space(
         ),
         "l2_min_signed_aggression": _normalize_float_options(
             request.l2_min_signed_aggression_options,
-            default=[0.05, float(l2_cfg.get("min_signed_aggression", 0.12)), 0.20, 0.35],
+            default=[
+                0.05,
+                float(l2_cfg.get("min_signed_aggression", 0.12)),
+                0.20,
+                0.35,
+            ],
             min_value=0.0,
             max_value=1.0,
         ),
@@ -166,13 +180,21 @@ def build_v2_search_space(
         ),
         "momentum_min_directional_consistency": _normalize_float_options(
             request.momentum_min_directional_consistency_options,
-            default=[float(momentum_cfg.get("min_directional_consistency", 0.35)), 0.45, 0.55],
+            default=[
+                float(momentum_cfg.get("min_directional_consistency", 0.35)),
+                0.45,
+                0.55,
+            ],
             min_value=0.0,
             max_value=1.0,
         ),
         "momentum_min_signed_aggression": _normalize_float_options(
             request.momentum_min_signed_aggression_options,
-            default=[float(momentum_cfg.get("min_signed_aggression", 0.03)), 0.06, 0.10],
+            default=[
+                float(momentum_cfg.get("min_signed_aggression", 0.03)),
+                0.06,
+                0.10,
+            ],
             min_value=0.0,
             max_value=1.0,
         ),
@@ -190,43 +212,71 @@ def build_v2_search_space(
         ),
         "momentum_min_directional_price_change_pct": _normalize_float_options(
             request.momentum_min_directional_price_change_pct_options,
-            default=[float(momentum_cfg.get("min_directional_price_change_pct", 0.0)), 0.05, 0.15],
+            default=[
+                float(momentum_cfg.get("min_directional_price_change_pct", 0.0)),
+                0.05,
+                0.15,
+            ],
             min_value=-100.0,
             max_value=100.0,
         ),
         "momentum_min_price_trend_efficiency": _normalize_float_options(
             request.momentum_min_price_trend_efficiency_options,
-            default=[float(momentum_cfg.get("min_price_trend_efficiency", 0.0)), 0.22, 0.35],
+            default=[
+                float(momentum_cfg.get("min_price_trend_efficiency", 0.0)),
+                0.22,
+                0.35,
+            ],
             min_value=0.0,
             max_value=1.0,
         ),
         "momentum_min_last_bar_body_ratio": _normalize_float_options(
             request.momentum_min_last_bar_body_ratio_options,
-            default=[float(momentum_cfg.get("min_last_bar_body_ratio", 0.0)), 0.30, 0.45],
+            default=[
+                float(momentum_cfg.get("min_last_bar_body_ratio", 0.0)),
+                0.30,
+                0.45,
+            ],
             min_value=0.0,
             max_value=1.0,
         ),
         "momentum_min_last_bar_close_location": _normalize_float_options(
             request.momentum_min_last_bar_close_location_options,
-            default=[float(momentum_cfg.get("min_last_bar_close_location", 0.0)), 0.55, 0.70],
+            default=[
+                float(momentum_cfg.get("min_last_bar_close_location", 0.0)),
+                0.55,
+                0.70,
+            ],
             min_value=0.0,
             max_value=1.0,
         ),
         "momentum_min_delta_acceleration": _normalize_float_options(
             request.momentum_min_delta_acceleration_options,
-            default=[float(momentum_cfg.get("min_delta_acceleration", 0.0)), 500.0, 1500.0],
+            default=[
+                float(momentum_cfg.get("min_delta_acceleration", 0.0)),
+                500.0,
+                1500.0,
+            ],
             min_value=-1_000_000.0,
             max_value=1_000_000.0,
         ),
         "momentum_min_delta_price_divergence": _normalize_float_options(
             request.momentum_min_delta_price_divergence_options,
-            default=[float(momentum_cfg.get("min_delta_price_divergence", -0.45)), -0.20, 0.0],
+            default=[
+                float(momentum_cfg.get("min_delta_price_divergence", -0.45)),
+                -0.20,
+                0.0,
+            ],
             min_value=-10.0,
             max_value=10.0,
         ),
         "momentum_route_flow_score_impulse": _normalize_float_options(
             request.momentum_route_flow_score_impulse_options,
-            default=[float(momentum_cfg.get("route_flow_score_impulse", 62.0)), 68.0, 74.0],
+            default=[
+                float(momentum_cfg.get("route_flow_score_impulse", 62.0)),
+                68.0,
+                74.0,
+            ],
             min_value=0.0,
             max_value=100.0,
         ),
@@ -336,9 +386,11 @@ def v2_candidate_key(candidate: Dict[str, Any], deps: AdaptiveTunerV2Deps) -> tu
         candidate.get("momentum_fail_fast_max_bars"),
         _normalize_strategy_selection_mode(candidate.get("strategy_selection_mode")),
         candidate.get("flow_bias_enabled"),
-        json.dumps(candidate.get("regime_strategy_map"), sort_keys=True)
-        if candidate.get("regime_strategy_map") is not None
-        else None,
+        (
+            json.dumps(candidate.get("regime_strategy_map"), sort_keys=True)
+            if candidate.get("regime_strategy_map") is not None
+            else None
+        ),
         candidate.get("context_regime_flip_tighten_stop_pct"),
         candidate.get("context_regime_flip_shorten_time_pct"),
         candidate.get("context_regime_flip_exit_when_losing"),
@@ -368,18 +420,30 @@ def build_v2_baseline_candidate(
         "switch_cooldown_bars": _first("switch_cooldown_bars"),
         "flow_bias_enabled": _first("flow_bias_enabled"),
         "use_ohlcv_fallbacks": _first("use_ohlcv_fallbacks"),
-        "enabled_strategies": list(search_space["strategy_sets"][0]) if search_space.get("strategy_sets") else [],
+        "enabled_strategies": (
+            list(search_space["strategy_sets"][0])
+            if search_space.get("strategy_sets")
+            else []
+        ),
         "l2_min_delta": _first("l2_min_delta"),
         "l2_min_imbalance": _first("l2_min_imbalance"),
         "l2_min_signed_aggression": _first("l2_min_signed_aggression"),
         "l2_min_directional_consistency": _first("l2_min_directional_consistency"),
-        "regime_filter": list(search_space["regime_filter_sets"][0]) if search_space.get("regime_filter_sets") else [],
+        "regime_filter": (
+            list(search_space["regime_filter_sets"][0])
+            if search_space.get("regime_filter_sets")
+            else []
+        ),
         "base_threshold": _first("base_threshold"),
         "min_confirming_sources": _first("min_confirming_sources"),
         "min_confidence": _first("min_confidence"),
         "atr_stop_multiplier": _first("atr_stop_multiplier"),
         "rr_ratio": _first("rr_ratio"),
-        "trading_hours": list(search_space["time_window_sets"][0]) if search_space.get("time_window_sets") else [],
+        "trading_hours": (
+            list(search_space["time_window_sets"][0])
+            if search_space.get("time_window_sets")
+            else []
+        ),
         "adverse_flow_consistency": _first("adverse_flow_consistency"),
         "adverse_book_pressure": _first("adverse_book_pressure"),
         "time_exit_bars": _first("time_exit_bars"),
@@ -387,31 +451,61 @@ def build_v2_baseline_candidate(
         "momentum_diversification_enabled": _first("momentum_diversification_enabled"),
         "momentum_route_enabled": _first("momentum_route_enabled"),
         "momentum_min_flow_score": _first("momentum_min_flow_score"),
-        "momentum_min_directional_consistency": _first("momentum_min_directional_consistency"),
+        "momentum_min_directional_consistency": _first(
+            "momentum_min_directional_consistency"
+        ),
         "momentum_min_signed_aggression": _first("momentum_min_signed_aggression"),
         "momentum_min_imbalance": _first("momentum_min_imbalance"),
         "momentum_min_cvd": _first("momentum_min_cvd"),
-        "momentum_min_directional_price_change_pct": _first("momentum_min_directional_price_change_pct"),
-        "momentum_min_price_trend_efficiency": _first("momentum_min_price_trend_efficiency"),
+        "momentum_min_directional_price_change_pct": _first(
+            "momentum_min_directional_price_change_pct"
+        ),
+        "momentum_min_price_trend_efficiency": _first(
+            "momentum_min_price_trend_efficiency"
+        ),
         "momentum_min_last_bar_body_ratio": _first("momentum_min_last_bar_body_ratio"),
-        "momentum_min_last_bar_close_location": _first("momentum_min_last_bar_close_location"),
+        "momentum_min_last_bar_close_location": _first(
+            "momentum_min_last_bar_close_location"
+        ),
         "momentum_min_delta_acceleration": _first("momentum_min_delta_acceleration"),
-        "momentum_min_delta_price_divergence": _first("momentum_min_delta_price_divergence"),
-        "momentum_route_flow_score_impulse": _first("momentum_route_flow_score_impulse"),
+        "momentum_min_delta_price_divergence": _first(
+            "momentum_min_delta_price_divergence"
+        ),
+        "momentum_route_flow_score_impulse": _first(
+            "momentum_route_flow_score_impulse"
+        ),
         "momentum_fail_fast_exit_enabled": _first("momentum_fail_fast_exit_enabled"),
         "momentum_fail_fast_max_bars": _first("momentum_fail_fast_max_bars"),
-        "context_regime_flip_tighten_stop_pct": _first("context_regime_flip_tighten_stop_pct"),
-        "context_regime_flip_shorten_time_pct": _first("context_regime_flip_shorten_time_pct"),
-        "context_regime_flip_exit_when_losing": _first("context_regime_flip_exit_when_losing"),
-        "context_regime_flip_exit_loss_threshold_pct": _first("context_regime_flip_exit_loss_threshold_pct"),
-        "context_flow_reversal_move_to_breakeven": _first("context_flow_reversal_move_to_breakeven"),
-        "context_flow_reversal_exit_when_losing": _first("context_flow_reversal_exit_when_losing"),
-        "context_momentum_stall_time_multiplier": _first("context_momentum_stall_time_multiplier"),
-        "context_volatility_spike_tighten_pct": _first("context_volatility_spike_tighten_pct"),
+        "context_regime_flip_tighten_stop_pct": _first(
+            "context_regime_flip_tighten_stop_pct"
+        ),
+        "context_regime_flip_shorten_time_pct": _first(
+            "context_regime_flip_shorten_time_pct"
+        ),
+        "context_regime_flip_exit_when_losing": _first(
+            "context_regime_flip_exit_when_losing"
+        ),
+        "context_regime_flip_exit_loss_threshold_pct": _first(
+            "context_regime_flip_exit_loss_threshold_pct"
+        ),
+        "context_flow_reversal_move_to_breakeven": _first(
+            "context_flow_reversal_move_to_breakeven"
+        ),
+        "context_flow_reversal_exit_when_losing": _first(
+            "context_flow_reversal_exit_when_losing"
+        ),
+        "context_momentum_stall_time_multiplier": _first(
+            "context_momentum_stall_time_multiplier"
+        ),
+        "context_volatility_spike_tighten_pct": _first(
+            "context_volatility_spike_tighten_pct"
+        ),
         "context_response_grace_bars": _first("context_response_grace_bars"),
-        "regime_strategy_map": search_space.get("regime_strategy_maps", [None])[0]
-        if search_space.get("regime_strategy_maps")
-        else None,
+        "regime_strategy_map": (
+            search_space.get("regime_strategy_maps", [None])[0]
+            if search_space.get("regime_strategy_maps")
+            else None
+        ),
     }
 
 
@@ -435,27 +529,51 @@ def build_v2_random_candidates(
     n_neighborhood = (n_trials // 2) if neighborhood_search else 0
 
     perturbable_dims = [
-        "l2_min_delta", "l2_min_imbalance", "l2_min_signed_aggression",
-        "l2_min_directional_consistency", "base_threshold", "min_confirming_sources",
-        "min_confidence", "atr_stop_multiplier", "rr_ratio",
-        "adverse_flow_consistency", "adverse_book_pressure",
-        "time_exit_bars", "trailing_stop_pct",
-        "momentum_diversification_enabled", "momentum_route_enabled",
-        "momentum_min_flow_score", "momentum_min_directional_consistency",
-        "momentum_min_signed_aggression", "momentum_min_imbalance",
-        "momentum_min_cvd", "momentum_min_directional_price_change_pct",
-        "momentum_min_price_trend_efficiency", "momentum_min_last_bar_body_ratio",
+        "l2_min_delta",
+        "l2_min_imbalance",
+        "l2_min_signed_aggression",
+        "l2_min_directional_consistency",
+        "base_threshold",
+        "min_confirming_sources",
+        "min_confidence",
+        "atr_stop_multiplier",
+        "rr_ratio",
+        "adverse_flow_consistency",
+        "adverse_book_pressure",
+        "time_exit_bars",
+        "trailing_stop_pct",
+        "momentum_diversification_enabled",
+        "momentum_route_enabled",
+        "momentum_min_flow_score",
+        "momentum_min_directional_consistency",
+        "momentum_min_signed_aggression",
+        "momentum_min_imbalance",
+        "momentum_min_cvd",
+        "momentum_min_directional_price_change_pct",
+        "momentum_min_price_trend_efficiency",
+        "momentum_min_last_bar_body_ratio",
         "momentum_min_last_bar_close_location",
-        "momentum_min_delta_acceleration", "momentum_min_delta_price_divergence",
-        "momentum_route_flow_score_impulse", "momentum_fail_fast_exit_enabled",
+        "momentum_min_delta_acceleration",
+        "momentum_min_delta_price_divergence",
+        "momentum_route_flow_score_impulse",
+        "momentum_fail_fast_exit_enabled",
         "momentum_fail_fast_max_bars",
-        "context_regime_flip_tighten_stop_pct", "context_regime_flip_shorten_time_pct",
-        "context_regime_flip_exit_when_losing", "context_regime_flip_exit_loss_threshold_pct",
-        "context_flow_reversal_move_to_breakeven", "context_flow_reversal_exit_when_losing",
-        "context_momentum_stall_time_multiplier", "context_volatility_spike_tighten_pct",
+        "context_regime_flip_tighten_stop_pct",
+        "context_regime_flip_shorten_time_pct",
+        "context_regime_flip_exit_when_losing",
+        "context_regime_flip_exit_loss_threshold_pct",
+        "context_flow_reversal_move_to_breakeven",
+        "context_flow_reversal_exit_when_losing",
+        "context_momentum_stall_time_multiplier",
+        "context_volatility_spike_tighten_pct",
         "context_response_grace_bars",
     ]
-    list_dims = ["strategy_sets", "regime_filter_sets", "time_window_sets", "regime_strategy_maps"]
+    list_dims = [
+        "strategy_sets",
+        "regime_filter_sets",
+        "time_window_sets",
+        "regime_strategy_maps",
+    ]
 
     neighbor_attempts = 0
     while len(candidates) < n_neighborhood and neighbor_attempts < max_attempts:
@@ -468,13 +586,21 @@ def build_v2_random_candidates(
         )
         for dim in dims_to_change:
             if dim == "strategy_sets":
-                candidate["enabled_strategies"] = list(rng.choice(search_space["strategy_sets"]))
+                candidate["enabled_strategies"] = list(
+                    rng.choice(search_space["strategy_sets"])
+                )
             elif dim == "regime_filter_sets":
-                candidate["regime_filter"] = list(rng.choice(search_space["regime_filter_sets"]))
+                candidate["regime_filter"] = list(
+                    rng.choice(search_space["regime_filter_sets"])
+                )
             elif dim == "regime_strategy_maps":
-                candidate["regime_strategy_map"] = rng.choice(search_space["regime_strategy_maps"])
+                candidate["regime_strategy_map"] = rng.choice(
+                    search_space["regime_strategy_maps"]
+                )
             elif dim == "time_window_sets":
-                candidate["trading_hours"] = list(rng.choice(search_space["time_window_sets"]))
+                candidate["trading_hours"] = list(
+                    rng.choice(search_space["time_window_sets"])
+                )
             elif dim in search_space:
                 candidate[dim] = rng.choice(search_space[dim])
         key = v2_candidate_key(candidate, deps)
@@ -489,40 +615,58 @@ def build_v2_random_candidates(
         regime_set = rng.choice(search_space["regime_filter_sets"])
 
         candidate = {
-            "strategy_selection_mode": rng.choice(search_space["strategy_selection_mode"]),
+            "strategy_selection_mode": rng.choice(
+                search_space["strategy_selection_mode"]
+            ),
             "max_active_strategies": rng.choice(search_space["max_active_strategies"]),
-            "min_active_bars_before_switch": rng.choice(search_space["min_active_bars_before_switch"]),
+            "min_active_bars_before_switch": rng.choice(
+                search_space["min_active_bars_before_switch"]
+            ),
             "switch_cooldown_bars": rng.choice(search_space["switch_cooldown_bars"]),
             "flow_bias_enabled": rng.choice(search_space["flow_bias_enabled"]),
             "use_ohlcv_fallbacks": rng.choice(search_space["use_ohlcv_fallbacks"]),
             "enabled_strategies": list(strategy_set),
             "l2_min_delta": rng.choice(search_space["l2_min_delta"]),
             "l2_min_imbalance": rng.choice(search_space["l2_min_imbalance"]),
-            "l2_min_signed_aggression": rng.choice(search_space["l2_min_signed_aggression"]),
-            "l2_min_directional_consistency": rng.choice(search_space["l2_min_directional_consistency"]),
+            "l2_min_signed_aggression": rng.choice(
+                search_space["l2_min_signed_aggression"]
+            ),
+            "l2_min_directional_consistency": rng.choice(
+                search_space["l2_min_directional_consistency"]
+            ),
             "regime_filter": list(regime_set),
             "base_threshold": rng.choice(search_space["base_threshold"]),
-            "min_confirming_sources": rng.choice(search_space["min_confirming_sources"]),
+            "min_confirming_sources": rng.choice(
+                search_space["min_confirming_sources"]
+            ),
             "min_confidence": rng.choice(search_space["min_confidence"]),
             "atr_stop_multiplier": rng.choice(search_space["atr_stop_multiplier"]),
             "rr_ratio": rng.choice(search_space["rr_ratio"]),
             "trading_hours": list(rng.choice(search_space["time_window_sets"])),
-            "adverse_flow_consistency": rng.choice(search_space["adverse_flow_consistency"]),
+            "adverse_flow_consistency": rng.choice(
+                search_space["adverse_flow_consistency"]
+            ),
             "adverse_book_pressure": rng.choice(search_space["adverse_book_pressure"]),
             "time_exit_bars": rng.choice(search_space["time_exit_bars"]),
             "trailing_stop_pct": rng.choice(search_space["trailing_stop_pct"]),
             "momentum_diversification_enabled": rng.choice(
                 search_space["momentum_diversification_enabled"]
             ),
-            "momentum_route_enabled": rng.choice(search_space["momentum_route_enabled"]),
-            "momentum_min_flow_score": rng.choice(search_space["momentum_min_flow_score"]),
+            "momentum_route_enabled": rng.choice(
+                search_space["momentum_route_enabled"]
+            ),
+            "momentum_min_flow_score": rng.choice(
+                search_space["momentum_min_flow_score"]
+            ),
             "momentum_min_directional_consistency": rng.choice(
                 search_space["momentum_min_directional_consistency"]
             ),
             "momentum_min_signed_aggression": rng.choice(
                 search_space["momentum_min_signed_aggression"]
             ),
-            "momentum_min_imbalance": rng.choice(search_space["momentum_min_imbalance"]),
+            "momentum_min_imbalance": rng.choice(
+                search_space["momentum_min_imbalance"]
+            ),
             "momentum_min_cvd": rng.choice(search_space["momentum_min_cvd"]),
             "momentum_min_directional_price_change_pct": rng.choice(
                 search_space["momentum_min_directional_price_change_pct"]
@@ -578,7 +722,9 @@ def build_v2_random_candidates(
             "context_response_grace_bars": rng.choice(
                 search_space["context_response_grace_bars"]
             ),
-            "regime_strategy_map": rng.choice(search_space.get("regime_strategy_maps", [None])),
+            "regime_strategy_map": rng.choice(
+                search_space.get("regime_strategy_maps", [None])
+            ),
         }
         key = v2_candidate_key(candidate, deps)
         if key in seen:
@@ -596,7 +742,9 @@ def build_v2_candidate_config(
 ) -> Dict[str, Any]:
     """Apply all v2 candidate dimensions to ticker config."""
     _build_adaptive_candidate_config = deps.build_adaptive_candidate_config
-    _normalize_momentum_diversification_payload = deps.normalize_momentum_diversification_payload
+    _normalize_momentum_diversification_payload = (
+        deps.normalize_momentum_diversification_payload
+    )
 
     cfg = _build_adaptive_candidate_config(ticker_config, candidate, adaptive_version)
 
@@ -707,14 +855,19 @@ def build_v2_candidate_config(
     if direct_momentum_cfg:
         raw_momentum_cfg.update(direct_momentum_cfg)
 
-    normalized_momentum_cfg = _normalize_momentum_diversification_payload(raw_momentum_cfg)
+    normalized_momentum_cfg = _normalize_momentum_diversification_payload(
+        raw_momentum_cfg
+    )
     if normalized_momentum_cfg:
         adaptive_cfg = cfg.get("adaptive", {})
         if not isinstance(adaptive_cfg, dict):
             adaptive_cfg = {}
-        existing_momentum = _normalize_momentum_diversification_payload(
-            adaptive_cfg.get("momentum_diversification")
-        ) or {}
+        existing_momentum = (
+            _normalize_momentum_diversification_payload(
+                adaptive_cfg.get("momentum_diversification")
+            )
+            or {}
+        )
         existing_momentum.update(normalized_momentum_cfg)
         adaptive_cfg["momentum_diversification"] = existing_momentum
         cfg["adaptive"] = adaptive_cfg
@@ -787,22 +940,35 @@ def analyze_vectors(
     STRATEGY_FAMILY_MAP = deps.strategy_family_map
 
     if not trials:
-        return {"dimension_importance": {}, "top_interactions": [], "surprising_vectors": []}
+        return {
+            "dimension_importance": {},
+            "top_interactions": [],
+            "surprising_vectors": [],
+        }
 
     valid_trials = [
-        t for t in trials
+        t
+        for t in trials
         if isinstance(t, dict)
         and float(t.get("score", -1e12)) > -999_999
         and int(t.get("metrics", {}).get("total_trades", 0)) >= min_trades
     ]
     if len(valid_trials) < 2:
-        return {"dimension_importance": {}, "top_interactions": [], "surprising_vectors": []}
+        return {
+            "dimension_importance": {},
+            "top_interactions": [],
+            "surprising_vectors": [],
+        }
 
     scores = [float(t["score"]) for t in valid_trials]
     overall_mean = sum(scores) / len(scores)
     total_variance = sum((s - overall_mean) ** 2 for s in scores) / len(scores)
     if total_variance < 1e-12:
-        return {"dimension_importance": {}, "top_interactions": [], "surprising_vectors": []}
+        return {
+            "dimension_importance": {},
+            "top_interactions": [],
+            "surprising_vectors": [],
+        }
 
     dimension_extractors = {
         "strategy_set": lambda c: str(sorted(c.get("enabled_strategies", []))),
@@ -825,7 +991,9 @@ def analyze_vectors(
             continue
 
         group_means = [sum(vals) / len(vals) for vals in groups.values()]
-        between_var = sum((gm - overall_mean) ** 2 for gm in group_means) / len(group_means)
+        between_var = sum((gm - overall_mean) ** 2 for gm in group_means) / len(
+            group_means
+        )
         dim_importance[dim_name] = round(min(1.0, between_var / total_variance), 4)
 
     total_imp = sum(dim_importance.values())
@@ -846,12 +1014,18 @@ def analyze_vectors(
             if len(groups) < 2:
                 continue
             group_means = [sum(v) / len(v) for v in groups.values()]
-            between_var = sum((gm - overall_mean) ** 2 for gm in group_means) / len(group_means)
-            effect = round(min(1.0, between_var / total_variance), 4) if total_variance > 0 else 0.0
+            between_var = sum((gm - overall_mean) ** 2 for gm in group_means) / len(
+                group_means
+            )
+            effect = (
+                round(min(1.0, between_var / total_variance), 4)
+                if total_variance > 0
+                else 0.0
+            )
             interactions.append({"dims": [d1, d2], "effect_size": effect})
     interactions.sort(key=lambda x: x["effect_size"], reverse=True)
 
-    score_std = (total_variance ** 0.5) if total_variance > 0 else 1.0
+    score_std = (total_variance**0.5) if total_variance > 0 else 1.0
     threshold = overall_mean + score_std
     surprising = []
     for trial in valid_trials:
@@ -874,13 +1048,15 @@ def analyze_vectors(
         if base_t is not None:
             desc_parts.append(f"ev_thresh={base_t:.0f}")
 
-        surprising.append({
-            "description": " | ".join(desc_parts) if desc_parts else "unknown",
-            "score": trial_score,
-            "z_score": round((trial_score - overall_mean) / score_std, 2),
-            "trial_index": trial.get("trial_index"),
-            "candidate": candidate,
-        })
+        surprising.append(
+            {
+                "description": " | ".join(desc_parts) if desc_parts else "unknown",
+                "score": trial_score,
+                "z_score": round((trial_score - overall_mean) / score_std, 2),
+                "trial_index": trial.get("trial_index"),
+                "candidate": candidate,
+            }
+        )
     surprising.sort(key=lambda x: x["score"], reverse=True)
 
     for vec in surprising:

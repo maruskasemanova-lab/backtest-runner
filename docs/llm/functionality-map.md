@@ -64,6 +64,10 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 ## Strategy Engine Internals
 
 - `day_trading_manager.py`: main session logic, execution realism, exits, risk controls.
+- `intraday_levels.py`: per-session intraday memory for swing S/R, tested level bounce/break events, session/composite volume profile (POC/value area), spike wick levels, prior-day anchors, gap context, RVOL metrics, and adaptive trade-window readiness; state resets automatically with each new trading day/session.
+- `day_trading_runtime_impl.py`: strategy-specific intraday entry-quality gate (`intraday_levels_entry_quality`) hard-gates entries using level proximity/tests, confluence scoring, recent break/bounce events, volume-profile context, RVOL/adaptive-window/gap filters, and optional micro-confirmation pending entries; gate writes `level_context` into signal metadata, can override MR target to effective POC, and applies strategy-side context-aware risk (level-anchored SL/TP, room/RR skips, and context trailing adjustments).
+- `exit_policy_engine.py`: close-based BE state machine + trailing handoff (cost-aware BE stop, levels/L2 proof gating, 1s anti-spike execution filtering) and closed-trade payload carrying flow diagnostics (`flow_strategy`, `book_pressure_*`, `signed_aggression`, `flow_snapshot`), preserved `level_context`/`signal_metadata`/`break_even`, and `entry_quality_diagnostics` for first-bar stop-loss root-cause tagging.
+- `session_runner.py` + `performance_tracker.py`: run-level summary includes `entry_timing_diagnostics` and `vwap_magnet_entry_timing_diagnostics` to diagnose fast stop-outs by strategy/tags.
 - Adaptive strategy switching supports config-driven switch guards (`min_active_bars_before_switch`, `switch_cooldown_bars`) from AOS ticker config.
 - `evidence_decision.py`: evidence-based execution scoring (strategy + L2/feature context).
 - `multi_layer_decision.py`: shared `DecisionResult` contract for downstream payload compatibility.
@@ -83,9 +87,10 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 
 - `App.tsx`: orchestration of controls + data fetches + socket handling.
 - `RunConfig.tsx`: run/session execution parameters, including optional selection of one saved unified profile (rendered as `Strategy profile` and `Execution profile` tabs, applied before next run start), optional pre/post-market inclusion toggle (`include_extended_hours`), and optional momentum-diversification override (`single` or `sleeves[]` multi-sleeve JSON).
+- `RunConfig.tsx`: includes intraday-level tracker controls (session-scoped S/R + volume-profile parameters) that are sent in run-start payload and applied during strategy session configuration.
 - `RunConfig.tsx`: preserves draft form state across sidebar collapse/remount and page reload via local browser storage (`backtest_runner.run_config_draft.v2`), and when signed-in syncs that draft to `/api/v2/user/settings` so ticker/date/profile intent is restored per user.
 - `main.tsx` + `auth/supabaseAuth.ts`: Supabase-backed Google OAuth bootstrap (`/auth/callback`) with JWT token sync into `backtest_jwt`/`supabase_jwt` keys used by v2 API requests (`VITE_SUPABASE_PUBLISHABLE_KEY`, legacy fallback `VITE_SUPABASE_ANON_KEY`, optional `VITE_SUPABASE_OAUTH_REDIRECT_URL` override for proxied/public-origin deploys).
-- `DecisionPanel.tsx`: marker timeline and explanation details.
+- `DecisionPanel.tsx`: marker timeline and explanation details, including intraday `Level Context Gate` diagnostics, L2/flow context, BE diagnostics (`state`, `trigger`, `proof`, `stop`, `costs`, `buffer`, `anti-spike`) surfaced from signal/exit metadata, and execution-layer `execution_status` markers for pending/no-fill drop reasons.
 - `CandlestickChart.tsx` + related components: visual representation of bars/markers.
 - `StrategySettings.tsx`: strategy toggles + per-strategy parameter editing with capture/apply strategy-combination profiles per ticker, including per-strategy `exit_mode|risk_mode` (`custom|global`), built-in entry/exit rule visibility, and optional custom formula rules (`custom_entry_formula*`, `custom_exit_formula*`) for user-defined entry/exit gating.
 - `AdaptiveStrategyStudio.tsx`: adaptive selection-flow editor with Global Modules execution controls; saves adaptive fields plus execution `positioning` snapshot to `aos_config.json` via `/api/aos-config/update` for next-run apply, with tuned-profile list/load/apply actions and strategy-combination-aware recomposition.

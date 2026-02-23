@@ -26,7 +26,9 @@ def test_split_dates_chronological_maintains_order_and_non_empty_buckets() -> No
 
 def test_split_dates_requires_minimum_history() -> None:
     with pytest.raises(ValueError):
-        split_dates_chronological(["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"])
+        split_dates_chronological(
+            ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"]
+        )
 
 
 def test_win_rate_handles_zero_trades() -> None:

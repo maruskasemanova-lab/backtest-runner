@@ -14,7 +14,9 @@ from src.services import start_run_data_service as svc
 class _DummyDiscovery:
     files: List[str]
 
-    def get_files_for_range(self, ticker: str, start_date: str, end_date: str) -> List[str]:
+    def get_files_for_range(
+        self, ticker: str, start_date: str, end_date: str
+    ) -> List[str]:
         return list(self.files)
 
 
@@ -57,10 +59,14 @@ class _DummyDataLoader:
         self.load_parquet_calls += 1
         return self.df.copy()
 
-    def filter_trading_range(self, df: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    def filter_trading_range(
+        self, df: pd.DataFrame, start: str, end: str
+    ) -> pd.DataFrame:
         return df
 
-    def filter_trading_hours(self, df: pd.DataFrame, trading_hours: List[int]) -> pd.DataFrame:
+    def filter_trading_hours(
+        self, df: pd.DataFrame, trading_hours: List[int]
+    ) -> pd.DataFrame:
         return df
 
     def generate_mock_data(self, ticker: str, date: str) -> pd.DataFrame:
@@ -136,9 +142,13 @@ def _sample_df_session_mix() -> pd.DataFrame:
 
 
 class _RangeFilteringDataLoader(_DummyDataLoader):
-    def filter_trading_range(self, df: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    def filter_trading_range(
+        self, df: pd.DataFrame, start: str, end: str
+    ) -> pd.DataFrame:
         ts = pd.to_datetime(df["timestamp"], utc=True)
-        mask = (ts >= pd.Timestamp(f"{start}T00:00:00Z")) & (ts <= pd.Timestamp(f"{end}T23:59:59Z"))
+        mask = (ts >= pd.Timestamp(f"{start}T00:00:00Z")) & (
+            ts <= pd.Timestamp(f"{end}T23:59:59Z")
+        )
         return df.loc[mask].reset_index(drop=True)
 
 
@@ -148,9 +158,13 @@ class _SessionScopeDataLoader(_DummyDataLoader):
         self.filter_trading_hours_calls = 0
 
     def _market_timestamp_series(self, df: pd.DataFrame):
-        return pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert("America/New_York")
+        return pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(
+            "America/New_York"
+        )
 
-    def filter_trading_hours(self, df: pd.DataFrame, trading_hours: List[int]) -> pd.DataFrame:
+    def filter_trading_hours(
+        self, df: pd.DataFrame, trading_hours: List[int]
+    ) -> pd.DataFrame:
         self.filter_trading_hours_calls += 1
         market_ts = self._market_timestamp_series(df)
         normalized = {int(hour) for hour in trading_hours}
@@ -177,7 +191,9 @@ def test_load_run_bars_uses_cache_for_same_inputs(isolated_disk_cache_dirs) -> N
     request = SimpleNamespace(data_file="mu_sample.csv", allow_mock_data=False)
     databento = _DummyDatabento(files=[])
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     bars_a, files_a = svc.load_run_bars(
         request=request,
@@ -236,7 +252,9 @@ def test_load_run_bars_regular_session_override_excludes_pre_and_post_market(
     )
     databento = _DummyDatabento(files=[])
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     bars, _ = svc.load_run_bars(
         request=request,
@@ -268,7 +286,9 @@ def test_load_run_bars_include_extended_hours_override_bypasses_aos_hour_filter(
     )
     databento = _DummyDatabento(files=[])
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     bars, _ = svc.load_run_bars(
         request=request,
@@ -286,13 +306,17 @@ def test_load_run_bars_include_extended_hours_override_bypasses_aos_hour_filter(
     assert loader.filter_trading_hours_calls == 0
 
 
-def test_load_reference_bars_map_uses_cache_for_same_inputs(isolated_disk_cache_dirs) -> None:
+def test_load_reference_bars_map_uses_cache_for_same_inputs(
+    isolated_disk_cache_dirs,
+) -> None:
     svc.clear_start_run_data_caches()
 
     loader = _DummyDataLoader(_sample_df())
     databento = _DummyDatabento(files=["qqq_sample.csv"])
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, debug=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, debug=lambda *args, **kwargs: None
+    )
 
     ref_a = svc.load_reference_bars_map(
         ticker="MU",
@@ -333,11 +357,15 @@ def test_load_reference_bars_map_uses_cache_for_same_inputs(isolated_disk_cache_
     assert ref_c[first_key]["open"] == 100.0
 
 
-def test_load_run_bars_uses_disk_cache_after_memory_clear(isolated_disk_cache_dirs) -> None:
+def test_load_run_bars_uses_disk_cache_after_memory_clear(
+    isolated_disk_cache_dirs,
+) -> None:
     request = SimpleNamespace(data_file="mu_sample.csv", allow_mock_data=False)
     databento = _DummyDatabento(files=[])
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     loader_first = _DummyDataLoader(_sample_df())
     bars_first, _ = svc.load_run_bars(
@@ -372,14 +400,18 @@ def test_load_run_bars_uses_disk_cache_after_memory_clear(isolated_disk_cache_di
     assert bars_second == bars_first
 
 
-def test_load_run_bars_uses_superset_memory_cache_for_subrange(isolated_disk_cache_dirs) -> None:
+def test_load_run_bars_uses_superset_memory_cache_for_subrange(
+    isolated_disk_cache_dirs,
+) -> None:
     svc.clear_start_run_data_caches()
 
     loader = _RangeFilteringDataLoader(_sample_df_multi_day())
     request = SimpleNamespace(data_file="mu_sample.csv", allow_mock_data=False)
     databento = _DummyDatabento(files=[])
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     bars_full, _ = svc.load_run_bars(
         request=request,
@@ -425,10 +457,14 @@ def test_load_run_bars_uses_superset_memory_cache_for_subrange(isolated_disk_cac
     assert bars_subset_again[0]["open"] == 101.0
 
 
-def test_load_reference_bars_map_uses_disk_cache_after_memory_clear(isolated_disk_cache_dirs) -> None:
+def test_load_reference_bars_map_uses_disk_cache_after_memory_clear(
+    isolated_disk_cache_dirs,
+) -> None:
     databento = _DummyDatabento(files=["qqq_sample.csv"])
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, debug=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, debug=lambda *args, **kwargs: None
+    )
 
     loader_first = _DummyDataLoader(_sample_df())
     ref_first = svc.load_reference_bars_map(
@@ -459,13 +495,17 @@ def test_load_reference_bars_map_uses_disk_cache_after_memory_clear(isolated_dis
     assert ref_second == ref_first
 
 
-def test_load_reference_bars_map_uses_superset_memory_cache_for_subrange(isolated_disk_cache_dirs) -> None:
+def test_load_reference_bars_map_uses_superset_memory_cache_for_subrange(
+    isolated_disk_cache_dirs,
+) -> None:
     svc.clear_start_run_data_caches()
 
     loader = _RangeFilteringDataLoader(_sample_df_multi_day())
     databento = _DummyDatabento(files=["qqq_sample.csv"])
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, debug=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, debug=lambda *args, **kwargs: None
+    )
 
     ref_full = svc.load_reference_bars_map(
         ticker="MU",
@@ -515,7 +555,9 @@ def _epoch_minute_key(ts: Any) -> int:
     return int(pd.Timestamp(ts).timestamp() // 60)
 
 
-def test_enrich_bars_with_l2_uses_cache_for_same_inputs(isolated_disk_cache_dirs) -> None:
+def test_enrich_bars_with_l2_uses_cache_for_same_inputs(
+    isolated_disk_cache_dirs,
+) -> None:
     bars = _sample_bars()
     counters = {"build": 0, "attach": 0, "normalize": 0}
 
@@ -529,13 +571,23 @@ def test_enrich_bars_with_l2_uses_cache_for_same_inputs(isolated_disk_cache_dirs
             }
             for bar in bars
         }
-        return feature_map, {"has_l2": True, "covered_minutes": len(feature_map), "footprint_bars": len(feature_map)}
+        return feature_map, {
+            "has_l2": True,
+            "covered_minutes": len(feature_map),
+            "footprint_bars": len(feature_map),
+        }
 
-    def normalize_l2_feature_map_for_market_day_sessions(*, feature_map: Dict[str, Any], bars: List[Dict[str, Any]]):
+    def normalize_l2_feature_map_for_market_day_sessions(
+        *, feature_map: Dict[str, Any], bars: List[Dict[str, Any]]
+    ):
         counters["normalize"] += 1
         return {"sessionized_days": 1}
 
-    def attach_l2_features(bars: List[Dict[str, Any]], feature_map: Dict[int, Dict[str, float]], l2_only: bool = False):
+    def attach_l2_features(
+        bars: List[Dict[str, Any]],
+        feature_map: Dict[int, Dict[str, float]],
+        l2_only: bool = False,
+    ):
         counters["attach"] += 1
         enriched = []
         for bar in bars:
@@ -545,9 +597,15 @@ def test_enrich_bars_with_l2_uses_cache_for_same_inputs(isolated_disk_cache_dirs
                 enriched.append({**bar, **feats})
             elif not l2_only:
                 enriched.append(bar)
-        return enriched, {"bars_with_l2": len(enriched), "bars_total": len(bars), "bars_after_filter": len(enriched)}
+        return enriched, {
+            "bars_with_l2": len(enriched),
+            "bars_total": len(bars),
+            "bars_after_filter": len(enriched),
+        }
 
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     bars_a, stats_a, sessionized_a = svc.enrich_bars_with_l2(
         bars=bars,
@@ -591,7 +649,9 @@ def test_enrich_bars_with_l2_uses_cache_for_same_inputs(isolated_disk_cache_dirs
     assert sessionized_b == sessionized_a
 
 
-def test_enrich_bars_with_l2_uses_disk_cache_after_memory_clear(isolated_disk_cache_dirs) -> None:
+def test_enrich_bars_with_l2_uses_disk_cache_after_memory_clear(
+    isolated_disk_cache_dirs,
+) -> None:
     bars = _sample_bars()
     first_counters = {"build": 0, "attach": 0}
     second_counters = {"build": 0, "attach": 0}
@@ -602,22 +662,47 @@ def test_enrich_bars_with_l2_uses_disk_cache_after_memory_clear(isolated_disk_ca
             _epoch_minute_key(bar["timestamp"]): {"l2_delta": 2.0, "l2_imbalance": 0.3}
             for bar in bars
         }
-        return feature_map, {"has_l2": True, "covered_minutes": len(feature_map), "footprint_bars": len(feature_map)}
+        return feature_map, {
+            "has_l2": True,
+            "covered_minutes": len(feature_map),
+            "footprint_bars": len(feature_map),
+        }
 
-    def attach_first(bars: List[Dict[str, Any]], feature_map: Dict[int, Dict[str, float]], l2_only: bool = False):
+    def attach_first(
+        bars: List[Dict[str, Any]],
+        feature_map: Dict[int, Dict[str, float]],
+        l2_only: bool = False,
+    ):
         first_counters["attach"] += 1
-        enriched = [{**bar, **feature_map.get(_epoch_minute_key(bar["timestamp"]), {})} for bar in bars]
-        return enriched, {"bars_with_l2": len(enriched), "bars_total": len(bars), "bars_after_filter": len(enriched)}
+        enriched = [
+            {**bar, **feature_map.get(_epoch_minute_key(bar["timestamp"]), {})}
+            for bar in bars
+        ]
+        return enriched, {
+            "bars_with_l2": len(enriched),
+            "bars_total": len(bars),
+            "bars_after_filter": len(enriched),
+        }
 
     def build_second(*, ticker: str, start_dt_utc: Any, end_dt_utc: Any):
         second_counters["build"] += 1
         return {}, {"has_l2": False, "covered_minutes": 0, "footprint_bars": 0}
 
-    def attach_second(bars: List[Dict[str, Any]], feature_map: Dict[int, Dict[str, float]], l2_only: bool = False):
+    def attach_second(
+        bars: List[Dict[str, Any]],
+        feature_map: Dict[int, Dict[str, float]],
+        l2_only: bool = False,
+    ):
         second_counters["attach"] += 1
-        return bars, {"bars_with_l2": 0, "bars_total": len(bars), "bars_after_filter": len(bars)}
+        return bars, {
+            "bars_with_l2": 0,
+            "bars_total": len(bars),
+            "bars_after_filter": len(bars),
+        }
 
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     bars_first, stats_first, _ = svc.enrich_bars_with_l2(
         bars=bars,
@@ -664,17 +749,31 @@ def test_enrich_bars_with_l2_uses_disk_cache_after_memory_clear(isolated_disk_ca
     assert stats_second == stats_first
 
 
-def test_enrich_bars_with_l2_raises_for_l2_only_missing_day_coverage(isolated_disk_cache_dirs) -> None:
-    bars = list(_DummyDataLoader(_sample_df_multi_day()).get_bars_iterator(_sample_df_multi_day()))
+def test_enrich_bars_with_l2_raises_for_l2_only_missing_day_coverage(
+    isolated_disk_cache_dirs,
+) -> None:
+    bars = list(
+        _DummyDataLoader(_sample_df_multi_day()).get_bars_iterator(
+            _sample_df_multi_day()
+        )
+    )
 
     def build_l2_feature_map(*, ticker: str, start_dt_utc: Any, end_dt_utc: Any):
         feature_map = {
             _epoch_minute_key(bars[0]["timestamp"]): {"l2_delta": 1.0},
             _epoch_minute_key(bars[1]["timestamp"]): {"l2_delta": 1.0},
         }
-        return feature_map, {"has_l2": True, "covered_minutes": len(feature_map), "footprint_bars": len(feature_map)}
+        return feature_map, {
+            "has_l2": True,
+            "covered_minutes": len(feature_map),
+            "footprint_bars": len(feature_map),
+        }
 
-    def attach_l2_features(bars: List[Dict[str, Any]], feature_map: Dict[int, Dict[str, float]], l2_only: bool = False):
+    def attach_l2_features(
+        bars: List[Dict[str, Any]],
+        feature_map: Dict[int, Dict[str, float]],
+        l2_only: bool = False,
+    ):
         enriched = []
         for bar in bars:
             feats = feature_map.get(_epoch_minute_key(bar["timestamp"]))
@@ -682,9 +781,15 @@ def test_enrich_bars_with_l2_raises_for_l2_only_missing_day_coverage(isolated_di
                 enriched.append({**bar, **feats})
             elif not l2_only:
                 enriched.append(bar)
-        return enriched, {"bars_with_l2": len(enriched), "bars_total": len(bars), "bars_after_filter": len(enriched)}
+        return enriched, {
+            "bars_with_l2": len(enriched),
+            "bars_total": len(bars),
+            "bars_after_filter": len(enriched),
+        }
 
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     with pytest.raises(svc.HTTPException) as exc:
         svc.enrich_bars_with_l2(
@@ -708,16 +813,28 @@ def test_enrich_bars_with_l2_raises_for_l2_only_missing_day_coverage(isolated_di
     assert "2026-02-05" in exc.value.detail
 
 
-def test_enrich_bars_with_l2_raises_for_l2_confirm_missing_coverage(isolated_disk_cache_dirs) -> None:
+def test_enrich_bars_with_l2_raises_for_l2_confirm_missing_coverage(
+    isolated_disk_cache_dirs,
+) -> None:
     bars = _sample_bars()
 
     def build_l2_feature_map(*, ticker: str, start_dt_utc: Any, end_dt_utc: Any):
         return {}, {"has_l2": False, "covered_minutes": 0, "footprint_bars": 0}
 
-    def attach_l2_features(bars: List[Dict[str, Any]], feature_map: Dict[int, Dict[str, float]], l2_only: bool = False):
-        return list(bars), {"bars_with_l2": 0, "bars_total": len(bars), "bars_after_filter": len(bars)}
+    def attach_l2_features(
+        bars: List[Dict[str, Any]],
+        feature_map: Dict[int, Dict[str, float]],
+        l2_only: bool = False,
+    ):
+        return list(bars), {
+            "bars_with_l2": 0,
+            "bars_total": len(bars),
+            "bars_after_filter": len(bars),
+        }
 
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     with pytest.raises(svc.HTTPException) as exc:
         svc.enrich_bars_with_l2(
@@ -741,12 +858,16 @@ def test_enrich_bars_with_l2_raises_for_l2_confirm_missing_coverage(isolated_dis
     assert "2026-02-03" in exc.value.detail
 
 
-def test_flush_start_run_data_cache_clears_memory_and_disk(isolated_disk_cache_dirs) -> None:
+def test_flush_start_run_data_cache_clears_memory_and_disk(
+    isolated_disk_cache_dirs,
+) -> None:
     loader = _DummyDataLoader(_sample_df())
     request = SimpleNamespace(data_file="mu_sample.csv", allow_mock_data=False)
     databento = _DummyDatabento(files=[])
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     svc.load_run_bars(
         request=request,
@@ -787,7 +908,9 @@ def test_load_run_bars_error_includes_available_ohlcv_hint_when_no_files() -> No
         },
     )
     discovery = _DummyDiscovery(files=[])
-    logger = SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
 
     with pytest.raises(svc.HTTPException) as exc:
         svc.load_run_bars(
@@ -803,5 +926,7 @@ def test_load_run_bars_error_includes_available_ohlcv_hint_when_no_files() -> No
         )
 
     assert exc.value.status_code == 404
-    assert "No data files found for MU in range 2025-11-03 to 2025-11-07" in str(exc.value.detail)
+    assert "No data files found for MU in range 2025-11-03 to 2025-11-07" in str(
+        exc.value.detail
+    )
     assert "Available OHLCV range: 2026-01-20 to 2026-02-13" in str(exc.value.detail)

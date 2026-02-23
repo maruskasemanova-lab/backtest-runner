@@ -39,9 +39,27 @@ def _make_df(rows: list[dict]) -> pd.DataFrame:
 def test_trade_flow_resets_cumulative_delta_by_market_day() -> None:
     df = _make_df(
         [
-            {"ts": "2026-01-20T14:30:05Z", "action": "T", "side": "B", "size": 100.0, "price": 100.0},
-            {"ts": "2026-01-20T14:31:05Z", "action": "T", "side": "B", "size": 100.0, "price": 100.2},
-            {"ts": "2026-01-21T14:30:05Z", "action": "T", "side": "B", "size": 50.0, "price": 100.4},
+            {
+                "ts": "2026-01-20T14:30:05Z",
+                "action": "T",
+                "side": "B",
+                "size": 100.0,
+                "price": 100.0,
+            },
+            {
+                "ts": "2026-01-20T14:31:05Z",
+                "action": "T",
+                "side": "B",
+                "size": 100.0,
+                "price": 100.2,
+            },
+            {
+                "ts": "2026-01-21T14:30:05Z",
+                "action": "T",
+                "side": "B",
+                "size": 50.0,
+                "price": 100.4,
+            },
         ]
     )
     engine = OrderFlowEngine(manager=_StubL2Manager(df))

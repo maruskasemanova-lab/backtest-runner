@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 
@@ -68,6 +69,43 @@ async def configure_session(
     l2_min_participation_ratio: float,
     l2_min_directional_consistency: float,
     l2_min_signed_aggression: float,
+    intraday_levels_enabled: bool,
+    intraday_levels_swing_left_bars: int,
+    intraday_levels_swing_right_bars: int,
+    intraday_levels_test_tolerance_pct: float,
+    intraday_levels_break_tolerance_pct: float,
+    intraday_levels_breakout_volume_lookback: int,
+    intraday_levels_breakout_volume_multiplier: float,
+    intraday_levels_volume_profile_bin_size_pct: float,
+    intraday_levels_value_area_pct: float,
+    intraday_levels_entry_quality_enabled: bool,
+    intraday_levels_min_levels_for_context: int,
+    intraday_levels_entry_tolerance_pct: float,
+    intraday_levels_break_cooldown_bars: int,
+    intraday_levels_rotation_max_tests: int,
+    intraday_levels_rotation_volume_max_ratio: float,
+    intraday_levels_recent_bounce_lookback_bars: int,
+    intraday_levels_require_recent_bounce_for_mean_reversion: bool,
+    intraday_levels_momentum_break_max_age_bars: int,
+    intraday_levels_momentum_min_room_pct: float,
+    intraday_levels_momentum_min_broken_ratio: float,
+    intraday_levels_min_confluence_score: int,
+    intraday_levels_memory_enabled: bool,
+    intraday_levels_memory_min_tests: int,
+    intraday_levels_memory_max_age_days: int,
+    intraday_levels_memory_decay_after_days: int,
+    intraday_levels_memory_decay_weight: float,
+    intraday_levels_memory_max_levels: int,
+    intraday_levels_opening_range_enabled: bool,
+    intraday_levels_opening_range_minutes: int,
+    intraday_levels_opening_range_break_tolerance_pct: float,
+    intraday_levels_poc_migration_enabled: bool,
+    intraday_levels_poc_migration_interval_bars: int,
+    intraday_levels_poc_migration_trend_threshold_pct: float,
+    intraday_levels_poc_migration_range_threshold_pct: float,
+    intraday_levels_composite_profile_enabled: bool,
+    intraday_levels_composite_profile_days: int,
+    intraday_levels_composite_profile_current_day_weight: float,
     cold_start_each_day: bool,
     strategy_selection_mode: str,
     max_active_strategies: int,
@@ -75,6 +113,8 @@ async def configure_session(
     deps: StrategyApiIntegrationDeps,
     max_daily_trades: Optional[int] = None,
     mu_choppy_hard_block_enabled: Optional[bool] = None,
+    regime_filter: Optional[List[str]] = None,
+    **extra_params: Any,
 ) -> None:
     params = {
         "run_id": run_id,
@@ -110,6 +150,95 @@ async def configure_session(
         "l2_min_participation_ratio": float(l2_min_participation_ratio),
         "l2_min_directional_consistency": float(l2_min_directional_consistency),
         "l2_min_signed_aggression": float(l2_min_signed_aggression),
+        "intraday_levels_enabled": int(bool(intraday_levels_enabled)),
+        "intraday_levels_swing_left_bars": int(intraday_levels_swing_left_bars),
+        "intraday_levels_swing_right_bars": int(intraday_levels_swing_right_bars),
+        "intraday_levels_test_tolerance_pct": float(intraday_levels_test_tolerance_pct),
+        "intraday_levels_break_tolerance_pct": float(
+            intraday_levels_break_tolerance_pct
+        ),
+        "intraday_levels_breakout_volume_lookback": int(
+            intraday_levels_breakout_volume_lookback
+        ),
+        "intraday_levels_breakout_volume_multiplier": float(
+            intraday_levels_breakout_volume_multiplier
+        ),
+        "intraday_levels_volume_profile_bin_size_pct": float(
+            intraday_levels_volume_profile_bin_size_pct
+        ),
+        "intraday_levels_value_area_pct": float(intraday_levels_value_area_pct),
+        "intraday_levels_entry_quality_enabled": int(
+            bool(intraday_levels_entry_quality_enabled)
+        ),
+        "intraday_levels_min_levels_for_context": int(
+            intraday_levels_min_levels_for_context
+        ),
+        "intraday_levels_entry_tolerance_pct": float(
+            intraday_levels_entry_tolerance_pct
+        ),
+        "intraday_levels_break_cooldown_bars": int(intraday_levels_break_cooldown_bars),
+        "intraday_levels_rotation_max_tests": int(intraday_levels_rotation_max_tests),
+        "intraday_levels_rotation_volume_max_ratio": float(
+            intraday_levels_rotation_volume_max_ratio
+        ),
+        "intraday_levels_recent_bounce_lookback_bars": int(
+            intraday_levels_recent_bounce_lookback_bars
+        ),
+        "intraday_levels_require_recent_bounce_for_mean_reversion": int(
+            bool(intraday_levels_require_recent_bounce_for_mean_reversion)
+        ),
+        "intraday_levels_momentum_break_max_age_bars": int(
+            intraday_levels_momentum_break_max_age_bars
+        ),
+        "intraday_levels_momentum_min_room_pct": float(
+            intraday_levels_momentum_min_room_pct
+        ),
+        "intraday_levels_momentum_min_broken_ratio": float(
+            intraday_levels_momentum_min_broken_ratio
+        ),
+        "intraday_levels_min_confluence_score": int(
+            intraday_levels_min_confluence_score
+        ),
+        "intraday_levels_memory_enabled": int(bool(intraday_levels_memory_enabled)),
+        "intraday_levels_memory_min_tests": int(intraday_levels_memory_min_tests),
+        "intraday_levels_memory_max_age_days": int(intraday_levels_memory_max_age_days),
+        "intraday_levels_memory_decay_after_days": int(
+            intraday_levels_memory_decay_after_days
+        ),
+        "intraday_levels_memory_decay_weight": float(
+            intraday_levels_memory_decay_weight
+        ),
+        "intraday_levels_memory_max_levels": int(intraday_levels_memory_max_levels),
+        "intraday_levels_opening_range_enabled": int(
+            bool(intraday_levels_opening_range_enabled)
+        ),
+        "intraday_levels_opening_range_minutes": int(
+            intraday_levels_opening_range_minutes
+        ),
+        "intraday_levels_opening_range_break_tolerance_pct": float(
+            intraday_levels_opening_range_break_tolerance_pct
+        ),
+        "intraday_levels_poc_migration_enabled": int(
+            bool(intraday_levels_poc_migration_enabled)
+        ),
+        "intraday_levels_poc_migration_interval_bars": int(
+            intraday_levels_poc_migration_interval_bars
+        ),
+        "intraday_levels_poc_migration_trend_threshold_pct": float(
+            intraday_levels_poc_migration_trend_threshold_pct
+        ),
+        "intraday_levels_poc_migration_range_threshold_pct": float(
+            intraday_levels_poc_migration_range_threshold_pct
+        ),
+        "intraday_levels_composite_profile_enabled": int(
+            bool(intraday_levels_composite_profile_enabled)
+        ),
+        "intraday_levels_composite_profile_days": int(
+            intraday_levels_composite_profile_days
+        ),
+        "intraday_levels_composite_profile_current_day_weight": float(
+            intraday_levels_composite_profile_current_day_weight
+        ),
         "cold_start_each_day": int(bool(cold_start_each_day)),
         "strategy_selection_mode": str(strategy_selection_mode),
         "max_active_strategies": int(max_active_strategies),
@@ -120,8 +249,24 @@ async def configure_session(
         params["max_daily_trades"] = int(max_daily_trades)
     if mu_choppy_hard_block_enabled is not None:
         params["mu_choppy_hard_block_enabled"] = int(bool(mu_choppy_hard_block_enabled))
+    if regime_filter is not None:
+        params["regime_filter_json"] = json.dumps(regime_filter)
+    if extra_params:
+        for key, value in extra_params.items():
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                params[str(key)] = int(value)
+            elif isinstance(value, (int, float, str)):
+                params[str(key)] = value
+            elif isinstance(value, (dict, list)):
+                params[str(key)] = json.dumps(value, separators=(",", ":"))
+            else:
+                params[str(key)] = str(value)
     try:
-        async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+        async with aiohttp.ClientSession(
+            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        ) as session:
             async with session.post(
                 f"{strategy_api_url}/api/session/config",
                 params=params,
@@ -155,10 +300,14 @@ async def clear_remote_strategy_sessions(
                 )
 
     try:
-        async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+        async with aiohttp.ClientSession(
+            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        ) as session:
             await _clear_v2(session)
     except Exception as exc:
-        deps.logger.warning(f"Remote session cleanup error for {run_id}:{normalized_ticker}: {exc}")
+        deps.logger.warning(
+            f"Remote session cleanup error for {run_id}:{normalized_ticker}: {exc}"
+        )
 
 
 async def reset_remote_orchestrator_state(
@@ -166,7 +315,9 @@ async def reset_remote_orchestrator_state(
     deps: StrategyApiIntegrationDeps,
 ) -> bool:
     try:
-        async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+        async with aiohttp.ClientSession(
+            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        ) as session:
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/reset",
                 params={"scope": "all", "clear_sessions": "true"},
@@ -181,7 +332,9 @@ async def reset_remote_orchestrator_state(
                 )
                 return False
     except Exception as exc:
-        deps.logger.warning(f"Remote orchestrator reset error at {strategy_api_url}: {exc}")
+        deps.logger.warning(
+            f"Remote orchestrator reset error at {strategy_api_url}: {exc}"
+        )
         return False
 
 
@@ -191,7 +344,9 @@ async def reset_remote_orchestrator_state_scoped(
     deps: StrategyApiIntegrationDeps,
 ) -> bool:
     try:
-        async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+        async with aiohttp.ClientSession(
+            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        ) as session:
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/reset",
                 params={"scope": scope, "clear_sessions": "true"},
@@ -212,7 +367,9 @@ async def apply_orchestrator_config(
     if not isinstance(config, dict) or not config:
         return {}
     try:
-        async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+        async with aiohttp.ClientSession(
+            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        ) as session:
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/config",
                 json=config,
@@ -238,7 +395,9 @@ async def load_remote_checkpoint(
     deps: StrategyApiIntegrationDeps,
 ) -> Optional[Dict]:
     try:
-        async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+        async with aiohttp.ClientSession(
+            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        ) as session:
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/checkpoint/load",
                 params={"path": checkpoint_path},
@@ -274,7 +433,9 @@ async def save_remote_checkpoint(
             }.items()
             if value
         }
-        async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+        async with aiohttp.ClientSession(
+            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        ) as session:
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/checkpoint/save",
                 params=params,

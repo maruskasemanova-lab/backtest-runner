@@ -1,0 +1,80 @@
+{
+  "version": "1.1.0",
+  "created_at": "2026-02-04T02:00:00",
+  "description": "AOS Configuration - Optimized based on Walk-Forward Testing Results (MU volatility/BE/L2/time-of-day/POC hints)",
+  "global_settings": {
+    "regime_detection_minutes": 30,
+    "max_daily_loss_pct": 3.0,
+    "trading_start_time": "09:30",
+    "trading_end_time": "15:55",
+    "avoid_days": [
+      "Friday"
+    ],
+    "min_bars_for_signal": 30,
+    "strategy_time_windows": {
+      "momentum": {
+        "start": "09:30",
+        "end": "11:30"
+      },
+      "pullback": {
+        "start": "09:30",
+        "end": "11:30"
+      },
+      "gap_liquidity": {
+        "start": "09:30",
+        "end": "11:30"
+      },
+      "volume_profile": {
+        "start": "09:30",
+        "end": "11:30"
+      },
+      "vwap_magnet": {
+        "start": "09:30",
+        "end": "11:30"
+      },
+      "mean_reversion": {
+        "start": "14:30",
+        "end": "15:30"
+      }
+    }
+  },
+  "strategies": {
+    "enabled": [
+      "mean_reversion",
+      "momentum",
+      "pullback",
+      "vwap_magnet",
+      "volume_profile",
+      "gap_liquidity"
+    ],
+    "disabled": [
+      "rotation"
+    ]
+  },
+  "risk_management": {
+    "max_position_size_pct": 10.0,
+    "max_daily_trades_total": 6,
+    "stop_loss_atr_mult": 2.5,
+    "take_profit_atr_mult": 5.0,
+    "trailing_stop_activation_pct": 0.5,
+    "min_risk_reward_ratio": 1.5,
+    "global_min_stop_loss_pct": 0.55,
+    "break_even_activation_min_mfe_pct": 1.1,
+    "l2_extreme_block_z_threshold": 1.65
+  },
+  "optimization_history": [
+    {
+      "date": "2026-02-04",
+      "changes": [
+        "Global: Set min SL floor to 0.55% based on 5m range stats",
+        "Global: Set BE activation to 1.10% MFE (\u22482R vs 0.55% risk)",
+        "Global: Set L2 extreme hard-block z-threshold to 1.65",
+        "Global: Time-of-day windows (momentum/pullback stop new signals after 11:30; mean reversion 14:30-15:30)",
+        "MU: Volume profile POC behavior favors bounce/mean reversion (January regime shift hint)"
+      ],
+      "results_before": "-$135 total, 33% win rate",
+      "results_after": "Pending validation"
+    }
+  ],
+  "tickers": {}
+}

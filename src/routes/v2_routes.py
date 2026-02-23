@@ -27,9 +27,14 @@ from src.security.auth import (
     parse_bearer_token,
     resolve_jwt_secret,
 )
-from src.security.network_policy import StrategyApiPolicyError, enforce_strategy_url_policy
+from src.security.network_policy import (
+    StrategyApiPolicyError,
+    enforce_strategy_url_policy,
+)
 from src.services.saas_service import V2Services, resolve_plan_limits
-from src.services.adaptive_tuner_orchestration_service import run_adaptive_tuner as service_run_adaptive_tuner
+from src.services.adaptive_tuner_orchestration_service import (
+    run_adaptive_tuner as service_run_adaptive_tuner,
+)
 
 router = APIRouter(prefix="/api/v2")
 HEAVY_JOB_TYPES = ("run", "adaptive_tuner", "download")
@@ -100,10 +105,19 @@ def _detail(
     return payload
 
 
-def _raise(status_code: int, *, code: str, message: str, request_id: str, extras: Optional[Dict[str, Any]] = None) -> None:
+def _raise(
+    status_code: int,
+    *,
+    code: str,
+    message: str,
+    request_id: str,
+    extras: Optional[Dict[str, Any]] = None,
+) -> None:
     raise HTTPException(
         status_code=status_code,
-        detail=_detail(code=code, message=message, request_id=request_id, extras=extras),
+        detail=_detail(
+            code=code, message=message, request_id=request_id, extras=extras
+        ),
     )
 
 
@@ -119,9 +133,19 @@ def _parse_iso_day(value: str) -> date:
 def _normalize_ticker(value: Any, *, request_id: str) -> str:
     token = str(value or "").strip().upper()
     if not token:
-        _raise(400, code="invalid_ticker", message="ticker is required", request_id=request_id)
+        _raise(
+            400,
+            code="invalid_ticker",
+            message="ticker is required",
+            request_id=request_id,
+        )
     if not token.replace("-", "").replace("_", "").isalnum():
-        _raise(400, code="invalid_ticker", message="ticker contains invalid characters", request_id=request_id)
+        _raise(
+            400,
+            code="invalid_ticker",
+            message="ticker contains invalid characters",
+            request_id=request_id,
+        )
     return token
 
 
@@ -149,7 +173,9 @@ def _resolve_date_span_days(date_from: str, date_to: str) -> int:
 def _run_identity(request: StartRunRequest) -> Tuple[str, str, str]:
     run_id = str(request.run_id or "").strip()
     ticker = str(request.ticker or "").strip().upper()
-    date_label = str(request.date or f"{request.date_from}_to_{request.date_to}").strip()
+    date_label = str(
+        request.date or f"{request.date_from}_to_{request.date_to}"
+    ).strip()
     return run_id, ticker, date_label
 
 
@@ -183,7 +209,9 @@ def _resolve_idempotency_key(request: Request, *, request_id: str) -> Optional[s
     try:
         return _normalize_idempotency_key(raw)
     except ValueError as exc:
-        _raise(400, code="invalid_idempotency_key", message=str(exc), request_id=request_id)
+        _raise(
+            400, code="invalid_idempotency_key", message=str(exc), request_id=request_id
+        )
     return None
 
 
@@ -222,7 +250,7 @@ def _retry_delay_seconds(*, services: V2Services, attempt: int) -> float:
     base = max(0.05, float(services.job_retry_base_seconds))
     max_delay = max(base, float(services.job_retry_max_delay_seconds))
     exponent = max(0, int(attempt) - 1)
-    return min(max_delay, base * (2 ** exponent))
+    return min(max_delay, base * (2**exponent))
 
 
 def _should_retry_exception(exc: Exception) -> bool:
@@ -246,9 +274,15 @@ def _error_text(exc: Exception) -> str:
     return str(exc)[:2000]
 
 
-def _job_auth_from_record(*, job: Dict[str, Any], fallback: AuthContext, services: V2Services) -> AuthContext:
-    owner_user_id = str(job.get("user_id") or fallback.user_id).strip() or fallback.user_id
-    owner_tenant_id = str(job.get("tenant_id") or fallback.tenant_id).strip() or fallback.tenant_id
+def _job_auth_from_record(
+    *, job: Dict[str, Any], fallback: AuthContext, services: V2Services
+) -> AuthContext:
+    owner_user_id = (
+        str(job.get("user_id") or fallback.user_id).strip() or fallback.user_id
+    )
+    owner_tenant_id = (
+        str(job.get("tenant_id") or fallback.tenant_id).strip() or fallback.tenant_id
+    )
     if owner_user_id == fallback.user_id:
         role = fallback.role
         plan_tier = fallback.plan_tier
@@ -273,7 +307,9 @@ def _job_auth_from_record(*, job: Dict[str, Any], fallback: AuthContext, service
     )
 
 
-def _schedule_job_task(*, services: V2Services, job_id: str, job_coro: Awaitable[None]) -> None:
+def _schedule_job_task(
+    *, services: V2Services, job_id: str, job_coro: Awaitable[None]
+) -> None:
     async def _run() -> None:
         if services.dispatch_lock is None:
             services.dispatch_lock = asyncio.Lock()
@@ -316,7 +352,9 @@ def _dispatch_queued_job_if_needed(
         return
 
     payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
-    request_payload = payload.get("request") if isinstance(payload.get("request"), dict) else {}
+    request_payload = (
+        payload.get("request") if isinstance(payload.get("request"), dict) else {}
+    )
     if not request_payload:
         return
 
@@ -357,7 +395,9 @@ def _dispatch_queued_job_if_needed(
 
 def _enforce_global_backlog_limit(*, services: V2Services, request_id: str) -> None:
     max_backlog = max(1, int(services.max_queue_backlog))
-    queued_heavy = services.store.count_jobs(statuses=("queued",), job_types=HEAVY_JOB_TYPES)
+    queued_heavy = services.store.count_jobs(
+        statuses=("queued",), job_types=HEAVY_JOB_TYPES
+    )
     if queued_heavy >= max_backlog:
         _raise(
             429,
@@ -430,7 +470,12 @@ def _to_bool(value: Any) -> bool:
 def _grace_until_iso(*, now_ts: float, days: int) -> Optional[str]:
     if days <= 0:
         return None
-    return datetime.utcfromtimestamp(now_ts + (days * 86400)).replace(microsecond=0).isoformat() + "Z"
+    return (
+        datetime.utcfromtimestamp(now_ts + (days * 86400))
+        .replace(microsecond=0)
+        .isoformat()
+        + "Z"
+    )
 
 
 def _as_object(value: Any) -> Dict[str, Any]:
@@ -521,9 +566,19 @@ def _is_admin(auth: AuthContext) -> bool:
 def _normalize_profile_scope(value: Any, *, auth: AuthContext, request_id: str) -> str:
     scope = str(value or "user").strip().lower()
     if scope not in {"user", "global"}:
-        _raise(400, code="invalid_scope", message="scope must be 'user' or 'global'", request_id=request_id)
+        _raise(
+            400,
+            code="invalid_scope",
+            message="scope must be 'user' or 'global'",
+            request_id=request_id,
+        )
     if scope == "global" and not _is_admin(auth):
-        _raise(403, code="forbidden", message="Only superuser can manage global strategies", request_id=request_id)
+        _raise(
+            403,
+            code="forbidden",
+            message="Only superuser can manage global strategies",
+            request_id=request_id,
+        )
     return scope
 
 
@@ -542,8 +597,14 @@ def _format_adaptive_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
         "ticker": str(profile.get("ticker") or ""),
         "profile_name": str(profile.get("profile_name") or ""),
         "adaptive_version": int(profile.get("adaptive_version") or 1),
-        "candidate": profile.get("candidate") if isinstance(profile.get("candidate"), dict) else {},
-        "metadata": profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {},
+        "candidate": (
+            profile.get("candidate")
+            if isinstance(profile.get("candidate"), dict)
+            else {}
+        ),
+        "metadata": (
+            profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+        ),
         "owner_user_id": str(profile.get("owner_user_id") or "") or None,
         "owner_tenant_id": str(profile.get("owner_tenant_id") or "") or None,
         "created_at": profile.get("created_at"),
@@ -569,7 +630,9 @@ def _stripe_post(path: str, data: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _verify_stripe_signature(raw_body: bytes, signature_header: str, webhook_secret: str) -> bool:
+def _verify_stripe_signature(
+    raw_body: bytes, signature_header: str, webhook_secret: str
+) -> bool:
     if not webhook_secret:
         return True
     raw_sig = str(signature_header or "").strip()
@@ -588,7 +651,9 @@ def _verify_stripe_signature(raw_body: bytes, signature_header: str, webhook_sec
         return False
 
     signed_payload = f"{timestamp}.".encode("utf-8") + raw_body
-    expected = hmac.new(webhook_secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
+    expected = hmac.new(
+        webhook_secret.encode("utf-8"), signed_payload, hashlib.sha256
+    ).hexdigest()
     return any(hmac.compare_digest(expected, sig) for sig in v1_signatures)
 
 
@@ -687,7 +752,9 @@ def _quota_snapshot(*, auth: AuthContext, services: V2Services) -> Dict[str, Any
     limits = resolve_plan_limits(auth.plan_tier)
     usage = services.store.get_usage_for_day(user_id=auth.user_id)
     active_runs = services.store.count_active_runs(user_id=auth.user_id)
-    active_run_jobs = services.store.count_active_jobs(user_id=auth.user_id, job_types=("run",))
+    active_run_jobs = services.store.count_active_jobs(
+        user_id=auth.user_id, job_types=("run",)
+    )
     active_heavy_jobs = services.store.count_jobs(
         user_id=auth.user_id,
         statuses=("running",),
@@ -725,7 +792,9 @@ def _settings_store_for_user(services: V2Services):
     return services.store
 
 
-def _sync_user_run_statuses(*, auth: AuthContext, services: V2Services, api_services: Any) -> None:
+def _sync_user_run_statuses(
+    *, auth: AuthContext, services: V2Services, api_services: Any
+) -> None:
     active_map = getattr(api_services, "active_runners", {})
     active_keys = set(active_map.keys()) if isinstance(active_map, dict) else set()
     tracked = services.store.list_run_keys_by_user(
@@ -811,7 +880,9 @@ async def _execute_run_job(
                 run_key = str(result.get("run_key") or "").strip() or None
             effective_run_key = run_key or provisional_run_key
 
-            resolved_run_id, resolved_ticker, resolved_date_label = _parse_run_key(effective_run_key)
+            resolved_run_id, resolved_ticker, resolved_date_label = _parse_run_key(
+                effective_run_key
+            )
             services.store.upsert_run(
                 run_key=effective_run_key,
                 user_id=auth.user_id,
@@ -837,11 +908,17 @@ async def _execute_run_job(
             error = _error_text(exc)
             should_retry = attempts < max_attempts and _should_retry_exception(exc)
             if should_retry:
-                services.store.update_run_status(run_key=provisional_run_key, status="queued")
+                services.store.update_run_status(
+                    run_key=provisional_run_key, status="queued"
+                )
                 services.store.update_job(job_id=job_id, status="queued", error=error)
-                await asyncio.sleep(_retry_delay_seconds(services=services, attempt=attempts))
+                await asyncio.sleep(
+                    _retry_delay_seconds(services=services, attempt=attempts)
+                )
                 continue
-            services.store.update_run_status(run_key=provisional_run_key, status="failed")
+            services.store.update_run_status(
+                run_key=provisional_run_key, status="failed"
+            )
             services.store.update_job(job_id=job_id, status="failed", error=error)
             return
 
@@ -877,7 +954,9 @@ async def _execute_adaptive_tuner_job(
             should_retry = attempts < max_attempts and _should_retry_exception(exc)
             if should_retry:
                 services.store.update_job(job_id=job_id, status="queued", error=error)
-                await asyncio.sleep(_retry_delay_seconds(services=services, attempt=attempts))
+                await asyncio.sleep(
+                    _retry_delay_seconds(services=services, attempt=attempts)
+                )
                 continue
             services.store.update_job(job_id=job_id, status="failed", error=error)
             return
@@ -910,6 +989,7 @@ async def _execute_download_job(
                 if coverage.get("fully_covered"):
                     result = {"status": "already_exists", "coverage": coverage}
                 else:
+
                     async def _broadcast(msg: Dict[str, Any]) -> None:
                         broadcaster = getattr(api_services, "broadcast", None)
                         if callable(broadcaster):
@@ -946,7 +1026,9 @@ async def _execute_download_job(
             should_retry = attempts < max_attempts and _should_retry_exception(exc)
             if should_retry:
                 services.store.update_job(job_id=job_id, status="queued", error=error)
-                await asyncio.sleep(_retry_delay_seconds(services=services, attempt=attempts))
+                await asyncio.sleep(
+                    _retry_delay_seconds(services=services, attempt=attempts)
+                )
                 continue
             services.store.update_job(job_id=job_id, status="failed", error=error)
             return
@@ -1017,7 +1099,9 @@ async def v2_usage(
         "plan_tier": auth.plan_tier,
         "quota_snapshot": _quota_snapshot(auth=auth, services=services),
         "feature_flags": {
-            "ads_enabled": bool(services.ads_enabled and resolve_plan_limits(auth.plan_tier).ads_enabled),
+            "ads_enabled": bool(
+                services.ads_enabled and resolve_plan_limits(auth.plan_tier).ads_enabled
+            ),
             "ads_provider": services.ads_provider,
             "ads_placements": list(services.ads_placements),
         },
@@ -1061,7 +1145,9 @@ async def v2_upsert_user_settings(
             patch=payload.settings,
         )
     except ValueError as exc:
-        _raise(400, code="invalid_settings_payload", message=str(exc), request_id=req_id)
+        _raise(
+            400, code="invalid_settings_payload", message=str(exc), request_id=req_id
+        )
     return {
         "request_id": req_id,
         "tenant_id": auth.tenant_id,
@@ -1080,10 +1166,18 @@ async def v2_ops_metrics(
     _enforce_admin_role(auth=auth, request_id=req_id)
 
     max_backlog = max(1, int(services.max_queue_backlog))
-    queued_heavy = services.store.count_jobs(statuses=("queued",), job_types=HEAVY_JOB_TYPES)
-    running_heavy = services.store.count_jobs(statuses=("running",), job_types=HEAVY_JOB_TYPES)
-    failed_heavy = services.store.count_jobs(statuses=("failed",), job_types=HEAVY_JOB_TYPES)
-    completed_heavy = services.store.count_jobs(statuses=("completed",), job_types=HEAVY_JOB_TYPES)
+    queued_heavy = services.store.count_jobs(
+        statuses=("queued",), job_types=HEAVY_JOB_TYPES
+    )
+    running_heavy = services.store.count_jobs(
+        statuses=("running",), job_types=HEAVY_JOB_TYPES
+    )
+    failed_heavy = services.store.count_jobs(
+        statuses=("failed",), job_types=HEAVY_JOB_TYPES
+    )
+    completed_heavy = services.store.count_jobs(
+        statuses=("completed",), job_types=HEAVY_JOB_TYPES
+    )
     finished_heavy = failed_heavy + completed_heavy
     fail_rate = (failed_heavy / finished_heavy) if finished_heavy > 0 else 0.0
 
@@ -1103,7 +1197,9 @@ async def v2_ops_metrics(
     raw_db_path = str(getattr(services.store, "db_path", "") or "").strip()
     db_path = Path(raw_db_path) if raw_db_path else None
     db_exists = bool(db_path and db_path.exists())
-    db_size_bytes = int(db_path.stat().st_size) if db_exists and db_path is not None else 0
+    db_size_bytes = (
+        int(db_path.stat().st_size) if db_exists and db_path is not None else 0
+    )
 
     return {
         "request_id": req_id,
@@ -1143,7 +1239,11 @@ async def v2_list_adaptive_strategies(
     services: V2Services = Depends(get_v2_services),
 ):
     req_id = _request_id(request)
-    normalized_ticker = _normalize_ticker(ticker, request_id=req_id) if str(ticker or "").strip() else None
+    normalized_ticker = (
+        _normalize_ticker(ticker, request_id=req_id)
+        if str(ticker or "").strip()
+        else None
+    )
     profiles = services.store.list_adaptive_strategy_profiles(
         user_id=auth.user_id,
         tenant_id=auth.tenant_id,
@@ -1170,17 +1270,40 @@ async def v2_upsert_adaptive_strategy(
 ):
     req_id = _request_id(request)
     normalized_ticker = _normalize_ticker(payload.ticker, request_id=req_id)
-    normalized_scope = _normalize_profile_scope(payload.scope, auth=auth, request_id=req_id)
+    normalized_scope = _normalize_profile_scope(
+        payload.scope, auth=auth, request_id=req_id
+    )
     profile_name = str(payload.profile_name or "").strip()
     if not profile_name:
-        _raise(400, code="invalid_profile_name", message="profile_name is required", request_id=req_id)
+        _raise(
+            400,
+            code="invalid_profile_name",
+            message="profile_name is required",
+            request_id=req_id,
+        )
 
     profile_id = str(payload.profile_id or "").strip() or None
-    existing = services.store.get_adaptive_strategy_profile(profile_id=profile_id) if profile_id else None
+    existing = (
+        services.store.get_adaptive_strategy_profile(profile_id=profile_id)
+        if profile_id
+        else None
+    )
     if profile_id and not existing:
-        _raise(404, code="profile_not_found", message="Adaptive strategy profile not found", request_id=req_id)
-    if isinstance(existing, dict) and not _can_manage_adaptive_profile(profile=existing, auth=auth):
-        _raise(403, code="forbidden", message="Profile does not belong to current user", request_id=req_id)
+        _raise(
+            404,
+            code="profile_not_found",
+            message="Adaptive strategy profile not found",
+            request_id=req_id,
+        )
+    if isinstance(existing, dict) and not _can_manage_adaptive_profile(
+        profile=existing, auth=auth
+    ):
+        _raise(
+            403,
+            code="forbidden",
+            message="Profile does not belong to current user",
+            request_id=req_id,
+        )
 
     if not _is_admin(auth):
         normalized_scope = "user"
@@ -1218,13 +1341,28 @@ async def v2_delete_adaptive_strategy(
     req_id = _request_id(request)
     target = services.store.get_adaptive_strategy_profile(profile_id=profile_id)
     if not isinstance(target, dict):
-        _raise(404, code="profile_not_found", message="Adaptive strategy profile not found", request_id=req_id)
+        _raise(
+            404,
+            code="profile_not_found",
+            message="Adaptive strategy profile not found",
+            request_id=req_id,
+        )
     if not _can_manage_adaptive_profile(profile=target, auth=auth):
-        _raise(403, code="forbidden", message="Profile does not belong to current user", request_id=req_id)
+        _raise(
+            403,
+            code="forbidden",
+            message="Profile does not belong to current user",
+            request_id=req_id,
+        )
 
     deleted = services.store.delete_adaptive_strategy_profile(profile_id=profile_id)
     if not deleted:
-        _raise(404, code="profile_not_found", message="Adaptive strategy profile not found", request_id=req_id)
+        _raise(
+            404,
+            code="profile_not_found",
+            message="Adaptive strategy profile not found",
+            request_id=req_id,
+        )
 
     return {
         "request_id": req_id,
@@ -1244,7 +1382,12 @@ async def v2_billing_checkout(
     req_id = _request_id(request)
     plan = str(payload.plan_tier or "premium").strip().lower()
     if plan != "premium":
-        _raise(400, code="invalid_plan", message="Only premium checkout is supported", request_id=req_id)
+        _raise(
+            400,
+            code="invalid_plan",
+            message="Only premium checkout is supported",
+            request_id=req_id,
+        )
 
     try:
         session = _stripe_post(
@@ -1253,7 +1396,8 @@ async def v2_billing_checkout(
                 "mode": "subscription",
                 "success_url": payload.success_url,
                 "cancel_url": payload.cancel_url,
-                "line_items[0][price]": payload.price_id or str(os.getenv("STRIPE_PREMIUM_PRICE_ID") or "").strip(),
+                "line_items[0][price]": payload.price_id
+                or str(os.getenv("STRIPE_PREMIUM_PRICE_ID") or "").strip(),
                 "line_items[0][quantity]": "1",
                 "client_reference_id": auth.user_id,
                 "metadata[user_id]": auth.user_id,
@@ -1284,14 +1428,22 @@ async def v2_billing_portal(
     req_id = _request_id(request)
     customer_id = services.store.get_stripe_customer_id(user_id=auth.user_id)
     if not customer_id:
-        _raise(404, code="customer_not_found", message="No Stripe customer linked for user", request_id=req_id)
+        _raise(
+            404,
+            code="customer_not_found",
+            message="No Stripe customer linked for user",
+            request_id=req_id,
+        )
 
     try:
         session = _stripe_post(
             "/v1/billing_portal/sessions",
             {
                 "customer": customer_id,
-                "return_url": payload.return_url or str(os.getenv("BILLING_PORTAL_RETURN_URL") or "http://localhost:5173"),
+                "return_url": payload.return_url
+                or str(
+                    os.getenv("BILLING_PORTAL_RETURN_URL") or "http://localhost:5173"
+                ),
             },
         )
     except Exception as exc:
@@ -1315,15 +1467,30 @@ async def v2_billing_webhook_stripe(
     signature = request.headers.get("Stripe-Signature", "")
 
     if not _verify_stripe_signature(raw, signature, _stripe_webhook_secret()):
-        _raise(401, code="invalid_signature", message="Invalid Stripe signature", request_id=req_id)
+        _raise(
+            401,
+            code="invalid_signature",
+            message="Invalid Stripe signature",
+            request_id=req_id,
+        )
 
     try:
         event = json.loads(raw.decode("utf-8"))
     except Exception:
-        _raise(400, code="invalid_json", message="Webhook payload is not valid JSON", request_id=req_id)
+        _raise(
+            400,
+            code="invalid_json",
+            message="Webhook payload is not valid JSON",
+            request_id=req_id,
+        )
 
     if not isinstance(event, dict):
-        _raise(400, code="invalid_payload", message="Webhook payload must be JSON object", request_id=req_id)
+        _raise(
+            400,
+            code="invalid_payload",
+            message="Webhook payload must be JSON object",
+            request_id=req_id,
+        )
 
     event_id = str(event.get("id") or "").strip() or f"evt_{uuid4().hex}"
     inserted = services.store.mark_webhook_event_processed(
@@ -1344,20 +1511,29 @@ async def v2_billing_webhook_stripe(
     metadata = _as_object(data_object.get("metadata"))
     user_id = str(metadata.get("user_id") or "").strip()
     customer_id = str(data_object.get("customer") or "").strip() or None
-    subscription_id = str(data_object.get("subscription") or data_object.get("id") or "").strip() or None
+    subscription_id = (
+        str(data_object.get("subscription") or data_object.get("id") or "").strip()
+        or None
+    )
 
     if not user_id and customer_id:
         user_id = services.store.find_user_id_by_stripe_customer(customer_id) or ""
     if not user_id and subscription_id:
-        user_id = services.store.find_user_id_by_stripe_subscription(subscription_id) or ""
+        user_id = (
+            services.store.find_user_id_by_stripe_subscription(subscription_id) or ""
+        )
     stripe_status = str(data_object.get("status") or "").strip().lower()
     cancel_at_period_end = _to_bool(data_object.get("cancel_at_period_end"))
     current_period_end = _to_utc_iso_from_unix(data_object.get("current_period_end"))
     now_ts = time.time()
     grace_until = _grace_until_iso(now_ts=now_ts, days=_billing_grace_days())
-    previous_subscription = services.store.get_subscription(user_id=user_id) if user_id else None
+    previous_subscription = (
+        services.store.get_subscription(user_id=user_id) if user_id else None
+    )
     previous_plan_tier = (
-        services.store.get_effective_plan(user_id=user_id, claim_plan_tier="free", role="free")
+        services.store.get_effective_plan(
+            user_id=user_id, claim_plan_tier="free", role="free"
+        )
         if user_id
         else None
     )
@@ -1371,11 +1547,20 @@ async def v2_billing_webhook_stripe(
 
     if isinstance(previous_subscription, dict):
         if not customer_id:
-            customer_id = str(previous_subscription.get("stripe_customer_id") or "").strip() or None
+            customer_id = (
+                str(previous_subscription.get("stripe_customer_id") or "").strip()
+                or None
+            )
         if not subscription_id:
-            subscription_id = str(previous_subscription.get("stripe_subscription_id") or "").strip() or None
+            subscription_id = (
+                str(previous_subscription.get("stripe_subscription_id") or "").strip()
+                or None
+            )
         if not current_period_end:
-            current_period_end = str(previous_subscription.get("current_period_end") or "").strip() or None
+            current_period_end = (
+                str(previous_subscription.get("current_period_end") or "").strip()
+                or None
+            )
 
     if user_id:
         if event_type == "checkout.session.completed":
@@ -1392,7 +1577,10 @@ async def v2_billing_webhook_stripe(
             )
             handled = True
             note = "checkout_completed"
-        elif event_type in {"customer.subscription.created", "customer.subscription.updated"}:
+        elif event_type in {
+            "customer.subscription.created",
+            "customer.subscription.updated",
+        }:
             if stripe_status in {"active", "trialing"}:
                 plan_tier = "premium"
                 status = "active"
@@ -1418,7 +1606,9 @@ async def v2_billing_webhook_stripe(
                 stripe_subscription_id=subscription_id,
                 current_period_end=current_period_end,
                 cancel_at_period_end=cancel_at_period_end,
-                scheduled_plan_tier="free" if (cancel_at_period_end or status == "canceled") else None,
+                scheduled_plan_tier=(
+                    "free" if (cancel_at_period_end or status == "canceled") else None
+                ),
                 grace_until=applied_grace_until,
             )
             handled = True
@@ -1451,7 +1641,10 @@ async def v2_billing_webhook_stripe(
             )
             handled = True
             note = "invoice_payment_succeeded"
-        elif event_type in {"customer.subscription.deleted", "customer.subscription.paused"}:
+        elif event_type in {
+            "customer.subscription.deleted",
+            "customer.subscription.paused",
+        }:
             services.store.upsert_subscription(
                 user_id=user_id,
                 plan_tier="premium",
@@ -1468,9 +1661,13 @@ async def v2_billing_webhook_stripe(
     else:
         note = "unmatched_user"
 
-    next_subscription = services.store.get_subscription(user_id=user_id) if user_id else None
+    next_subscription = (
+        services.store.get_subscription(user_id=user_id) if user_id else None
+    )
     next_plan_tier = (
-        services.store.get_effective_plan(user_id=user_id, claim_plan_tier="free", role="free")
+        services.store.get_effective_plan(
+            user_id=user_id, claim_plan_tier="free", role="free"
+        )
         if user_id
         else None
     )
@@ -1511,7 +1708,12 @@ async def v2_create_run(
     req_id = _request_id(request)
     api_services = getattr(request.app.state, "api_services", None)
     if api_services is None:
-        _raise(500, code="service_unavailable", message="Core API services unavailable", request_id=req_id)
+        _raise(
+            500,
+            code="service_unavailable",
+            message="Core API services unavailable",
+            request_id=req_id,
+        )
     _enforce_heavy_ops_enabled(auth=auth, request_id=req_id)
     idempotency_key = _resolve_idempotency_key(request, request_id=req_id)
     existing_job = _maybe_idempotent_job(
@@ -1595,7 +1797,7 @@ async def v2_create_run(
             job_id=job_id,
             services=services,
             api_services=api_services,
-        )
+        ),
     )
 
     return {
@@ -1620,7 +1822,12 @@ async def v2_run_adaptive_tuner(
     req_id = _request_id(request)
     api_services = getattr(request.app.state, "api_services", None)
     if api_services is None:
-        _raise(500, code="service_unavailable", message="Core API services unavailable", request_id=req_id)
+        _raise(
+            500,
+            code="service_unavailable",
+            message="Core API services unavailable",
+            request_id=req_id,
+        )
     _enforce_heavy_ops_enabled(auth=auth, request_id=req_id)
     idempotency_key = _resolve_idempotency_key(request, request_id=req_id)
     existing_job = _maybe_idempotent_job(
@@ -1676,9 +1883,13 @@ async def v2_run_adaptive_tuner(
         payload={"request": body},
         status="queued",
         idempotency_key=idempotency_key,
-        max_attempts=_resolve_job_max_attempts(services=services, job_type="adaptive_tuner"),
+        max_attempts=_resolve_job_max_attempts(
+            services=services, job_type="adaptive_tuner"
+        ),
     )
-    services.store.increment_usage(user_id=auth.user_id, metric="adaptive_tuner_requests")
+    services.store.increment_usage(
+        user_id=auth.user_id, metric="adaptive_tuner_requests"
+    )
 
     _schedule_job_task(
         services=services,
@@ -1689,7 +1900,7 @@ async def v2_run_adaptive_tuner(
             job_id=job_id,
             services=services,
             api_services=api_services,
-        )
+        ),
     )
 
     return {
@@ -1713,7 +1924,12 @@ async def v2_download_data(
     req_id = _request_id(request)
     api_services = getattr(request.app.state, "api_services", None)
     if api_services is None:
-        _raise(500, code="service_unavailable", message="Core API services unavailable", request_id=req_id)
+        _raise(
+            500,
+            code="service_unavailable",
+            message="Core API services unavailable",
+            request_id=req_id,
+        )
     _enforce_heavy_ops_enabled(auth=auth, request_id=req_id)
     idempotency_key = _resolve_idempotency_key(request, request_id=req_id)
     existing_job = _maybe_idempotent_job(
@@ -1770,7 +1986,7 @@ async def v2_download_data(
             job_id=job_id,
             services=services,
             api_services=api_services,
-        )
+        ),
     )
 
     return {
@@ -1803,7 +2019,12 @@ async def v2_get_job(
     owner_id = str(job.get("user_id") or "")
     is_admin = auth.role == "admin" or auth.plan_tier == "admin"
     if owner_id and owner_id != auth.user_id and not is_admin:
-        _raise(403, code="forbidden", message="Job does not belong to current user", request_id=req_id)
+        _raise(
+            403,
+            code="forbidden",
+            message="Job does not belong to current user",
+            request_id=req_id,
+        )
 
     if api_services is not None:
         _dispatch_queued_job_if_needed(

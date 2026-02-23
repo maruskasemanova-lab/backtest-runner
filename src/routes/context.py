@@ -21,7 +21,9 @@ class ApiServices:
     build_strategy_combo_options_payload: Callable[[str], Dict[str, Any]]
     load_aos_config: Callable[[], Dict[str, Any]]
     load_positioning_config: Callable[[], Dict[str, Any]]
-    merge_positioning_into_aos_snapshot: Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
+    merge_positioning_into_aos_snapshot: Callable[
+        [Dict[str, Any], Dict[str, Any]], Dict[str, Any]
+    ]
     get_ticker_positioning_config: Callable[[str], Dict[str, Any]]
     positioning_config_keys: Any
     build_adaptive_tuner_options_payload: Callable[[str], Dict[str, Any]]

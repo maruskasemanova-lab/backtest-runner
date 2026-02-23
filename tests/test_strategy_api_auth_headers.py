@@ -26,7 +26,9 @@ def test_build_strategy_api_headers_prefers_explicit_env(monkeypatch):
     assert headers == {"x-internal-token": "explicit-token"}
 
 
-def test_build_strategy_api_headers_reads_token_from_env_file(monkeypatch, tmp_path: Path):
+def test_build_strategy_api_headers_reads_token_from_env_file(
+    monkeypatch, tmp_path: Path
+):
     _clear_token_env(monkeypatch)
     env_file = tmp_path / "strategy.env"
     env_file.write_text("STRATEGY_INTERNAL_API_TOKEN=file-token\n", encoding="utf-8")

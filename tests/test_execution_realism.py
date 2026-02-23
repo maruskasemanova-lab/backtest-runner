@@ -9,7 +9,12 @@ STRATEGY_ROOT = PROJECT_ROOT.parent / "market_regime_detection"
 sys.path.insert(0, str(STRATEGY_ROOT))
 sys.modules.pop("src", None)
 
-from src.day_trading_manager import BarData, DayTradingManager, SessionPhase, TradingCosts  # noqa: E402
+from src.day_trading_manager import (
+    BarData,
+    DayTradingManager,
+    SessionPhase,
+    TradingCosts,
+)  # noqa: E402
 from src.strategies.base_strategy import Signal, SignalType  # noqa: E402
 
 
@@ -26,7 +31,13 @@ class ExecutionRealismTests(unittest.TestCase):
         session.pending_signal = None
         return manager, session
 
-    def _open_long_position(self, manager: DayTradingManager, session, ts: datetime, bar_volume: float = 5000.0):
+    def _open_long_position(
+        self,
+        manager: DayTradingManager,
+        session,
+        ts: datetime,
+        bar_volume: float = 5000.0,
+    ):
         signal = Signal(
             strategy_name="MomentumFlow",
             signal_type=SignalType.BUY,
@@ -84,7 +95,7 @@ class ExecutionRealismTests(unittest.TestCase):
             ts=datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc),
             bar_volume=500.0,
         )
-        # Risk sizing suggests ~100 shares, but 10% of 500 shares/bar caps fill to 50.
+        # Fixed-notional sizing suggests 100 shares, but 10% of 500 shares/bar caps fill to 50.
         self.assertAlmostEqual(pos.size, 50.0, places=3)
         self.assertAlmostEqual(pos.fill_ratio, 0.5, places=3)
 
@@ -174,7 +185,38 @@ class ExecutionRealismTests(unittest.TestCase):
         )
         self.assertAlmostEqual(wide_pos.stop_loss, 99.5, places=4)
 
-    def test_position_size_scales_down_for_low_source_agreement(self):
+    def test_context_risk_bypasses_capped_stop_and_respects_floor(self):
+        manager, session = self._build_manager_session()
+        session.stop_loss_mode = "capped"
+        session.fixed_stop_loss_pct = 0.24
+        session.max_fill_participation_rate = 1.0
+        session.min_fill_ratio = 1.0
+        ts = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
+
+        signal = Signal(
+            strategy_name="MomentumFlow",
+            signal_type=SignalType.BUY,
+            price=100.0,
+            timestamp=ts,
+            confidence=80.0,
+            stop_loss=99.92,
+            take_profit=103.0,
+            trailing_stop=False,
+            reasoning="context-risk-floor",
+            metadata={"context_risk": {"skip": False, "configured_min_sl_pct": 0.30}},
+        )
+        pos = manager._open_position(
+            session=session,
+            signal=signal,
+            entry_price=100.0,
+            entry_time=ts,
+            signal_bar_index=0,
+            entry_bar_index=0,
+            entry_bar_volume=50_000.0,
+        )
+        self.assertAlmostEqual(pos.stop_loss, 99.7, places=4)
+
+    def test_position_size_uses_fixed_notional_regardless_of_source_agreement(self):
         manager, session = self._build_manager_session()
         session.account_size_usd = 10_000.0
         session.risk_per_trade_pct = 1.0
@@ -203,9 +245,14 @@ class ExecutionRealismTests(unittest.TestCase):
             metadata={"layer_scores": {"confirming_sources": 3}},
         )
 
-        low_size = manager._calculate_position_size(session, low_agreement_signal, 100.0)
-        high_size = manager._calculate_position_size(session, high_agreement_signal, 100.0)
-        self.assertLess(low_size, high_size)
+        low_size = manager._calculate_position_size(
+            session, low_agreement_signal, 100.0
+        )
+        high_size = manager._calculate_position_size(
+            session, high_agreement_signal, 100.0
+        )
+        self.assertEqual(low_size, high_size)
+        self.assertAlmostEqual(low_size, 100.0, places=3)
 
     def test_time_exit_closes_stale_position(self):
         manager, session = self._build_manager_session()
@@ -271,7 +318,9 @@ class ExecutionRealismTests(unittest.TestCase):
         result = manager._process_trading_bar(session, bars[-1], bars[-1].timestamp)
 
         self.assertEqual(result.get("action"), "position_closed_adverse_flow")
-        self.assertEqual(result.get("trade_closed", {}).get("exit_reason"), "adverse_flow")
+        self.assertEqual(
+            result.get("trade_closed", {}).get("exit_reason"), "adverse_flow"
+        )
         self.assertIsNone(session.active_position)
 
     def test_intrabar_quotes_can_resolve_tp_before_later_stop(self):
@@ -297,13 +346,15 @@ class ExecutionRealismTests(unittest.TestCase):
             intrabar_quotes_1s=[
                 {"s": 5, "bid": 100.2, "ask": 100.3},
                 {"s": 12, "bid": 101.05, "ask": 101.1},  # TP hit first for long exit.
-                {"s": 45, "bid": 98.95, "ask": 99.0},    # Stop would hit later.
+                {"s": 45, "bid": 98.95, "ask": 99.0},  # Stop would hit later.
             ],
         )
 
         result = manager._process_trading_bar(session, bar, bar.timestamp)
         self.assertEqual(result.get("action"), "position_closed_take_profit")
-        self.assertEqual(result.get("trade_closed", {}).get("exit_reason"), "take_profit")
+        self.assertEqual(
+            result.get("trade_closed", {}).get("exit_reason"), "take_profit"
+        )
         self.assertIsNone(session.active_position)
 
     def test_intrabar_quotes_same_second_conflict_keeps_conservative_stop(self):

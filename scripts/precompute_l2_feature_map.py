@@ -33,7 +33,9 @@ def _iter_days(start_day: datetime, end_day: datetime) -> Iterable[datetime]:
 def _feature_rows(feature_map: Dict[int, Dict[str, object]]) -> List[Dict[str, object]]:
     rows: List[Dict[str, object]] = []
     for minute_key in sorted(feature_map.keys()):
-        features = feature_map[minute_key] if isinstance(feature_map[minute_key], dict) else {}
+        features = (
+            feature_map[minute_key] if isinstance(feature_map[minute_key], dict) else {}
+        )
         row: Dict[str, object] = {"minute_key": int(minute_key)}
         row.update(features)
         rows.append(row)
@@ -45,8 +47,12 @@ def main() -> int:
         description="Precompute daily L2 minute feature maps for faster run start.",
     )
     parser.add_argument("--ticker", required=True, help="Ticker symbol (e.g. MU)")
-    parser.add_argument("--start-date", required=True, help="Inclusive start date (YYYY-MM-DD)")
-    parser.add_argument("--end-date", required=True, help="Inclusive end date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--start-date", required=True, help="Inclusive start date (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--end-date", required=True, help="Inclusive end date (YYYY-MM-DD)"
+    )
     parser.add_argument(
         "--data-dir",
         default="",
@@ -104,7 +110,9 @@ def main() -> int:
             continue
 
         start_dt = datetime.combine(day.date(), time(0, 0, 0), tzinfo=timezone.utc)
-        end_dt = datetime.combine(day.date(), time(23, 59, 59, 999999), tzinfo=timezone.utc)
+        end_dt = datetime.combine(
+            day.date(), time(23, 59, 59, 999999), tzinfo=timezone.utc
+        )
 
         feature_map, stats = service.build_feature_map(
             ticker=ticker,

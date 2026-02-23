@@ -17,7 +17,9 @@ def _build_services(*, l2_manager) -> ApiServices:
         l2_manager=l2_manager,
         l2_features=SimpleNamespace(),
         active_runners={},
-        databento_svc=SimpleNamespace(get_available_data_summary=lambda refresh=False: {}),
+        databento_svc=SimpleNamespace(
+            get_available_data_summary=lambda refresh=False: {}
+        ),
         logger=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None),
         get_live_trader_artifacts_dir=lambda: None,
         live_run_active_window_seconds=60,
@@ -59,11 +61,36 @@ def test_get_icebergs_filters_ranks_and_limits_results():
 
         def detect_icebergs(self, _ticker, _start_dt, _end_dt):
             return [
-                {"id": "a", "time": "2026-02-13T14:30:01Z", "trade_size": 220, "hidden_size": 210},
-                {"id": "b", "time": "2026-02-13T14:31:01Z", "trade_size": 650, "hidden_size": 150},
-                {"id": "c", "time": "2026-02-13T14:32:01Z", "trade_size": 900, "hidden_size": 500},
-                {"id": "d", "time": "2026-02-13T14:33:01Z", "trade_size": 800, "hidden_size": 400},
-                {"id": "e", "time": "2026-02-13T14:34:01Z", "trade_size": 700, "hidden_size": 300},
+                {
+                    "id": "a",
+                    "time": "2026-02-13T14:30:01Z",
+                    "trade_size": 220,
+                    "hidden_size": 210,
+                },
+                {
+                    "id": "b",
+                    "time": "2026-02-13T14:31:01Z",
+                    "trade_size": 650,
+                    "hidden_size": 150,
+                },
+                {
+                    "id": "c",
+                    "time": "2026-02-13T14:32:01Z",
+                    "trade_size": 900,
+                    "hidden_size": 500,
+                },
+                {
+                    "id": "d",
+                    "time": "2026-02-13T14:33:01Z",
+                    "trade_size": 800,
+                    "hidden_size": 400,
+                },
+                {
+                    "id": "e",
+                    "time": "2026-02-13T14:34:01Z",
+                    "trade_size": 700,
+                    "hidden_size": 300,
+                },
             ]
 
     manager = _L2Manager()
@@ -93,9 +120,24 @@ def test_get_icebergs_time_limit_keeps_latest_events():
 
         def detect_icebergs(self, _ticker, _start_dt, _end_dt):
             return [
-                {"id": "a", "time": "2026-02-13T14:30:01Z", "trade_size": 100, "hidden_size": 40},
-                {"id": "b", "time": "2026-02-13T14:31:01Z", "trade_size": 120, "hidden_size": 50},
-                {"id": "c", "time": "2026-02-13T14:32:01Z", "trade_size": 130, "hidden_size": 60},
+                {
+                    "id": "a",
+                    "time": "2026-02-13T14:30:01Z",
+                    "trade_size": 100,
+                    "hidden_size": 40,
+                },
+                {
+                    "id": "b",
+                    "time": "2026-02-13T14:31:01Z",
+                    "trade_size": 120,
+                    "hidden_size": 50,
+                },
+                {
+                    "id": "c",
+                    "time": "2026-02-13T14:32:01Z",
+                    "trade_size": 130,
+                    "hidden_size": 60,
+                },
             ]
 
     client = _build_client(l2_manager=_L2Manager())

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-02-12",
+  "updated_at": "2026-02-20",
   "stories": [
     {
       "id": "ER-01",
@@ -205,7 +205,7 @@
       "title": "api_server decomposition to routes/services",
       "priority": "P1",
       "domain": "orchestration",
-      "status": "in_progress",
+      "status": "completed",
       "files": [
         "api_server.py",
         "src/routes",
@@ -225,7 +225,7 @@
       "title": "Expose execution controls in UI",
       "priority": "P2",
       "domain": "frontend",
-      "status": "todo",
+      "status": "completed",
       "files": [
         "frontend/src/components/RunConfig.jsx",
         "frontend/src/App.jsx"
@@ -241,7 +241,7 @@
       "title": "L2 diagnostics panel",
       "priority": "P2",
       "domain": "frontend",
-      "status": "todo",
+      "status": "completed",
       "files": [
         "frontend/src/components/DecisionPanel.jsx",
         "frontend/src/components/SessionSummary.jsx"
@@ -265,6 +265,138 @@
         "Marker details support partial_take_profit and adverse_flow exits."
       ],
       "prompt_seed": "Extend marker detail renderer for new exit/cost fields."
+    },
+    {
+      "id": "BR-01",
+      "epic": "EPIC-06",
+      "title": "Decompose execution config resolver",
+      "priority": "P0",
+      "domain": "orchestration",
+      "status": "in_progress",
+      "files": [
+        "src/services/start_run_execution_config_service.py",
+        "src/services/start_run_service.py",
+        "src/models/run_requests.py"
+      ],
+      "acceptance": [
+        "Execution config resolution is split into focused sub-resolvers with a compatibility wrapper.",
+        "Runner -> strategy session config payload remains backward compatible.",
+        "Orchestration regression tests remain green."
+      ],
+      "prompt_seed": "Refactor start run execution config resolver into composable modules while preserving existing API contracts."
+    },
+    {
+      "id": "BR-02",
+      "epic": "EPIC-06",
+      "title": "Split start_run into deterministic phases",
+      "priority": "P0",
+      "domain": "orchestration",
+      "status": "todo",
+      "files": [
+        "src/services/start_run_service.py",
+        "src/services/start_run_data_service.py",
+        "src/routes/run_start_routes.py"
+      ],
+      "acceptance": [
+        "start_run orchestration is phased with explicit handoff state objects.",
+        "Run start responses and start_timing diagnostics remain unchanged.",
+        "No-lookahead behavior in bar processing is unaffected."
+      ],
+      "prompt_seed": "Split monolithic start_run flow into deterministic phase modules without changing output behavior."
+    },
+    {
+      "id": "BR-03",
+      "epic": "EPIC-06",
+      "title": "Extract marker and summary builders",
+      "priority": "P0",
+      "domain": "orchestration",
+      "status": "todo",
+      "files": [
+        "session_runner.py",
+        "decision_tracker.py",
+        "tests/test_session_runner_markers.py"
+      ],
+      "acceptance": [
+        "Marker payload builders are moved into isolated services with stable contracts.",
+        "Decision marker schema parity is preserved for existing frontend consumers.",
+        "Session marker regression tests remain green."
+      ],
+      "prompt_seed": "Refactor session_runner marker/summary logic into dedicated services with schema parity tests."
+    },
+    {
+      "id": "BR-04",
+      "epic": "EPIC-06",
+      "title": "Decompose strategy runtime pipeline",
+      "priority": "P0",
+      "domain": "strategy-engine",
+      "status": "todo",
+      "files": [
+        "../market_regime_detection/src/day_trading_runtime_impl.py",
+        "../market_regime_detection/src/day_trading_manager.py"
+      ],
+      "acceptance": [
+        "Runtime pipeline is split into bar orchestration, entry-quality gating, and position transition modules.",
+        "No same-bar signal execution invariant is explicitly guarded.",
+        "Strategy reset/checkpoint tests remain green."
+      ],
+      "prompt_seed": "Refactor day_trading_runtime_impl into composable runtime modules while keeping execution causality unchanged."
+    },
+    {
+      "id": "BR-05",
+      "epic": "EPIC-06",
+      "title": "Decompose regime and exit policy blocks",
+      "priority": "P1",
+      "domain": "strategy-engine",
+      "status": "todo",
+      "files": [
+        "../market_regime_detection/src/day_trading_regime_impl.py",
+        "../market_regime_detection/src/exit_policy_engine.py",
+        "../market_regime_detection/src/context_aware_risk.py"
+      ],
+      "acceptance": [
+        "Regime scoring/selection and exit policy decisions are extracted into smaller policy units.",
+        "Closed-trade payload and diagnostics fields remain backward compatible.",
+        "Strategy engine regression tests remain green."
+      ],
+      "prompt_seed": "Break large regime and exit policy functions into deterministic policy units with unchanged outputs."
+    },
+    {
+      "id": "BR-06",
+      "epic": "EPIC-06",
+      "title": "Split data and L2 orchestration services",
+      "priority": "P1",
+      "domain": "data-l2",
+      "status": "todo",
+      "files": [
+        "src/databento_service.py",
+        "src/l2_data_manager.py",
+        "src/routes/system_routes.py"
+      ],
+      "acceptance": [
+        "Databento catalog/download/range logic is separated from route and summary assembly.",
+        "L2 loading/sessionization behavior remains no-lookahead and coverage-compatible.",
+        "Data/L2 regression tests remain green."
+      ],
+      "prompt_seed": "Refactor databento and L2 managers into dedicated services with stable range and coverage behavior."
+    },
+    {
+      "id": "BR-07",
+      "epic": "EPIC-06",
+      "title": "Normalize large strategy signal modules",
+      "priority": "P2",
+      "domain": "strategy-engine",
+      "status": "todo",
+      "files": [
+        "../market_regime_detection/src/strategies/vwap_magnet.py",
+        "../market_regime_detection/src/strategies/volume_profile.py",
+        "../market_regime_detection/src/strategies/gap_liquidity.py"
+      ],
+      "acceptance": [
+        "Large generate_signal implementations are split into reusable helper slices.",
+        "Strategy output decisions remain behaviorally equivalent for unchanged config.",
+        "Per-strategy regression tests are added or updated."
+      ],
+      "prompt_seed": "Refactor large strategy generate_signal methods into shared helpers while preserving behavior."
     }
   ]
 }

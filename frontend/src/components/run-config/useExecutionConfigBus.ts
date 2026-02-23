@@ -3,6 +3,27 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 const EXEC_CONFIG_SNAPSHOT_EVENT = "execution-config-snapshot";
 const EXEC_CONFIG_SNAPSHOT_REQUEST_EVENT = "execution-config-snapshot-request";
 const EXEC_MODULE_TOGGLE_EVENT = "execution-module-toggle";
+const DEFAULT_FIXED_STOP_LOSS_PCT = 0.3;
+
+const normalizeStopLossMode = (value: unknown): "strategy" | "fixed" | "capped" => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "fixed" || normalized === "capped") {
+    return normalized;
+  }
+  return "strategy";
+};
+
+const resolveFixedStopLossPct = (mode: unknown, value: unknown): number => {
+  const normalizedMode = normalizeStopLossMode(mode);
+  const parsed = Number(value);
+  if (normalizedMode === "strategy") {
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  }
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_FIXED_STOP_LOSS_PCT;
+  }
+  return parsed;
+};
 
 const isSupportedExecutionValue = (value: unknown): value is string | number | boolean => {
   return (
@@ -27,7 +48,26 @@ export const useExecutionConfigBus = <T extends Record<string, any>>(
       if (typeof configKey !== "string" || !isSupportedExecutionValue(value)) {
         return;
       }
-      setConfig((prev) => ({ ...prev, [configKey]: value }));
+      setConfig((prev) => {
+        if (configKey === "stop_loss_mode") {
+          const nextStopLossMode = normalizeStopLossMode(value);
+          return {
+            ...prev,
+            stop_loss_mode: nextStopLossMode,
+            fixed_stop_loss_pct: resolveFixedStopLossPct(
+              nextStopLossMode,
+              prev.fixed_stop_loss_pct,
+            ),
+          };
+        }
+        if (configKey === "fixed_stop_loss_pct") {
+          return {
+            ...prev,
+            fixed_stop_loss_pct: resolveFixedStopLossPct(prev.stop_loss_mode, value),
+          };
+        }
+        return { ...prev, [configKey]: value };
+      });
     };
 
     const handleSnapshotRequest = () => {

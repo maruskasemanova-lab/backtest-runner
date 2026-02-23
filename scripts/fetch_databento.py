@@ -52,7 +52,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def next_day(date_str: str) -> str:
-    return (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    return (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime(
+        "%Y-%m-%d"
+    )
 
 
 def main() -> None:
@@ -75,7 +77,9 @@ def main() -> None:
 
     tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     end_date = args.end_date
-    end_exclusive = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    end_exclusive = (
+        datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+    ).strftime("%Y-%m-%d")
 
     for ticker in tickers:
         existing_range = discovery.get_date_range(ticker)

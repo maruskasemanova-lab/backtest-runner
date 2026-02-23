@@ -63,7 +63,9 @@ def _is_missing_data_error(errors: List[str]) -> bool:
 
 
 async def run_audit(args: argparse.Namespace) -> Dict[str, Any]:
-    tester = StrategyTester(api_url=args.api_url, strategy_api_url=args.strategy_api_url)
+    tester = StrategyTester(
+        api_url=args.api_url, strategy_api_url=args.strategy_api_url
+    )
     dates = _iter_dates(args.start_date, args.end_date, skip_friday=args.skip_friday)
 
     start_overrides = {
@@ -140,11 +142,15 @@ async def run_audit(args: argparse.Namespace) -> Dict[str, Any]:
         "total_trades": total_trades,
         "total_pnl_dollars_sum": round(total_pnl_dollars, 4),
         "total_pnl_pct_sum": round(total_pnl_pct, 4),
-        "avg_pnl_dollars_per_tested_day": round((total_pnl_dollars / len(tested)) if tested else 0.0, 4),
+        "avg_pnl_dollars_per_tested_day": round(
+            (total_pnl_dollars / len(tested)) if tested else 0.0, 4
+        ),
         "winning_days": winning_days,
         "losing_days": losing_days,
         "flat_days": flat_days,
-        "win_day_rate_pct": round((winning_days / len(tested) * 100.0) if tested else 0.0, 2),
+        "win_day_rate_pct": round(
+            (winning_days / len(tested) * 100.0) if tested else 0.0, 2
+        ),
         "l2_config": start_overrides,
         "execution_mode": args.execution_mode,
         "play_speed": args.play_speed,
@@ -160,7 +166,9 @@ async def run_audit(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Audit one ticker across a date range.")
+    parser = argparse.ArgumentParser(
+        description="Audit one ticker across a date range."
+    )
     parser.add_argument("--ticker", required=True)
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)

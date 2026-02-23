@@ -131,12 +131,16 @@ def test_sync_remote_manifest_from_s3_uri(tmp_path: Path, monkeypatch):
     }
     dummy_s3 = _DummyS3Client(
         {
-            ("market-data", "mu/manifests/mu_janfeb_manifest.json"): bytes(json.dumps(manifest_payload), "utf-8"),
+            ("market-data", "mu/manifests/mu_janfeb_manifest.json"): bytes(
+                json.dumps(manifest_payload), "utf-8"
+            ),
         }
     )
     monkeypatch.setattr(svc, "_get_s3_client", lambda: dummy_s3)
 
-    synced = svc.sync_remote_manifest("s3://market-data/mu/manifests/mu_janfeb_manifest.json")
+    synced = svc.sync_remote_manifest(
+        "s3://market-data/mu/manifests/mu_janfeb_manifest.json"
+    )
     assert synced == 1
 
     rows = svc.list_catalog(refresh=False, ticker="MU")

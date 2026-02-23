@@ -26,7 +26,9 @@ def test_download_auto_precomputes_l2_days(monkeypatch, tmp_path: Path):
     svc = _make_service(tmp_path)
     calls = []
 
-    def _fake_blocking_download(ticker, schema, start, end, dataset, convert_to_parquet):
+    def _fake_blocking_download(
+        ticker, schema, start, end, dataset, convert_to_parquet
+    ):
         parquet_file = svc.l2_dir / f"{ticker}_{start}_{end}.parquet"
         parquet_file.write_bytes(b"PAR1")
         return CatalogEntry(
@@ -54,7 +56,9 @@ def test_download_auto_precomputes_l2_days(monkeypatch, tmp_path: Path):
         }
 
     monkeypatch.setattr(svc, "_blocking_download", _fake_blocking_download)
-    monkeypatch.setattr(svc, "_blocking_precompute_l2_day", _fake_blocking_precompute_l2_day)
+    monkeypatch.setattr(
+        svc, "_blocking_precompute_l2_day", _fake_blocking_precompute_l2_day
+    )
 
     result = asyncio.run(
         svc.download(
@@ -77,7 +81,9 @@ def test_download_does_not_auto_precompute_non_l2(monkeypatch, tmp_path: Path):
     svc = _make_service(tmp_path)
     calls = []
 
-    def _fake_blocking_download(ticker, schema, start, end, dataset, convert_to_parquet):
+    def _fake_blocking_download(
+        ticker, schema, start, end, dataset, convert_to_parquet
+    ):
         csv_file = svc.ohlcv_dir / f"{ticker}_{schema}_{start}_{end}.csv"
         csv_file.write_text("timestamp,open,high,low,close,volume\n")
         return CatalogEntry(
@@ -99,7 +105,9 @@ def test_download_does_not_auto_precompute_non_l2(monkeypatch, tmp_path: Path):
         return {"built": True}
 
     monkeypatch.setattr(svc, "_blocking_download", _fake_blocking_download)
-    monkeypatch.setattr(svc, "_blocking_precompute_l2_day", _fake_blocking_precompute_l2_day)
+    monkeypatch.setattr(
+        svc, "_blocking_precompute_l2_day", _fake_blocking_precompute_l2_day
+    )
 
     result = asyncio.run(
         svc.download(

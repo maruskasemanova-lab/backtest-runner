@@ -80,7 +80,9 @@ def _build_r2_client(
     )
 
 
-def _upload_file(client: Any, *, bucket: str, key: str, source: Path, content_type: str) -> None:
+def _upload_file(
+    client: Any, *, bucket: str, key: str, source: Path, content_type: str
+) -> None:
     with source.open("rb") as handle:
         client.put_object(
             Bucket=bucket,
@@ -115,13 +117,22 @@ def main() -> None:
 
     account_id = _required_env("R2_ACCOUNT_ID")
     bucket = _required_env("R2_BUCKET")
-    manifest_mode = str(os.getenv("R2_MANIFEST_MODE", "public") or "public").strip().lower()
+    manifest_mode = (
+        str(os.getenv("R2_MANIFEST_MODE", "public") or "public").strip().lower()
+    )
     if manifest_mode not in {"public", "private"}:
         raise RuntimeError("R2_MANIFEST_MODE must be 'public' or 'private'")
     public_base_url = str(os.getenv("R2_PUBLIC_BASE_URL", "") or "").strip().rstrip("/")
     if manifest_mode == "public" and not public_base_url:
-        raise RuntimeError("R2_PUBLIC_BASE_URL is required when R2_MANIFEST_MODE=public")
-    dry_run = str(os.getenv("R2_DRY_RUN", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
+        raise RuntimeError(
+            "R2_PUBLIC_BASE_URL is required when R2_MANIFEST_MODE=public"
+        )
+    dry_run = str(os.getenv("R2_DRY_RUN", "0") or "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     access_key_id = str(os.getenv("R2_ACCESS_KEY_ID", "") or "").strip()
     secret_access_key = str(os.getenv("R2_SECRET_ACCESS_KEY", "") or "").strip()
     if not dry_run:
@@ -140,7 +151,9 @@ def main() -> None:
     upload_jobs: List[Dict[str, Any]] = []
 
     # OHLCV files are kept as-is.
-    ohlcv_files = [path for path in _non_overlap_mu_ohlcv_files(data_dir) if path.exists()]
+    ohlcv_files = [
+        path for path in _non_overlap_mu_ohlcv_files(data_dir) if path.exists()
+    ]
     for src in ohlcv_files:
         dst = stage_dir / "mu" / "ohlcv" / src.name
         shutil.copy2(src, dst)
@@ -213,7 +226,9 @@ def main() -> None:
             print(f"recompressed {idx}/{len(l2_sources)} L2 files")
 
     total_size = sum(int(item.get("size_bytes", 0) or 0) for item in manifest_entries)
-    print(f"Prepared {len(manifest_entries)} entries ({round(total_size / (1024 ** 3), 4)} GiB)")
+    print(
+        f"Prepared {len(manifest_entries)} entries ({round(total_size / (1024 ** 3), 4)} GiB)"
+    )
 
     manifest_payload = {
         "version": "1.0",

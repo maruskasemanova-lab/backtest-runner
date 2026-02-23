@@ -4,6 +4,7 @@ Pytest configuration for backtest-runner tests.
 This conftest.py is in the project root directory to ensure
 the src module is importable from all test files.
 """
+
 import sys
 from pathlib import Path
 

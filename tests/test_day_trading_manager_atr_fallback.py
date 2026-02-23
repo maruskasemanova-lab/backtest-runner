@@ -37,4 +37,3 @@ def test_atr_is_available_for_short_windows() -> None:
     assert len(indicators["atr"]) == len(bars)
     assert indicators["atr"][-1] > 0
     assert manager._latest_indicator_value({}, "atr", bars) > 0
-

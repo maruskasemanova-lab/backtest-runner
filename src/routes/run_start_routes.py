@@ -187,14 +187,19 @@ async def diagnose_run_start_endpoint(
     )
     ohlcv_ok = bool(ohlcv_coverage.get("fully_covered", False))
     l2_ok = (not requested_use_l2) or bool(
-        isinstance(best_l2_coverage, dict) and best_l2_coverage.get("fully_covered", False)
+        isinstance(best_l2_coverage, dict)
+        and best_l2_coverage.get("fully_covered", False)
     )
 
     def _coverage_payload() -> Dict[str, Any]:
         return {
             "ohlcv_1m": ohlcv_coverage,
             "l2_schemas": l2_coverage,
-            "best_l2_schema": best_l2_coverage.get("schema") if isinstance(best_l2_coverage, dict) else None,
+            "best_l2_schema": (
+                best_l2_coverage.get("schema")
+                if isinstance(best_l2_coverage, dict)
+                else None
+            ),
         }
 
     def _format_missing_from_meta(meta: Any) -> str:
@@ -221,7 +226,9 @@ async def diagnose_run_start_endpoint(
                 ohlcv_probe = {
                     "ok": True,
                     "bars": int(ohlcv_probe_result.get("bars", 0) or 0),
-                    "data_files_count": int(ohlcv_probe_result.get("data_files_count", 0) or 0),
+                    "data_files_count": int(
+                        ohlcv_probe_result.get("data_files_count", 0) or 0
+                    ),
                     "cache_hit": bool(ohlcv_probe_result.get("cache_hit", False)),
                 }
             except HTTPException as exc:
@@ -277,7 +284,11 @@ async def diagnose_run_start_endpoint(
                 "probe": {"ohlcv_probe": ohlcv_probe},
             }
 
-        missing = best_l2_coverage.get("missing_days_meta", {}) if isinstance(best_l2_coverage, dict) else {}
+        missing = (
+            best_l2_coverage.get("missing_days_meta", {})
+            if isinstance(best_l2_coverage, dict)
+            else {}
+        )
         return {
             "ok": False,
             "mode": "coverage_only",

@@ -17,28 +17,40 @@ class _LoggerStub:
         return None
 
 
-def _build_deps(apply_calls: List[Dict[str, Dict[str, Any]]]) -> StrategyApiIntegrationDeps:
-    async def _apply_strategy_param_map(_url: str, payload: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def _build_deps(
+    apply_calls: List[Dict[str, Dict[str, Any]]],
+) -> StrategyApiIntegrationDeps:
+    async def _apply_strategy_param_map(
+        _url: str, payload: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, Any]:
         apply_calls.append(payload)
         return {"applied_count": len(payload), "failed_count": 0}
 
     async def _fetch_remote_strategies(_url: str) -> Dict[str, Any]:
         return {"Momentum": {}, "VWAPMagnet": {}, "Pullback": {}}
 
-    async def _apply_orchestrator_config(_url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def _apply_orchestrator_config(
+        _url: str, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
         return {"updated": payload}
 
     return StrategyApiIntegrationDeps(
         load_strategy_overrides=lambda: {},
         sanitize_strategy_params=lambda value: value if isinstance(value, dict) else {},
-        normalize_strategy_combo_profiles=lambda value: value if isinstance(value, list) else [],
-        normalize_unified_profiles=lambda value: value if isinstance(value, list) else [],
+        normalize_strategy_combo_profiles=lambda value: (
+            value if isinstance(value, list) else []
+        ),
+        normalize_unified_profiles=lambda value: (
+            value if isinstance(value, list) else []
+        ),
         normalize_tuner_profiles=lambda value: value if isinstance(value, list) else [],
         normalize_strategy_selection_mode=lambda _value: "all_enabled",
         normalize_clamped_int=lambda value, default=3, min_value=1, max_value=20: max(
             min_value, min(max_value, int(value if value is not None else default))
         ),
-        normalize_momentum_diversification_payload=lambda value: value if isinstance(value, dict) else {},
+        normalize_momentum_diversification_payload=lambda value: (
+            value if isinstance(value, dict) else {}
+        ),
         load_aos_config=lambda *_args, **_kwargs: {},
         get_ticker_positioning_config=lambda *_args, **_kwargs: {},
         positioning_config_keys=(),
@@ -179,6 +191,8 @@ def test_extract_runtime_overrides_includes_trading_hours() -> None:
         {
             "strategy_selection_mode": "all_enabled",
             "max_active_strategies": 2,
+            "regime_detection_minutes": 45,
+            "regime_refresh_bars": 2,
             "trading_hours": [16, "17", 17, 99, -1, "x"],
             "time_filter_enabled": True,
         },
@@ -187,6 +201,8 @@ def test_extract_runtime_overrides_includes_trading_hours() -> None:
 
     assert runtime["trading_hours"] == [16, 17]
     assert runtime["time_filter_enabled"] is True
+    assert runtime["regime_detection_minutes"] == 45
+    assert runtime["regime_refresh_bars"] == 3
 
 
 def test_apply_aos_optimizations_prefers_adaptive_trading_hours() -> None:
@@ -262,10 +278,14 @@ def test_apply_aos_optimizations_uses_unified_profile_when_active() -> None:
     deps = _build_deps(calls)
 
     async def _unexpected_combo(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
-        raise AssertionError("legacy strategy combo path should not be called for unified profile")
+        raise AssertionError(
+            "legacy strategy combo path should not be called for unified profile"
+        )
 
     async def _unexpected_adaptive(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
-        raise AssertionError("legacy adaptive profile path should not be called for unified profile")
+        raise AssertionError(
+            "legacy adaptive profile path should not be called for unified profile"
+        )
 
     deps.apply_active_strategy_combo = _unexpected_combo
     deps.apply_active_adaptive_tuner_profile = _unexpected_adaptive
@@ -282,14 +302,21 @@ def test_apply_aos_optimizations_uses_unified_profile_when_active() -> None:
                         "profile_id": "u1",
                         "profile_name": "MU Unified",
                         "strategy_profile": {
+                            "runtime_overrides": {
+                                "regime_detection_minutes": 20,
+                                "regime_refresh_bars": 2,
+                            },
                             "strategy_params": {
                                 "momentum": {"enabled": True, "min_confidence": 58.0}
                             },
+                            "regime_detection_minutes": 35,
                             "strategy_selection_mode": "all_enabled",
                             "max_active_strategies": 5,
                             "trading_hours": [10, 9, 10],
                             "time_filter_enabled": True,
                             "long_only": True,
+                            "intraday_levels_entry_tolerance_pct": 0.12,
+                            "intraday_levels_micro_confirmation_enabled": False,
                             "l2": {"confirm_enabled": True, "min_imbalance": 0.03},
                         },
                         "execution_profile": {
@@ -317,6 +344,23 @@ def test_apply_aos_optimizations_uses_unified_profile_when_active() -> None:
     assert "unified_profile" in result
     assert result["unified_profile"]["active_profile_id"] == "u1"
     assert result["adaptive_profile"]["unified_profile"] is True
+    assert (
+        result["adaptive_profile"]["runtime_overrides"]["regime_detection_minutes"]
+        == 35
+    )
+    assert result["adaptive_profile"]["runtime_overrides"]["regime_refresh_bars"] == 3
+    assert (
+        result["adaptive_profile"]["runtime_overrides"][
+            "intraday_levels_entry_tolerance_pct"
+        ]
+        == 0.12
+    )
+    assert (
+        result["adaptive_profile"]["runtime_overrides"][
+            "intraday_levels_micro_confirmation_enabled"
+        ]
+        is False
+    )
     assert result["strategy_selection_mode"] == "all_enabled"
     assert result["max_active_strategies"] == 5
     assert result["trading_hours"] == [9, 10]

@@ -50,16 +50,18 @@ for report_dir in sorted(reports_dir.glob("*MU*"), reverse=True)[:3]:
     if summary_path.exists():
         with open(summary_path) as f:
             summary = json.load(f)
-        
+
         overall = summary.get("overall", {})
         trades_list = summary.get("trades", [])
-        
+
         print(f"\n{report_dir.name}:")
         print(f"  Total PnL: ${overall.get('total_pnl_dollars', 0):.2f}")
         print(f"  Total Costs: ${overall.get('total_costs', 0):.2f}")
-        
+
         if trades_list:
             print(f"  Sample trade costs:")
             for t in trades_list[:2]:
-                print(f"    - Costs: ${t.get('total_costs', 0):.2f}, Gross PnL: {t.get('gross_pnl_pct', 0):.2f}%")
+                print(
+                    f"    - Costs: ${t.get('total_costs', 0):.2f}, Gross PnL: {t.get('gross_pnl_pct', 0):.2f}%"
+                )
         break

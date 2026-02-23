@@ -1,6 +1,7 @@
 """
 Configuration and JSON utility helpers for backtest-runner.
 """
+
 from __future__ import annotations
 
 import json

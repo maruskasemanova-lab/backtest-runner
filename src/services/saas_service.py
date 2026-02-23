@@ -115,8 +115,7 @@ def normalize_user_settings_payload(settings: Any) -> Dict[str, Any]:
 
 
 class UserSettingsStore(Protocol):
-    def get_user_settings(self, *, user_id: str) -> Dict[str, Any]:
-        ...
+    def get_user_settings(self, *, user_id: str) -> Dict[str, Any]: ...
 
     def merge_user_settings(
         self,
@@ -124,8 +123,7 @@ class UserSettingsStore(Protocol):
         user_id: str,
         tenant_id: str,
         patch: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        ...
+    ) -> Dict[str, Any]: ...
 
 
 class RunReportsStore(Protocol):
@@ -134,15 +132,13 @@ class RunReportsStore(Protocol):
         *,
         run_key: str,
         summary: Dict[str, Any],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def list_run_summaries(
         self,
         *,
         limit: int = 300,
-    ) -> list[Dict[str, Any]]:
-        ...
+    ) -> list[Dict[str, Any]]: ...
 
 
 class SupabaseStoreRequestError(RuntimeError):
@@ -150,7 +146,9 @@ class SupabaseStoreRequestError(RuntimeError):
         self.status_code = int(status_code)
         self.body = str(body or "")
         snippet = self.body.strip()[:400]
-        super().__init__(f"Supabase user_settings request failed [{self.status_code}]: {snippet}")
+        super().__init__(
+            f"Supabase user_settings request failed [{self.status_code}]: {snippet}"
+        )
 
 
 def normalize_run_summary_payload(summary: Any) -> Dict[str, Any]:
@@ -326,7 +324,9 @@ class SupabaseUserSettingsStore:
         )
         return tenant_uuid
 
-    def _get_user_settings_run_summary_fallback(self, *, user_id: str) -> Dict[str, Any]:
+    def _get_user_settings_run_summary_fallback(
+        self, *, user_id: str
+    ) -> Dict[str, Any]:
         run_key = self._settings_run_key(user_id)
         rows = self._request_json(
             method="GET",
@@ -384,7 +384,9 @@ class SupabaseUserSettingsStore:
         if not normalized_user_id:
             return {}
         if self._fallback_mode:
-            return self._get_user_settings_run_summary_fallback(user_id=normalized_user_id)
+            return self._get_user_settings_run_summary_fallback(
+                user_id=normalized_user_id
+            )
 
         try:
             rows = self._request_json(
@@ -398,7 +400,9 @@ class SupabaseUserSettingsStore:
         except Exception as exc:
             if self._is_missing_primary_table(exc):
                 self._fallback_mode = True
-                return self._get_user_settings_run_summary_fallback(user_id=normalized_user_id)
+                return self._get_user_settings_run_summary_fallback(
+                    user_id=normalized_user_id
+                )
             raise
         if not isinstance(rows, list) or not rows:
             return {}
@@ -415,7 +419,9 @@ class SupabaseUserSettingsStore:
         normalized_user_id = str(user_id or "").strip()
         if not normalized_user_id:
             raise ValueError("user_id is required")
-        normalized_tenant_id = str(tenant_id or "").strip() or f"tenant_{normalized_user_id}"
+        normalized_tenant_id = (
+            str(tenant_id or "").strip() or f"tenant_{normalized_user_id}"
+        )
         normalized_settings = normalize_user_settings_payload(settings)
         if self._fallback_mode:
             return self._upsert_user_settings_run_summary_fallback(
@@ -624,7 +630,9 @@ class SupabaseRunReportsStore:
             raise ValueError("run_key is required")
         normalized_summary = normalize_run_summary_payload(summary)
         user_id = self._default_user_id
-        tenant_uuid = self._ensure_identity(user_id=user_id, tenant_id=self._default_tenant_id)
+        tenant_uuid = self._ensure_identity(
+            user_id=user_id, tenant_id=self._default_tenant_id
+        )
         self._request_json(
             method="POST",
             endpoint=self._endpoint,
@@ -691,7 +699,9 @@ class InMemorySlidingWindowLimiter:
         self._events: Dict[str, list[float]] = {}
         self._lock = threading.Lock()
 
-    def consume(self, key: str, *, limit: int, window_seconds: Optional[int] = None) -> Tuple[bool, int]:
+    def consume(
+        self, key: str, *, limit: int, window_seconds: Optional[int] = None
+    ) -> Tuple[bool, int]:
         max_allowed = max(1, int(limit))
         window = max(1, int(window_seconds or self.default_window_seconds))
         now = time.time()
@@ -880,7 +890,9 @@ class SaaSStateStore:
             self._ensure_column("jobs", "idempotency_key", "TEXT")
             self._ensure_column("jobs", "attempts", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column("jobs", "max_attempts", "INTEGER NOT NULL DEFAULT 1")
-            self._ensure_column("subscriptions", "cancel_at_period_end", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(
+                "subscriptions", "cancel_at_period_end", "INTEGER NOT NULL DEFAULT 0"
+            )
             self._ensure_column("subscriptions", "scheduled_plan_tier", "TEXT")
             self._ensure_column("subscriptions", "grace_until", "TEXT")
             cur.executescript(
@@ -917,7 +929,9 @@ class SaaSStateStore:
             )
             self._conn.commit()
 
-    def get_effective_plan(self, *, user_id: str, claim_plan_tier: str, role: str) -> str:
+    def get_effective_plan(
+        self, *, user_id: str, claim_plan_tier: str, role: str
+    ) -> str:
         role_norm = str(role or "").strip().lower()
         if role_norm == "admin":
             return "admin"
@@ -951,7 +965,11 @@ class SaaSStateStore:
                 scheduled_plan = "free"
 
             if status == "active" and plan in PLAN_LIMITS:
-                if cancel_at_period_end and period_end is not None and now >= period_end:
+                if (
+                    cancel_at_period_end
+                    and period_end is not None
+                    and now >= period_end
+                ):
                     return scheduled_plan
                 return plan
 
@@ -1060,7 +1078,9 @@ class SaaSStateStore:
         if not normalized_run_key:
             raise ValueError("run_key is required")
         normalized_summary = normalize_run_summary_payload(summary)
-        serialized = json.dumps(normalized_summary, separators=(",", ":"), sort_keys=True)
+        serialized = json.dumps(
+            normalized_summary, separators=(",", ":"), sort_keys=True
+        )
         now = utc_now_iso()
         with self._lock:
             cur = self._conn.cursor()
@@ -1122,7 +1142,9 @@ class SaaSStateStore:
         now = utc_now_iso()
         normalized_status = str(status or "active").strip().lower()
         normalized_plan_tier = str(plan_tier or "free").strip().lower()
-        normalized_scheduled_plan = str(scheduled_plan_tier or "").strip().lower() or None
+        normalized_scheduled_plan = (
+            str(scheduled_plan_tier or "").strip().lower() or None
+        )
         if normalized_scheduled_plan and normalized_scheduled_plan not in PLAN_LIMITS:
             normalized_scheduled_plan = "free"
         with self._lock:
@@ -1195,7 +1217,9 @@ class SaaSStateStore:
         value = str(row["user_id"] or "").strip()
         return value or None
 
-    def find_user_id_by_stripe_subscription(self, subscription_id: str) -> Optional[str]:
+    def find_user_id_by_stripe_subscription(
+        self, subscription_id: str
+    ) -> Optional[str]:
         needle = str(subscription_id or "").strip()
         if not needle:
             return None
@@ -1241,7 +1265,9 @@ class SaaSStateStore:
             self._conn.commit()
         return int(row["value"] or 0) if row else 0
 
-    def get_usage_for_day(self, *, user_id: str, day_key: Optional[str] = None) -> Dict[str, int]:
+    def get_usage_for_day(
+        self, *, user_id: str, day_key: Optional[str] = None
+    ) -> Dict[str, int]:
         key = str(day_key or utc_day_key()).strip()
         with self._lock:
             cur = self._conn.cursor()
@@ -1262,7 +1288,9 @@ class SaaSStateStore:
         now_utc: Optional[datetime] = None,
     ) -> Dict[str, int]:
         horizon_days = max(1, int(retention_days))
-        now = now_utc if isinstance(now_utc, datetime) else datetime.now(tz=timezone.utc)
+        now = (
+            now_utc if isinstance(now_utc, datetime) else datetime.now(tz=timezone.utc)
+        )
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         else:
@@ -1413,7 +1441,11 @@ class SaaSStateStore:
                 """,
                 (
                     status,
-                    json.dumps(result or {}, separators=(",", ":"), sort_keys=True) if result is not None else None,
+                    (
+                        json.dumps(result or {}, separators=(",", ":"), sort_keys=True)
+                        if result is not None
+                        else None
+                    ),
                     str(error or "").strip() or None,
                     run_key,
                     now,
@@ -1425,7 +1457,9 @@ class SaaSStateStore:
     def get_job(self, *, job_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             cur = self._conn.cursor()
-            row = cur.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+            row = cur.execute(
+                "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
         if not row:
             return None
         return self._row_to_job_payload(row)
@@ -1456,7 +1490,9 @@ class SaaSStateStore:
             return None
         return self._row_to_job_payload(row)
 
-    def count_active_jobs(self, *, user_id: str, job_types: Optional[Iterable[str]] = None) -> int:
+    def count_active_jobs(
+        self, *, user_id: str, job_types: Optional[Iterable[str]] = None
+    ) -> int:
         return self.count_jobs(
             user_id=user_id,
             statuses=("queued", "running"),
@@ -1478,14 +1514,18 @@ class SaaSStateStore:
             args.append(str(user_id))
 
         if statuses:
-            normalized_statuses = [str(item).strip().lower() for item in statuses if str(item).strip()]
+            normalized_statuses = [
+                str(item).strip().lower() for item in statuses if str(item).strip()
+            ]
             if normalized_statuses:
                 placeholders = ",".join("?" for _ in normalized_statuses)
                 clauses.append(f"lower(status) IN ({placeholders})")
                 args.extend(normalized_statuses)
 
         if job_types:
-            normalized_types = [str(item).strip() for item in job_types if str(item).strip()]
+            normalized_types = [
+                str(item).strip() for item in job_types if str(item).strip()
+            ]
             if normalized_types:
                 placeholders = ",".join("?" for _ in normalized_types)
                 clauses.append(f"job_type IN ({placeholders})")
@@ -1573,8 +1613,12 @@ class SaaSStateStore:
             ).fetchone()
         return int(row["c"] or 0) if row else 0
 
-    def list_run_keys_by_user(self, *, user_id: str, statuses: Iterable[str]) -> list[str]:
-        normalized = [str(item).strip().lower() for item in statuses if str(item).strip()]
+    def list_run_keys_by_user(
+        self, *, user_id: str, statuses: Iterable[str]
+    ) -> list[str]:
+        normalized = [
+            str(item).strip().lower() for item in statuses if str(item).strip()
+        ]
         if not normalized:
             return []
         placeholders = ",".join("?" for _ in normalized)
@@ -1710,7 +1754,9 @@ class SaaSStateStore:
             normalized_owner_user = str(owner_user_id or "").strip()
             normalized_owner_tenant = str(owner_tenant_id or "").strip()
             if not normalized_owner_user or not normalized_owner_tenant:
-                raise ValueError("user scope profile requires owner_user_id and owner_tenant_id")
+                raise ValueError(
+                    "user scope profile requires owner_user_id and owner_tenant_id"
+                )
 
         now = utc_now_iso()
         candidate_payload = candidate if isinstance(candidate, dict) else {}
@@ -1753,7 +1799,9 @@ class SaaSStateStore:
                     normalized_ticker,
                     normalized_name,
                     normalized_version,
-                    json.dumps(candidate_payload, separators=(",", ":"), sort_keys=True),
+                    json.dumps(
+                        candidate_payload, separators=(",", ":"), sort_keys=True
+                    ),
                     json.dumps(metadata_payload, separators=(",", ":"), sort_keys=True),
                     now,
                     now,
@@ -1766,7 +1814,9 @@ class SaaSStateStore:
             raise RuntimeError("Failed to load saved adaptive strategy profile")
         return result
 
-    def get_adaptive_strategy_profile(self, *, profile_id: str) -> Optional[Dict[str, Any]]:
+    def get_adaptive_strategy_profile(
+        self, *, profile_id: str
+    ) -> Optional[Dict[str, Any]]:
         key = str(profile_id or "").strip()
         if not key:
             return None
@@ -1795,7 +1845,9 @@ class SaaSStateStore:
         normalized_tenant = str(tenant_id or "").strip()
 
         if include_user and normalized_user and normalized_tenant:
-            visibility_clauses.append("(scope = 'user' AND owner_user_id = ? AND owner_tenant_id = ?)")
+            visibility_clauses.append(
+                "(scope = 'user' AND owner_user_id = ? AND owner_tenant_id = ?)"
+            )
             args.extend([normalized_user, normalized_tenant])
         if include_global:
             visibility_clauses.append("(scope = 'global')")
@@ -1807,7 +1859,9 @@ class SaaSStateStore:
             clauses.append("ticker = ?")
             args.append(str(ticker).strip().upper())
 
-        query = "SELECT * FROM adaptive_strategy_profiles WHERE " + " AND ".join(clauses)
+        query = "SELECT * FROM adaptive_strategy_profiles WHERE " + " AND ".join(
+            clauses
+        )
         query += " ORDER BY CASE WHEN scope = 'global' THEN 0 ELSE 1 END, updated_at DESC, profile_id ASC"
 
         with self._lock:
@@ -1844,7 +1898,11 @@ class SaaSStateStore:
         key = str(cache_key or "").strip()
         if not key:
             raise ValueError("cache_key is required")
-        serialized = json.dumps(payload if isinstance(payload, dict) else {}, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        serialized = json.dumps(
+            payload if isinstance(payload, dict) else {},
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
         compressed = gzip.compress(serialized, compresslevel=6)
         checksum = hashlib.sha256(serialized).hexdigest()
         now = utc_now_iso()

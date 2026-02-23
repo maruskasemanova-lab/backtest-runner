@@ -26,3 +26,25 @@ def test_signal_marker_still_serializes_expected_fields() -> None:
     assert payload["marker_type"] == "signal_generated"
     assert payload["details"]["signal_type"] == "BUY"
     assert payload["details"]["stop_loss"] == 396.0
+
+
+def test_execution_status_marker_serializes_as_non_signal_type() -> None:
+    tracker = DecisionTracker(run_id="r2", ticker="MU", date="2026-02-06")
+    marker = tracker.add_execution_status(
+        timestamp=datetime(2026, 2, 6, 15, 41, tzinfo=timezone.utc),
+        bar_index=11,
+        price=401.0,
+        title="Signal Dropped (Insufficient Fill)",
+        description="Position size after risk/fill constraints is zero.",
+        strategy="momentum_flow",
+        confidence=0.0,
+        details={
+            "execution_status": "no_fill",
+            "execution_action": "insufficient_fill",
+        },
+    )
+
+    payload = marker.to_dict()
+    assert payload["marker_type"] == "execution_status"
+    assert payload["details"]["execution_status"] == "no_fill"
+    assert payload["details"]["execution_action"] == "insufficient_fill"

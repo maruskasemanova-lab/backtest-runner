@@ -74,6 +74,7 @@ TEST_LOCK_FILE = REPORTS_DIR / "test_lock.json"
 
 # ── Date helpers ─────────────────────────────────────────────────────────────
 
+
 def iter_weekdays(start: str, end: str) -> List[str]:
     """Yield YYYY-MM-DD for each weekday in [start, end]."""
     dt = datetime.strptime(start, "%Y-%m-%d")
@@ -160,7 +161,9 @@ def _extract_ohlcv_days_from_csv(csv_path: Path, start: str, end: str) -> List[s
     return sorted(days)
 
 
-def _extract_ohlcv_days_from_parquet(parquet_path: Path, start: str, end: str) -> List[str]:
+def _extract_ohlcv_days_from_parquet(
+    parquet_path: Path, start: str, end: str
+) -> List[str]:
     start_day = datetime.strptime(start, "%Y-%m-%d").date()
     end_day = datetime.strptime(end, "%Y-%m-%d").date()
     df = pd.read_parquet(parquet_path, columns=["timestamp"])
@@ -194,7 +197,9 @@ async def get_available_ohlcv_dates(
             timeout=30.0,
         )
     except Exception as exc:
-        details["file_errors"].append(f"catalog_request_failed: {type(exc).__name__}: {safe_text(exc)}")
+        details["file_errors"].append(
+            f"catalog_request_failed: {type(exc).__name__}: {safe_text(exc)}"
+        )
         return [], details
 
     if resp.status_code != 200:
@@ -224,7 +229,9 @@ async def get_available_ohlcv_dates(
             covered.update(days)
             details["files_scanned"].append(str(path))
         except Exception as exc:
-            details["file_errors"].append(f"{path.name}: {type(exc).__name__}: {safe_text(exc)}")
+            details["file_errors"].append(
+                f"{path.name}: {type(exc).__name__}: {safe_text(exc)}"
+            )
     return sorted(covered), details
 
 
@@ -342,11 +349,13 @@ def update_funnel(funnel: Dict[str, Any], response: Dict[str, Any]) -> None:
     if isinstance(response.get("position_closed"), dict):
         funnel["trades_closed"] += 1
 
+
 TUNING_DATES = iter_weekdays(TUNING_START, TUNING_END)
 TEST_DATES = iter_weekdays(TEST_START, TEST_END)
 
 
 # ── Orchestrator config (strategy API) ──────────────────────────────────────
+
 
 async def set_orchestrator_config(
     client: httpx.AsyncClient,
@@ -400,6 +409,7 @@ async def get_orchestrator_config(client: httpx.AsyncClient) -> Dict[str, Any]:
 
 
 # ── Runner L2 runtime tuning (fast mode) ─────────────────────────────────────
+
 
 async def set_runner_l2_runtime(
     client: httpx.AsyncClient,
@@ -455,9 +465,12 @@ async def apply_fast_mode(client: httpx.AsyncClient) -> Dict[str, Any]:
 
 # ── AOS config builder ──────────────────────────────────────────────────────
 
+
 def load_baseline_aos() -> Dict[str, Any]:
     """Load the current AOS config as the baseline."""
-    aos_path = Path(__file__).resolve().parent.parent / "aos_optimization" / "aos_config.json"
+    aos_path = (
+        Path(__file__).resolve().parent.parent / "aos_optimization" / "aos_config.json"
+    )
     with open(aos_path) as f:
         return json.load(f)
 
@@ -563,6 +576,7 @@ def write_temp_aos(config: Dict[str, Any], label: str = "") -> str:
 
 # ── Single-day runner (HTTP API) ─────────────────────────────────────────────
 
+
 async def run_single_day(
     client: httpx.AsyncClient,
     date: str,
@@ -644,11 +658,15 @@ async def run_single_day(
                     timeout=30.0,
                 )
             except Exception as exc:
-                step_errors.append(f"step exception: {type(exc).__name__}: {safe_text(exc)}")
+                step_errors.append(
+                    f"step exception: {type(exc).__name__}: {safe_text(exc)}"
+                )
                 break
 
             if step_resp.status_code != 200:
-                step_errors.append(f"step failed: {step_resp.status_code} {safe_text(step_resp.text)}")
+                step_errors.append(
+                    f"step failed: {step_resp.status_code} {safe_text(step_resp.text)}"
+                )
                 break
 
             step_payload = step_resp.json()
@@ -665,7 +683,9 @@ async def run_single_day(
             update_funnel(diagnostic_funnel, step_payload.get("response") or {})
 
         if not completed and not step_errors:
-            step_errors.append("step loop did not reach COMPLETED phase before max_steps")
+            step_errors.append(
+                "step loop did not reach COMPLETED phase before max_steps"
+            )
         if step_errors:
             await cleanup()
             return {
@@ -788,13 +808,21 @@ async def run_single_day(
     # Fallback when marker pipeline is sparse: use step funnel counts.
     step_signal_candidates = int(diagnostic_funnel.get("candidates_generated", 0))
     step_trades = int(diagnostic_funnel.get("trades_placed", 0))
-    step_regime_actions = int((diagnostic_funnel.get("actions") or {}).get("regime_detected", 0))
+    step_regime_actions = int(
+        (diagnostic_funnel.get("actions") or {}).get("regime_detected", 0)
+    )
 
-    signal_count_effective = signal_count if signal_count > 0 else step_signal_candidates
+    signal_count_effective = (
+        signal_count if signal_count > 0 else step_signal_candidates
+    )
     entry_count_effective = entry_count if entry_count > 0 else step_trades
     regime_count_effective = regime_count if regime_count > 0 else step_regime_actions
 
-    aos_applied = start_data.get("aos_applied", {}) if isinstance(start_data.get("aos_applied"), dict) else {}
+    aos_applied = (
+        start_data.get("aos_applied", {})
+        if isinstance(start_data.get("aos_applied"), dict)
+        else {}
+    )
     adaptive_profile_meta = (
         aos_applied.get("adaptive_profile", {})
         if isinstance(aos_applied.get("adaptive_profile"), dict)
@@ -820,7 +848,9 @@ async def run_single_day(
         "exits": exit_count,
         "regime_evaluations": regime_count_effective,
         "regime_evaluations_markers": regime_count,
-        "total_trades": int(session.get("total_trades", 0) or 0) if session else step_trades,
+        "total_trades": (
+            int(session.get("total_trades", 0) or 0) if session else step_trades
+        ),
         "winning_trades": int(session.get("winning_trades", 0) or 0),
         "losing_trades": int(session.get("losing_trades", 0) or 0),
         "win_rate": float(session.get("win_rate", 0) or 0),
@@ -837,7 +867,8 @@ async def run_single_day(
         "l2_applied": start_data.get("l2_applied", {}),
         "execution_config": start_data.get("execution_config", {}),
         "aos_applied": aos_applied,
-        "adaptive_profile_id": adaptive_profile_meta.get("active_profile_id") or adaptive_profile_meta.get("profile_id"),
+        "adaptive_profile_id": adaptive_profile_meta.get("active_profile_id")
+        or adaptive_profile_meta.get("profile_id"),
         "adaptive_profile_name": adaptive_profile_meta.get("profile_name"),
         "strategy_combo_profile_id": strategy_combo_meta.get("active_profile_id"),
         "strategy_combo_profile_name": strategy_combo_meta.get("profile_name"),
@@ -874,7 +905,8 @@ async def run_days(
             print(f"{prefix}{i+1}/{len(dates)} {date}", end="", flush=True)
 
             result = await run_single_day(
-                client, date,
+                client,
+                date,
                 aos_config_path=aos_config_path,
                 run_label=label,
                 diagnostic_mode=diagnostic_mode,
@@ -1014,6 +1046,7 @@ async def run_multi_day_probe(
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
 
+
 def compute_day_metrics(day_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Compute aggregate metrics from day-level results."""
     valid = [d for d in day_results if d.get("success")]
@@ -1030,7 +1063,7 @@ def compute_day_metrics(day_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     mean_pnl = total_pnl_pct / len(valid)
     if len(valid) > 1:
         variance = sum((p - mean_pnl) ** 2 for p in pnl_values) / (len(valid) - 1)
-        std_pnl = variance ** 0.5
+        std_pnl = variance**0.5
     else:
         std_pnl = 0.0
 
@@ -1109,6 +1142,7 @@ def compute_variant_score(metrics: Dict[str, Any]) -> float:
 
 # ── Bootstrap CI ─────────────────────────────────────────────────────────────
 
+
 def bootstrap_ci(
     day_results: List[Dict[str, Any]],
     metric_fn,
@@ -1131,7 +1165,11 @@ def bootstrap_ci(
     lo_idx = max(0, int(alpha * n_boot))
     hi_idx = min(n_boot - 1, int((1.0 - alpha) * n_boot))
     mean_val = sum(boot_values) / len(boot_values)
-    return (round(mean_val, 4), round(boot_values[lo_idx], 4), round(boot_values[hi_idx], 4))
+    return (
+        round(mean_val, 4),
+        round(boot_values[lo_idx], 4),
+        round(boot_values[hi_idx], 4),
+    )
 
 
 def pnl_metric(days):
@@ -1143,6 +1181,7 @@ def trades_metric(days):
 
 
 # ── Phase 0: Diagnostic ─────────────────────────────────────────────────────
+
 
 async def phase0_diagnostic() -> Dict[str, Any]:
     """Run baseline on tuning dates, classify each day's pipeline."""
@@ -1176,9 +1215,13 @@ async def phase0_diagnostic() -> Dict[str, Any]:
     missing_l2 = coverage["missing_l2_days"]
     missing_overlap = coverage["missing_overlap_days"]
 
-    print(f"Dataset-driven dates: {len(available_dates)} / {len(coverage['weekdays'])} weekdays usable")
+    print(
+        f"Dataset-driven dates: {len(available_dates)} / {len(coverage['weekdays'])} weekdays usable"
+    )
     if missing_ohlcv:
-        print(f"  Missing OHLCV days ({len(missing_ohlcv)}): {summarize_days(missing_ohlcv)}")
+        print(
+            f"  Missing OHLCV days ({len(missing_ohlcv)}): {summarize_days(missing_ohlcv)}"
+        )
     if missing_l2:
         print(f"  Missing L2 days ({len(missing_l2)}): {summarize_days(missing_l2)}")
     if not available_dates:
@@ -1245,9 +1288,13 @@ async def phase0_diagnostic() -> Dict[str, Any]:
             )
 
         bar_funnel_totals["bars_processed"] += bars_processed
-        bar_funnel_totals["strategies_evaluated"] += int(funnel.get("strategies_evaluated", 0))
+        bar_funnel_totals["strategies_evaluated"] += int(
+            funnel.get("strategies_evaluated", 0)
+        )
         bar_funnel_totals["candidates_generated"] += candidates
-        bar_funnel_totals["candidates_rejected"] += int(funnel.get("candidates_rejected", 0))
+        bar_funnel_totals["candidates_rejected"] += int(
+            funnel.get("candidates_rejected", 0)
+        )
         bar_funnel_totals["evidence_passed"] += int(funnel.get("evidence_passed", 0))
         bar_funnel_totals["trades_placed"] += trades_placed
 
@@ -1268,9 +1315,15 @@ async def phase0_diagnostic() -> Dict[str, Any]:
     print("SIGNAL FUNNEL (day-level)")
     print(f"{'─' * 60}")
     print(f"  Total valid days:           {total}")
-    print(f"  Days with 0 signals:        {len(days_no_signals)} ({len(days_no_signals)/total*100:.0f}%)")
-    print(f"  Days with signals, 0 trades: {len(days_signals_no_trades)} ({len(days_signals_no_trades)/total*100:.0f}%)")
-    print(f"  Days with trades:           {len(days_with_trades)} ({len(days_with_trades)/total*100:.0f}%)")
+    print(
+        f"  Days with 0 signals:        {len(days_no_signals)} ({len(days_no_signals)/total*100:.0f}%)"
+    )
+    print(
+        f"  Days with signals, 0 trades: {len(days_signals_no_trades)} ({len(days_signals_no_trades)/total*100:.0f}%)"
+    )
+    print(
+        f"  Days with trades:           {len(days_with_trades)} ({len(days_with_trades)/total*100:.0f}%)"
+    )
     print(f"  Missing overlap days:       {len(missing_overlap)}")
 
     # Bar-level funnel summary
@@ -1297,9 +1350,7 @@ async def phase0_diagnostic() -> Dict[str, Any]:
             f"{row['date']}({row['bars_processed']}/{row['total_bars']})"
             for row in incomplete_days
         ]
-        print(
-            f"    {summarize_days(incomplete_tokens, max_items=8)}"
-        )
+        print(f"    {summarize_days(incomplete_tokens, max_items=8)}")
 
     # Aggregate metrics
     metrics = compute_day_metrics(day_results)
@@ -1307,7 +1358,9 @@ async def phase0_diagnostic() -> Dict[str, Any]:
     print("AGGREGATE METRICS")
     print(f"{'─' * 60}")
     print(f"  Total trades:    {metrics['total_trades']}")
-    print(f"  Total PnL:       {metrics['total_pnl_pct']:+.2f}% (${metrics['total_pnl_dollars']:+.2f})")
+    print(
+        f"  Total PnL:       {metrics['total_pnl_pct']:+.2f}% (${metrics['total_pnl_dollars']:+.2f})"
+    )
     print(f"  Participation:   {metrics['participation']*100:.0f}%")
     print(f"  Selectivity:     {metrics['selectivity']:.1f} trades/trading-day")
     print(f"  Max drawdown:    ${metrics['max_drawdown_dollars']:.2f}")
@@ -1319,12 +1372,18 @@ async def phase0_diagnostic() -> Dict[str, Any]:
     abort = candidate_days < 2
     ab_probe = None
     if abort:
-        print(f"\n*** ABORT_ABLATION: Only {candidate_days} days produce candidate signals.")
+        print(
+            f"\n*** ABORT_ABLATION: Only {candidate_days} days produce candidate signals."
+        )
         print("    Investigate strategy logic before proceeding to Phase 1.")
 
         # A/B check: single-day cold-start vs one continuous multi-day run.
-        print("\n  Running A/B probe: single-day vs one multi-day continuous session...")
-        ab_probe = await run_multi_day_probe(available_dates, stop_on_first_candidate=True)
+        print(
+            "\n  Running A/B probe: single-day vs one multi-day continuous session..."
+        )
+        ab_probe = await run_multi_day_probe(
+            available_dates, stop_on_first_candidate=True
+        )
         if ab_probe.get("success"):
             probe_funnel = ab_probe.get("diagnostic_funnel", {})
             probe_candidates = int(probe_funnel.get("candidates_generated", 0))
@@ -1336,13 +1395,19 @@ async def phase0_diagnostic() -> Dict[str, Any]:
                 f" early_stop={ab_probe.get('early_stop_reason')}"
             )
             if probe_candidates > 0 or probe_trades > 0:
-                print("  Inference: per-day cold-start/reset likely suppresses candidates.")
+                print(
+                    "  Inference: per-day cold-start/reset likely suppresses candidates."
+                )
             else:
-                print("  Inference: issue is likely in gating/preconditions/feature mapping, not reset semantics.")
+                print(
+                    "  Inference: issue is likely in gating/preconditions/feature mapping, not reset semantics."
+                )
         else:
             print(f"  Multi-day probe failed: {ab_probe.get('error', 'unknown')}")
     else:
-        print(f"\n  Sanity gate PASSED: {candidate_days} days with candidate signals (>= 2 required)")
+        print(
+            f"\n  Sanity gate PASSED: {candidate_days} days with candidate signals (>= 2 required)"
+        )
 
     # Day-by-day table
     print(f"\n{'─' * 60}")
@@ -1360,7 +1425,11 @@ async def phase0_diagnostic() -> Dict[str, Any]:
         bars_done = int(funnel.get("bars_processed", 0))
         bars_total = int(d.get("total_bars", 0) or 0)
         gate_counts = funnel.get("reject_by_gate", {}) or {}
-        top_gate = sorted(gate_counts.items(), key=lambda x: (-x[1], x[0]))[0][0] if gate_counts else "-"
+        top_gate = (
+            sorted(gate_counts.items(), key=lambda x: (-x[1], x[0]))[0][0]
+            if gate_counts
+            else "-"
+        )
         if cand > 0 or rej > 0 or d["total_trades"] > 0:
             print(
                 f"  {d['date']:<12} {bars_done:>4}/{bars_total:<4} {cand:>5} {rej:>5} {passed:>5} "
@@ -1401,6 +1470,7 @@ async def phase0_diagnostic() -> Dict[str, Any]:
 
 
 # ── Phase 1: Ablation ───────────────────────────────────────────────────────
+
 
 def build_ablation_variants() -> Dict[str, Dict[str, Any]]:
     """
@@ -1530,7 +1600,9 @@ async def phase1_ablation(
 
     if phase0_result and phase0_result.get("status") == "abort" and force:
         print("WARNING: Phase 0 sanity gate failed — proceeding with --force")
-        print("  Ablation variants are specifically designed to relax the blocking gates.")
+        print(
+            "  Ablation variants are specifically designed to relax the blocking gates."
+        )
 
     tuning_dates = []
     if isinstance(phase0_result, dict):
@@ -1567,7 +1639,9 @@ async def phase1_ablation(
     print("\n" + "=" * 80)
     print("PHASE 1 — ABLATION (5 variants on tuning set)")
     print("=" * 80)
-    print(f"Dates: {min(tuning_dates)} to {max(tuning_dates)} ({len(tuning_dates)} days)")
+    print(
+        f"Dates: {min(tuning_dates)} to {max(tuning_dates)} ({len(tuning_dates)} days)"
+    )
 
     variants = build_ablation_variants()
     variant_results = {}
@@ -1592,8 +1666,12 @@ async def phase1_ablation(
             # requirements directly on the ensemble combiner/evidence engine.
             if orch_overrides:
                 async with httpx.AsyncClient() as client:
-                    orch_result = await set_orchestrator_config(client, **orch_overrides)
-                    print(f"  Orchestrator config applied: {orch_result.get('updated', {})}")
+                    orch_result = await set_orchestrator_config(
+                        client, **orch_overrides
+                    )
+                    print(
+                        f"  Orchestrator config applied: {orch_result.get('updated', {})}"
+                    )
 
             day_results = await run_days(
                 tuning_dates,
@@ -1618,9 +1696,13 @@ async def phase1_ablation(
             }
 
             print(f"\n  Score: {score:.4f}")
-            print(f"  PnL:   {metrics['total_pnl_pct']:+.2f}% (${metrics['total_pnl_dollars']:+.2f})")
+            print(
+                f"  PnL:   {metrics['total_pnl_pct']:+.2f}% (${metrics['total_pnl_dollars']:+.2f})"
+            )
             print(f"  95% CI: [{pnl_ci[1]:+.2f}%, {pnl_ci[2]:+.2f}%]")
-            print(f"  Trades: {metrics['total_trades']}, Participation: {metrics['participation']*100:.0f}%")
+            print(
+                f"  Trades: {metrics['total_trades']}, Participation: {metrics['participation']*100:.0f}%"
+            )
 
         finally:
             # Clean up temp file
@@ -1637,7 +1719,9 @@ async def phase1_ablation(
         f"  {'Variant':<18} {'Score':>8} {'PnL%':>8} {'PnL$':>10} "
         f"{'Trades':>6} {'Part%':>5} {'Select':>6} {'MaxDD$':>8} {'CI_lo':>7} {'CI_hi':>7}"
     )
-    print(f"  {'─'*18} {'─'*8} {'─'*8} {'─'*10} {'─'*6} {'─'*5} {'─'*6} {'─'*8} {'─'*7} {'─'*7}")
+    print(
+        f"  {'─'*18} {'─'*8} {'─'*8} {'─'*10} {'─'*6} {'─'*5} {'─'*6} {'─'*8} {'─'*7} {'─'*7}"
+    )
 
     ranked = sorted(variant_results.items(), key=lambda x: x[1]["score"], reverse=True)
     for variant_id, vr in ranked:
@@ -1682,10 +1766,13 @@ async def phase1_ablation(
     if winner_id:
         # Save winner's day results separately for Phase 2
         winner_day_results = variant_results[winner_id]["day_results"]
-        save_report("phase1_winner_day_results.json", {
-            "variant": winner_id,
-            "day_results": winner_day_results,
-        })
+        save_report(
+            "phase1_winner_day_results.json",
+            {
+                "variant": winner_id,
+                "day_results": winner_day_results,
+            },
+        )
         # Save winner's AOS config + orchestrator overrides
         winner_variant = build_ablation_variants()[winner_id]
         save_report("phase1_winner_aos.json", winner_variant["aos"])
@@ -1695,6 +1782,7 @@ async def phase1_ablation(
 
 
 # ── Phase 2: Test ────────────────────────────────────────────────────────────
+
 
 def compute_config_hash(config: Dict[str, Any]) -> str:
     """Deterministic hash of the config for test-set protection."""
@@ -1825,19 +1913,25 @@ async def phase2_test(phase1_result: Optional[Dict] = None) -> Dict[str, Any]:
     print(f"{'─' * 60}")
     print(f"  Variant:       {winner_id}")
     print(f"  Total trades:  {metrics['total_trades']}")
-    print(f"  Total PnL:     {metrics['total_pnl_pct']:+.2f}% (${metrics['total_pnl_dollars']:+.2f})")
+    print(
+        f"  Total PnL:     {metrics['total_pnl_pct']:+.2f}% (${metrics['total_pnl_dollars']:+.2f})"
+    )
     print(f"  Participation: {metrics['participation']*100:.0f}%")
     print(f"  Max drawdown:  ${metrics['max_drawdown_dollars']:.2f}")
     print(f"  95% CI:        [{pnl_ci[1]:+.2f}%, {pnl_ci[2]:+.2f}%]")
 
     # Compare tuning vs test
-    phase1_winner_metrics = phase1_result.get("variants", {}).get(winner_id, {}).get("metrics", {})
+    phase1_winner_metrics = (
+        phase1_result.get("variants", {}).get(winner_id, {}).get("metrics", {})
+    )
     if phase1_winner_metrics:
         train_pnl = phase1_winner_metrics.get("total_pnl_pct", 0)
         test_pnl = metrics["total_pnl_pct"]
         print(f"\n  Tuning PnL:    {train_pnl:+.2f}%")
         print(f"  Test PnL:      {test_pnl:+.2f}%")
-        degradation = ((train_pnl - test_pnl) / abs(train_pnl) * 100) if train_pnl != 0 else 0
+        degradation = (
+            ((train_pnl - test_pnl) / abs(train_pnl) * 100) if train_pnl != 0 else 0
+        )
         print(f"  Degradation:   {degradation:.0f}%")
 
     result = {
@@ -1859,6 +1953,7 @@ async def phase2_test(phase1_result: Optional[Dict] = None) -> Dict[str, Any]:
 
 
 # ── Phase 3: Apply ───────────────────────────────────────────────────────────
+
 
 async def phase3_apply(phase2_result: Optional[Dict] = None) -> Dict[str, Any]:
     """Apply winning config to AOS if test passed."""
@@ -1882,7 +1977,11 @@ async def phase3_apply(phase2_result: Optional[Dict] = None) -> Dict[str, Any]:
     if test_pnl < -2.0:
         print(f"  WARNING: Test PnL is {test_pnl:+.2f}% — skipping auto-apply.")
         print("  Review results and apply manually if desired.")
-        return {"phase": 3, "status": "skipped", "reason": f"negative_test_pnl={test_pnl}"}
+        return {
+            "phase": 3,
+            "status": "skipped",
+            "reason": f"negative_test_pnl={test_pnl}",
+        }
 
     # Load winner AOS config
     winner_aos_path = REPORTS_DIR / "phase1_winner_aos.json"
@@ -1930,11 +2029,17 @@ async def phase3_apply(phase2_result: Optional[Dict] = None) -> Dict[str, Any]:
             # Apply orchestrator overrides
             if winner_orch:
                 orch_result = await set_orchestrator_config(client, **winner_orch)
-                print(f"  Orchestrator config applied: {orch_result.get('updated', {})}")
+                print(
+                    f"  Orchestrator config applied: {orch_result.get('updated', {})}"
+                )
 
             if resp.status_code == 200:
-                return {"phase": 3, "status": "applied", "variant": variant_id,
-                        "orch_overrides": winner_orch}
+                return {
+                    "phase": 3,
+                    "status": "applied",
+                    "variant": variant_id,
+                    "orch_overrides": winner_orch,
+                }
             else:
                 print(f"  Falling back to direct file write...")
     except Exception as e:
@@ -1942,7 +2047,9 @@ async def phase3_apply(phase2_result: Optional[Dict] = None) -> Dict[str, Any]:
         print(f"  Falling back to direct file write...")
 
     # Direct file write fallback
-    aos_path = Path(__file__).resolve().parent.parent / "aos_optimization" / "aos_config.json"
+    aos_path = (
+        Path(__file__).resolve().parent.parent / "aos_optimization" / "aos_config.json"
+    )
     with open(aos_path) as f:
         full_config = json.load(f)
 
@@ -1956,6 +2063,7 @@ async def phase3_apply(phase2_result: Optional[Dict] = None) -> Dict[str, Any]:
 
 # ── Reporting ────────────────────────────────────────────────────────────────
 
+
 def save_report(filename: str, data: Dict[str, Any]):
     """Save a JSON report."""
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1966,6 +2074,7 @@ def save_report(filename: str, data: Dict[str, Any]):
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
+
 
 async def main():
     parser = argparse.ArgumentParser(

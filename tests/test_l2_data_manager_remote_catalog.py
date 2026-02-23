@@ -12,7 +12,9 @@ class _StubRemoteCatalog:
         self.file_path = file_path
         self.calls = []
 
-    def get_files_for_range(self, *, ticker: str, start_date: str, end_date: str, schema_prefix: str):
+    def get_files_for_range(
+        self, *, ticker: str, start_date: str, end_date: str, schema_prefix: str
+    ):
         self.calls.append(
             {
                 "ticker": ticker,

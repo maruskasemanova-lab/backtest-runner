@@ -32,11 +32,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExtractionResult:
     """Result of feature extraction."""
+
     snapshots: List[PatternSnapshot]
     total_bars_processed: int
     total_signals_found: int
     extraction_errors: List[str] = field(default_factory=list)
-    
+
     @property
     def success_rate(self) -> float:
         if self.total_signals_found == 0:
@@ -47,13 +48,13 @@ class ExtractionResult:
 class FeatureExtractor:
     """
     Extract feature snapshots from backtest data.
-    
+
     Works with:
     - Backtest reports (JSON files from reports/)
     - Session summaries (JSON files from reports/)
     - Raw bar data with L2 features
     """
-    
+
     def __init__(
         self,
         lookback_bars: int = 20,
@@ -63,7 +64,7 @@ class FeatureExtractor:
         self.lookback_bars = lookback_bars
         self.forward_bars = forward_bars
         self.min_price_move_pct = min_price_move_pct
-    
+
     def extract_from_report(
         self,
         report_path: Path,
@@ -71,11 +72,11 @@ class FeatureExtractor:
     ) -> ExtractionResult:
         """
         Extract snapshots from a backtest report file.
-        
+
         Args:
             report_path: Path to report JSON file
             ticker: Ticker symbol
-            
+
         Returns:
             ExtractionResult with snapshots and statistics
         """
@@ -83,9 +84,9 @@ class FeatureExtractor:
         errors = []
         total_bars = 0
         total_signals = 0
-        
+
         try:
-            with open(report_path, 'r') as f:
+            with open(report_path, "r") as f:
                 report = json.load(f)
         except Exception as e:
             errors.append(f"Failed to load report {report_path}: {e}")
@@ -95,7 +96,7 @@ class FeatureExtractor:
                 total_signals_found=0,
                 extraction_errors=errors,
             )
-        
+
         # Handle daily report format
         if "days" in report:
             for day_data in report["days"]:
@@ -104,7 +105,7 @@ class FeatureExtractor:
                 total_bars += day_result.total_bars_processed
                 total_signals += day_result.total_signals_found
                 errors.extend(day_result.extraction_errors)
-        
+
         # Handle single session format
         elif "decisions" in report:
             day_result = self._extract_from_session(report, ticker)
@@ -112,7 +113,7 @@ class FeatureExtractor:
             total_bars += day_result.total_bars_processed
             total_signals += day_result.total_signals_found
             errors.extend(day_result.extraction_errors)
-        
+
         # Handle session_summary format used by backtest-runner reports
         elif "markers" in report:
             day_result = self._extract_from_markers_report(report, ticker)
@@ -120,14 +121,14 @@ class FeatureExtractor:
             total_bars += day_result.total_bars_processed
             total_signals += day_result.total_signals_found
             errors.extend(day_result.extraction_errors)
-        
+
         return ExtractionResult(
             snapshots=snapshots,
             total_bars_processed=total_bars,
             total_signals_found=total_signals,
             extraction_errors=errors,
         )
-    
+
     def _extract_from_day(
         self,
         day_data: Dict[str, Any],
@@ -138,25 +139,25 @@ class FeatureExtractor:
         errors = []
         total_bars = day_data.get("total_bars", 0)
         total_signals = 0
-        
+
         decisions = day_data.get("decisions", [])
         trades = day_data.get("trades", [])
-        
+
         # Create trade lookup by entry time
         trade_map = {}
         for trade in trades:
             entry_time = trade.get("entry_time")
             if entry_time:
                 trade_map[entry_time] = trade
-        
+
         # Extract from decisions
         for decision in decisions:
             marker_type = decision.get("marker_type", "")
-            
+
             # Look for signal decisions
             if "signal" in marker_type.lower() or "entry" in marker_type.lower():
                 total_signals += 1
-                
+
                 try:
                     snapshot = self._create_snapshot_from_decision(
                         decision, day_data, ticker, trade_map
@@ -165,14 +166,14 @@ class FeatureExtractor:
                         snapshots.append(snapshot)
                 except Exception as e:
                     errors.append(f"Failed to extract snapshot from decision: {e}")
-        
+
         return ExtractionResult(
             snapshots=snapshots,
             total_bars_processed=total_bars,
             total_signals_found=total_signals,
             extraction_errors=errors,
         )
-    
+
     def _extract_from_session(
         self,
         session_data: Dict[str, Any],
@@ -181,7 +182,7 @@ class FeatureExtractor:
         """Extract snapshots from a single session."""
         # Similar to _extract_from_day but for session format
         return self._extract_from_day(session_data, ticker)
-    
+
     def _extract_from_markers_report(
         self,
         report: Dict[str, Any],
@@ -196,44 +197,55 @@ class FeatureExtractor:
                 total_signals_found=0,
                 extraction_errors=[],
             )
-        
+
         # Prefer executed entries for clean outcome labeling. Fallback to raw signals.
         entry_markers = [
-            m for m in markers
+            m
+            for m in markers
             if isinstance(m, dict) and m.get("marker_type") == "entry_executed"
         ]
         signal_markers = [
-            m for m in markers
+            m
+            for m in markers
             if isinstance(m, dict) and m.get("marker_type") == "signal_generated"
         ]
         candidate_markers = entry_markers if entry_markers else signal_markers
-        
+
         regime_markers = [
-            m for m in markers
+            m
+            for m in markers
             if isinstance(m, dict) and m.get("marker_type") == "regime_detected"
         ]
-        
+
         decisions = [
             self._normalize_marker_decision(marker, regime_markers)
             for marker in candidate_markers
         ]
-        
+
         session_summary = report.get("session_summary", {})
         trades = []
         if isinstance(session_summary, dict):
             trades = session_summary.get("trades", []) or []
         if not trades:
             trades = report.get("trades", []) or []
-        
+
         pseudo_day = {
-            "date": report.get("date") or (session_summary.get("date") if isinstance(session_summary, dict) else ""),
-            "run_id": report.get("run_id") or (session_summary.get("run_id") if isinstance(session_summary, dict) else ""),
+            "date": report.get("date")
+            or (
+                session_summary.get("date") if isinstance(session_summary, dict) else ""
+            ),
+            "run_id": report.get("run_id")
+            or (
+                session_summary.get("run_id")
+                if isinstance(session_summary, dict)
+                else ""
+            ),
             "total_bars": report.get("total_bars", 0),
             "decisions": decisions,
             "trades": trades,
         }
         return self._extract_from_day(pseudo_day, ticker)
-    
+
     def _normalize_marker_decision(
         self,
         marker: Dict[str, Any],
@@ -245,17 +257,19 @@ class FeatureExtractor:
         details = details if isinstance(details, dict) else {}
         metadata = details.get("metadata", {})
         metadata = metadata if isinstance(metadata, dict) else {}
-        
+
         indicators = details.get("indicators", {})
         indicators = dict(indicators) if isinstance(indicators, dict) else {}
-        
+
         metadata_indicators = metadata.get("indicators", {})
         if isinstance(metadata_indicators, dict):
             indicators.update(metadata_indicators)
-        
+
         # If signal marker has no direct indicators, borrow latest known regime metrics.
         if not indicators:
-            latest_regime = self._latest_regime_for_bar(regime_markers, marker.get("bar_index"))
+            latest_regime = self._latest_regime_for_bar(
+                regime_markers, marker.get("bar_index")
+            )
             if latest_regime:
                 regime_details = latest_regime.get("details", {})
                 if isinstance(regime_details, dict):
@@ -264,7 +278,7 @@ class FeatureExtractor:
                         indicators.update(regime_indicators)
                 if not normalized.get("regime"):
                     normalized["regime"] = latest_regime.get("regime")
-        
+
         # Layer scores often carry flow metrics in session summary format.
         layer_scores = metadata.get("layer_scores", {})
         if isinstance(layer_scores, dict):
@@ -276,17 +290,17 @@ class FeatureExtractor:
             ):
                 if key not in indicators and key in layer_scores:
                     indicators[key] = layer_scores.get(key)
-        
+
         # Prefer explicit signal_type when side is missing.
         if not normalized.get("side"):
             signal_type = details.get("signal_type")
             if isinstance(signal_type, str):
                 normalized["side"] = signal_type.lower()
-        
+
         details["indicators"] = indicators
         normalized["details"] = details
         return normalized
-    
+
     def _latest_regime_for_bar(
         self,
         regime_markers: List[Dict[str, Any]],
@@ -296,7 +310,7 @@ class FeatureExtractor:
         target_bar = self._safe_int(bar_index, -1)
         if target_bar < 0:
             return None
-        
+
         best = None
         best_bar = -1
         for marker in regime_markers:
@@ -305,7 +319,7 @@ class FeatureExtractor:
                 best = marker
                 best_bar = marker_bar
         return best
-    
+
     def _create_snapshot_from_decision(
         self,
         decision: Dict[str, Any],
@@ -314,20 +328,20 @@ class FeatureExtractor:
         trade_map: Dict[str, Any],
     ) -> Optional[PatternSnapshot]:
         """Create a PatternSnapshot from a decision marker."""
-        
+
         timestamp_str = decision.get("timestamp")
         if not timestamp_str:
             return None
-        
+
         try:
-            timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+            timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
         except:
             return None
-        
+
         # Extract features from decision details
         details = decision.get("details", {})
         indicators = details.get("indicators", {})
-        
+
         # Create PatternInput from available data
         features = PatternInput(
             momentum_z=self._safe_float(indicators.get("momentum_z", 0.0)),
@@ -337,7 +351,9 @@ class FeatureExtractor:
             l2_delta_z=self._safe_float(indicators.get("l2_delta_z", 0.0)),
             l2_aggression_z=self._safe_float(indicators.get("signed_aggression", 0.0)),
             l2_imbalance_z=self._safe_float(indicators.get("imbalance", 0.0)),
-            l2_book_pressure_z=self._safe_float(indicators.get("book_pressure_avg", 0.0)),
+            l2_book_pressure_z=self._safe_float(
+                indicators.get("book_pressure_avg", 0.0)
+            ),
             l2_flow_score_z=self._safe_float(indicators.get("flow_score", 0.0)),
             regime=decision.get("regime", "MIXED") or "MIXED",
             trend_efficiency=self._safe_float(indicators.get("trend_efficiency", 0.5)),
@@ -349,13 +365,13 @@ class FeatureExtractor:
             close_location=self._safe_float(indicators.get("close_location", 0.5)),
             gap_pct=self._safe_float(indicators.get("gap_pct", 0.0)),
         )
-        
+
         # Find matching trade for outcome
         outcome = self._compute_outcome(decision, trade_map, day_data)
-        
+
         # Create snapshot
         snapshot_id = f"{ticker}:{timestamp_str}:{decision.get('bar_index', 0)}"
-        
+
         return PatternSnapshot(
             snapshot_id=snapshot_id,
             ticker=ticker,
@@ -369,7 +385,7 @@ class FeatureExtractor:
             run_id=day_data.get("run_id", ""),
             session_date=day_data.get("date", ""),
         )
-    
+
     def _compute_outcome(
         self,
         decision: Dict[str, Any],
@@ -377,22 +393,26 @@ class FeatureExtractor:
         day_data: Dict[str, Any],
     ) -> PatternOutcome:
         """Compute forward outcome from decision."""
-        
+
         # Try to find matching trade
         timestamp_str = decision.get("timestamp", "")
         trade = trade_map.get(timestamp_str)
-        
+
         if trade:
             return PatternOutcome(
                 is_profitable=trade.get("pnl_pct", 0) > 0,
                 pnl_pct=self._safe_float(trade.get("pnl_pct", 0.0)),
                 pnl_dollars=self._safe_float(trade.get("pnl_dollars", 0.0)),
                 bars_held=trade.get("bars_held", 0),
-                max_favorable_excursion=self._safe_float(trade.get("max_favorable_excursion", 0.0)),
-                max_adverse_excursion=self._safe_float(trade.get("max_adverse_excursion", 0.0)),
+                max_favorable_excursion=self._safe_float(
+                    trade.get("max_favorable_excursion", 0.0)
+                ),
+                max_adverse_excursion=self._safe_float(
+                    trade.get("max_adverse_excursion", 0.0)
+                ),
                 exit_reason=trade.get("exit_reason", ""),
             )
-        
+
         # No matching trade - compute from price data if available
         # This is a fallback for decisions that didn't result in trades
         return PatternOutcome(
@@ -402,25 +422,25 @@ class FeatureExtractor:
             bars_held=0,
             exit_reason="no_trade",
         )
-    
+
     def _determine_signal_type(self, decision: Dict[str, Any]) -> str:
         """Determine signal type from decision."""
         side = decision.get("side", "")
         marker_type = decision.get("marker_type", "").lower()
-        
+
         if "long" in marker_type or side == "long":
             return "long"
         elif "short" in marker_type or side == "short":
             return "short"
         return "unknown"
-    
+
     def _safe_float(self, value: Any) -> float:
         """Safely convert value to float."""
         try:
             return float(value) if value is not None else 0.0
         except (ValueError, TypeError):
             return 0.0
-    
+
     def _safe_int(self, value: Any, default: int = 0) -> int:
         """Safely convert value to int."""
         try:
@@ -438,14 +458,14 @@ def extract_snapshots_from_backtest(
 ) -> List[PatternSnapshot]:
     """
     Extract feature snapshots from backtest reports.
-    
+
     Args:
         ticker: Ticker symbol
         date_from: Start date YYYY-MM-DD
         date_to: End date YYYY-MM-DD
         reports_dir: Directory containing backtest reports
         config: Discovery configuration
-        
+
     Returns:
         List of PatternSnapshot objects
     """
@@ -453,9 +473,9 @@ def extract_snapshots_from_backtest(
         lookback_bars=config.lookback_bars,
         forward_bars=config.forward_bars,
     )
-    
+
     all_snapshots = []
-    
+
     # Find report files recursively for the ticker and date range
     ticker_lower = ticker.lower()
     for report_file in reports_dir.rglob("*.json"):
@@ -465,7 +485,7 @@ def extract_snapshots_from_backtest(
         try:
             result = extractor.extract_from_report(report_file, ticker)
             all_snapshots.extend(result.snapshots)
-            
+
             if result.extraction_errors:
                 logger.warning(
                     f"Extraction errors in {report_file}: "
@@ -473,16 +493,15 @@ def extract_snapshots_from_backtest(
                 )
         except Exception as e:
             logger.error(f"Failed to process {report_file}: {e}")
-    
+
     # Filter by date range
     start_date = datetime.strptime(date_from, "%Y-%m-%d").date()
     end_date = datetime.strptime(date_to, "%Y-%m-%d").date()
-    
+
     filtered_snapshots = [
-        s for s in all_snapshots
-        if start_date <= s.timestamp.date() <= end_date
+        s for s in all_snapshots if start_date <= s.timestamp.date() <= end_date
     ]
-    
+
     # Deduplicate repeated replay runs to reduce bias in pattern support.
     unique_snapshots: Dict[Tuple[str, str, int, str, str], PatternSnapshot] = {}
     for snapshot in filtered_snapshots:
@@ -495,112 +514,10 @@ def extract_snapshots_from_backtest(
         )
         unique_snapshots.setdefault(key, snapshot)
     deduped_snapshots = list(unique_snapshots.values())
-    
+
     logger.info(
         f"Extracted {len(deduped_snapshots)} snapshots for {ticker} "
         f"from {date_from} to {date_to}"
     )
-    
+
     return deduped_snapshots
-
-
-def extract_snapshots_from_session_summary(
-    session_summary_path: Path,
-    ticker: str,
-    config: DiscoveryConfig,
-) -> List[PatternSnapshot]:
-    """
-    Extract snapshots from a session summary file.
-    
-    Session summaries contain detailed bar-by-bar data with features.
-    """
-    extractor = FeatureExtractor(
-        lookback_bars=config.lookback_bars,
-        forward_bars=config.forward_bars,
-    )
-    
-    result = extractor.extract_from_report(session_summary_path, ticker)
-    return result.snapshots
-
-
-def compute_forward_outcome(
-    bars: List[Dict[str, Any]],
-    signal_bar_index: int,
-    forward_bars: int,
-    direction: str,
-) -> PatternOutcome:
-    """
-    Compute forward outcome from bar data.
-    
-    Args:
-        bars: List of bar dictionaries with OHLCV data
-        signal_bar_index: Index of the signal bar
-        forward_bars: Number of bars to look forward
-        direction: 'long' or 'short'
-        
-    Returns:
-        PatternOutcome with computed metrics
-    """
-    if signal_bar_index >= len(bars) - 1:
-        return PatternOutcome(
-            is_profitable=False,
-            pnl_pct=0.0,
-            bars_held=0,
-            exit_reason="no_forward_data",
-        )
-    
-    signal_bar = bars[signal_bar_index]
-    entry_price = signal_bar.get("close", 0)
-    
-    if entry_price == 0:
-        return PatternOutcome(
-            is_profitable=False,
-            pnl_pct=0.0,
-            bars_held=0,
-            exit_reason="invalid_price",
-        )
-    
-    # Look at forward bars
-    end_index = min(signal_bar_index + forward_bars + 1, len(bars))
-    forward_bars_data = bars[signal_bar_index + 1:end_index]
-    
-    if not forward_bars_data:
-        return PatternOutcome(
-            is_profitable=False,
-            pnl_pct=0.0,
-            bars_held=0,
-            exit_reason="no_forward_bars",
-        )
-    
-    # Compute PnL at each forward bar
-    max_favorable = 0.0
-    max_adverse = 0.0
-    final_pnl = 0.0
-    
-    for i, bar in enumerate(forward_bars_data):
-        if direction == "long":
-            pnl = (bar.get("high", entry_price) - entry_price) / entry_price * 100
-            adverse = (entry_price - bar.get("low", entry_price)) / entry_price * 100
-        else:  # short
-            pnl = (entry_price - bar.get("low", entry_price)) / entry_price * 100
-            adverse = (bar.get("high", entry_price) - entry_price) / entry_price * 100
-        
-        max_favorable = max(max_favorable, pnl)
-        max_adverse = max(max_adverse, adverse)
-        final_pnl = pnl
-    
-    # Use last bar for final PnL
-    last_bar = forward_bars_data[-1]
-    if direction == "long":
-        final_pnl = (last_bar.get("close", entry_price) - entry_price) / entry_price * 100
-    else:
-        final_pnl = (entry_price - last_bar.get("close", entry_price)) / entry_price * 100
-    
-    return PatternOutcome(
-        is_profitable=final_pnl > 0,
-        pnl_pct=final_pnl,
-        bars_held=len(forward_bars_data),
-        max_favorable_excursion=max_favorable,
-        max_adverse_excursion=max_adverse,
-        exit_reason="forward_bars_complete",
-    )

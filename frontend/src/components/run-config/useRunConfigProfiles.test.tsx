@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useRunConfigProfiles } from "./useRunConfigProfiles";
@@ -106,5 +106,58 @@ describe("useRunConfigProfiles unified-only flow", () => {
     const calledUrls = fetchMock.mock.calls.map((args) => String(args[0]));
     expect(calledUrls).not.toContain("/api/strategy-combos/apply");
     expect(calledUrls).not.toContain("/api/adaptive-tuner/profiles/apply");
+  });
+
+  it("keeps selected unified profile when profile refresh fails", async () => {
+    const hydrateExecutionConfigFromPositioning = vi.fn();
+    let profileCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/aos-config/MU") {
+        return responseJson({});
+      }
+      if (url === "/api/profiles/MU") {
+        profileCalls += 1;
+        if (profileCalls === 1) {
+          return responseJson({
+            ticker: "MU",
+            profiles: [{ profile_id: "u1", profile_name: "Unified 1" }],
+            active_profile_id: "u1",
+          });
+        }
+        return responseJson({ detail: "temporary outage" }, false, 503);
+      }
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() =>
+      useRunConfigProfiles({
+        ticker: "MU",
+        strategyApiUrl: "http://localhost:8001",
+        activeProfileSentinel: "__ACTIVE__",
+        normalizeProfileRefToken,
+        normalizeAosTickerConfig,
+        hydrateExecutionConfigFromPositioning,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.unifiedProfilesLoading).toBe(false);
+    });
+    expect(result.current.selectedUnifiedProfileId).toBe("__ACTIVE__");
+
+    act(() => {
+      result.current.setSelectedUnifiedProfileId("u1");
+    });
+    expect(result.current.selectedUnifiedProfileId).toBe("u1");
+
+    await act(async () => {
+      await result.current.fetchUnifiedProfiles("MU");
+    });
+
+    expect(result.current.selectedUnifiedProfileId).toBe("u1");
+    expect(result.current.unifiedProfilesResolved).toBe(true);
+    expect(result.current.unifiedProfilesError).toBe("Failed to load unified profiles.");
   });
 });

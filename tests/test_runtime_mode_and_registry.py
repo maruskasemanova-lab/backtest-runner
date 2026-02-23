@@ -38,7 +38,9 @@ def test_runtime_mode_blocks_stateful_run_api_on_serverless_by_default(
     assert stateful_run_api_supported() is False
 
 
-def test_runtime_mode_does_not_allow_serverless_override_env(monkeypatch: pytest.MonkeyPatch):
+def test_runtime_mode_does_not_allow_serverless_override_env(
+    monkeypatch: pytest.MonkeyPatch,
+):
     _clear_serverless_env(monkeypatch)
     monkeypatch.setenv("VERCEL", "1")
     assert is_serverless_environment() is True
@@ -72,7 +74,9 @@ def test_run_registry_returns_404_when_stateful_mode_is_supported(
     assert "Run not found: r1:MU:2026-02-13" in str(exc.value.detail)
 
 
-def test_start_run_rejects_serverless_when_guard_active(monkeypatch: pytest.MonkeyPatch):
+def test_start_run_rejects_serverless_when_guard_active(
+    monkeypatch: pytest.MonkeyPatch,
+):
     _clear_serverless_env(monkeypatch)
     monkeypatch.setenv("VERCEL", "1")
 

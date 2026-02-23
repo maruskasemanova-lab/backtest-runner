@@ -44,14 +44,20 @@ class _ClientSessionStub:
 def test_apply_global_trailing_updates_global_exit_and_risk_fields(monkeypatch) -> None:
     captured_updates: List[Tuple[str, Dict[str, Any]]] = []
 
-    async def _run_updates(*, strategy_api_url: str, updates: List[Tuple[str, Dict[str, Any]]]):
+    async def _run_updates(
+        *, strategy_api_url: str, updates: List[Tuple[str, Dict[str, Any]]]
+    ):
         captured_updates.extend(updates)
         return [(name, 200, None) for name, _ in updates]
 
     monkeypatch.setattr(
         svc,
         "aiohttp",
-        SimpleNamespace(ClientSession=lambda *args, **kwargs: _ClientSessionStub({"momentum_flow": {}, "pullback": {}})),
+        SimpleNamespace(
+            ClientSession=lambda *args, **kwargs: _ClientSessionStub(
+                {"momentum_flow": {}, "pullback": {}}
+            )
+        ),
     )
     monkeypatch.setattr(svc, "_run_strategy_updates", _run_updates)
 

@@ -53,7 +53,11 @@ class DatabentoApiKeyRequest(BaseModel):
 
 
 def _require_admin_access(request: Request) -> None:
-    enforce = str(os.getenv("BACKTEST_ENFORCE_ADMIN_DATABENTO_API_KEY", "true")).strip().lower()
+    enforce = (
+        str(os.getenv("BACKTEST_ENFORCE_ADMIN_DATABENTO_API_KEY", "true"))
+        .strip()
+        .lower()
+    )
     if enforce not in {"1", "true", "yes", "on"}:
         return
 
@@ -226,6 +230,8 @@ async def start_download(
                 request.data_schema,
                 entry.status,
             )
+            if request.data_schema.startswith("ohlcv"):
+                services.reset_discovery()
         except Exception as exc:
             services.logger.error("Download failed: %s", exc)
 

@@ -58,7 +58,17 @@ def git_last_touch(path: Path) -> str:
     except ValueError:
         return "-"
 
-    cmd = ["git", "-C", str(git_root), "log", "-n", "1", "--pretty=format:%h %cs", "--", str(rel)]
+    cmd = [
+        "git",
+        "-C",
+        str(git_root),
+        "log",
+        "-n",
+        "1",
+        "--pretty=format:%h %cs",
+        "--",
+        str(rel),
+    ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     out = proc.stdout.strip()
     return out if out else "-"
@@ -85,10 +95,18 @@ def _decorator_route_info(decorator: ast.AST) -> Optional[Tuple[str, str]]:
         return None
 
     path = ""
-    if decorator.args and isinstance(decorator.args[0], ast.Constant) and isinstance(decorator.args[0].value, str):
+    if (
+        decorator.args
+        and isinstance(decorator.args[0], ast.Constant)
+        and isinstance(decorator.args[0].value, str)
+    ):
         path = decorator.args[0].value
     for kw in decorator.keywords:
-        if kw.arg == "path" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+        if (
+            kw.arg == "path"
+            and isinstance(kw.value, ast.Constant)
+            and isinstance(kw.value.value, str)
+        ):
             path = kw.value.value
     return func.attr.upper(), path
 
@@ -112,7 +130,9 @@ def extract_python_metadata(path: Path) -> Dict[str, Any]:
         if isinstance(node, ast.ClassDef):
             symbols.append({"kind": "class", "name": node.name, "line": node.lineno})
         elif isinstance(node, ast.AsyncFunctionDef):
-            symbols.append({"kind": "async_function", "name": node.name, "line": node.lineno})
+            symbols.append(
+                {"kind": "async_function", "name": node.name, "line": node.lineno}
+            )
         elif isinstance(node, ast.FunctionDef):
             symbols.append({"kind": "function", "name": node.name, "line": node.lineno})
 
@@ -193,7 +213,14 @@ def build_machine_index(config: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
 
-    route_catalog.sort(key=lambda r: (str(r.get("domain")), str(r.get("method")), str(r.get("path")), str(r.get("handler"))))
+    route_catalog.sort(
+        key=lambda r: (
+            str(r.get("domain")),
+            str(r.get("method")),
+            str(r.get("path")),
+            str(r.get("handler")),
+        )
+    )
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -204,7 +231,9 @@ def build_machine_index(config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def build_domain_markdown(domain: Dict[str, Any], file_records: List[Dict[str, Any]]) -> str:
+def build_domain_markdown(
+    domain: Dict[str, Any], file_records: List[Dict[str, Any]]
+) -> str:
     lines: List[str] = []
     lines.append(f"# Domain: {domain['title']}")
     lines.append("")
@@ -355,14 +384,18 @@ def build_index_markdown(config: Dict[str, Any]) -> str:
     lines.append("## Generated Assets")
     lines.append("")
     lines.append("- `bmad/context/generated/00-machine-index.json` (symbols + routes)")
-    lines.append("- `bmad/context/generated/00-endpoint-map.md` (global endpoint catalog)")
+    lines.append(
+        "- `bmad/context/generated/00-endpoint-map.md` (global endpoint catalog)"
+    )
     lines.append("")
 
     lines.append("## How To Use")
     lines.append("")
     lines.append("- Pick one primary domain for the task.")
     lines.append("- Load the primary domain pack plus `00-machine-index.json`.")
-    lines.append("- Keep changes local first; list contract deltas when crossing domains.")
+    lines.append(
+        "- Keep changes local first; list contract deltas when crossing domains."
+    )
     lines.append("")
     return "\n".join(lines)
 

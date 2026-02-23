@@ -114,7 +114,9 @@ def test_v2_auth_me_returns_context(tmp_path, monkeypatch):
         },
         "test-secret",
     )
-    response = client.get("/api/v2/auth/me", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/api/v2/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 200
     payload = response.json()
     assert payload["user_id"] == "user-1"
@@ -123,7 +125,9 @@ def test_v2_auth_me_returns_context(tmp_path, monkeypatch):
 
 
 def test_v2_run_non_admin_forces_internal_strategy_url(tmp_path, monkeypatch):
-    client, calls = _build_client(tmp_path, internal_strategy_url="http://internal:8001")
+    client, calls = _build_client(
+        tmp_path, internal_strategy_url="http://internal:8001"
+    )
     monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
 
     token = _make_jwt(
@@ -151,7 +155,9 @@ def test_v2_run_non_admin_forces_internal_strategy_url(tmp_path, monkeypatch):
 
     # Poll until background task writes result.
     for _ in range(30):
-        polled = client.get(f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"})
+        polled = client.get(
+            f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"}
+        )
         assert polled.status_code == 200
         state = polled.json()["job"]["status"]
         if state in {"completed", "failed"}:
@@ -192,7 +198,9 @@ def test_v2_run_free_plan_enforces_date_range_limit(tmp_path, monkeypatch):
 
 
 def test_v2_adaptive_tuner_forces_internal_strategy_url(tmp_path, monkeypatch):
-    client, calls = _build_client(tmp_path, internal_strategy_url="http://internal:8001")
+    client, calls = _build_client(
+        tmp_path, internal_strategy_url="http://internal:8001"
+    )
     monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
 
     token = _make_jwt(
@@ -218,7 +226,9 @@ def test_v2_adaptive_tuner_forces_internal_strategy_url(tmp_path, monkeypatch):
     job_id = response.json()["job_id"]
 
     for _ in range(20):
-        polled = client.get(f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"})
+        polled = client.get(
+            f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"}
+        )
         assert polled.status_code == 200
         if polled.json()["job"]["status"] in {"completed", "failed"}:
             break
@@ -292,7 +302,9 @@ def test_v2_run_idempotency_key_reuses_existing_job(tmp_path, monkeypatch):
     assert second_payload["idempotent_replay"] is True
 
     for _ in range(30):
-        polled = client.get(f"/api/v2/jobs/{first_job}", headers={"Authorization": f"Bearer {token}"})
+        polled = client.get(
+            f"/api/v2/jobs/{first_job}", headers={"Authorization": f"Bearer {token}"}
+        )
         assert polled.status_code == 200
         if polled.json()["job"]["status"] in {"completed", "failed"}:
             break
@@ -309,7 +321,10 @@ def test_v2_run_retries_transient_failure(tmp_path, monkeypatch):
         if attempts["count"] == 1:
             raise HTTPException(status_code=503, detail="temporary upstream error")
         date_label = request.date or f"{request.date_from}_to_{request.date_to}"
-        return {"run_key": f"{request.run_id}:{request.ticker}:{date_label}", "status": "ok"}
+        return {
+            "run_key": f"{request.run_id}:{request.ticker}:{date_label}",
+            "status": "ok",
+        }
 
     client, calls = _build_client(tmp_path, start_run_impl=_flaky_start_run)
     monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
@@ -338,7 +353,9 @@ def test_v2_run_retries_transient_failure(tmp_path, monkeypatch):
 
     final_payload = None
     for _ in range(80):
-        polled = client.get(f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"})
+        polled = client.get(
+            f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"}
+        )
         assert polled.status_code == 200
         final_payload = polled.json()["job"]
         if final_payload["status"] in {"completed", "failed"}:
@@ -419,7 +436,9 @@ def test_v2_billing_subscription_cancel_at_period_end_lifecycle(tmp_path, monkey
     assert response.status_code == 200
     assert response.json()["handled"] is True
 
-    usage_resp = client.get("/api/v2/usage", headers={"Authorization": f"Bearer {token}"})
+    usage_resp = client.get(
+        "/api/v2/usage", headers={"Authorization": f"Bearer {token}"}
+    )
     assert usage_resp.status_code == 200
     assert usage_resp.json()["plan_tier"] == "premium"
 
@@ -437,10 +456,14 @@ def test_v2_billing_subscription_cancel_at_period_end_lifecycle(tmp_path, monkey
             }
         },
     }
-    response_expired = client.post("/api/v2/billing/webhook/stripe", json=expired_payload)
+    response_expired = client.post(
+        "/api/v2/billing/webhook/stripe", json=expired_payload
+    )
     assert response_expired.status_code == 200
 
-    usage_after = client.get("/api/v2/usage", headers={"Authorization": f"Bearer {token}"})
+    usage_after = client.get(
+        "/api/v2/usage", headers={"Authorization": f"Bearer {token}"}
+    )
     assert usage_after.status_code == 200
     assert usage_after.json()["plan_tier"] == "free"
 
@@ -475,7 +498,9 @@ def test_v2_billing_invoice_payment_failed_sets_grace(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json()["handled"] is True
 
-    usage_resp = client.get("/api/v2/usage", headers={"Authorization": f"Bearer {token}"})
+    usage_resp = client.get(
+        "/api/v2/usage", headers={"Authorization": f"Bearer {token}"}
+    )
     assert usage_resp.status_code == 200
     assert usage_resp.json()["plan_tier"] == "premium"
 
@@ -497,7 +522,9 @@ def test_v2_invite_only_blocks_non_allowlisted_user(tmp_path, monkeypatch):
         },
         "test-secret",
     )
-    response = client.get("/api/v2/auth/me", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/api/v2/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "invite_only_beta"
 
@@ -517,7 +544,9 @@ def test_v2_invite_only_allows_allowlisted_user(tmp_path, monkeypatch):
         },
         "test-secret",
     )
-    response = client.get("/api/v2/auth/me", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/api/v2/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 200
     assert response.json()["user_id"] == "allowed-user-1"
 
@@ -589,7 +618,9 @@ def test_v2_ops_metrics_requires_admin(tmp_path, monkeypatch):
         "test-secret",
     )
 
-    response = client.get("/api/v2/ops/metrics", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/api/v2/ops/metrics", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "forbidden"
 
@@ -651,7 +682,9 @@ def test_v2_ops_metrics_returns_queue_runtime_and_storage(tmp_path, monkeypatch)
         },
         "test-secret",
     )
-    response = client.get("/api/v2/ops/metrics", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/api/v2/ops/metrics", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 200
 
     payload = response.json()
@@ -711,7 +744,9 @@ def test_v2_usage_retention_cleanup_prunes_old_terminal_records(tmp_path, monkey
         status="completed",
         metadata={},
     )
-    old_usage_day = (datetime.now(tz=timezone.utc) - timedelta(days=10)).date().isoformat()
+    old_usage_day = (
+        (datetime.now(tz=timezone.utc) - timedelta(days=10)).date().isoformat()
+    )
     store.increment_usage(user_id=user_id, metric="api_requests", day_key=old_usage_day)
 
     with store._lock:
@@ -741,15 +776,21 @@ def test_v2_usage_retention_cleanup_prunes_old_terminal_records(tmp_path, monkey
         cur = store._conn.cursor()
         jobs = {
             str(row["job_id"])
-            for row in cur.execute("SELECT job_id FROM jobs WHERE user_id = ?", (user_id,)).fetchall()
+            for row in cur.execute(
+                "SELECT job_id FROM jobs WHERE user_id = ?", (user_id,)
+            ).fetchall()
         }
         runs = {
             str(row["run_key"])
-            for row in cur.execute("SELECT run_key FROM runs WHERE user_id = ?", (user_id,)).fetchall()
+            for row in cur.execute(
+                "SELECT run_key FROM runs WHERE user_id = ?", (user_id,)
+            ).fetchall()
         }
         usage_days = {
             str(row["day_key"])
-            for row in cur.execute("SELECT day_key FROM usage_counters_daily WHERE user_id = ?", (user_id,)).fetchall()
+            for row in cur.execute(
+                "SELECT day_key FROM usage_counters_daily WHERE user_id = ?", (user_id,)
+            ).fetchall()
         }
 
     assert "job_ret_old_terminal" not in jobs
@@ -844,7 +885,10 @@ def test_v2_adaptive_strategies_user_scope_lifecycle(tmp_path, monkeypatch):
             "profile_name": "user momentum v1",
             "adaptive_version": 2,
             "scope": "user",
-            "candidate": {"strategy_selection_mode": "adaptive_top_n", "max_active_strategies": 3},
+            "candidate": {
+                "strategy_selection_mode": "adaptive_top_n",
+                "max_active_strategies": 3,
+            },
             "metadata": {"note": "personal profile"},
         },
     )
@@ -930,7 +974,9 @@ def test_v2_adaptive_strategies_global_scope_requires_admin(tmp_path, monkeypatc
     assert created_profile_id in ids
 
 
-def test_v2_adaptive_strategies_non_owner_cannot_delete_user_profile(tmp_path, monkeypatch):
+def test_v2_adaptive_strategies_non_owner_cannot_delete_user_profile(
+    tmp_path, monkeypatch
+):
     client, _calls = _build_client(tmp_path)
     monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
 
@@ -1033,7 +1079,10 @@ def test_v2_user_settings_roundtrip_and_top_level_merge(tmp_path, monkeypatch):
     )
     assert second.status_code == 200
     merged = second.json()["settings"]
-    assert merged["run_config_draft"]["selected_unified_profile_id"] == "mu_scalp_intrabar_fee_v1"
+    assert (
+        merged["run_config_draft"]["selected_unified_profile_id"]
+        == "mu_scalp_intrabar_fee_v1"
+    )
     assert merged["sidebar_nav"]["active"] == "profiles"
 
     final = client.get("/api/v2/user/settings", headers=headers)

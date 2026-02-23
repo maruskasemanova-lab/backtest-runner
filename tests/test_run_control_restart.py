@@ -98,7 +98,9 @@ def _build_deps(runner: _DummyRunner, calls: dict) -> RunControlDeps:
     async def _clear_remote(strategy_api_url: str, run_id: str, ticker: str):
         calls["clear"] = (strategy_api_url, run_id, ticker)
 
-    async def _configure_session(strategy_api_url: str, run_id: str, ticker: str, date: str, **kwargs):
+    async def _configure_session(
+        strategy_api_url: str, run_id: str, ticker: str, date: str, **kwargs
+    ):
         calls["configure"] = (strategy_api_url, run_id, ticker, date, kwargs)
 
     return RunControlDeps(

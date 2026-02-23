@@ -57,3 +57,5 @@ reports/
 # Local Netlify folder
 .netlify
 .vercel
+# Local axon binary cache (too large for GitHub)
+.axon/kuzu

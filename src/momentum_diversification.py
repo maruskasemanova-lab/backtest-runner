@@ -6,9 +6,9 @@ This module handles momentum diversification configuration including:
 - Micro-regime routing (TRENDING_UP, BREAKOUT, CHOPPY, etc.)
 - Route-based strategy mapping (impulse, continuation, defensive)
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 
@@ -42,67 +42,6 @@ STRATEGY_FAMILY_MAP: Dict[str, str] = {
 }
 
 
-@dataclass
-class MomentumDiversificationConfig:
-    """Configuration for momentum diversification."""
-    
-    enabled: bool = False
-    require_l2_coverage: bool = False
-    min_flow_score: float = 0.0
-    min_directional_consistency: float = 0.0
-    min_signed_aggression: float = 0.0
-    min_imbalance: float = 0.0
-    min_cvd: float = 0.0
-    min_directional_price_change_pct: float = 0.0
-    min_price_trend_efficiency: float = 0.0
-    min_last_bar_body_ratio: float = 0.0
-    min_last_bar_close_location: float = 0.0
-    allowed_micro_regimes: List[str] = field(default_factory=list)
-    blocked_micro_regimes: List[str] = field(default_factory=list)
-    route_enabled: bool = False
-    route_require_l2_coverage: bool = False
-    route_flow_score_impulse: float = 0.0
-    route_strategy_map: Dict[str, List[str]] = field(default_factory=dict)
-    micro_regime_routes: Dict[str, str] = field(default_factory=dict)
-    fail_fast_exit_enabled: bool = False
-    fail_fast_max_bars: int = 5
-    fail_fast_signed_aggression_max: float = -0.1
-    fail_fast_book_pressure_max: float = -0.1
-    fail_fast_directional_consistency_max: float = 0.3
-    apply_to_strategies: List[str] = field(default_factory=list)
-    sleeves: List[Dict[str, Any]] = field(default_factory=list)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "enabled": self.enabled,
-            "require_l2_coverage": self.require_l2_coverage,
-            "min_flow_score": self.min_flow_score,
-            "min_directional_consistency": self.min_directional_consistency,
-            "min_signed_aggression": self.min_signed_aggression,
-            "min_imbalance": self.min_imbalance,
-            "min_cvd": self.min_cvd,
-            "min_directional_price_change_pct": self.min_directional_price_change_pct,
-            "min_price_trend_efficiency": self.min_price_trend_efficiency,
-            "min_last_bar_body_ratio": self.min_last_bar_body_ratio,
-            "min_last_bar_close_location": self.min_last_bar_close_location,
-            "allowed_micro_regimes": self.allowed_micro_regimes,
-            "blocked_micro_regimes": self.blocked_micro_regimes,
-            "route_enabled": self.route_enabled,
-            "route_require_l2_coverage": self.route_require_l2_coverage,
-            "route_flow_score_impulse": self.route_flow_score_impulse,
-            "route_strategy_map": self.route_strategy_map,
-            "micro_regime_routes": self.micro_regime_routes,
-            "fail_fast_exit_enabled": self.fail_fast_exit_enabled,
-            "fail_fast_max_bars": self.fail_fast_max_bars,
-            "fail_fast_signed_aggression_max": self.fail_fast_signed_aggression_max,
-            "fail_fast_book_pressure_max": self.fail_fast_book_pressure_max,
-            "fail_fast_directional_consistency_max": self.fail_fast_directional_consistency_max,
-            "apply_to_strategies": self.apply_to_strategies,
-            "sleeves": self.sleeves,
-        }
-
-
 def normalize_momentum_diversification_payload(
     raw: Any,
     *,
@@ -110,11 +49,11 @@ def normalize_momentum_diversification_payload(
 ) -> Optional[Dict[str, Any]]:
     """
     Normalize and validate momentum diversification payload.
-    
+
     Args:
         raw: Raw configuration dictionary
         include_sleeves: Whether to process sleeve configurations
-        
+
     Returns:
         Normalized configuration dictionary or None if invalid
     """
@@ -233,7 +172,9 @@ def normalize_momentum_diversification_payload(
             )
             if not sleeve_payload:
                 continue
-            raw_id = str(item.get("sleeve_id") or item.get("name") or f"sleeve_{idx + 1}").strip()
+            raw_id = str(
+                item.get("sleeve_id") or item.get("name") or f"sleeve_{idx + 1}"
+            ).strip()
             normalized_id = raw_id.lower().replace(" ", "_")
             if not normalized_id:
                 normalized_id = f"sleeve_{idx + 1}"
@@ -268,25 +209,25 @@ def build_regime_strategy_map_options(
     Returns a list of map candidates. ``None`` means flat mode (no per-regime
     mapping, backward compatible). Each map assigns a strategy list to each
     macro regime (TRENDING / MIXED / CHOPPY).
-    
+
     Args:
         enabled: List of enabled strategy names
         strategy_family_map: Optional custom strategy family map
-        
+
     Returns:
         List of regime strategy map options
     """
     family_map = strategy_family_map or STRATEGY_FAMILY_MAP
-    
+
     trend = [s for s in enabled if family_map.get(s) == "trend-follow"]
     reversal = [s for s in enabled if family_map.get(s) == "reversal"]
-    
+
     # Fallback: if a family bucket is empty, use enabled list
     if not trend:
         trend = enabled[:1]
     if not reversal:
         reversal = enabled[:1]
-        
+
     return [
         None,  # flat mode — backward compatible
         {"TRENDING": trend, "MIXED": reversal, "CHOPPY": []},

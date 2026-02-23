@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from src.services.saas_service import SaaSStateStore, SupabaseRunReportsStore, SupabaseUserSettingsStore
+from src.services.saas_service import (
+    SaaSStateStore,
+    SupabaseRunReportsStore,
+    SupabaseUserSettingsStore,
+)
 
 
 class _StubResponse:
@@ -30,7 +34,9 @@ def test_supabase_user_settings_store_fallback_to_run_summaries(monkeypatch):
         "run_summaries": {},
     }
 
-    def _fake_request(method, url, params=None, json=None, headers=None, timeout=None, **kwargs):
+    def _fake_request(
+        method, url, params=None, json=None, headers=None, timeout=None, **kwargs
+    ):
         method = str(method or "").upper()
         path = str(url or "")
         _ = headers, timeout, kwargs
@@ -47,17 +53,25 @@ def test_supabase_user_settings_store_fallback_to_run_summaries(monkeypatch):
             user_id = _eq(params, "user_id")
             if method == "GET":
                 row = state["run_summaries"].get(f"direct:{user_id}")
-                return _StubResponse(200, [{"settings_json": row}] if row is not None else [])
+                return _StubResponse(
+                    200, [{"settings_json": row}] if row is not None else []
+                )
             if method == "POST":
                 row = (json or [{}])[0]
-                state["run_summaries"][f"direct:{row['user_id']}"] = row.get("settings_json") or {}
-                return _StubResponse(201, [{"settings_json": row.get("settings_json") or {}}])
+                state["run_summaries"][f"direct:{row['user_id']}"] = (
+                    row.get("settings_json") or {}
+                )
+                return _StubResponse(
+                    201, [{"settings_json": row.get("settings_json") or {}}]
+                )
 
         if path.endswith("/users"):
             if method == "GET":
                 user_id = _eq(params, "id")
                 row = state["users"].get(user_id)
-                return _StubResponse(200, [{"tenant_id": row["tenant_id"]}] if row else [])
+                return _StubResponse(
+                    200, [{"tenant_id": row["tenant_id"]}] if row else []
+                )
             if method == "POST":
                 rows = []
                 for row in json or []:
@@ -83,7 +97,9 @@ def test_supabase_user_settings_store_fallback_to_run_summaries(monkeypatch):
             if method == "GET":
                 run_key = _eq(params, "run_key")
                 row = state["run_summaries"].get(run_key)
-                return _StubResponse(200, [{"summary": row.get("summary")}] if row else [])
+                return _StubResponse(
+                    200, [{"summary": row.get("summary")}] if row else []
+                )
             if method == "POST":
                 rows = []
                 for row in json or []:
@@ -92,7 +108,9 @@ def test_supabase_user_settings_store_fallback_to_run_summaries(monkeypatch):
                     rows.append({"summary": dict(row.get("summary") or {})})
                 return _StubResponse(201, rows)
 
-        raise AssertionError(f"Unexpected request: {method} {url} params={params} json={json}")
+        raise AssertionError(
+            f"Unexpected request: {method} {url} params={params} json={json}"
+        )
 
     monkeypatch.setattr("src.services.saas_service.requests.request", _fake_request)
 
@@ -109,7 +127,9 @@ def test_supabase_user_settings_store_fallback_to_run_summaries(monkeypatch):
         patch={"run_config_draft": {"ticker": "MU"}},
     )
     assert merged == {"run_config_draft": {"ticker": "MU"}}
-    assert store.get_user_settings(user_id="user-a") == {"run_config_draft": {"ticker": "MU"}}
+    assert store.get_user_settings(user_id="user-a") == {
+        "run_config_draft": {"ticker": "MU"}
+    }
 
     created_user = state["users"]["user-a"]
     assert created_user["tenant_id"]
@@ -119,7 +139,9 @@ def test_supabase_user_settings_store_fallback_to_run_summaries(monkeypatch):
 def test_supabase_user_settings_store_primary_table(monkeypatch):
     state = {"user_settings": {}}
 
-    def _fake_request(method, url, params=None, json=None, headers=None, timeout=None, **kwargs):
+    def _fake_request(
+        method, url, params=None, json=None, headers=None, timeout=None, **kwargs
+    ):
         method = str(method or "").upper()
         _ = headers, timeout, kwargs
         if not str(url).endswith("/user_settings"):
@@ -128,7 +150,9 @@ def test_supabase_user_settings_store_primary_table(monkeypatch):
         if method == "GET":
             user_id = _eq(params, "user_id")
             settings = state["user_settings"].get(user_id)
-            return _StubResponse(200, [{"settings_json": settings}] if settings is not None else [])
+            return _StubResponse(
+                200, [{"settings_json": settings}] if settings is not None else []
+            )
 
         if method == "POST":
             row = (json or [{}])[0]
@@ -164,7 +188,9 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
         "run_summaries": {},
     }
 
-    def _fake_request(method, url, params=None, json=None, headers=None, timeout=None, **kwargs):
+    def _fake_request(
+        method, url, params=None, json=None, headers=None, timeout=None, **kwargs
+    ):
         method = str(method or "").upper()
         path = str(url or "")
         _ = headers, timeout, kwargs
@@ -173,7 +199,9 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
             if method == "GET":
                 user_id = _eq(params, "id")
                 row = state["users"].get(user_id)
-                return _StubResponse(200, [{"tenant_id": row["tenant_id"]}] if row else [])
+                return _StubResponse(
+                    200, [{"tenant_id": row["tenant_id"]}] if row else []
+                )
             if method == "POST":
                 rows = []
                 for row in json or []:
@@ -201,7 +229,9 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
                 for row in json or []:
                     run_key = str(row.get("run_key") or "").strip()
                     state["run_summaries"][run_key] = dict(row or {})
-                    rows.append({"run_key": run_key, "updated_at": row.get("updated_at")})
+                    rows.append(
+                        {"run_key": run_key, "updated_at": row.get("updated_at")}
+                    )
                 return _StubResponse(201, rows)
             if method == "GET":
                 user_id = _eq(params, "user_id")
@@ -209,14 +239,18 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
                     {
                         "run_key": run_key,
                         "summary": row.get("summary") if isinstance(row, dict) else {},
-                        "updated_at": row.get("updated_at") if isinstance(row, dict) else None,
+                        "updated_at": (
+                            row.get("updated_at") if isinstance(row, dict) else None
+                        ),
                     }
                     for run_key, row in state["run_summaries"].items()
                     if not user_id or str((row or {}).get("user_id") or "") == user_id
                 ]
                 return _StubResponse(200, rows)
 
-        raise AssertionError(f"Unexpected request: {method} {url} params={params} json={json}")
+        raise AssertionError(
+            f"Unexpected request: {method} {url} params={params} json={json}"
+        )
 
     monkeypatch.setattr("src.services.saas_service.requests.request", _fake_request)
 

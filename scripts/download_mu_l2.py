@@ -13,7 +13,9 @@ import os
 import databento as db
 
 
-def download_data(api_key: str, ticker: str, start_date: str, end_date: str, output_dir: str) -> None:
+def download_data(
+    api_key: str, ticker: str, start_date: str, end_date: str, output_dir: str
+) -> None:
     if not api_key:
         raise RuntimeError("Missing DATABENTO_API_KEY environment variable")
 
@@ -21,7 +23,9 @@ def download_data(api_key: str, ticker: str, start_date: str, end_date: str, out
     client = db.Historical(api_key)
     output_file = os.path.join(output_dir, f"{ticker}_{start_date}_{end_date}.mbn")
 
-    print(f"[{ticker}] Downloading MBP-10 from {start_date} to {end_date} (end exclusive)...")
+    print(
+        f"[{ticker}] Downloading MBP-10 from {start_date} to {end_date} (end exclusive)..."
+    )
     data = client.timeseries.get_range(
         dataset="XNAS.ITCH",
         symbols=ticker,
@@ -37,7 +41,9 @@ def download_data(api_key: str, ticker: str, start_date: str, end_date: str, out
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download MU L2 data (Databento MBP-10).")
+    parser = argparse.ArgumentParser(
+        description="Download MU L2 data (Databento MBP-10)."
+    )
     parser.add_argument("--ticker", default="MU")
     parser.add_argument("--start-date", default="2026-02-03")
     parser.add_argument(

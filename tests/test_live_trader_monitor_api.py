@@ -15,7 +15,9 @@ _API_SERVER_PATH = Path(__file__).resolve().parents[1] / "api_server.py"
 _PROJECT_ROOT = str(_API_SERVER_PATH.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
-_API_SERVER_SPEC = importlib.util.spec_from_file_location("api_server_module", _API_SERVER_PATH)
+_API_SERVER_SPEC = importlib.util.spec_from_file_location(
+    "api_server_module", _API_SERVER_PATH
+)
 assert _API_SERVER_SPEC is not None and _API_SERVER_SPEC.loader is not None
 api_server = importlib.util.module_from_spec(_API_SERVER_SPEC)
 _API_SERVER_SPEC.loader.exec_module(api_server)
@@ -54,7 +56,9 @@ def test_discover_live_trader_runs_groups_streams(tmp_path: Path, monkeypatch) -
     assert run_a["status"] in {"active", "idle"}
 
 
-def test_get_live_trader_snapshot_returns_latest_records(tmp_path: Path, monkeypatch) -> None:
+def test_get_live_trader_snapshot_returns_latest_records(
+    tmp_path: Path, monkeypatch
+) -> None:
     _write_jsonl(tmp_path / "runtime_run123.jsonl", [{"kind": "runtime", "v": 1}])
     _write_jsonl(
         tmp_path / "decisions_run123.jsonl",
@@ -77,7 +81,9 @@ def test_get_live_trader_events_rejects_invalid_stream() -> None:
     assert exc.value.status_code == 400
 
 
-def test_discover_live_runs_marks_finished_and_filters_active(tmp_path: Path, monkeypatch) -> None:
+def test_discover_live_runs_marks_finished_and_filters_active(
+    tmp_path: Path, monkeypatch
+) -> None:
     active_path = tmp_path / "runtime_run_active.jsonl"
     finished_path = tmp_path / "runtime_run_finished.jsonl"
 

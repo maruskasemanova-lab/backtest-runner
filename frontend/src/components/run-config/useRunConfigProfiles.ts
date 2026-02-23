@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type FetchTickerAosOptions = {
   hydrateExecution?: boolean;
@@ -30,10 +30,12 @@ export const useRunConfigProfiles = ({
   const [aosError, setAosError] = useState<string | null>(null);
   const [aosTickerConfig, setAosTickerConfig] = useState<Record<string, any>>({});
   const [unifiedProfilesLoading, setUnifiedProfilesLoading] = useState(false);
+  const [unifiedProfilesResolved, setUnifiedProfilesResolved] = useState(false);
   const [unifiedProfilesError, setUnifiedProfilesError] = useState<string | null>(null);
   const [unifiedProfiles, setUnifiedProfiles] = useState<any[]>([]);
   const [activeUnifiedProfileId, setActiveUnifiedProfileId] = useState("");
   const [selectedUnifiedProfileId, setSelectedUnifiedProfileId] = useState(activeProfileSentinel);
+  const lastFetchedTickerRef = useRef("");
 
   const fetchTickerAosConfig = useCallback(
     async (rawTicker: string, options: FetchTickerAosOptions = {}) => {
@@ -72,6 +74,7 @@ export const useRunConfigProfiles = ({
       const upperTicker = String(rawTicker || "").trim().toUpperCase();
       if (!upperTicker) return null;
       setUnifiedProfilesLoading(true);
+      setUnifiedProfilesResolved(false);
       setUnifiedProfilesError(null);
       try {
         const resp = await fetch(`/api/profiles/${upperTicker}`);
@@ -102,10 +105,14 @@ export const useRunConfigProfiles = ({
         setUnifiedProfilesError("Failed to load unified profiles.");
         setUnifiedProfiles([]);
         setActiveUnifiedProfileId("");
-        setSelectedUnifiedProfileId(activeProfileSentinel);
+        setSelectedUnifiedProfileId((prev) => {
+          const prevId = String(prev || "").trim();
+          return prevId || activeProfileSentinel;
+        });
         return null;
       } finally {
         setUnifiedProfilesLoading(false);
+        setUnifiedProfilesResolved(true);
       }
     },
     [activeProfileSentinel, normalizeProfileRefToken],
@@ -153,14 +160,23 @@ export const useRunConfigProfiles = ({
   useEffect(() => {
     const upperTicker = String(ticker || "").trim().toUpperCase();
     if (!upperTicker) {
+      lastFetchedTickerRef.current = "";
       setAosTickerConfig({});
       setAosError(null);
       setUnifiedProfiles([]);
       setActiveUnifiedProfileId("");
       setSelectedUnifiedProfileId(activeProfileSentinel);
+      setUnifiedProfilesResolved(false);
       setUnifiedProfilesError(null);
       return;
     }
+
+    // Only re-fetch when ticker actually changes to avoid overwriting
+    // manual strategy sidebar toggles with a stale profile state.
+    if (lastFetchedTickerRef.current === upperTicker) {
+      return;
+    }
+    lastFetchedTickerRef.current = upperTicker;
 
     fetchTickerAosConfig(upperTicker, { hydrateExecution: true });
     fetchUnifiedProfiles(upperTicker);
@@ -171,6 +187,7 @@ export const useRunConfigProfiles = ({
     aosError,
     aosTickerConfig,
     unifiedProfilesLoading,
+    unifiedProfilesResolved,
     unifiedProfilesError,
     unifiedProfiles,
     activeUnifiedProfileId,

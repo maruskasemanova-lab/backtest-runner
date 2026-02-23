@@ -1,0 +1,29 @@
+{
+  "strategy": "vwap_magnet",
+  "params": {
+    "min_distance_pct": 0.2,
+    "max_distance_pct": 1.0,
+    "volume_stop_pct": 1.5,
+    "trailing_stop_pct": 2.0,
+    "rr_ratio": 3.0,
+    "min_confidence": 55.0,
+    "long_only": true
+  },
+  "backup_strategy": "volume_profile",
+  "regime_filter": [
+    "TRENDING",
+    "MIXED"
+  ],
+  "avoid_days": [
+    "Friday"
+  ],
+  "trading_hours": [
+    15
+  ],
+  "min_confidence": 55.0,
+  "max_daily_trades": 3,
+  "notes": "LONG ONLY (shorts lose $233) | Time: 15:00 | Trail: 2.0%",
+  "trailing_stop_pct": 2.0,
+  "long_only": true,
+  "time_filter_enabled": true
+}

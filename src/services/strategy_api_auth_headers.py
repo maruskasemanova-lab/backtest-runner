@@ -9,4 +9,3 @@ __all__ = [
     "build_strategy_api_headers",
     "resolve_strategy_internal_api_token",
 ]
-

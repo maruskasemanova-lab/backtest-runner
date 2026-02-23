@@ -93,11 +93,16 @@ def simulate_drawdown_distribution(
 def percentile(sorted_values: List[float], pct: float) -> float:
     if not sorted_values:
         return 0.0
-    idx = min(len(sorted_values) - 1, max(0, int(math.ceil((pct / 100.0) * len(sorted_values)) - 1)))
+    idx = min(
+        len(sorted_values) - 1,
+        max(0, int(math.ceil((pct / 100.0) * len(sorted_values)) - 1)),
+    )
     return float(sorted_values[idx])
 
 
-def summarize(drawdowns_pct: List[float], drawdowns_dollars: List[float]) -> Dict[str, float]:
+def summarize(
+    drawdowns_pct: List[float], drawdowns_dollars: List[float]
+) -> Dict[str, float]:
     if not drawdowns_pct:
         return {}
     n = len(drawdowns_pct)
@@ -123,17 +128,27 @@ def summarize(drawdowns_pct: List[float], drawdowns_dollars: List[float]) -> Dic
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Monte Carlo drawdown analysis for trade sequences")
-    parser.add_argument("--trades-file", required=True, help="Path to CSV with trade PnL values")
-    parser.add_argument("--iterations", type=int, default=10_000, help="Number of Monte Carlo runs")
-    parser.add_argument("--start-equity", type=float, default=10_000.0, help="Initial equity in dollars")
+    parser = argparse.ArgumentParser(
+        description="Monte Carlo drawdown analysis for trade sequences"
+    )
+    parser.add_argument(
+        "--trades-file", required=True, help="Path to CSV with trade PnL values"
+    )
+    parser.add_argument(
+        "--iterations", type=int, default=10_000, help="Number of Monte Carlo runs"
+    )
+    parser.add_argument(
+        "--start-equity", type=float, default=10_000.0, help="Initial equity in dollars"
+    )
     parser.add_argument(
         "--max-p95-drawdown-dollars",
         type=float,
         default=500.0,
         help="Validation threshold for P95 max drawdown in dollars (default: 500)",
     )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed for reproducibility"
+    )
     args = parser.parse_args()
 
     csv_path = Path(args.trades_file)

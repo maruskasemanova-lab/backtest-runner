@@ -29,11 +29,27 @@ MARKET_HOLIDAYS = {
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Backfill missing MU L2 daily files (Databento MBP-10).")
-    parser.add_argument("--start-date", default=DEFAULT_START_DATE, help="Inclusive start date (YYYY-MM-DD).")
-    parser.add_argument("--end-date", default=DEFAULT_END_DATE, help="Inclusive end date (YYYY-MM-DD).")
-    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Directory for MU_YYYY-MM-DD_YYYY-MM-DD.parquet.")
-    parser.add_argument("--api-key", default="", help="Databento API key. Falls back to DATABENTO_API_KEY env var.")
+    parser = argparse.ArgumentParser(
+        description="Backfill missing MU L2 daily files (Databento MBP-10)."
+    )
+    parser.add_argument(
+        "--start-date",
+        default=DEFAULT_START_DATE,
+        help="Inclusive start date (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--end-date", default=DEFAULT_END_DATE, help="Inclusive end date (YYYY-MM-DD)."
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=DEFAULT_OUTPUT_DIR,
+        help="Directory for MU_YYYY-MM-DD_YYYY-MM-DD.parquet.",
+    )
+    parser.add_argument(
+        "--api-key",
+        default="",
+        help="Databento API key. Falls back to DATABENTO_API_KEY env var.",
+    )
     return parser.parse_args()
 
 
@@ -77,7 +93,9 @@ def _download_single_day(client: db.Historical, output_dir: Path, day: str) -> s
     if out_path.exists():
         return "exists"
 
-    end_exclusive = (datetime.strptime(day, "%Y-%m-%d").date() + timedelta(days=1)).isoformat()
+    end_exclusive = (
+        datetime.strptime(day, "%Y-%m-%d").date() + timedelta(days=1)
+    ).isoformat()
     print(f"[DOWNLOAD] {day}")
     try:
         data = client.timeseries.get_range(
@@ -108,7 +126,9 @@ def main() -> int:
     args = _parse_args()
     api_key = args.api_key.strip() or os.getenv("DATABENTO_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("Missing Databento API key. Use --api-key or set DATABENTO_API_KEY.")
+        raise RuntimeError(
+            "Missing Databento API key. Use --api-key or set DATABENTO_API_KEY."
+        )
 
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)

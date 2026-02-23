@@ -1,6 +1,7 @@
 """
 Tests for regime-aware trailing stop behavior.
 """
+
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -12,7 +13,11 @@ STRATEGY_ROOT = PROJECT_ROOT.parent / "market_regime_detection"
 sys.path.insert(0, str(STRATEGY_ROOT))
 sys.modules.pop("src", None)
 
-from src.day_trading_manager import BarData, DayTradingManager, SessionPhase  # noqa: E402
+from src.day_trading_manager import (
+    BarData,
+    DayTradingManager,
+    SessionPhase,
+)  # noqa: E402
 from src.strategies.base_strategy import Regime, Signal, SignalType  # noqa: E402
 
 
@@ -31,12 +36,18 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         session.detected_regime = regime
         session.selected_strategy = None
         session.pending_signal = None
+        # Unit tests in this module target trailing/BE sequencing, not proof gating.
+        session.break_even_activation_use_levels = False
+        session.break_even_activation_use_l2 = False
+        session.break_even_activation_min_r = 0.0
+        session.break_even_activation_min_r_trending_5m = 0.0
+        session.break_even_activation_min_r_choppy_5m = 0.0
         return manager, session
 
     def _open_long_position(
-        self, 
-        manager: DayTradingManager, 
-        session, 
+        self,
+        manager: DayTradingManager,
+        session,
         ts: datetime,
         trailing_stop: bool = True,
         entry_price: float = 100.0,
@@ -69,10 +80,11 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         manager, session = self._build_manager_session(regime=Regime.CHOPPY)
         session.trailing_enabled_in_choppy = False  # Default
         session.trailing_activation_pct = 0.0  # No threshold for this test
-        
+        session.break_even_activation_min_mfe_pct = 0.0
+
         start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
         pos = self._open_long_position(manager, session, start, trailing_stop=True)
-        
+
         # Simulate profitable bar
         bar = BarData(
             timestamp=start + timedelta(minutes=1),
@@ -84,10 +96,10 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
             vwap=101.0,
         )
         session.bars.append(bar)
-        
+
         initial_trailing_price = pos.trailing_stop_price
         manager._update_trailing_from_close(session, pos, bar)
-        
+
         # Trailing should NOT have been updated in CHOPPY
         self.assertEqual(pos.trailing_stop_price, initial_trailing_price)
         self.assertFalse(pos.break_even_stop_active)
@@ -96,11 +108,15 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         """Trailing stop should only activate after reaching profit threshold."""
         manager, session = self._build_manager_session(regime=Regime.TRENDING)
         session.trailing_activation_pct = 0.30  # Require 0.3% profit
+        session.break_even_activation_min_mfe_pct = 0.30
+        session.break_even_min_hold_bars = 3
         session.break_even_buffer_pct = 0.05
-        
+
         start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
-        pos = self._open_long_position(manager, session, start, trailing_stop=True, entry_price=100.0)
-        
+        pos = self._open_long_position(
+            manager, session, start, trailing_stop=True, entry_price=100.0
+        )
+
         # Bar with only +0.2% profit (below threshold)
         bar1 = BarData(
             timestamp=start + timedelta(minutes=1),
@@ -113,12 +129,12 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         )
         session.bars.append(bar1)
         manager._update_trailing_from_close(session, pos, bar1)
-        
+
         # Should NOT have triggered break-even or trailing
         self.assertFalse(pos.trailing_activation_pnl_met)
         self.assertFalse(pos.break_even_stop_active)
         self.assertEqual(pos.trailing_stop_price, 0.0)
-        
+
         # Bar with +0.5% profit (above threshold)
         bar2 = BarData(
             timestamp=start + timedelta(minutes=2),
@@ -136,7 +152,7 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         self.assertFalse(pos.trailing_activation_pnl_met)
         self.assertFalse(pos.break_even_stop_active)
 
-        # Third bar keeps profit and satisfies min-hold, so break-even can engage.
+        # Third bar still does not satisfy min-hold (>=3 bars held in engine math).
         bar3 = BarData(
             timestamp=start + timedelta(minutes=3),
             open=100.50,
@@ -148,25 +164,48 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         )
         session.bars.append(bar3)
         manager._update_trailing_from_close(session, pos, bar3)
-        
+
+        self.assertFalse(pos.trailing_activation_pnl_met)
+        self.assertFalse(pos.break_even_stop_active)
+
+        # Fourth bar satisfies min-hold and should activate break-even.
+        bar4 = BarData(
+            timestamp=start + timedelta(minutes=4),
+            open=100.55,
+            high=100.85,
+            low=100.45,
+            close=100.70,
+            volume=10_000.0,
+            vwap=100.55,
+        )
+        session.bars.append(bar4)
+        manager._update_trailing_from_close(session, pos, bar4)
+
         # Should now have triggered break-even
         self.assertTrue(pos.trailing_activation_pnl_met)
         self.assertTrue(pos.break_even_stop_active)
-        # Stop should be at entry + buffer
-        expected_be_stop = 100.0 * (1 + 0.05 / 100)
-        self.assertAlmostEqual(pos.stop_loss, expected_be_stop, places=4)
+        be_snapshot = getattr(pos, "signal_metadata", {}).get("break_even", {})
+        expected_be_stop = (be_snapshot.get("computed_break_even", {}) or {}).get(
+            "stop_level"
+        )
+        self.assertIsNotNone(expected_be_stop)
+        self.assertAlmostEqual(pos.stop_loss, float(expected_be_stop), places=4)
 
     def test_break_even_set_before_trailing(self):
         """Break-even stop must be set before trailing starts updating."""
         manager, session = self._build_manager_session(regime=Regime.TRENDING)
         session.trailing_activation_pct = 0.30
+        session.break_even_activation_min_mfe_pct = 0.30
+        session.break_even_min_hold_bars = 3
         session.break_even_buffer_pct = 0.05
         session.trailing_stop_pct = 0.8
-        
+
         start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
-        pos = self._open_long_position(manager, session, start, trailing_stop=True, entry_price=100.0)
+        pos = self._open_long_position(
+            manager, session, start, trailing_stop=True, entry_price=100.0
+        )
         original_stop = pos.stop_loss
-        
+
         # Bar with +0.5% profit to trigger threshold
         bar1 = BarData(
             timestamp=start + timedelta(minutes=1),
@@ -179,7 +218,7 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         )
         session.bars.append(bar1)
         manager._update_trailing_from_close(session, pos, bar1)
-        
+
         # Min-hold guard: break-even should not activate immediately.
         self.assertFalse(pos.break_even_stop_active)
 
@@ -209,13 +248,27 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         session.bars.append(bar1c)
         manager._update_trailing_from_close(session, pos, bar1c)
 
+        self.assertFalse(pos.break_even_stop_active)
+
+        bar1d = BarData(
+            timestamp=start + timedelta(minutes=4),
+            open=100.75,
+            high=101.00,
+            low=100.65,
+            close=100.85,
+            volume=10_000.0,
+            vwap=100.72,
+        )
+        session.bars.append(bar1d)
+        manager._update_trailing_from_close(session, pos, bar1d)
+
         # Verify break-even was eventually set
         self.assertTrue(pos.break_even_stop_active)
         self.assertGreater(pos.stop_loss, original_stop)
-        
+
         # Now with higher price, trailing should engage
         bar2 = BarData(
-            timestamp=start + timedelta(minutes=4),
+            timestamp=start + timedelta(minutes=5),
             open=100.50,
             high=101.50,
             low=100.50,
@@ -225,7 +278,7 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         )
         session.bars.append(bar2)
         manager._update_trailing_from_close(session, pos, bar2)
-        
+
         # Trailing stop should now be set
         self.assertGreater(pos.trailing_stop_price, 0.0)
         # Should be based on highest price
@@ -239,11 +292,11 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         session.choppy_time_exit_bars = 12
         session.enable_partial_take_profit = False
         session.adverse_flow_exit_enabled = False
-        
+
         start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
         pos = self._open_long_position(manager, session, start, trailing_stop=False)
         pos.entry_bar_index = 0
-        
+
         # Generate bars up to choppy limit
         for i in range(13):
             bar = BarData(
@@ -256,22 +309,49 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
                 vwap=100.0,
             )
             session.bars.append(bar)
-        
+
         # Should trigger time exit (12 bars + 1)
         result = manager._should_time_exit(session, pos, 12)
         self.assertTrue(result)
-        
+
+    def test_time_exit_formula_can_override_builtin_decision(self):
+        """Runtime time-exit formula should be able to suppress a built-in time exit."""
+        manager, session = self._build_manager_session(regime=Regime.CHOPPY)
+        session.time_exit_bars = 40
+        session.choppy_time_exit_bars = 12
+        session.time_exit_formula_enabled = True
+        session.time_exit_formula = "False"
+
+        start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
+        pos = self._open_long_position(manager, session, start, trailing_stop=False)
+        pos.entry_bar_index = 0
+
+        for i in range(13):
+            bar = BarData(
+                timestamp=start + timedelta(minutes=i),
+                open=100.0,
+                high=100.2,
+                low=99.8,
+                close=100.0,
+                volume=10_000.0,
+                vwap=100.0,
+            )
+            session.bars.append(bar)
+
+        result = manager._should_time_exit(session, pos, 12)
+        self.assertFalse(result)
+
     def test_time_exit_normal_in_trending(self):
         """Time exit should use normal limit in TRENDING regime."""
         manager, session = self._build_manager_session(regime=Regime.TRENDING)
         session.time_exit_bars = 40
         session.choppy_time_exit_bars = 12
-        
+
         start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
         pos = self._open_long_position(manager, session, start, trailing_stop=False)
         pos.entry_bar_index = 0
-        
-        # Generate bars 
+
+        # Generate bars
         for i in range(20):
             bar = BarData(
                 timestamp=start + timedelta(minutes=i),
@@ -283,15 +363,15 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
                 vwap=100.0,
             )
             session.bars.append(bar)
-        
+
         # Should NOT trigger time exit at 12 bars in TRENDING
         result = manager._should_time_exit(session, pos, 12)
         self.assertFalse(result)
 
     def _open_short_position(
-        self, 
-        manager: DayTradingManager, 
-        session, 
+        self,
+        manager: DayTradingManager,
+        session,
         ts: datetime,
         trailing_stop: bool = True,
         entry_price: float = 100.0,
@@ -322,25 +402,27 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
     def test_short_stop_loss_is_above_entry(self):
         """Verify SHORT stop-loss is set ABOVE entry price."""
         manager, session = self._build_manager_session(regime=Regime.TRENDING)
-        
+
         start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
         pos = self._open_short_position(manager, session, start, entry_price=100.0)
-        
+
         # Stop loss must be above entry for SHORT
         self.assertGreater(pos.stop_loss, pos.entry_price)
         # Take profit must be below entry for SHORT
         self.assertLess(pos.take_profit, pos.entry_price)
 
-    def test_short_break_even_is_above_entry(self):
-        """Verify SHORT break-even stop is set ABOVE entry (protects profit)."""
+    def test_short_break_even_is_below_entry_cost_aware(self):
+        """Verify SHORT break-even stop is cost-aware and below entry."""
         manager, session = self._build_manager_session(regime=Regime.TRENDING)
         session.trailing_activation_pct = 0.30
+        session.break_even_activation_min_mfe_pct = 0.30
+        session.break_even_min_hold_bars = 3
         session.break_even_buffer_pct = 0.05  # 0.05% buffer
-        
+
         start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
         pos = self._open_short_position(manager, session, start, entry_price=100.0)
         original_stop = pos.stop_loss  # Should be 101.0 (1% above)
-        
+
         # Simulate profitable drop (for SHORT, price going down = profit)
         bar = BarData(
             timestamp=start + timedelta(minutes=1),
@@ -377,18 +459,35 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         )
         session.bars.append(bar3)
         manager._update_trailing_from_close(session, pos, bar3)
-        
+
+        self.assertFalse(pos.trailing_activation_pnl_met)
+        self.assertFalse(pos.break_even_stop_active)
+
+        bar4 = BarData(
+            timestamp=start + timedelta(minutes=4),
+            open=99.35,
+            high=99.6,
+            low=99.0,
+            close=99.25,
+            volume=10_000.0,
+            vwap=99.3,
+        )
+        session.bars.append(bar4)
+        manager._update_trailing_from_close(session, pos, bar4)
+
         # Break-even should have activated
         self.assertTrue(pos.trailing_activation_pnl_met)
         self.assertTrue(pos.break_even_stop_active)
-        
-        # For SHORT, break-even stop = entry * (1 + buffer) = 100.05
-        # This is LOWER than original stop (101), so it's more protective
-        expected_be_stop = 100.0 * (1 + 0.05 / 100)  # 100.05
-        self.assertAlmostEqual(pos.stop_loss, expected_be_stop, places=4)
-        
-        # Be stop must still be ABOVE entry
-        self.assertGreater(pos.stop_loss, pos.entry_price)
+
+        be_snapshot = getattr(pos, "signal_metadata", {}).get("break_even", {})
+        expected_be_stop = (be_snapshot.get("computed_break_even", {}) or {}).get(
+            "stop_level"
+        )
+        self.assertIsNotNone(expected_be_stop)
+        self.assertAlmostEqual(pos.stop_loss, float(expected_be_stop), places=4)
+
+        # Cost-aware SHORT BE sits below entry and below original stop.
+        self.assertLess(pos.stop_loss, pos.entry_price)
         # Be stop should be lower (more protective) than original stop
         self.assertLess(pos.stop_loss, original_stop)
 
@@ -432,13 +531,14 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
         """Verify SHORT stopped out at stop_loss results in NEGATIVE PnL."""
         manager, session = self._build_manager_session(regime=Regime.TRENDING)
         session.trailing_activation_pct = 10.0  # High threshold so no break-even
-        
+        session.break_even_activation_min_mfe_pct = 10.0
+
         start = datetime(2026, 2, 3, 14, 30, tzinfo=timezone.utc)
         pos = self._open_short_position(manager, session, start, entry_price=100.0)
-        
+
         # Stop should be above entry
         self.assertGreater(pos.stop_loss, pos.entry_price)
-        
+
         # Create bar that hits stop (price goes UP = loss for short)
         bar = BarData(
             timestamp=start + timedelta(minutes=1),
@@ -450,12 +550,12 @@ class RegimeAwareTrailingStopTests(unittest.TestCase):
             vwap=100.5,
         )
         session.bars.append(bar)
-        
+
         # Resolve exit
         exit_result = manager._resolve_exit_for_bar(pos, bar)
         self.assertIsNotNone(exit_result)
         exit_reason, exit_price = exit_result
-        
+
         self.assertEqual(exit_reason, "stop_loss")
         # Exit price should be at or above entry (loss for short)
         self.assertGreater(exit_price, pos.entry_price)

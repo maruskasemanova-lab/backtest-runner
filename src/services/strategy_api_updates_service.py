@@ -76,6 +76,7 @@ async def _run_strategy_updates(
         return []
     semaphore = asyncio.Semaphore(_STRATEGY_UPDATE_MAX_CONCURRENCY)
     async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+
         async def _bounded_update(
             strategy_name: str,
             params: Dict[str, Any],
@@ -137,7 +138,9 @@ async def fetch_remote_strategies(
                 )
             payload = await resp.json()
     if not isinstance(payload, dict):
-        raise HTTPException(502, "Strategy API /api/strategies returned invalid payload.")
+        raise HTTPException(
+            502, "Strategy API /api/strategies returned invalid payload."
+        )
     return payload
 
 
@@ -216,7 +219,9 @@ async def apply_global_trailing(
         return
 
     try:
-        async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+        async with aiohttp.ClientSession(
+            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        ) as session:
             async with session.get(
                 f"{strategy_api_url}/api/strategies",
                 headers=_strategy_api_headers(strategy_api_url),
@@ -228,12 +233,11 @@ async def apply_global_trailing(
                     return
                 strategies = await resp.json()
         if not isinstance(strategies, dict):
-            deps.logger.warning("Failed to parse strategies for global trailing (invalid payload).")
+            deps.logger.warning(
+                "Failed to parse strategies for global trailing (invalid payload)."
+            )
             return
-        updates = [
-            (str(name), dict(update_payload))
-            for name in strategies.keys()
-        ]
+        updates = [(str(name), dict(update_payload)) for name in strategies.keys()]
         results = await _run_strategy_updates(
             strategy_api_url=strategy_api_url,
             updates=updates,

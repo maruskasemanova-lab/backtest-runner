@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { createChart, ColorType } from "lightweight-charts";
 import ChartTooltip from "./ChartTooltip";
 import { toUnixSeconds, toIsoTimestamp } from "../utils";
@@ -6,7 +6,7 @@ import { toUnixSeconds, toIsoTimestamp } from "../utils";
 const MAX_SNAP_SECONDS = 120;
 
 
-function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, selectedMarker, chartState, onChartStateChange, l2Data, priceRange, onPriceRangeChange }) {
+const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, selectedMarker, chartState, onChartStateChange, l2Data, priceRange, onPriceRangeChange }: any, ref) {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -14,7 +14,13 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, 
   const appliedBarsMetaRef = useRef({ length: 0, lastTime: null });
   const lastFocusedMarkerKeyRef = useRef(null);
   const [error, setError] = useState(null);
-  
+
+  // Expose chart instance to parent via ref
+  useImperativeHandle(ref, () => ({
+    getChart: () => chartRef.current,
+    getChartContainer: () => chartContainerRef.current,
+  }));
+
   // Tooltip state
   const [tooltip, setTooltip] = useState({
     visible: false,
@@ -386,22 +392,46 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, 
       }
   }, [chartState]);
 
-  const toCandleDataPoint = useCallback((bar) => ({
-    time: Number(bar?.time) || 0,
-    open: Number(bar?.open) || 0,
-    high: Number(bar?.high) || 0,
-    low: Number(bar?.low) || 0,
-    close: Number(bar?.close) || 0,
-  }), []);
+  const toCandleDataPoint = useCallback((bar) => {
+    const time = Number(bar?.time) || 0;
+    const open = Number(bar?.open);
+    const high = Number(bar?.high);
+    const low = Number(bar?.low);
+    const close = Number(bar?.close);
+    if (
+      bar?.__wfPlaceholder ||
+      !Number.isFinite(open) ||
+      !Number.isFinite(high) ||
+      !Number.isFinite(low) ||
+      !Number.isFinite(close)
+    ) {
+      return { time };
+    }
+    return { time, open, high, low, close };
+  }, []);
 
-  const toVolumeDataPoint = useCallback((bar) => ({
-    time: Number(bar?.time) || 0,
-    value: Number(bar?.volume) || 0,
-    color:
-      (Number(bar?.close) || 0) >= (Number(bar?.open) || 0)
-        ? "rgba(34, 197, 94, 0.5)"
-        : "rgba(239, 68, 68, 0.5)",
-  }), []);
+  const toVolumeDataPoint = useCallback((bar) => {
+    const time = Number(bar?.time) || 0;
+    const open = Number(bar?.open);
+    const close = Number(bar?.close);
+    const volume = Number(bar?.volume);
+    if (
+      bar?.__wfPlaceholder ||
+      !Number.isFinite(open) ||
+      !Number.isFinite(close) ||
+      !Number.isFinite(volume)
+    ) {
+      return { time };
+    }
+    return {
+      time,
+      value: volume,
+      color:
+        close >= open
+          ? "rgba(34, 197, 94, 0.5)"
+          : "rgba(239, 68, 68, 0.5)",
+    };
+  }, []);
 
   const applyFullBarDataset = useCallback((sourceBars) => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
@@ -439,6 +469,11 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, 
     try {
       if (!Array.isArray(bars) || bars.length === 0) {
         applyFullBarDataset([]);
+        return;
+      }
+      const containsWhitespaceBars = bars.some((bar) => Boolean(bar?.__wfPlaceholder));
+      if (containsWhitespaceBars) {
+        applyFullBarDataset(bars);
         return;
       }
 
@@ -483,9 +518,12 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, 
     if (!chartRef.current || !selectedMarker || !bars || bars.length === 0) {
       if (!selectedMarker) {
         lastFocusedMarkerKeyRef.current = null;
+        setTooltip((prev) => ({ ...prev, visible: false }));
       }
       return;
     }
+    const selectedFromDecisionPanel =
+      String(selectedMarker?.__selectionSource || "") === "decision_panel";
 
     const markerFocusKey = String(
       selectedMarker.id ||
@@ -527,6 +565,12 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, 
         to: toTime,
       });
       lastFocusedMarkerKeyRef.current = markerFocusKey || `${fromTime}-${toTime}`;
+    }
+
+    // Show tooltip for chart-driven selection only. Decision-panel selection opens detail dialog.
+    if (selectedFromDecisionPanel) {
+      setTooltip((prev) => ({ ...prev, visible: false }));
+      return;
     }
 
     // Show tooltip for the selected marker if coordinates are available
@@ -790,6 +834,6 @@ function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, 
       />
     </>
   );
-}
+});
 
 export default memo(CandlestickChart);

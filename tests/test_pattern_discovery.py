@@ -31,9 +31,18 @@ from src.pattern_discovery import (
     Direction,
     RecommendedAction,
 )
-from src.pattern_discovery.extractor import FeatureExtractor, extract_snapshots_from_backtest
-from src.pattern_discovery.clustering import ClusterPatternDiscovery, discover_cluster_patterns
-from src.pattern_discovery.sequential import SequentialPatternMiner, discover_sequential_patterns
+from src.pattern_discovery.extractor import (
+    FeatureExtractor,
+    extract_snapshots_from_backtest,
+)
+from src.pattern_discovery.clustering import (
+    ClusterPatternDiscovery,
+    discover_cluster_patterns,
+)
+from src.pattern_discovery.sequential import (
+    SequentialPatternMiner,
+    discover_sequential_patterns,
+)
 from src.pattern_discovery.library import PatternLibraryManager
 from src.pattern_discovery.matcher import PatternMatcher
 from src.pattern_discovery.evidence import PatternEvidenceSource, format_evidence
@@ -42,6 +51,7 @@ from src.pattern_discovery.evidence import PatternEvidenceSource, format_evidenc
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def sample_pattern_input() -> PatternInput:
@@ -112,7 +122,8 @@ def sample_snapshots(sample_pattern_input, sample_outcome) -> List[PatternSnapsh
             volume_z=sample_pattern_input.volume_z + np.random.randn() * 0.5,
             atr_z=sample_pattern_input.atr_z,
             l2_delta_z=sample_pattern_input.l2_delta_z + np.random.randn() * 0.5,
-            l2_aggression_z=sample_pattern_input.l2_aggression_z + np.random.randn() * 0.3,
+            l2_aggression_z=sample_pattern_input.l2_aggression_z
+            + np.random.randn() * 0.3,
             l2_imbalance_z=sample_pattern_input.l2_imbalance_z,
             l2_book_pressure_z=sample_pattern_input.l2_book_pressure_z,
             l2_flow_score_z=sample_pattern_input.l2_flow_score_z,
@@ -126,7 +137,7 @@ def sample_snapshots(sample_pattern_input, sample_outcome) -> List[PatternSnapsh
             close_location=0.2 + np.random.rand() * 0.6,
             gap_pct=np.random.randn() * 0.1,
         )
-        
+
         # Vary outcomes
         is_profitable = np.random.rand() > 0.4  # 60% win rate
         outcome = PatternOutcome(
@@ -138,7 +149,7 @@ def sample_snapshots(sample_pattern_input, sample_outcome) -> List[PatternSnapsh
             max_adverse_excursion=0.2 if is_profitable else 0.5,
             exit_reason="take_profit" if is_profitable else "stop_loss",
         )
-        
+
         snapshot = PatternSnapshot(
             snapshot_id=f"MU:2025-11-0{i%9+1}:{i}",
             ticker="MU",
@@ -153,7 +164,7 @@ def sample_snapshots(sample_pattern_input, sample_outcome) -> List[PatternSnapsh
             session_date=f"2025-11-{i % 28 + 1:02d}",
         )
         snapshots.append(snapshot)
-    
+
     return snapshots
 
 
@@ -164,14 +175,43 @@ def sample_cluster_pattern() -> ClusterPattern:
         pattern_id="cluster_42",
         pattern_type=PatternType.CLUSTER,
         pattern_name="bullish_high_delta_spike",
-        centroid=[1.5, -0.5, 2.0, 0.3, 2.5, 1.8, 1.2, 0.9, 1.5, 0.65, 0.4, 0.43, 0.5, 0.33, 0.7, 0.8, 0.1],
+        centroid=[
+            1.5,
+            -0.5,
+            2.0,
+            0.3,
+            2.5,
+            1.8,
+            1.2,
+            0.9,
+            1.5,
+            0.65,
+            0.4,
+            0.43,
+            0.5,
+            0.33,
+            0.7,
+            0.8,
+            0.1,
+        ],
         feature_names=[
-            "momentum_z", "rsi_z", "volume_z", "atr_z",
-            "l2_delta_z", "l2_aggression_z", "l2_imbalance_z",
-            "l2_book_pressure_z", "l2_flow_score_z",
-            "trend_efficiency", "volatility_pct",
-            "hour_norm", "minute_norm", "day_norm",
-            "bar_body_ratio", "close_location", "gap_pct",
+            "momentum_z",
+            "rsi_z",
+            "volume_z",
+            "atr_z",
+            "l2_delta_z",
+            "l2_aggression_z",
+            "l2_imbalance_z",
+            "l2_book_pressure_z",
+            "l2_flow_score_z",
+            "trend_efficiency",
+            "volatility_pct",
+            "hour_norm",
+            "minute_norm",
+            "day_norm",
+            "bar_body_ratio",
+            "close_location",
+            "gap_pct",
         ],
         win_rate=0.72,
         avg_pnl_pct=0.35,
@@ -211,24 +251,25 @@ def temp_library_dir():
 # Model Tests
 # ============================================================================
 
+
 class TestPatternInput:
     """Tests for PatternInput model."""
-    
+
     def test_to_vector(self, sample_pattern_input):
         """Test conversion to feature vector."""
         vector = sample_pattern_input.to_vector()
-        
+
         assert isinstance(vector, list)
         assert len(vector) == 17  # Number of features
         assert all(isinstance(v, float) for v in vector)
-    
+
     def test_to_state_label(self, sample_pattern_input):
         """Test state label generation."""
         label = sample_pattern_input.to_state_label()
-        
+
         assert isinstance(label, str)
         assert "_" in label  # Multi-part label
-    
+
     def test_from_feature_vector(self):
         """Test creation from feature vector dict."""
         fv = {
@@ -239,9 +280,9 @@ class TestPatternInput:
             "regime": "TRENDING",
             "hour_of_day": 10,
         }
-        
+
         pattern_input = PatternInput.from_feature_vector(fv)
-        
+
         assert pattern_input.momentum_z == 1.0
         assert pattern_input.rsi_z == 0.5
         assert pattern_input.regime == "TRENDING"
@@ -250,7 +291,7 @@ class TestPatternInput:
 
 class TestPatternMatch:
     """Tests for PatternMatch model."""
-    
+
     def test_to_evidence_dict(self, sample_cluster_pattern):
         """Test conversion to evidence dict."""
         match = PatternMatch(
@@ -271,9 +312,9 @@ class TestPatternMatch:
             evidence_strength=61.2,
             evidence_reasoning="Test reasoning",
         )
-        
+
         evidence = match.to_evidence_dict()
-        
+
         assert evidence["source_type"] == "pattern"
         assert evidence["source_name"] == sample_cluster_pattern.pattern_name
         assert evidence["direction"] == "bullish"
@@ -283,6 +324,7 @@ class TestPatternMatch:
 # ============================================================================
 # Extractor Tests
 # ============================================================================
+
 
 class TestFeatureExtractor:
     """Tests for feature extraction from report formats."""
@@ -415,9 +457,10 @@ class TestFeatureExtractor:
 # Clustering Tests
 # ============================================================================
 
+
 class TestClusterPatternDiscovery:
     """Tests for cluster pattern discovery."""
-    
+
     def test_discover_patterns(self, sample_snapshots):
         """Test pattern discovery from snapshots."""
         discovery = ClusterPatternDiscovery(
@@ -425,18 +468,18 @@ class TestClusterPatternDiscovery:
             min_support=3,
             min_win_rate=0.40,  # Lower threshold for test
         )
-        
+
         result = discovery.discover(sample_snapshots, ticker="MU")
-        
+
         assert result.total_snapshots == len(sample_snapshots)
         assert result.optimal_k > 0
         assert len(result.patterns) >= 0  # May or may not find patterns
-    
+
     def test_compute_similarity(self, sample_cluster_pattern, sample_pattern_input):
         """Test similarity computation."""
         features = sample_pattern_input.to_vector()
         similarity = sample_cluster_pattern.compute_similarity(features)
-        
+
         assert 0.0 <= similarity <= 1.0
 
 
@@ -444,9 +487,10 @@ class TestClusterPatternDiscovery:
 # Sequential Mining Tests
 # ============================================================================
 
+
 class TestSequentialPatternMiner:
     """Tests for sequential pattern mining."""
-    
+
     def test_mine_patterns(self, sample_snapshots):
         """Test sequential pattern mining."""
         miner = SequentialPatternMiner(
@@ -454,12 +498,12 @@ class TestSequentialPatternMiner:
             min_support=2,
             min_win_rate=0.40,  # Lower threshold for test
         )
-        
+
         result = miner.mine(sample_snapshots, ticker="MU")
-        
+
         assert result.total_sequences_analyzed > 0
         # May or may not find patterns depending on data
-    
+
     def test_pattern_matches(self):
         """Test sequential pattern matching."""
         pattern = SequentialPattern(
@@ -474,11 +518,11 @@ class TestSequentialPatternMiner:
             confidence_interval=(0.5, 0.9),
             direction=Direction.BULLISH,
         )
-        
+
         # Should match
         assert pattern.matches(["up_spike_up_normal", "up_normal_high"])
         assert pattern.matches(["other", "up_spike_up_normal", "up_normal_high"])
-        
+
         # Should not match
         assert not pattern.matches(["up_spike_up_normal"])
         assert not pattern.matches(["other", "other"])
@@ -488,44 +532,45 @@ class TestSequentialPatternMiner:
 # Library Tests
 # ============================================================================
 
+
 class TestPatternLibraryManager:
     """Tests for pattern library management."""
-    
+
     def test_save_and_load_library(self, sample_library, temp_library_dir):
         """Test saving and loading a pattern library."""
         manager = PatternLibraryManager(library_dir=temp_library_dir)
-        
+
         # Save
         path = manager.save_library(sample_library)
         assert path.exists()
-        
+
         # Load
         loaded = manager.load_library(path)
-        
+
         assert loaded.ticker == sample_library.ticker
         assert loaded.version == sample_library.version
         assert len(loaded.cluster_patterns) == len(sample_library.cluster_patterns)
-    
+
     def test_list_libraries(self, sample_library, temp_library_dir):
         """Test listing available libraries."""
         manager = PatternLibraryManager(library_dir=temp_library_dir)
         manager.save_library(sample_library)
-        
+
         libraries = manager.list_libraries()
-        
+
         assert len(libraries) == 1
         assert libraries[0]["ticker"] == sample_library.ticker
-    
+
     def test_load_library_for_ticker(self, sample_library, temp_library_dir):
         """Test loading library for a specific ticker."""
         manager = PatternLibraryManager(library_dir=temp_library_dir)
         manager.save_library(sample_library)
-        
+
         loaded = manager.load_library_for_ticker("MU")
-        
+
         assert loaded is not None
         assert loaded.ticker == "MU"
-        
+
         # Non-existent ticker
         not_found = manager.load_library_for_ticker("AAPL")
         assert not_found is None
@@ -535,34 +580,35 @@ class TestPatternLibraryManager:
 # Matcher Tests
 # ============================================================================
 
+
 class TestPatternMatcher:
     """Tests for pattern matching."""
-    
+
     def test_match_cluster_pattern(self, sample_library, sample_pattern_input):
         """Test matching cluster patterns."""
         matcher = PatternMatcher(library=sample_library)
-        
+
         matches = matcher.match(sample_pattern_input)
-        
+
         assert isinstance(matches, list)
         # May or may not match depending on similarity threshold
-    
+
     def test_get_best_match(self, sample_library, sample_pattern_input):
         """Test getting best match."""
         matcher = PatternMatcher(library=sample_library)
-        
+
         best = matcher.get_best_match(sample_pattern_input)
-        
+
         # May be None if no match
         if best:
             assert isinstance(best, PatternMatch)
-    
+
     def test_get_evidence(self, sample_library, sample_pattern_input):
         """Test getting evidence for decision engine."""
         matcher = PatternMatcher(library=sample_library)
-        
+
         evidence = matcher.get_evidence(sample_pattern_input)
-        
+
         # May be None if no match
         if evidence:
             assert "source_type" in evidence
@@ -573,21 +619,22 @@ class TestPatternMatcher:
 # Evidence Tests
 # ============================================================================
 
+
 class TestPatternEvidenceSource:
     """Tests for pattern evidence source."""
-    
+
     def test_get_evidence(self, sample_library, sample_pattern_input):
         """Test getting evidence from pattern source."""
         matcher = PatternMatcher(library=sample_library)
         evidence_source = PatternEvidenceSource(matcher=matcher)
-        
+
         feature_vector = sample_pattern_input.model_dump()
         evidence = evidence_source.get_evidence(feature_vector)
-        
+
         # May be None if no match
         if evidence:
             assert evidence.source_type == "pattern"
-    
+
     def test_format_evidence(self, sample_cluster_pattern):
         """Test formatting evidence for API."""
         match = PatternMatch(
@@ -608,9 +655,9 @@ class TestPatternEvidenceSource:
             evidence_strength=61.2,
             evidence_reasoning="Test reasoning",
         )
-        
+
         evidence = format_evidence(match)
-        
+
         assert evidence["source_type"] == "pattern"
         assert "pattern_id" in evidence
 
@@ -619,9 +666,10 @@ class TestPatternEvidenceSource:
 # Integration Tests
 # ============================================================================
 
+
 class TestIntegration:
     """Integration tests for the pattern discovery pipeline."""
-    
+
     def test_full_discovery_pipeline(self, sample_snapshots, temp_library_dir):
         """Test the full discovery pipeline."""
         config = DiscoveryConfig(
@@ -631,21 +679,21 @@ class TestIntegration:
             min_support=3,
             min_win_rate=0.40,
         )
-        
+
         # Discover cluster patterns
         cluster_patterns = discover_cluster_patterns(
             snapshots=sample_snapshots,
             config=config,
             ticker="MU",
         )
-        
+
         # Discover sequential patterns
         sequential_patterns = discover_sequential_patterns(
             snapshots=sample_snapshots,
             config=config,
             ticker="MU",
         )
-        
+
         # Create and save library
         manager = PatternLibraryManager(library_dir=temp_library_dir)
         library = manager.create_library(
@@ -655,18 +703,18 @@ class TestIntegration:
             total_snapshots=len(sample_snapshots),
             discovery_config=config,
         )
-        
+
         path = manager.save_library(library)
         assert path.exists()
-        
+
         # Load and use for matching
         loaded = manager.load_library(path)
         matcher = PatternMatcher(library=loaded)
-        
+
         # Match with a sample input
         sample_input = sample_snapshots[0].features
         matches = matcher.match(sample_input)
-        
+
         # Results depend on data, but should not error
         assert isinstance(matches, list)
 

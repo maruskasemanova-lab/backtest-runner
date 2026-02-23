@@ -1,0 +1,62 @@
+{
+  "strategy": "momentum_flow",
+  "params": {
+    "min_signed_aggression": 0.06,
+    "min_directional_consistency": 0.5,
+    "min_imbalance": 0.025,
+    "min_sweep_intensity": 0.07,
+    "min_book_pressure": 0,
+    "min_confidence": 58,
+    "atr_stop_multiplier": 1.8,
+    "rr_ratio": 2.2,
+    "trailing_stop_pct": 0.9
+  },
+  "backup_strategy": "",
+  "regime_filter": [
+    "TRENDING"
+  ],
+  "avoid_days": [],
+  "long_only": false,
+  "min_confidence": 58,
+  "max_daily_trades": 3,
+  "l2": {
+    "l2_only": true,
+    "confirm_enabled": true,
+    "min_delta": 5000.0,
+    "min_imbalance": 0.03,
+    "min_iceberg_bias": 0,
+    "lookback_bars": 3,
+    "min_participation_ratio": 0.1,
+    "min_directional_consistency": 0.3,
+    "min_signed_aggression": 0.03
+  },
+  "notes": "Evidence-based GOOGL profile with flow-only strategy stack and default L2-only gating.",
+  "trailing_stop_pct": 0.9,
+  "strategy_selection_mode": "adaptive_top_n",
+  "max_active_strategies": 1,
+  "trading_hours": [
+    9,
+    10,
+    11,
+    12
+  ],
+  "time_filter_enabled": true,
+  "adaptive": {
+    "version": 2,
+    "flow_bias_enabled": true,
+    "use_ohlcv_fallbacks": true,
+    "min_active_bars_before_switch": 0,
+    "switch_cooldown_bars": 0,
+    "evidence_base_threshold": 45.0,
+    "evidence_min_confirming_sources": 1
+  },
+  "v2_strategy_param_overrides": {
+    "min_confidence": 55.0,
+    "atr_stop_multiplier": 1.6,
+    "rr_ratio": 1.6,
+    "trailing_stop_pct": 0.6
+  },
+  "adverse_flow_consistency_threshold": 0.1,
+  "adverse_book_pressure_threshold": 0.1,
+  "time_exit_bars": 25
+}

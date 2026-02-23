@@ -26,4 +26,3 @@ def test_exit_marker_schema_v2_includes_cost_fields() -> None:
     assert details["position_notional_usd"] == 1000.0
     assert round(details["cost_pct"], 2) == 0.15
     assert details["pnl_usd"] == -62.47
-

@@ -36,7 +36,7 @@ def _enrich_trade(trade: Dict[str, Any]) -> Dict[str, Any]:
     gross_pnl = (entry_price - exit_price) * qty
     ibkr_cost = gross_pnl - net_pnl
     hold_minutes = (exit_utc - entry_utc).total_seconds() / 60.0
-    pnl_per_share = (entry_price - exit_price)
+    pnl_per_share = entry_price - exit_price
     entry_et = entry_utc.astimezone(NY_TZ)
     exit_et = exit_utc.astimezone(NY_TZ)
     return {
@@ -98,17 +98,32 @@ def _summarize_group(name: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "total_net_pnl": round(sum(_safe_float(row["net_pnl"]) for row in rows), 6),
         "avg_net_pnl": round(mean(_safe_float(row["net_pnl"]) for row in rows), 6),
         "median_net_pnl": round(median(_safe_float(row["net_pnl"]) for row in rows), 6),
-        "avg_hold_minutes": round(mean(_safe_float(row["holding_minutes"]) for row in rows), 6),
-        "median_hold_minutes": round(median(_safe_float(row["holding_minutes"]) for row in rows), 6),
-        "avg_pnl_per_share": round(mean(_safe_float(row["pnl_per_share"]) for row in rows), 6),
-        "median_pnl_per_share": round(median(_safe_float(row["pnl_per_share"]) for row in rows), 6),
+        "avg_hold_minutes": round(
+            mean(_safe_float(row["holding_minutes"]) for row in rows), 6
+        ),
+        "median_hold_minutes": round(
+            median(_safe_float(row["holding_minutes"]) for row in rows), 6
+        ),
+        "avg_pnl_per_share": round(
+            mean(_safe_float(row["pnl_per_share"]) for row in rows), 6
+        ),
+        "median_pnl_per_share": round(
+            median(_safe_float(row["pnl_per_share"]) for row in rows), 6
+        ),
         "avg_quantity": round(mean(_safe_float(row["quantity"]) for row in rows), 6),
-        "median_quantity": round(median(_safe_float(row["quantity"]) for row in rows), 6),
+        "median_quantity": round(
+            median(_safe_float(row["quantity"]) for row in rows), 6
+        ),
     }
 
 
 def _build_profile(profile_id: str, profile_name: str) -> Dict[str, Any]:
-    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    now = (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
     return {
         "profile_id": profile_id,
         "profile_name": profile_name,
@@ -295,7 +310,9 @@ def _write_winners_markdown(
     lines.append("")
     lines.append("## Profitable Trades")
     lines.append("")
-    lines.append("| ID | Entry ET | Exit ET | Hold (m) | Qty | Entry | Exit | Gross | Cost | Net |")
+    lines.append(
+        "| ID | Entry ET | Exit ET | Hold (m) | Qty | Entry | Exit | Gross | Cost | Net |"
+    )
     lines.append("|---:|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for row in winners:
         lines.append(
@@ -319,7 +336,8 @@ def _upsert_unified_profile(
     unified_profiles = ticker_node.setdefault("unified_profiles", [])
     profile_id = str(profile_payload.get("profile_id", "")).strip()
     unified_profiles = [
-        row for row in unified_profiles
+        row
+        for row in unified_profiles
         if str(row.get("profile_id", "")).strip() != profile_id
     ]
     unified_profiles.append(profile_payload)
@@ -328,7 +346,9 @@ def _upsert_unified_profile(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Analyze profitable MU short scalp trades from fixture.")
+    parser = argparse.ArgumentParser(
+        description="Analyze profitable MU short scalp trades from fixture."
+    )
     parser.add_argument(
         "--fixture",
         default="tests/fixtures/ibkr_MU_short_scalps_2025-10-01_2026-02-13_from_xml.json",
@@ -400,7 +420,9 @@ def main() -> None:
     overall = _summarize_group("all", enriched_sorted)
     overall["winner_count"] = len(winners)
     overall["loser_count"] = len(losers)
-    overall["win_rate"] = (len(winners) / len(enriched_sorted)) if enriched_sorted else 0.0
+    overall["win_rate"] = (
+        (len(winners) / len(enriched_sorted)) if enriched_sorted else 0.0
+    )
     overall["total_trades"] = len(enriched_sorted)
     overall["first_entry_et"] = enriched_sorted[0]["entry_time_et"]
     overall["last_entry_et"] = enriched_sorted[-1]["entry_time_et"]
@@ -410,7 +432,9 @@ def main() -> None:
     worst_losers = sorted(enriched_sorted, key=lambda row: row["net_pnl"])[:10]
 
     analysis_payload = {
-        "generated_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "generated_at_utc": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
         "fixture_path": str(fixture_path),
         "ticker": str(args.ticker).strip().upper(),
         "overall": overall,
@@ -434,7 +458,9 @@ def main() -> None:
     profile_out = Path(args.profile_out)
 
     _write_winners_csv(csv_out, winners_sorted)
-    _write_winners_markdown(md_out, winners_sorted, overall, winners_summary, losers_summary, hour_stats)
+    _write_winners_markdown(
+        md_out, winners_sorted, overall, winners_summary, losers_summary, hour_stats
+    )
     analysis_out.parent.mkdir(parents=True, exist_ok=True)
     analysis_out.write_text(json.dumps(analysis_payload, indent=2))
 
@@ -453,7 +479,9 @@ def main() -> None:
     print(f"Profitable scalps MD:  {md_out}")
     print(f"Analysis JSON:         {analysis_out}")
     print(f"Profile JSON:          {profile_out}")
-    print(f"Winners: {len(winners_sorted)} / {len(enriched_sorted)} ({overall['win_rate']:.2%})")
+    print(
+        f"Winners: {len(winners_sorted)} / {len(enriched_sorted)} ({overall['win_rate']:.2%})"
+    )
 
 
 if __name__ == "__main__":

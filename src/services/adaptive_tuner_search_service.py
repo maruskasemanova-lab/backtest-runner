@@ -21,7 +21,9 @@ def candidate_key(candidate: Dict[str, Any]) -> tuple:
     return (
         normalize_strategy_selection_mode(candidate.get("strategy_selection_mode")),
         normalize_clamped_int(candidate.get("max_active_strategies"), 3, 1, 20),
-        normalize_non_negative_int(candidate.get("min_active_bars_before_switch"), 0, 500),
+        normalize_non_negative_int(
+            candidate.get("min_active_bars_before_switch"), 0, 500
+        ),
         normalize_non_negative_int(candidate.get("switch_cooldown_bars"), 0, 500),
         bool(candidate.get("flow_bias_enabled", True)),
         bool(candidate.get("use_ohlcv_fallbacks", True)),
@@ -95,9 +97,13 @@ def build_random_candidates(
     while len(candidates) < n_trials and attempts < max_attempts:
         attempts += 1
         candidate = {
-            "strategy_selection_mode": rng.choice(search_space["strategy_selection_mode"]),
+            "strategy_selection_mode": rng.choice(
+                search_space["strategy_selection_mode"]
+            ),
             "max_active_strategies": rng.choice(search_space["max_active_strategies"]),
-            "min_active_bars_before_switch": rng.choice(search_space["min_active_bars_before_switch"]),
+            "min_active_bars_before_switch": rng.choice(
+                search_space["min_active_bars_before_switch"]
+            ),
             "switch_cooldown_bars": rng.choice(search_space["switch_cooldown_bars"]),
             "flow_bias_enabled": rng.choice(search_space["flow_bias_enabled"]),
             "use_ohlcv_fallbacks": rng.choice(search_space["use_ohlcv_fallbacks"]),
@@ -128,7 +134,9 @@ def build_adaptive_candidate_config(
         adaptive_cfg = {}
     adaptive_cfg["version"] = int(adaptive_version)
     adaptive_cfg["flow_bias_enabled"] = bool(candidate.get("flow_bias_enabled", True))
-    adaptive_cfg["use_ohlcv_fallbacks"] = bool(candidate.get("use_ohlcv_fallbacks", True))
+    adaptive_cfg["use_ohlcv_fallbacks"] = bool(
+        candidate.get("use_ohlcv_fallbacks", True)
+    )
     adaptive_cfg["min_active_bars_before_switch"] = normalize_non_negative_int(
         candidate.get("min_active_bars_before_switch"), default=0, max_value=500
     )
@@ -186,7 +194,7 @@ def compute_tuner_score_robust(
 
     mean_abs = max(abs(avg_pnl), 0.001)
     variance = sum((p - avg_pnl) ** 2 for p in daily_pnl) / n_days
-    std_dev = variance ** 0.5
+    std_dev = variance**0.5
     cv = std_dev / mean_abs
     consistency = 1.0 / (1.0 + cv)
 
@@ -229,7 +237,9 @@ def compute_tuner_score_robust(
     l2_ratio = l2_confirmed_days / n_days if n_days > 0 else 0.0
     l2_bonus = 1.0 + (l2_ratio * 0.10)
 
-    score = avg_pnl * consistency * quality_gate * day_penalty * trade_norm * trade_scarcity
+    score = (
+        avg_pnl * consistency * quality_gate * day_penalty * trade_norm * trade_scarcity
+    )
     score *= l2_bonus
     return round(score, 6)
 

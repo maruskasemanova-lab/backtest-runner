@@ -4,6 +4,7 @@ Session Config - Session configuration for backtest runs.
 This module handles configuration of trading sessions including
 risk parameters, exit rules, and L2 confirmation settings.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,7 +33,7 @@ async def configure_session(
     partial_take_profit_fraction: float = 0.5,
     trailing_activation_pct: float = 0.15,
     break_even_buffer_pct: float = 0.03,
-    break_even_min_hold_bars: int = 2,
+    break_even_min_hold_bars: int = 5,
     trailing_enabled_in_choppy: bool = False,
     time_exit_bars: int = 40,
     adverse_flow_exit_enabled: bool = True,
@@ -50,6 +51,10 @@ async def configure_session(
     l2_min_participation_ratio: float = 0.0,
     l2_min_directional_consistency: float = 0.0,
     l2_min_signed_aggression: float = 0.0,
+    tcbbo_gate_enabled: bool = False,
+    tcbbo_min_net_premium: float = 0.0,
+    tcbbo_sweep_boost: float = 5.0,
+    tcbbo_lookback_bars: int = 5,
     cold_start_each_day: bool = False,
     strategy_selection_mode: str = "adaptive_top_n",
     max_active_strategies: int = 3,
@@ -59,7 +64,7 @@ async def configure_session(
 ) -> bool:
     """
     Configure a trading session on the strategy API.
-    
+
     Args:
         strategy_api_url: URL of the strategy API
         run_id: Run identifier
@@ -70,7 +75,7 @@ async def configure_session(
         account_size_usd: Account size in USD
         risk_per_trade_pct: Risk per trade as percentage
         ... (other parameters as documented in api_server.py)
-        
+
     Returns:
         True if configuration was successful
     """
@@ -108,18 +113,22 @@ async def configure_session(
         "l2_min_participation_ratio": float(l2_min_participation_ratio),
         "l2_min_directional_consistency": float(l2_min_directional_consistency),
         "l2_min_signed_aggression": float(l2_min_signed_aggression),
+        "tcbbo_gate_enabled": int(bool(tcbbo_gate_enabled)),
+        "tcbbo_min_net_premium": float(tcbbo_min_net_premium),
+        "tcbbo_sweep_boost": float(tcbbo_sweep_boost),
+        "tcbbo_lookback_bars": int(tcbbo_lookback_bars),
         "cold_start_each_day": int(bool(cold_start_each_day)),
         "strategy_selection_mode": str(strategy_selection_mode),
         "max_active_strategies": int(max_active_strategies),
     }
-    
+
     if momentum_diversification_json:
         params["momentum_diversification_json"] = str(momentum_diversification_json)
     if max_daily_trades is not None:
         params["max_daily_trades"] = int(max_daily_trades)
     if mu_choppy_hard_block_enabled is not None:
         params["mu_choppy_hard_block_enabled"] = int(bool(mu_choppy_hard_block_enabled))
-    
+
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -144,20 +153,20 @@ async def clear_remote_strategy_sessions(
 ) -> bool:
     """
     Best-effort cleanup of strategy API session state.
-    
+
     This prevents sticky per-run state (phase/cooldown/session caches) from
     affecting subsequent replays with the same run_id+ticker.
-    
+
     Args:
         strategy_api_url: URL of the strategy API
         run_id: Run identifier
         ticker: Ticker symbol
-        
+
     Returns:
         True if cleanup was successful
     """
     normalized_ticker = ticker.upper()
-    
+
     async def _clear_v2(session: aiohttp.ClientSession) -> None:
         async with session.delete(
             f"{strategy_api_url}/api/session/run",
@@ -167,13 +176,15 @@ async def clear_remote_strategy_sessions(
                 logger.warning(
                     f"Session run-clear failed (HTTP {resp.status}) for {run_id}:{normalized_ticker}"
                 )
-    
+
     try:
         async with aiohttp.ClientSession() as session:
             await _clear_v2(session)
             return True
     except Exception as exc:
-        logger.warning(f"Remote session cleanup error for {run_id}:{normalized_ticker}: {exc}")
+        logger.warning(
+            f"Remote session cleanup error for {run_id}:{normalized_ticker}: {exc}"
+        )
         return False
 
 
@@ -183,11 +194,11 @@ async def reset_remote_orchestrator_state(
 ) -> bool:
     """
     Best-effort full reset of remote strategy/orchestrator state.
-    
+
     Args:
         strategy_api_url: URL of the strategy API
         scope: Reset scope (all, session, learning)
-        
+
     Returns:
         True when a reset endpoint acknowledged the request
     """
@@ -217,11 +228,11 @@ async def load_remote_checkpoint(
 ) -> Optional[Dict[str, Any]]:
     """
     Load a checkpoint on the remote strategy API.
-    
+
     Args:
         strategy_api_url: URL of the strategy API
         checkpoint_path: Path to checkpoint file
-        
+
     Returns:
         Checkpoint data or None if failed
     """
@@ -251,25 +262,27 @@ async def save_remote_checkpoint(
 ) -> Optional[str]:
     """
     Auto-save checkpoint after a successful backtest run.
-    
+
     Args:
         strategy_api_url: URL of the strategy API
         run_id: Run identifier
         ticker: Ticker symbol
         date_from: Start date
         date_to: End date
-        
+
     Returns:
         Path to saved checkpoint or None if failed
     """
     try:
         params = {
-            k: v for k, v in {
+            k: v
+            for k, v in {
                 "run_id": run_id,
                 "ticker": ticker,
                 "date_from": date_from,
                 "date_to": date_to,
-            }.items() if v
+            }.items()
+            if v
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(

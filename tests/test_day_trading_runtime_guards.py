@@ -10,7 +10,11 @@ STRATEGY_ROOT = PROJECT_ROOT.parent / "market_regime_detection"
 sys.path.insert(0, str(STRATEGY_ROOT))
 sys.modules.pop("src", None)
 
-from src.day_trading_manager import BarData, DayTradingManager, SessionPhase  # noqa: E402
+from src.day_trading_manager import (
+    BarData,
+    DayTradingManager,
+    SessionPhase,
+)  # noqa: E402
 from src.strategies.base_strategy import Signal, SignalType  # noqa: E402
 
 
@@ -56,7 +60,9 @@ def test_pending_signal_ttl_drops_stale_signal() -> None:
     session.pending_signal_bar_index = 0
     session.bars = [_bar(start + timedelta(minutes=i)) for i in range(4)]
 
-    result = manager._process_trading_bar(session, session.bars[-1], session.bars[-1].timestamp)
+    result = manager._process_trading_bar(
+        session, session.bars[-1], session.bars[-1].timestamp
+    )
 
     assert result.get("stale_pending_signal_dropped") is True
     assert session.pending_signal is None
@@ -94,7 +100,9 @@ def test_daily_loss_limit_counts_unrealized_pnl() -> None:
     result = manager._process_trading_bar(session, down_bar, down_bar.timestamp)
 
     assert result.get("action") == "max_loss_stop"
-    assert result.get("max_daily_loss_trigger", {}).get("total_pnl_dollars", 0.0) < -100.0
+    assert (
+        result.get("max_daily_loss_trigger", {}).get("total_pnl_dollars", 0.0) < -100.0
+    )
     assert session.phase == SessionPhase.END_OF_DAY
 
 

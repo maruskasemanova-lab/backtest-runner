@@ -1,0 +1,24 @@
+{
+  "strategy": "vwap_magnet",
+  "params": {
+    "min_distance_pct": 0.15,
+    "max_distance_pct": 0.8,
+    "volume_stop_pct": 0.8,
+    "trailing_stop_pct": 0.6,
+    "min_confidence": 55.0
+  },
+  "backup_strategy": "mean_reversion",
+  "regime_filter": [
+    "TRENDING",
+    "MIXED",
+    "CHOPPY"
+  ],
+  "avoid_days": [],
+  "min_confidence": 55.0,
+  "max_daily_trades": 4,
+  "notes": "Low volatility, tighter params OK",
+  "trailing_stop_pct": 0.6,
+  "long_only": false,
+  "trading_hours": [],
+  "time_filter_enabled": false
+}

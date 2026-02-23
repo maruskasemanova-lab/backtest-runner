@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   toUnixSeconds,
   toIsoTimestamp,
@@ -22,6 +22,7 @@ import AdaptiveStrategyStudio from './components/AdaptiveStrategyStudio';
 import AdaptiveTuner from './components/AdaptiveTuner';
 import LiveTraderMonitor from './components/LiveTraderMonitor';
 import DiagnosticCalendar from './components/DiagnosticCalendar';
+import StrategyAnalyzer from './components/StrategyAnalyzer';
 import {
   isSupabaseAuthEnabled,
   signInWithGoogle,
@@ -139,6 +140,7 @@ const buildRunApiBase = (runParts) => {
 };
 
 const RUN_RANGE_LABEL_PATTERN = /^(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})$/;
+const RUN_ID_COLLISION_PATTERN = /Run already exists:/i;
 
 const resolveRunDateWindow = (stateRow) => {
   const row = stateRow && typeof stateRow === 'object' ? stateRow : {};
@@ -286,6 +288,38 @@ const toChartBar = (bar) => {
     return null;
   }
 
+  const nestedAnalysis =
+    (bar.analysis && typeof bar.analysis === 'object' ? bar.analysis : null) ||
+    (bar.strategy_analysis && typeof bar.strategy_analysis === 'object' ? bar.strategy_analysis : null) ||
+    null;
+  const layerScores =
+    (bar.layer_scores && typeof bar.layer_scores === 'object' ? bar.layer_scores : null) ||
+    (nestedAnalysis?.layer_scores && typeof nestedAnalysis.layer_scores === 'object'
+      ? nestedAnalysis.layer_scores
+      : null);
+  const signalRejected =
+    (bar.signal_rejected && typeof bar.signal_rejected === 'object' ? bar.signal_rejected : null) ||
+    (nestedAnalysis?.signal_rejected && typeof nestedAnalysis.signal_rejected === 'object'
+      ? nestedAnalysis.signal_rejected
+      : null);
+  const candidateDiagnostics =
+    (bar.candidate_diagnostics && typeof bar.candidate_diagnostics === 'object'
+      ? bar.candidate_diagnostics
+      : null) ||
+    (nestedAnalysis?.candidate_diagnostics && typeof nestedAnalysis.candidate_diagnostics === 'object'
+      ? nestedAnalysis.candidate_diagnostics
+      : null);
+  const intrabarEvalTrace =
+    (bar.intrabar_eval_trace && typeof bar.intrabar_eval_trace === 'object'
+      ? bar.intrabar_eval_trace
+      : null) ||
+    (nestedAnalysis?.intrabar_eval_trace && typeof nestedAnalysis.intrabar_eval_trace === 'object'
+      ? nestedAnalysis.intrabar_eval_trace
+      : null);
+  const nestedWarmupOnly =
+    typeof nestedAnalysis?.warmup_only === 'boolean' ? nestedAnalysis.warmup_only : undefined;
+  const nestedBarIndex = nestedAnalysis?.bar_index;
+
   return {
     time,
     open,
@@ -293,12 +327,33 @@ const toChartBar = (bar) => {
     low,
     close,
     volume: Number.isFinite(volume) ? volume : 0,
+    // Preserve runtime analysis payload on streamed bars so analyzer can scrub
+    // historical conditions bar-by-bar without changing chart rendering logic.
+    ...(layerScores
+      ? {
+          layer_scores: layerScores,
+          signal_rejected: signalRejected,
+          candidate_diagnostics: candidateDiagnostics,
+          intrabar_eval_trace: intrabarEvalTrace || undefined,
+          warmup_only:
+            typeof bar.warmup_only === 'boolean'
+              ? bar.warmup_only
+              : nestedWarmupOnly,
+          bar_index:
+            Number.isFinite(Number(bar.bar_index))
+              ? Number(bar.bar_index)
+              : (Number.isFinite(Number(nestedBarIndex)) ? Number(nestedBarIndex) : undefined),
+          timestamp: typeof bar.timestamp === 'string' ? bar.timestamp : undefined,
+          ...(nestedAnalysis ? { analysis: nestedAnalysis } : {}),
+        }
+      : {}),
   };
 };
 
 const VIEW_TABS = [
   { id: 'backtest', label: 'Backtest', icon: '📈' },
   { id: 'data-manager', label: 'Data Manager', icon: '💾' },
+  { id: 'strategy-analyzer', label: 'Strategy Analyzer', icon: '🔬' },
   { id: 'adaptive-studio', label: 'Adaptive Studio', icon: '🧪' },
   { id: 'adaptive-tuner', label: 'Adaptive Tuner', icon: '⚙️' },
   { id: 'diagnostics', label: 'Diagnostics', icon: '🔍' },
@@ -308,6 +363,7 @@ const VIEW_TABS = [
 const SIDEBAR_NAV_ITEMS = [
   { id: 'dates', label: 'Date Range', icon: '🗓', sectionId: 'run-config', runConfigMode: 'dates', focusFieldId: 'date_from', rangeLabel: 'A1' },
   { id: 'profiles', label: 'Profiles', icon: '🧩', sectionId: 'run-config', runConfigMode: 'profiles', focusFieldId: 'unified_profile_section', rangeLabel: 'A2' },
+  { id: 'start-mode', label: 'Start Mode', icon: '🚀', sectionId: 'run-config', runConfigMode: 'start', focusFieldId: 'start_mode_section', rangeLabel: 'A3' },
   { id: 'strategies', label: 'Strategies', icon: '🎛', sectionId: 'strategy-settings', focusFieldId: null, rangeLabel: 'B' },
   { id: 'modules', label: 'Global Modules', icon: '🔧', sectionId: 'execution-modules', focusFieldId: null, rangeLabel: 'E' },
   { id: 'playback', label: 'Playback', icon: '▶', sectionId: 'playback-controls', focusFieldId: null, rangeLabel: 'C' },
@@ -340,6 +396,23 @@ const EMPTY_AUTH_SNAPSHOT: AuthSnapshot = {
 
 type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
+const SIDEBAR_WIDTH_STORAGE_KEY = 'backtest_runner.sidebar_width';
+const SIDEBAR_MIN_WIDTH = 280;
+const SIDEBAR_MAX_WIDTH = 760;
+const MOBILE_SIDEBAR_BREAKPOINT = 992;
+
+const clampSidebarWidth = (value: number) => {
+  if (!Number.isFinite(value)) return 340;
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)));
+};
+
+const readInitialSidebarWidth = () => {
+  if (typeof window === 'undefined') return 340;
+  const raw = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+  const parsed = Number(raw);
+  return clampSidebarWidth(parsed);
+};
+
 function App() {
   // Run state
   const [runKey, setRunKey] = useState(null);
@@ -353,6 +426,7 @@ function App() {
   const [markers, setMarkers] = useState([]);
   const [selectedMarker, setSelectedMarker] = useState(null);
   const [currentBar, setCurrentBar] = useState(null);
+  const [latestBarAnalysis, setLatestBarAnalysis] = useState<any>(null);
   const [selectedIntrabar, setSelectedIntrabar] = useState(null);
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [strategyApiUrl, setStrategyApiUrl] = useState(defaultStrategyApiUrl);
@@ -363,6 +437,7 @@ function App() {
   const [downloadProgress, setDownloadProgress] = useState(null);
   const [activeSidebarNavItem, setActiveSidebarNavItem] = useState<string | null>(SIDEBAR_NAV_ITEMS[0]?.id ?? null);
   const [isSidebarRailExpanded, setIsSidebarRailExpanded] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readInitialSidebarWidth);
 
   // L2 Data
   const [activeTab, setActiveTab] = useState("standard"); // "standard" or "l2"
@@ -401,12 +476,14 @@ function App() {
   const reconnectTimeoutRef = useRef(null);
   const wsPollingFallbackRef = useRef(false);
   const isMountedRef = useRef(true); // Track mount status
+  const barsLengthRef = useRef(0);
   const [isPageVisible, setIsPageVisible] = useState(() =>
     typeof document === 'undefined' ? true : document.visibilityState === 'visible'
   );
   const isPageVisibleRef = useRef(isPageVisible);
   const pendingVisibilitySyncRef = useRef(false);
   const sidebarRailRef = useRef<HTMLDivElement | null>(null);
+  const sidebarResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const activeRun = useMemo(() => parseRunKey(runKey), [runKey]);
   const activeRunId = activeRun?.runId || null;
   const activeRunTicker = activeRun?.ticker || null;
@@ -448,6 +525,7 @@ function App() {
     setMarkers([]);
     setSelectedMarker(null);
     setCurrentBar(null);
+    setLatestBarAnalysis(null);
     setSelectedIntrabar(null);
     setIsPlaying(false);
     pendingVisibilitySyncRef.current = false;
@@ -467,6 +545,10 @@ function App() {
   useEffect(() => {
     isPageVisibleRef.current = isPageVisible;
   }, [isPageVisible]);
+
+  useEffect(() => {
+    barsLengthRef.current = Array.isArray(bars) ? bars.length : 0;
+  }, [bars]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
@@ -613,6 +695,8 @@ function App() {
       setRunKey(targetRunKey);
       setRunState(statePayload && typeof statePayload === 'object' ? statePayload : null);
       setEffectiveExecutionConfig(nextExecutionConfig);
+      setChartState(null);
+      setPriceRange(null);
       setBars(chartBars);
       setMarkers(nextMarkers);
       setCurrentBar(rawBars.length ? rawBars[rawBars.length - 1] : null);
@@ -825,6 +909,37 @@ function App() {
   }, [activeView]);
   
   // Handle new bar from WebSocket
+  const handleEvaluateIntrabarSlice = useCallback(async (ts: number) => {
+    if (!activeRunApiBase) return null;
+    // Find the minute bar that contains this checkpoint timestamp
+    const targetBar = bars.find(b => b.time <= ts && ts < b.time + 60);
+    if (!targetBar) return null;
+    
+    try {
+      const resp = await fetch(`${activeRunApiBase}/intrabar_eval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          run_id: activeRunId,
+          ticker: activeRunTicker,
+          timestamp: new Date(ts * 1000).toISOString(),
+          open: targetBar.open,
+          high: targetBar.high,
+          low: targetBar.low,
+          close: targetBar.close,
+          volume: targetBar.volume,
+          intrabar_quotes_1s: targetBar.intrabar_1s || [],
+        }),
+      });
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch (e) {
+      console.error("Intrabar eval failed", e);
+      return null;
+    }
+  }, [activeRunApiBase, activeRunId, activeRunTicker, bars]);
+
+  // Handle new bar from WebSocket
   const handleNewBar = useCallback((bar) => {
     const chartBar = toChartBar(bar);
     if (!chartBar) return;
@@ -840,6 +955,57 @@ function App() {
       return [...prev, chartBar];
     });
     setCurrentBar(bar);
+    // Extract live strategy analysis from bar payload (injected by session_runner).
+    const nestedAnalysis =
+      (bar?.analysis && typeof bar.analysis === 'object' ? bar.analysis : null) ||
+      (bar?.strategy_analysis && typeof bar.strategy_analysis === 'object' ? bar.strategy_analysis : null) ||
+      null;
+    const liveLayerScores =
+      (bar?.layer_scores && typeof bar.layer_scores === 'object' ? bar.layer_scores : null) ||
+      (nestedAnalysis?.layer_scores && typeof nestedAnalysis.layer_scores === 'object'
+        ? nestedAnalysis.layer_scores
+        : null);
+    const liveIntrabarEvalTrace =
+      (bar?.intrabar_eval_trace && typeof bar.intrabar_eval_trace === 'object'
+        ? bar.intrabar_eval_trace
+        : null) ||
+      (nestedAnalysis?.intrabar_eval_trace && typeof nestedAnalysis.intrabar_eval_trace === 'object'
+        ? nestedAnalysis.intrabar_eval_trace
+        : null);
+    const liveTraceCheckpoints = Array.isArray(liveIntrabarEvalTrace?.checkpoints) ? liveIntrabarEvalTrace.checkpoints : [];
+    const liveLatestCheckpoint =
+      liveTraceCheckpoints.length > 0 ? liveTraceCheckpoints[liveTraceCheckpoints.length - 1] : null;
+    if (liveLayerScores) {
+      setLatestBarAnalysis({
+        layer_scores: liveLayerScores,
+        signal_rejected:
+          (bar?.signal_rejected && typeof bar.signal_rejected === 'object' ? bar.signal_rejected : null) ||
+          (nestedAnalysis?.signal_rejected && typeof nestedAnalysis.signal_rejected === 'object'
+            ? nestedAnalysis.signal_rejected
+            : null),
+        candidate_diagnostics:
+          (bar?.candidate_diagnostics && typeof bar.candidate_diagnostics === 'object'
+            ? bar.candidate_diagnostics
+            : null) ||
+          (nestedAnalysis?.candidate_diagnostics && typeof nestedAnalysis.candidate_diagnostics === 'object'
+            ? nestedAnalysis.candidate_diagnostics
+            : null),
+        intrabar_eval_trace:
+          liveIntrabarEvalTrace,
+        intrabar_1s:
+          (liveLatestCheckpoint?.intrabar_1s && typeof liveLatestCheckpoint.intrabar_1s === 'object'
+            ? liveLatestCheckpoint.intrabar_1s
+            : null),
+        bar_index:
+          Number.isFinite(Number(bar?.bar_index))
+            ? Number(bar.bar_index)
+            : (Number.isFinite(Number(nestedAnalysis?.bar_index)) ? Number(nestedAnalysis.bar_index) : null),
+        warmup_only:
+          typeof bar?.warmup_only === 'boolean'
+            ? bar.warmup_only
+            : Boolean(nestedAnalysis?.warmup_only),
+      });
+    }
     setRunState(prev => {
       if (!prev) return null;
 
@@ -1135,6 +1301,8 @@ function App() {
       }
       
       // Reset state
+      setChartState(null);
+      setPriceRange(null);
       setBars([]);
       setMarkers([]);
       setSelectedMarker(null);
@@ -1152,6 +1320,25 @@ function App() {
       }
       const state = await stateResp.json();
       setRunState(state);
+
+      // Seed chart from processed bars so chart is visible even when WS lags.
+      try {
+        const barsResp = await fetch(`${runApiBase}/bars`);
+        if (barsResp.ok) {
+          const barsPayload = await barsResp.json();
+          const rawBars = Array.isArray(barsPayload?.bars) ? barsPayload.bars : [];
+          const chartBars = rawBars
+            .map((bar) => toChartBar(bar))
+            .filter(Boolean)
+            .sort((a, b) => a.time - b.time);
+          if (chartBars.length > 0) {
+            setBars(chartBars);
+            setCurrentBar(rawBars[rawBars.length - 1] || null);
+          }
+        }
+      } catch (barsError) {
+        console.debug('Initial bars snapshot load failed:', barsError);
+      }
       
       // Subscribe WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -1162,11 +1349,15 @@ function App() {
       
       return data;
     } catch (error) {
-      console.error('Start run error:', error);
+      const message = String((error as any)?.message || '');
+      if (!RUN_ID_COLLISION_PATTERN.test(message)) {
+        console.error('Start run error:', error);
+      }
       throw error;
     }
   }, [fetchActiveRuns]);
   
+  // Step forward one bar
   // Step forward one bar
   const handleStep = useCallback(async () => {
     if (!activeRunApiBase) return;
@@ -1207,7 +1398,7 @@ function App() {
   }, [activeRunApiBase, handleNewBar]);
   
   // Play/auto-advance
-  const handlePlay = useCallback(async () => {
+  const handlePlay = useCallback(async (playOptions = null) => {
     if (!activeRunApiBase) return;
     
     try {
@@ -1222,12 +1413,20 @@ function App() {
         speedParam = speed;
       }
       
+      const overrideTradeEvalMode = String(playOptions?.trade_eval_mode || '').trim().toLowerCase();
+      const requestedTradeEvalMode =
+        overrideTradeEvalMode === 'intrabar_5s' ||
+        overrideTradeEvalMode === 'intrabar_1s' ||
+        overrideTradeEvalMode === 'standard'
+          ? overrideTradeEvalMode
+          : tradeEvaluationMode;
+
       const response = await fetch(`${activeRunApiBase}/play`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           speed_ms: speedParam,
-          trade_eval_mode: tradeEvaluationMode
+          trade_eval_mode: requestedTradeEvalMode
         })
       });
       if (!response.ok) {
@@ -1308,6 +1507,30 @@ function App() {
         if (isPageVisibleRef.current) {
           setRunState(state);
         }
+        const processedCount = Number(state?.current_bar_index || 0);
+        const localBarsCount = Number(barsLengthRef.current || 0);
+        const shouldSyncBars =
+          processedCount > 0 &&
+          (wsPollingFallbackRef.current || processedCount > localBarsCount);
+        if (shouldSyncBars) {
+          try {
+            const barsResp = await fetch(`${activeRunApiBase}/bars`);
+            if (barsResp.ok) {
+              const barsPayload = await barsResp.json();
+              const rawBars = Array.isArray(barsPayload?.bars) ? barsPayload.bars : [];
+              if (rawBars.length > localBarsCount) {
+                const chartBars = rawBars
+                  .map((bar) => toChartBar(bar))
+                  .filter(Boolean)
+                  .sort((a, b) => a.time - b.time);
+                setBars(chartBars);
+                setCurrentBar(rawBars[rawBars.length - 1] || null);
+              }
+            }
+          } catch (barsError) {
+            console.debug('Bars poll sync failed:', barsError);
+          }
+        }
         if (!state?.is_running) {
           setIsPlaying(false);
         }
@@ -1361,6 +1584,40 @@ function App() {
     }
   }, [activeRunApiBase, clearActiveRunState, fetchActiveRuns]);
 
+  const handleKillAndDeleteRun = useCallback(async (targetRunKey: string) => {
+    const normalizedRunKey = String(targetRunKey || '').trim();
+    const parsed = parseRunKey(normalizedRunKey);
+    if (!parsed) {
+      throw new Error('Invalid run key.');
+    }
+    const runApiBase = buildRunApiBase(parsed);
+    if (!runApiBase) {
+      throw new Error('Invalid run path.');
+    }
+
+    setRuntimeNotice('');
+    try {
+      const stopResp = await fetch(`${runApiBase}/stop`, { method: 'POST' });
+      if (!stopResp.ok && stopResp.status !== 404) {
+        const stopDetail = await readErrorDetail(stopResp, `HTTP ${stopResp.status}`);
+        console.warn('Stop before delete returned error:', stopDetail);
+      }
+    } catch (stopError) {
+      console.warn('Stop before delete failed:', stopError);
+    }
+
+    const deleteResp = await fetch(runApiBase, { method: 'DELETE' });
+    if (!deleteResp.ok) {
+      const detail = await readErrorDetail(deleteResp, `HTTP ${deleteResp.status}`);
+      throw new Error(detail || 'Failed to delete run.');
+    }
+
+    if (normalizedRunKey === String(runKey || '').trim()) {
+      clearActiveRunState('');
+    }
+    fetchActiveRuns().catch(() => null);
+  }, [clearActiveRunState, fetchActiveRuns, runKey]);
+
   const handleReloadBacktest = useCallback(async () => {
     if (!runKey || !activeRunApiBase) return;
 
@@ -1404,7 +1661,10 @@ function App() {
     if (typeof markerOrId !== 'object') {
       const marker = decisionEvents.find((eventMarker) => eventMarker.id === markerOrId);
       if (marker) {
-        setSelectedMarker(marker);
+        setSelectedMarker({
+          ...marker,
+          __selectionSource: "chart",
+        });
       }
       return;
     }
@@ -1420,14 +1680,20 @@ function App() {
     });
 
     if (bestMatch && bestScore > 100) {
-      setSelectedMarker(bestMatch);
+      setSelectedMarker({
+        ...bestMatch,
+        __selectionSource: "chart",
+      });
       return;
     }
 
-    setSelectedMarker(markerOrId);
+    setSelectedMarker({
+      ...markerOrId,
+      __selectionSource: "chart",
+    });
   }, [decisionEvents]);
 
-  const activeRunConfigSidebarMode = useMemo<'all' | 'dates' | 'profiles'>(() => {
+  const activeRunConfigSidebarMode = useMemo<'all' | 'dates' | 'profiles' | 'start'>(() => {
     const activeItem = SIDEBAR_NAV_ITEMS.find((item) => item.id === activeSidebarNavItem);
     if (!activeItem || activeItem.sectionId !== 'run-config') {
       return 'all';
@@ -1444,6 +1710,7 @@ function App() {
       activeRuns={activeRuns}
       activeRunKey={runKey}
       onAttachRun={handleAttachActiveRun}
+      onKillRun={handleKillAndDeleteRun}
       sidebarSubsection={activeRunConfigSidebarMode}
       authToken={authSnapshot.token || ''}
       activeRunState={runState}
@@ -1454,6 +1721,7 @@ function App() {
     authSnapshot.token,
     effectiveExecutionConfig,
     handleAttachActiveRun,
+    handleKillAndDeleteRun,
     handleStartRun,
     hasActiveAttachedRun,
     runState,
@@ -1627,10 +1895,13 @@ function App() {
     const runConfigSectionOpen = activeSidebarSectionId === 'run-config';
     const clickedRunConfigHost = item.sectionId === 'run-config' && item.id === RUN_CONFIG_PANEL_HOST_ID;
     const isClosingCurrentItem = activeSidebarNavItem === item.id;
+    const collapsingRunConfigHost =
+      clickedRunConfigHost && activeSidebarNavItem === RUN_CONFIG_PANEL_HOST_ID;
 
     if (item.sectionId === 'run-config') {
-      // Make "Date Range" act as a stable collapse handle for the whole run-config section.
-      if (runConfigSectionOpen && (isClosingCurrentItem || clickedRunConfigHost)) {
+      // Collapse only when re-clicking the currently active run-config item.
+      // This keeps the RunConfig subtree mounted when switching Date Range <-> Profiles.
+      if (runConfigSectionOpen && (isClosingCurrentItem || collapsingRunConfigHost)) {
         setActiveSidebarNavItem(null);
         return;
       }
@@ -1655,13 +1926,48 @@ function App() {
   const handleSidebarMouseLeave = useCallback(() => {
     setIsSidebarRailExpanded(false);
   }, []);
+
+  const handleSidebarResizeMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (typeof window === 'undefined') return;
+    if (window.innerWidth <= MOBILE_SIDEBAR_BREAKPOINT) return;
+    event.preventDefault();
+    const startWidth = clampSidebarWidth(sidebarWidth);
+    sidebarResizeStateRef.current = {
+      startX: event.clientX,
+      startWidth,
+    };
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!sidebarResizeStateRef.current) return;
+      const deltaX = moveEvent.clientX - sidebarResizeStateRef.current.startX;
+      const nextWidth = clampSidebarWidth(sidebarResizeStateRef.current.startWidth + deltaX);
+      setSidebarWidth(nextWidth);
+    };
+
+    const onMouseUp = () => {
+      sidebarResizeStateRef.current = null;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clampSidebarWidth(sidebarWidth)));
+  }, [sidebarWidth]);
   
   // Debug state moved to top level
   
   return (
     <div className="app-container">
       {/* Dark Sidebar */}
-      <aside className={`app-sidebar ${isNavOpen ? 'mobile-open' : ''}`}>
+      <aside
+        className={`app-sidebar ${isNavOpen ? 'mobile-open' : ''}`}
+        style={{ width: `${clampSidebarWidth(sidebarWidth)}px`, minWidth: `${clampSidebarWidth(sidebarWidth)}px` }}
+      >
         <div className="sidebar-brand">
           <span className="sidebar-brand-icon">📈</span>
           <div className="sidebar-brand-text">
@@ -1738,7 +2044,7 @@ function App() {
                 const activeIdx = sidebarNavItems.findIndex((i) => i.id === activeSidebarNavItem);
                 return (
                   <div
-                    className={`sidebar-section-entry ${activeRunConfigSidebarMode === 'dates' ? 'open' : ''}`}
+                    className="sidebar-section-entry open"
                     style={{ order: activeIdx >= 0 ? activeIdx * 2 + 1 : 999 }}
                   >
                     <div className="sidebar-panel">
@@ -1752,6 +2058,14 @@ function App() {
             </div>
           </>
         )}
+        <div
+          className="sidebar-resize-handle"
+          onMouseDown={handleSidebarResizeMouseDown}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          title="Drag to resize sidebar"
+        />
       </aside>
 
       {/* Mobile overlay */}
@@ -1827,6 +2141,28 @@ function App() {
         <div className="app-view">
           {activeView === 'data-manager' ? (
             <DataManager downloadProgress={downloadProgress} />
+          ) : activeView === 'strategy-analyzer' ? (
+            <StrategyAnalyzer
+              selectedTicker={selectedTicker}
+              onTickerChange={setSelectedTicker}
+              strategyApiUrl={strategyApiUrl}
+              onStartRun={handleStartRun}
+              onPlayRun={handlePlay}
+              onPauseRun={handlePause}
+              onStepRun={handleStep}
+              onEvaluateIntrabarSlice={handleEvaluateIntrabarSlice}
+              onClearRun={handleReset}
+              isPlayingRun={isPlaying}
+              attachedRunKey={runKey}
+              attachedRunState={runState}
+              attachedRunBars={bars}
+              decisionEvents={decisionEvents}
+              selectedMarker={selectedMarker}
+              latestBarAnalysis={latestBarAnalysis}
+              onDecisionSelectMarker={setSelectedMarker}
+              onChartMarkerClick={handleMarkerClick}
+              onSwitchToBacktest={() => setActiveView('backtest')}
+            />
           ) : activeView === 'adaptive-studio' ? (
             <AdaptiveStrategyStudio
               selectedTicker={selectedTicker}

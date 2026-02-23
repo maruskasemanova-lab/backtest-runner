@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import hashlib
 import os
 from pathlib import Path
 import pickle
 from threading import RLock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 from fastapi import HTTPException
@@ -24,11 +25,15 @@ def _parse_positive_int_env(name: str, default: int) -> int:
         return max(1, int(default))
 
 
-_BASE_BARS_CACHE_MAX_ENTRIES = _parse_positive_int_env("BACKTEST_BASE_BARS_CACHE_MAX_ENTRIES", 16)
+_BASE_BARS_CACHE_MAX_ENTRIES = _parse_positive_int_env(
+    "BACKTEST_BASE_BARS_CACHE_MAX_ENTRIES", 16
+)
 _REFERENCE_BARS_CACHE_MAX_ENTRIES = _parse_positive_int_env(
     "BACKTEST_REFERENCE_BARS_CACHE_MAX_ENTRIES", 16
 )
-_L2_ENRICH_CACHE_MAX_ENTRIES = _parse_positive_int_env("BACKTEST_L2_ENRICH_CACHE_MAX_ENTRIES", 8)
+_L2_ENRICH_CACHE_MAX_ENTRIES = _parse_positive_int_env(
+    "BACKTEST_L2_ENRICH_CACHE_MAX_ENTRIES", 8
+)
 _PREWARM_RESULT_CACHE_MAX_ENTRIES = _parse_positive_int_env(
     "BACKTEST_PREWARM_RESULT_CACHE_MAX_ENTRIES", 64
 )
@@ -44,12 +49,28 @@ _REFERENCE_BARS_DISK_DIR = _DISK_CACHE_ROOT / "reference"
 _L2_ENRICH_DISK_DIR = _DISK_CACHE_ROOT / "l2_enriched"
 _PREWARM_RESULT_DISK_DIR = _DISK_CACHE_ROOT / "prewarm_results"
 _CACHE_LOCK = RLock()
-_BASE_BARS_CACHE: "OrderedDict[str, Tuple[List[Dict[str, Any]], List[str]]]" = OrderedDict()
+_BASE_BARS_CACHE: "OrderedDict[str, Tuple[List[Dict[str, Any]], List[str]]]" = (
+    OrderedDict()
+)
 _REFERENCE_BARS_CACHE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 _L2_ENRICH_CACHE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 _PREWARM_RESULT_CACHE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 _BASE_BARS_CACHE_META: Dict[str, Dict[str, Any]] = {}
 _REFERENCE_BARS_CACHE_META: Dict[str, Dict[str, Any]] = {}
+
+
+@dataclass(frozen=True)
+class BaseBarsCacheContext:
+    cache_key: str
+    meta: Dict[str, Any]
+    file_identities: Tuple[Tuple[str, int, int], ...]
+
+
+@dataclass(frozen=True)
+class ReferenceBarsCacheContext:
+    cache_key: str
+    meta: Dict[str, Any]
+    file_identities: Tuple[Tuple[str, int, int], ...]
 
 
 def clear_start_run_data_caches(*, include_disk: bool = False) -> None:
@@ -473,7 +494,9 @@ def _is_day_range_superset(
     requested_start: str,
     requested_end: str,
 ) -> bool:
-    return str(cached_start) <= str(requested_start) and str(cached_end) >= str(requested_end)
+    return str(cached_start) <= str(requested_start) and str(cached_end) >= str(
+        requested_end
+    )
 
 
 def _range_span_days(start: str, end: str) -> int:
@@ -598,6 +621,73 @@ def _build_reference_bars_meta(
     }
 
 
+def _select_best_superset_entry(
+    *,
+    payload_store: OrderedDict,
+    meta_store: Dict[str, Dict[str, Any]],
+    range_start: str,
+    range_end: str,
+    meta_matches: Callable[[Dict[str, Any]], bool],
+) -> Tuple[str, Any, str, str] | None:
+    best_key: str | None = None
+    best_payload: Any = None
+    best_span: int | None = None
+    best_start = ""
+    best_end = ""
+    for key, meta in meta_store.items():
+        if not isinstance(meta, dict) or not meta_matches(meta):
+            continue
+        cached_start = str(meta.get("range_start", ""))
+        cached_end = str(meta.get("range_end", ""))
+        if not cached_start or not cached_end:
+            continue
+        if not _is_day_range_superset(cached_start, cached_end, range_start, range_end):
+            continue
+        payload = payload_store.get(key)
+        if payload is None:
+            continue
+        span = _range_span_days(cached_start, cached_end)
+        if best_span is not None and span >= best_span:
+            continue
+        best_key = key
+        best_payload = payload
+        best_span = span
+        best_start = cached_start
+        best_end = cached_end
+    if best_key is None or best_payload is None:
+        return None
+    return best_key, best_payload, best_start, best_end
+
+
+def _base_cache_meta_matches(
+    *,
+    meta: Dict[str, Any],
+    ticker: str,
+    time_filter_enabled: bool,
+    trading_hours: Tuple[int, ...],
+    regular_session_only: bool,
+    file_identities: Tuple[Tuple[str, int, int], ...],
+) -> bool:
+    return (
+        str(meta.get("ticker", "")).upper() == str(ticker).upper()
+        and bool(meta.get("time_filter_enabled")) == bool(time_filter_enabled)
+        and tuple(meta.get("trading_hours", ())) == tuple(trading_hours)
+        and bool(meta.get("regular_session_only", False)) == bool(regular_session_only)
+        and tuple(meta.get("file_identities", ())) == tuple(file_identities)
+    )
+
+
+def _reference_cache_meta_matches(
+    *,
+    meta: Dict[str, Any],
+    ticker: str,
+    file_identities: Tuple[Tuple[str, int, int], ...],
+) -> bool:
+    return str(meta.get("ticker", "")).upper() == str(ticker).upper() and tuple(
+        meta.get("file_identities", ())
+    ) == tuple(file_identities)
+
+
 def _find_base_bars_superset_in_memory(
     *,
     ticker: str,
@@ -608,43 +698,27 @@ def _find_base_bars_superset_in_memory(
     regular_session_only: bool,
     file_identities: Tuple[Tuple[str, int, int], ...],
 ) -> Tuple[List[Dict[str, Any]], List[str], str, str] | None:
-    best_key = None
-    best_span = None
-    cached_payload = None
+    selected = None
     with _CACHE_LOCK:
-        for key, meta in _BASE_BARS_CACHE_META.items():
-            if not isinstance(meta, dict):
-                continue
-            if str(meta.get("ticker", "")).upper() != str(ticker).upper():
-                continue
-            if bool(meta.get("time_filter_enabled")) != bool(time_filter_enabled):
-                continue
-            if tuple(meta.get("trading_hours", ())) != tuple(trading_hours):
-                continue
-            if bool(meta.get("regular_session_only", False)) != bool(regular_session_only):
-                continue
-            if tuple(meta.get("file_identities", ())) != tuple(file_identities):
-                continue
-            cached_start = str(meta.get("range_start", ""))
-            cached_end = str(meta.get("range_end", ""))
-            if not cached_start or not cached_end:
-                continue
-            if not _is_day_range_superset(cached_start, cached_end, range_start, range_end):
-                continue
-            span = _range_span_days(cached_start, cached_end)
-            if best_span is not None and span >= best_span:
-                continue
-            payload = _BASE_BARS_CACHE.get(key)
-            if payload is None:
-                continue
-            best_key = key
-            best_span = span
-            cached_payload = (payload, cached_start, cached_end)
-        if best_key is not None:
-            _BASE_BARS_CACHE.move_to_end(best_key)
-    if cached_payload is None:
+        selected = _select_best_superset_entry(
+            payload_store=_BASE_BARS_CACHE,
+            meta_store=_BASE_BARS_CACHE_META,
+            range_start=range_start,
+            range_end=range_end,
+            meta_matches=lambda meta: _base_cache_meta_matches(
+                meta=meta,
+                ticker=ticker,
+                time_filter_enabled=time_filter_enabled,
+                trading_hours=trading_hours,
+                regular_session_only=regular_session_only,
+                file_identities=file_identities,
+            ),
+        )
+        if selected is not None:
+            _BASE_BARS_CACHE.move_to_end(selected[0])
+    if selected is None:
         return None
-    (cached_bars, cached_files), cached_start, cached_end = cached_payload
+    _, (cached_bars, cached_files), cached_start, cached_end = selected
     sliced = _slice_bars_for_day_range(
         cached_bars,
         range_start=range_start,
@@ -662,43 +736,307 @@ def _find_reference_bars_superset_in_memory(
     range_end: str,
     file_identities: Tuple[Tuple[str, int, int], ...],
 ) -> Tuple[Dict[str, Any], str, str] | None:
-    best_key = None
-    best_span = None
-    cached_payload = None
+    selected = None
     with _CACHE_LOCK:
-        for key, meta in _REFERENCE_BARS_CACHE_META.items():
-            if not isinstance(meta, dict):
-                continue
-            if str(meta.get("ticker", "")).upper() != str(ticker).upper():
-                continue
-            if tuple(meta.get("file_identities", ())) != tuple(file_identities):
-                continue
-            cached_start = str(meta.get("range_start", ""))
-            cached_end = str(meta.get("range_end", ""))
-            if not cached_start or not cached_end:
-                continue
-            if not _is_day_range_superset(cached_start, cached_end, range_start, range_end):
-                continue
-            span = _range_span_days(cached_start, cached_end)
-            if best_span is not None and span >= best_span:
-                continue
-            payload = _REFERENCE_BARS_CACHE.get(key)
-            if payload is None:
-                continue
-            best_key = key
-            best_span = span
-            cached_payload = (payload, cached_start, cached_end)
-        if best_key is not None:
-            _REFERENCE_BARS_CACHE.move_to_end(best_key)
-    if cached_payload is None:
+        selected = _select_best_superset_entry(
+            payload_store=_REFERENCE_BARS_CACHE,
+            meta_store=_REFERENCE_BARS_CACHE_META,
+            range_start=range_start,
+            range_end=range_end,
+            meta_matches=lambda meta: _reference_cache_meta_matches(
+                meta=meta,
+                ticker=ticker,
+                file_identities=file_identities,
+            ),
+        )
+        if selected is not None:
+            _REFERENCE_BARS_CACHE.move_to_end(selected[0])
+    if selected is None:
         return None
-    cached_ref_map, cached_start, cached_end = cached_payload
+    _, cached_ref_map, cached_start, cached_end = selected
     sliced = _slice_reference_map_for_day_range(
         cached_ref_map,
         range_start=range_start,
         range_end=range_end,
     )
     return deepcopy(sliced), cached_start, cached_end
+
+
+def _resolve_run_data_files(
+    *,
+    request: Any,
+    ticker: str,
+    range_start: str,
+    range_end: str,
+    databento_svc: Any,
+    get_discovery: Any,
+) -> List[str]:
+    data_file = request.data_file
+    if data_file:
+        return [data_file]
+
+    databento_svc.scan_existing_files()
+    data_files = databento_svc.get_files_for_range(
+        ticker=ticker,
+        start_date=range_start,
+        end_date=range_end,
+        schema_prefix="ohlcv-",
+    )
+    if data_files:
+        return data_files
+
+    catalog_rows = databento_svc.list_catalog(refresh=False, ticker=ticker)
+    has_catalog_ohlcv = any(
+        str(row.get("schema", "")).lower().startswith("ohlcv-")
+        and row.get("status") == "ready"
+        for row in catalog_rows
+    )
+    if has_catalog_ohlcv:
+        return data_files
+    discovery = get_discovery()
+    return discovery.get_files_for_range(ticker, range_start, range_end)
+
+
+def _resolve_run_time_filter_state(
+    *,
+    request: Any,
+    aos_applied: Dict[str, Any],
+) -> Tuple[bool, Tuple[int, ...], bool]:
+    time_filter_enabled = bool(
+        aos_applied.get("time_filter_enabled") and aos_applied.get("trading_hours")
+    )
+    trading_hours = _canonical_trading_hours(aos_applied.get("trading_hours"))
+    regular_session_only = False
+    include_extended_hours = _coerce_include_extended_hours(
+        getattr(request, "include_extended_hours", None)
+    )
+    if include_extended_hours is True:
+        return False, tuple(), False
+    if include_extended_hours is False:
+        return False, tuple(), True
+    return time_filter_enabled, trading_hours, regular_session_only
+
+
+def _build_base_bars_cache_context(
+    *,
+    ticker: str,
+    range_start: str,
+    range_end: str,
+    data_files: List[str],
+    time_filter_enabled: bool,
+    trading_hours: Tuple[int, ...],
+    regular_session_only: bool,
+) -> BaseBarsCacheContext | None:
+    if not data_files:
+        return None
+    file_identities = tuple(_file_identity(file) for file in data_files)
+    cache_key = _build_base_bars_cache_key(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        data_files=data_files,
+        time_filter_enabled=time_filter_enabled,
+        trading_hours=trading_hours,
+        regular_session_only=regular_session_only,
+    )
+    meta = _build_base_bars_meta(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        time_filter_enabled=time_filter_enabled,
+        trading_hours=trading_hours,
+        regular_session_only=regular_session_only,
+        file_identities=file_identities,
+    )
+    return BaseBarsCacheContext(
+        cache_key=cache_key,
+        meta=meta,
+        file_identities=file_identities,
+    )
+
+
+def _store_base_bars_cache(
+    *,
+    cache_context: BaseBarsCacheContext,
+    bars: List[Dict[str, Any]],
+    data_files: List[str],
+) -> None:
+    _cache_set(
+        _BASE_BARS_CACHE,
+        cache_context.cache_key,
+        (bars, list(data_files)),
+        _BASE_BARS_CACHE_MAX_ENTRIES,
+        meta_store=_BASE_BARS_CACHE_META,
+        meta_value=cache_context.meta,
+    )
+    _disk_cache_set(
+        _BASE_BARS_DISK_DIR,
+        cache_context.cache_key,
+        (bars, list(data_files)),
+    )
+
+
+def _try_load_cached_base_bars(
+    *,
+    cache_context: BaseBarsCacheContext,
+    ticker: str,
+    range_start: str,
+    range_end: str,
+    time_filter_enabled: bool,
+    trading_hours: Tuple[int, ...],
+    regular_session_only: bool,
+    logger: Any,
+) -> Tuple[List[Dict[str, Any]], List[str]] | None:
+    cached_bars_payload = _cache_get(_BASE_BARS_CACHE, cache_context.cache_key)
+    if cached_bars_payload is not None:
+        cached_bars, cached_files = cached_bars_payload
+        logger.info(
+            "Using cached bars for %s %s..%s (%d bars)",
+            ticker,
+            range_start,
+            range_end,
+            len(cached_bars),
+        )
+        return cached_bars, cached_files
+
+    superset_payload = _find_base_bars_superset_in_memory(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        time_filter_enabled=time_filter_enabled,
+        trading_hours=trading_hours,
+        regular_session_only=regular_session_only,
+        file_identities=cache_context.file_identities,
+    )
+    if superset_payload is not None:
+        superset_bars, superset_files, cached_start, cached_end = superset_payload
+        logger.info(
+            "Using prewarmed superset bars for %s %s..%s from %s..%s (%d bars)",
+            ticker,
+            range_start,
+            range_end,
+            cached_start,
+            cached_end,
+            len(superset_bars),
+        )
+        _store_base_bars_cache(
+            cache_context=cache_context,
+            bars=superset_bars,
+            data_files=list(superset_files),
+        )
+        return superset_bars, list(superset_files)
+
+    cached_disk_payload = _disk_cache_get(_BASE_BARS_DISK_DIR, cache_context.cache_key)
+    if cached_disk_payload is None:
+        return None
+    cached_bars, cached_files = cached_disk_payload
+    _cache_set(
+        _BASE_BARS_CACHE,
+        cache_context.cache_key,
+        (cached_bars, list(cached_files)),
+        _BASE_BARS_CACHE_MAX_ENTRIES,
+        meta_store=_BASE_BARS_CACHE_META,
+        meta_value=cache_context.meta,
+    )
+    logger.info(
+        "Using disk-cached bars for %s %s..%s (%d bars)",
+        ticker,
+        range_start,
+        range_end,
+        len(cached_bars),
+    )
+    return cached_bars, list(cached_files)
+
+
+def _load_dataframe_from_files(
+    *,
+    data_files: List[str],
+    range_start: str,
+    range_end: str,
+    data_loader: Any,
+    time_filter_enabled: bool,
+    trading_hours: Tuple[int, ...],
+    regular_session_only: bool,
+    logger: Any,
+) -> pd.DataFrame:
+    dfs = []
+    skipped_files = []
+    for file in data_files:
+        try:
+            if file.endswith(".parquet") or file.endswith(".parq"):
+                dfs.append(data_loader.load_parquet(file))
+            else:
+                dfs.append(data_loader.load_csv(file))
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc))
+        except Exception as exc:
+            logger.warning(f"Skipping invalid data file {file}: {exc}")
+            skipped_files.append(file)
+            continue
+
+    if not dfs:
+        skipped_note = (
+            f" Skipped files: {', '.join(skipped_files)}" if skipped_files else ""
+        )
+        raise HTTPException(
+            400, f"No usable data files for the specified date/range.{skipped_note}"
+        )
+
+    df = pd.concat(dfs, ignore_index=True)
+    df = (
+        df.drop_duplicates(subset=["timestamp"])
+        .sort_values("timestamp")
+        .reset_index(drop=True)
+    )
+    df = data_loader.filter_trading_range(df, range_start, range_end)
+    if regular_session_only:
+        return _filter_regular_session_only(df=df, data_loader=data_loader)
+    if time_filter_enabled and trading_hours:
+        return data_loader.filter_trading_hours(df, list(trading_hours))
+    return df
+
+
+def _build_available_ohlcv_hint(*, databento_svc: Any, ticker: str) -> str:
+    try:
+        summary = databento_svc.get_available_data_summary(refresh=True)
+        date_ranges = (
+            summary.get("date_ranges", {}) if isinstance(summary, dict) else {}
+        )
+        ticker_range = (
+            date_ranges.get(ticker, {}) if isinstance(date_ranges, dict) else {}
+        )
+        available_start = str(ticker_range.get("start") or "").strip()
+        available_end = str(ticker_range.get("end") or "").strip()
+        if available_start and available_end:
+            return f" Available OHLCV range: {available_start} to {available_end}."
+    except Exception:
+        return ""
+    return ""
+
+
+def _load_dataframe_without_files(
+    *,
+    request: Any,
+    ticker: str,
+    range_start: str,
+    range_end: str,
+    data_loader: Any,
+    databento_svc: Any,
+    logger: Any,
+) -> pd.DataFrame:
+    if not request.allow_mock_data:
+        availability_hint = _build_available_ohlcv_hint(
+            databento_svc=databento_svc, ticker=ticker
+        )
+        raise HTTPException(
+            404,
+            f"No data files found for {ticker} in range {range_start} to {range_end}. "
+            f"Backtest aborted to avoid mock-data contamination.{availability_hint}",
+        )
+    logger.warning(
+        f"No data file found for {ticker} in range {range_start} to {range_end}, using mock data (allow_mock_data=True)"
+    )
+    return data_loader.generate_mock_data(ticker=ticker, date=range_start)
 
 
 def load_run_bars(
@@ -713,195 +1051,72 @@ def load_run_bars(
     aos_applied: Dict[str, Any],
     logger: Any,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    data_file = request.data_file
-
-    if not data_file:
-        databento_svc.scan_existing_files()
-        data_files = databento_svc.get_files_for_range(
-            ticker=ticker,
-            start_date=range_start,
-            end_date=range_end,
-            schema_prefix="ohlcv-",
-        )
-        if not data_files:
-            catalog_rows = databento_svc.list_catalog(refresh=False, ticker=ticker)
-            has_catalog_ohlcv = any(
-                str(row.get("schema", "")).lower().startswith("ohlcv-")
-                and row.get("status") == "ready"
-                for row in catalog_rows
-            )
-            if not has_catalog_ohlcv:
-                discovery = get_discovery()
-                data_files = discovery.get_files_for_range(ticker, range_start, range_end)
-    else:
-        data_files = [data_file]
-
-    time_filter_enabled = bool(aos_applied.get("time_filter_enabled") and aos_applied.get("trading_hours"))
-    trading_hours = _canonical_trading_hours(aos_applied.get("trading_hours"))
-    regular_session_only = False
-    include_extended_hours = _coerce_include_extended_hours(
-        getattr(request, "include_extended_hours", None)
+    data_files = _resolve_run_data_files(
+        request=request,
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        databento_svc=databento_svc,
+        get_discovery=get_discovery,
     )
-    if include_extended_hours is True:
-        time_filter_enabled = False
-        trading_hours = tuple()
-    elif include_extended_hours is False:
-        time_filter_enabled = False
-        trading_hours = tuple()
-        regular_session_only = True
-    bars_cache_key = None
-    bars_meta = None
-    if data_files:
-        file_identities = tuple(_file_identity(file) for file in data_files)
-        bars_cache_key = _build_base_bars_cache_key(
+    time_filter_enabled, trading_hours, regular_session_only = (
+        _resolve_run_time_filter_state(
+            request=request,
+            aos_applied=aos_applied,
+        )
+    )
+    cache_context = _build_base_bars_cache_context(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        data_files=data_files,
+        time_filter_enabled=time_filter_enabled,
+        trading_hours=trading_hours,
+        regular_session_only=regular_session_only,
+    )
+    if cache_context is not None:
+        cached_bars = _try_load_cached_base_bars(
+            cache_context=cache_context,
             ticker=ticker,
             range_start=range_start,
             range_end=range_end,
+            time_filter_enabled=time_filter_enabled,
+            trading_hours=trading_hours,
+            regular_session_only=regular_session_only,
+            logger=logger,
+        )
+        if cached_bars is not None:
+            return cached_bars
+
+    if data_files:
+        df = _load_dataframe_from_files(
             data_files=data_files,
-            time_filter_enabled=time_filter_enabled,
-            trading_hours=trading_hours,
-            regular_session_only=regular_session_only,
-        )
-        bars_meta = _build_base_bars_meta(
-            ticker=ticker,
             range_start=range_start,
             range_end=range_end,
+            data_loader=data_loader,
             time_filter_enabled=time_filter_enabled,
             trading_hours=trading_hours,
             regular_session_only=regular_session_only,
-            file_identities=file_identities,
+            logger=logger,
         )
-        cached_bars_payload = _cache_get(_BASE_BARS_CACHE, bars_cache_key)
-        if cached_bars_payload is not None:
-            cached_bars, cached_files = cached_bars_payload
-            logger.info(
-                "Using cached bars for %s %s..%s (%d bars)",
-                ticker,
-                range_start,
-                range_end,
-                len(cached_bars),
-            )
-            return cached_bars, cached_files
-        superset_payload = _find_base_bars_superset_in_memory(
-            ticker=ticker,
-            range_start=range_start,
-            range_end=range_end,
-            time_filter_enabled=time_filter_enabled,
-            trading_hours=trading_hours,
-            regular_session_only=regular_session_only,
-            file_identities=file_identities,
-        )
-        if superset_payload is not None:
-            superset_bars, superset_files, cached_start, cached_end = superset_payload
-            logger.info(
-                "Using prewarmed superset bars for %s %s..%s from %s..%s (%d bars)",
-                ticker,
-                range_start,
-                range_end,
-                cached_start,
-                cached_end,
-                len(superset_bars),
-            )
-            _cache_set(
-                _BASE_BARS_CACHE,
-                bars_cache_key,
-                (superset_bars, list(superset_files)),
-                _BASE_BARS_CACHE_MAX_ENTRIES,
-                meta_store=_BASE_BARS_CACHE_META,
-                meta_value=bars_meta,
-            )
-            _disk_cache_set(
-                _BASE_BARS_DISK_DIR,
-                bars_cache_key,
-                (superset_bars, list(superset_files)),
-            )
-            return superset_bars, list(superset_files)
-        cached_disk_payload = _disk_cache_get(_BASE_BARS_DISK_DIR, bars_cache_key)
-        if cached_disk_payload is not None:
-            cached_bars, cached_files = cached_disk_payload
-            _cache_set(
-                _BASE_BARS_CACHE,
-                bars_cache_key,
-                (cached_bars, list(cached_files)),
-                _BASE_BARS_CACHE_MAX_ENTRIES,
-                meta_store=_BASE_BARS_CACHE_META,
-                meta_value=bars_meta,
-            )
-            logger.info(
-                "Using disk-cached bars for %s %s..%s (%d bars)",
-                ticker,
-                range_start,
-                range_end,
-                len(cached_bars),
-            )
-            return cached_bars, list(cached_files)
-
-    if data_files:
-        dfs = []
-        skipped_files = []
-        for file in data_files:
-            try:
-                if file.endswith(".parquet") or file.endswith(".parq"):
-                    dfs.append(data_loader.load_parquet(file))
-                else:
-                    dfs.append(data_loader.load_csv(file))
-            except FileNotFoundError as exc:
-                raise HTTPException(404, str(exc))
-            except Exception as exc:
-                logger.warning(f"Skipping invalid data file {file}: {exc}")
-                skipped_files.append(file)
-                continue
-
-        if not dfs:
-            skipped_note = f" Skipped files: {', '.join(skipped_files)}" if skipped_files else ""
-            raise HTTPException(400, f"No usable data files for the specified date/range.{skipped_note}")
-
-        df = pd.concat(dfs, ignore_index=True)
-        df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-        df = data_loader.filter_trading_range(df, range_start, range_end)
-        if regular_session_only:
-            df = _filter_regular_session_only(df=df, data_loader=data_loader)
-        elif time_filter_enabled and trading_hours:
-            df = data_loader.filter_trading_hours(df, list(trading_hours))
     else:
-        if not request.allow_mock_data:
-            availability_hint = ""
-            try:
-                summary = databento_svc.get_available_data_summary(refresh=True)
-                date_ranges = summary.get("date_ranges", {}) if isinstance(summary, dict) else {}
-                ticker_range = date_ranges.get(ticker, {}) if isinstance(date_ranges, dict) else {}
-                available_start = str(ticker_range.get("start") or "").strip()
-                available_end = str(ticker_range.get("end") or "").strip()
-                if available_start and available_end:
-                    availability_hint = f" Available OHLCV range: {available_start} to {available_end}."
-            except Exception:
-                availability_hint = ""
-            raise HTTPException(
-                404,
-                f"No data files found for {ticker} in range {range_start} to {range_end}. "
-                f"Backtest aborted to avoid mock-data contamination.{availability_hint}",
-            )
-        logger.warning(
-            f"No data file found for {ticker} in range {range_start} to {range_end}, using mock data (allow_mock_data=True)"
+        df = _load_dataframe_without_files(
+            request=request,
+            ticker=ticker,
+            range_start=range_start,
+            range_end=range_end,
+            data_loader=data_loader,
+            databento_svc=databento_svc,
+            logger=logger,
         )
-        df = data_loader.generate_mock_data(ticker=ticker, date=range_start)
-
     bars = list(data_loader.get_bars_iterator(df))
     if not bars:
         raise HTTPException(400, "No data available for the specified date/range")
-    if bars_cache_key:
-        _cache_set(
-            _BASE_BARS_CACHE,
-            bars_cache_key,
-            (bars, list(data_files)),
-            _BASE_BARS_CACHE_MAX_ENTRIES,
-            meta_store=_BASE_BARS_CACHE_META,
-            meta_value=bars_meta,
-        )
-        _disk_cache_set(
-            _BASE_BARS_DISK_DIR,
-            bars_cache_key,
-            (bars, list(data_files)),
+    if cache_context is not None:
+        _store_base_bars_cache(
+            cache_context=cache_context,
+            bars=bars,
+            data_files=data_files,
         )
     return bars, data_files
 
@@ -960,7 +1175,11 @@ def enrich_bars_with_l2(
             return (
                 list(cached_l2_payload.get("bars", [])),
                 dict(cached_l2_payload.get("l2_stats", l2_stats)),
-                bool(cached_l2_payload.get("l2_sessionized_by_market_day", l2_sessionized_by_market_day)),
+                bool(
+                    cached_l2_payload.get(
+                        "l2_sessionized_by_market_day", l2_sessionized_by_market_day
+                    )
+                ),
             )
         cached_l2_disk_payload = _disk_cache_get(_L2_ENRICH_DISK_DIR, l2_cache_key)
         if cached_l2_disk_payload is not None:
@@ -980,7 +1199,11 @@ def enrich_bars_with_l2(
             return (
                 list(cached_l2_disk_payload.get("bars", [])),
                 dict(cached_l2_disk_payload.get("l2_stats", l2_stats)),
-                bool(cached_l2_disk_payload.get("l2_sessionized_by_market_day", l2_sessionized_by_market_day)),
+                bool(
+                    cached_l2_disk_payload.get(
+                        "l2_sessionized_by_market_day", l2_sessionized_by_market_day
+                    )
+                ),
             )
 
         first_ts_utc = to_utc_datetime(bars[0]["timestamp"])
@@ -1012,7 +1235,9 @@ def enrich_bars_with_l2(
                 "missing_l2_days_count": len(missing_l2_days),
             }
         )
-        bars, attach_stats = attach_l2_features(bars, feature_map, l2_only=requested_l2_only)
+        bars, attach_stats = attach_l2_features(
+            bars, feature_map, l2_only=requested_l2_only
+        )
         l2_stats.update(attach_stats)
         l2_stats["has_l2"] = bool(l2_stats.get("bars_with_l2", 0) > 0)
 
@@ -1061,6 +1286,252 @@ def enrich_bars_with_l2(
     return bars, l2_stats, l2_sessionized_by_market_day
 
 
+def _resolve_reference_data_files(
+    *,
+    range_start: str,
+    range_end: str,
+    databento_svc: Any,
+    get_discovery: Any,
+) -> List[str]:
+    databento_svc.scan_existing_files()
+    qqq_files = databento_svc.get_files_for_range(
+        ticker="QQQ",
+        start_date=range_start,
+        end_date=range_end,
+        schema_prefix="ohlcv-",
+    )
+    if qqq_files:
+        return qqq_files
+    discovery = get_discovery()
+    return discovery.get_files_for_range("QQQ", range_start, range_end)
+
+
+def _build_reference_cache_context(
+    *,
+    ticker: str,
+    range_start: str,
+    range_end: str,
+    ref_files: List[str],
+) -> ReferenceBarsCacheContext:
+    file_identities = tuple(_file_identity(file) for file in ref_files)
+    cache_key = _build_reference_bars_cache_key(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        ref_files=ref_files,
+    )
+    meta = _build_reference_bars_meta(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        file_identities=file_identities,
+    )
+    return ReferenceBarsCacheContext(
+        cache_key=cache_key,
+        meta=meta,
+        file_identities=file_identities,
+    )
+
+
+def _store_reference_bars_cache(
+    *,
+    cache_context: ReferenceBarsCacheContext,
+    ref_bars_map: Dict[str, Any],
+) -> None:
+    _cache_set(
+        _REFERENCE_BARS_CACHE,
+        cache_context.cache_key,
+        ref_bars_map,
+        _REFERENCE_BARS_CACHE_MAX_ENTRIES,
+        meta_store=_REFERENCE_BARS_CACHE_META,
+        meta_value=cache_context.meta,
+    )
+    _disk_cache_set(
+        _REFERENCE_BARS_DISK_DIR,
+        cache_context.cache_key,
+        ref_bars_map,
+    )
+
+
+def _try_load_cached_reference_bars(
+    *,
+    cache_context: ReferenceBarsCacheContext,
+    ticker: str,
+    range_start: str,
+    range_end: str,
+    logger: Any,
+) -> Dict[str, Any] | None:
+    cached_ref_map = _cache_get(_REFERENCE_BARS_CACHE, cache_context.cache_key)
+    if cached_ref_map is not None:
+        logger.info(
+            "Using cached QQQ reference bars for %s %s..%s (%d bars)",
+            ticker,
+            range_start,
+            range_end,
+            len(cached_ref_map),
+        )
+        return cached_ref_map
+
+    superset_ref_payload = _find_reference_bars_superset_in_memory(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        file_identities=cache_context.file_identities,
+    )
+    if superset_ref_payload is not None:
+        superset_ref_map, cached_start, cached_end = superset_ref_payload
+        logger.info(
+            "Using prewarmed superset QQQ bars for %s %s..%s from %s..%s (%d bars)",
+            ticker,
+            range_start,
+            range_end,
+            cached_start,
+            cached_end,
+            len(superset_ref_map),
+        )
+        _store_reference_bars_cache(
+            cache_context=cache_context,
+            ref_bars_map=superset_ref_map,
+        )
+        return superset_ref_map
+
+    cached_disk_ref_map = _disk_cache_get(
+        _REFERENCE_BARS_DISK_DIR, cache_context.cache_key
+    )
+    if cached_disk_ref_map is None:
+        return None
+    _cache_set(
+        _REFERENCE_BARS_CACHE,
+        cache_context.cache_key,
+        cached_disk_ref_map,
+        _REFERENCE_BARS_CACHE_MAX_ENTRIES,
+        meta_store=_REFERENCE_BARS_CACHE_META,
+        meta_value=cache_context.meta,
+    )
+    logger.info(
+        "Using disk-cached QQQ reference bars for %s %s..%s (%d bars)",
+        ticker,
+        range_start,
+        range_end,
+        len(cached_disk_ref_map),
+    )
+    return cached_disk_ref_map
+
+
+def _load_reference_map_from_files(
+    *,
+    ref_files: List[str],
+    range_start: str,
+    range_end: str,
+    data_loader: Any,
+    logger: Any,
+) -> Dict[str, Any]:
+    ref_bars_map: Dict[str, Any] = {}
+    if not ref_files:
+        return ref_bars_map
+
+    qqq_dfs = []
+    for file in ref_files:
+        try:
+            if file.endswith(".parquet") or file.endswith(".parq"):
+                qqq_dfs.append(data_loader.load_parquet(file))
+            else:
+                qqq_dfs.append(data_loader.load_csv(file))
+        except Exception:
+            continue
+    if not qqq_dfs:
+        return ref_bars_map
+
+    qqq_df = pd.concat(qqq_dfs, ignore_index=True)
+    qqq_df = data_loader.filter_trading_range(qqq_df, range_start, range_end)
+    for qqq_bar in data_loader.get_bars_iterator(qqq_df):
+        ts = qqq_bar.get("timestamp")
+        ts_key = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+        qqq_bar["ticker"] = "QQQ"
+        ref_bars_map[ts_key] = qqq_bar
+    logger.info(f"Loaded {len(ref_bars_map)} QQQ reference bars for cross-asset")
+    return ref_bars_map
+
+
+def enrich_bars_with_tcbbo(
+    *,
+    bars: List[Dict[str, Any]],
+    ticker: str,
+    range_start: str,
+    range_end: str,
+    logger: Any,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Attach TCBBO options flow fields to bars if TCBBO data is available.
+
+    Follows the same pattern as enrich_bars_with_l2: discovers data files,
+    builds a minute-keyed feature map, and attaches fields to matching bars.
+
+    Returns (bars, tcbbo_stats).
+    """
+    from src.tcbbo_analyzer import build_tcbbo_feature_map, find_tcbbo_files
+
+    tcbbo_stats: Dict[str, Any] = {
+        "tcbbo_available": False,
+        "tcbbo_minutes_covered": 0,
+        "tcbbo_bars_enriched": 0,
+        "tcbbo_bars_total": len(bars),
+    }
+
+    files = find_tcbbo_files(data_dir="data", ticker=ticker)
+    if not files:
+        return bars, tcbbo_stats
+
+    # Pick the file whose date range best overlaps with the requested range
+    best_file = None
+    for f in files:
+        if f["start_date"] <= range_start.replace("-", "") and f[
+            "end_date"
+        ] >= range_end.replace("-", ""):
+            best_file = f["file"]
+            break
+    if best_file is None:
+        # Fallback: use the first file for this ticker
+        best_file = files[0]["file"]
+
+    try:
+        feature_map, build_stats = build_tcbbo_feature_map(best_file)
+    except Exception as exc:
+        logger.warning("TCBBO enrichment failed for %s: %s", ticker, exc)
+        return bars, tcbbo_stats
+
+    tcbbo_stats.update(build_stats)
+    tcbbo_stats["tcbbo_available"] = len(feature_map) > 0
+
+    enriched = 0
+    for bar in bars:
+        ts = bar.get("timestamp")
+        if ts is None:
+            continue
+        # Normalize to minute-floored ISO key matching feature_map
+        if hasattr(ts, "isoformat"):
+            ts_key = ts.replace(second=0, microsecond=0).isoformat()
+        else:
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                ts_key = dt.replace(second=0, microsecond=0).isoformat()
+            except Exception:
+                continue
+
+        features = feature_map.get(ts_key)
+        if features:
+            bar.update(features)
+            enriched += 1
+
+    tcbbo_stats["tcbbo_bars_enriched"] = enriched
+    logger.info(
+        "TCBBO enrichment: %d/%d bars enriched from %s",
+        enriched,
+        len(bars),
+        best_file,
+    )
+    return bars, tcbbo_stats
+
+
 def load_reference_bars_map(
     *,
     ticker: str,
@@ -1071,124 +1542,43 @@ def load_reference_bars_map(
     get_discovery: Any,
     logger: Any,
 ) -> Dict[str, Any]:
-    ref_bars_map: Dict[str, Any] = {}
     if ticker.upper() == "QQQ":
-        return ref_bars_map
+        return {}
+    ref_bars_map: Dict[str, Any] = {}
     try:
-        databento_svc.scan_existing_files()
-        qqq_files = databento_svc.get_files_for_range(
-            ticker="QQQ",
-            start_date=range_start,
-            end_date=range_end,
-            schema_prefix="ohlcv-",
+        qqq_files = _resolve_reference_data_files(
+            range_start=range_start,
+            range_end=range_end,
+            databento_svc=databento_svc,
+            get_discovery=get_discovery,
         )
-        if not qqq_files:
-            discovery = get_discovery()
-            qqq_files = discovery.get_files_for_range("QQQ", range_start, range_end)
-        ref_file_identities = tuple(_file_identity(file) for file in qqq_files)
-        ref_cache_key = _build_reference_bars_cache_key(
+        cache_context = _build_reference_cache_context(
             ticker=ticker,
             range_start=range_start,
             range_end=range_end,
             ref_files=qqq_files,
         )
-        ref_cache_meta = _build_reference_bars_meta(
+        cached_ref_map = _try_load_cached_reference_bars(
+            cache_context=cache_context,
             ticker=ticker,
             range_start=range_start,
             range_end=range_end,
-            file_identities=ref_file_identities,
+            logger=logger,
         )
-        cached_ref_map = _cache_get(_REFERENCE_BARS_CACHE, ref_cache_key)
         if cached_ref_map is not None:
-            logger.info(
-                "Using cached QQQ reference bars for %s %s..%s (%d bars)",
-                ticker,
-                range_start,
-                range_end,
-                len(cached_ref_map),
-            )
             return cached_ref_map
-        superset_ref_payload = _find_reference_bars_superset_in_memory(
-            ticker=ticker,
+        ref_bars_map = _load_reference_map_from_files(
+            ref_files=qqq_files,
             range_start=range_start,
             range_end=range_end,
-            file_identities=ref_file_identities,
+            data_loader=data_loader,
+            logger=logger,
         )
-        if superset_ref_payload is not None:
-            superset_ref_map, cached_start, cached_end = superset_ref_payload
-            logger.info(
-                "Using prewarmed superset QQQ bars for %s %s..%s from %s..%s (%d bars)",
-                ticker,
-                range_start,
-                range_end,
-                cached_start,
-                cached_end,
-                len(superset_ref_map),
-            )
-            _cache_set(
-                _REFERENCE_BARS_CACHE,
-                ref_cache_key,
-                superset_ref_map,
-                _REFERENCE_BARS_CACHE_MAX_ENTRIES,
-                meta_store=_REFERENCE_BARS_CACHE_META,
-                meta_value=ref_cache_meta,
-            )
-            _disk_cache_set(
-                _REFERENCE_BARS_DISK_DIR,
-                ref_cache_key,
-                superset_ref_map,
-            )
-            return superset_ref_map
-        cached_disk_ref_map = _disk_cache_get(_REFERENCE_BARS_DISK_DIR, ref_cache_key)
-        if cached_disk_ref_map is not None:
-            _cache_set(
-                _REFERENCE_BARS_CACHE,
-                ref_cache_key,
-                cached_disk_ref_map,
-                _REFERENCE_BARS_CACHE_MAX_ENTRIES,
-                meta_store=_REFERENCE_BARS_CACHE_META,
-                meta_value=ref_cache_meta,
-            )
-            logger.info(
-                "Using disk-cached QQQ reference bars for %s %s..%s (%d bars)",
-                ticker,
-                range_start,
-                range_end,
-                len(cached_disk_ref_map),
-            )
-            return cached_disk_ref_map
-        if qqq_files:
-            qqq_dfs = []
-            for file in qqq_files:
-                try:
-                    if file.endswith(".parquet") or file.endswith(".parq"):
-                        qqq_dfs.append(data_loader.load_parquet(file))
-                    else:
-                        qqq_dfs.append(data_loader.load_csv(file))
-                except Exception:
-                    continue
-            if qqq_dfs:
-                qqq_df = pd.concat(qqq_dfs, ignore_index=True)
-                qqq_df = data_loader.filter_trading_range(qqq_df, range_start, range_end)
-                for qqq_bar in data_loader.get_bars_iterator(qqq_df):
-                    ts = qqq_bar.get("timestamp")
-                    ts_key = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-                    qqq_bar["ticker"] = "QQQ"
-                    ref_bars_map[ts_key] = qqq_bar
-                logger.info(f"Loaded {len(ref_bars_map)} QQQ reference bars for cross-asset")
-        _cache_set(
-            _REFERENCE_BARS_CACHE,
-            ref_cache_key,
-            ref_bars_map,
-            _REFERENCE_BARS_CACHE_MAX_ENTRIES,
-            meta_store=_REFERENCE_BARS_CACHE_META,
-            meta_value=ref_cache_meta,
+        _store_reference_bars_cache(
+            cache_context=cache_context,
+            ref_bars_map=ref_bars_map,
         )
-        _disk_cache_set(
-            _REFERENCE_BARS_DISK_DIR,
-            ref_cache_key,
-            ref_bars_map,
-        )
+        return ref_bars_map
     except Exception as exc:
         logger.debug(f"Could not load QQQ reference data: {exc}")
     return ref_bars_map

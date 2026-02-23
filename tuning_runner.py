@@ -48,6 +48,7 @@ def suppress_output():
         sys.stdout, sys.stderr = old_out, old_err
         devnull.close()
 
+
 @dataclass
 class TuneResult:
     params: Dict[str, Any]
@@ -92,7 +93,9 @@ def get_available_dates(df: pd.DataFrame) -> List[str]:
     return dates
 
 
-def select_training_dates(available: List[str], test_start: str, count: int) -> List[str]:
+def select_training_dates(
+    available: List[str], test_start: str, count: int
+) -> List[str]:
     """Pick last N available dates before test_start."""
     prior = [d for d in available if d < test_start]
     return prior[-count:] if len(prior) >= count else prior
@@ -193,7 +196,13 @@ def tune_strategy_for_ticker(
 
         score = score_result(total_pnl, total_trades)
         if score > best.score:
-            best = TuneResult(params=params, score=score, total_pnl_pct=total_pnl, trades=total_trades, days_used=days_used)
+            best = TuneResult(
+                params=params,
+                score=score,
+                total_pnl_pct=total_pnl,
+                trades=total_trades,
+                days_used=days_used,
+            )
 
     return best
 
@@ -217,12 +226,14 @@ def evaluate_test_week(
             day_rows=day_rows,
             params_by_strategy=overrides,
         )
-        day_results.append({
-            "date": date,
-            "pnl_pct": round(pnl, 2),
-            "trades": trades,
-            "strategy": selected,
-        })
+        day_results.append(
+            {
+                "date": date,
+                "pnl_pct": round(pnl, 2),
+                "trades": trades,
+                "strategy": selected,
+            }
+        )
         total_pnl += pnl
         total_trades += trades
     return {
@@ -292,8 +303,12 @@ def main():
                 continue
             day_rows_map[date] = list(day_df.itertuples(index=False))
 
-        mean_rev = tune_strategy_for_ticker(ticker, day_rows_map, train_dates, "mean_reversion", mean_rev_grid)
-        momentum = tune_strategy_for_ticker(ticker, day_rows_map, train_dates, "momentum", momentum_grid)
+        mean_rev = tune_strategy_for_ticker(
+            ticker, day_rows_map, train_dates, "mean_reversion", mean_rev_grid
+        )
+        momentum = tune_strategy_for_ticker(
+            ticker, day_rows_map, train_dates, "momentum", momentum_grid
+        )
 
         tuning_results[ticker] = {
             "mean_reversion": mean_rev.__dict__,
@@ -310,7 +325,11 @@ def main():
             overrides[ticker] = ticker_overrides
 
     # Evaluate test week
-    test_results = {"test_start": args.test_start, "test_end": args.test_end, "tickers": {}}
+    test_results = {
+        "test_start": args.test_start,
+        "test_end": args.test_end,
+        "tickers": {},
+    }
     for ticker in tickers:
         if ticker not in overrides:
             continue

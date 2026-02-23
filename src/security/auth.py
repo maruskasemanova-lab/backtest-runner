@@ -49,11 +49,13 @@ def parse_bearer_token(authorization_header: Optional[str]) -> str:
 
 
 def _resolve_supabase_auth_verify_url() -> str:
-    base_url = str(
-        os.getenv("BACKTEST_SUPABASE_URL")
-        or os.getenv("VITE_SUPABASE_URL")
-        or "",
-    ).strip().rstrip("/")
+    base_url = (
+        str(
+            os.getenv("BACKTEST_SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "",
+        )
+        .strip()
+        .rstrip("/")
+    )
     if not base_url:
         return ""
     return f"{base_url}/auth/v1/user"
@@ -123,7 +125,9 @@ def _verify_jwt_via_supabase_auth(token: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def decode_and_verify_jwt(token: str, *, secret: str, allow_unverified: bool = False) -> Dict[str, Any]:
+def decode_and_verify_jwt(
+    token: str, *, secret: str, allow_unverified: bool = False
+) -> Dict[str, Any]:
     parts = str(token or "").split(".")
     if len(parts) != 3:
         raise JwtValidationError("Invalid JWT format")
@@ -149,7 +153,9 @@ def decode_and_verify_jwt(token: str, *, secret: str, allow_unverified: bool = F
 
     if alg == "HS256" and secret:
         signed_part = f"{parts[0]}.{parts[1]}".encode("utf-8")
-        expected_sig = _b64url_encode(hmac.new(secret.encode("utf-8"), signed_part, hashlib.sha256).digest())
+        expected_sig = _b64url_encode(
+            hmac.new(secret.encode("utf-8"), signed_part, hashlib.sha256).digest()
+        )
         if not hmac.compare_digest(parts[2], expected_sig):
             raise JwtValidationError("JWT signature verification failed")
     elif allow_unverified:
@@ -177,9 +183,7 @@ def decode_and_verify_jwt(token: str, *, secret: str, allow_unverified: bool = F
 
 def resolve_jwt_secret() -> str:
     return str(
-        os.getenv("BACKTEST_JWT_SECRET")
-        or os.getenv("SUPABASE_JWT_SECRET")
-        or ""
+        os.getenv("BACKTEST_JWT_SECRET") or os.getenv("SUPABASE_JWT_SECRET") or ""
     ).strip()
 
 
@@ -189,7 +193,11 @@ def allow_unverified_jwt() -> bool:
 
 
 def extract_role(payload: Dict[str, Any]) -> str:
-    app_meta = payload.get("app_metadata") if isinstance(payload.get("app_metadata"), dict) else {}
+    app_meta = (
+        payload.get("app_metadata")
+        if isinstance(payload.get("app_metadata"), dict)
+        else {}
+    )
     role = (
         payload.get("role")
         or app_meta.get("role")
@@ -205,8 +213,16 @@ def extract_role(payload: Dict[str, Any]) -> str:
 
 
 def extract_plan_tier(payload: Dict[str, Any], role: str) -> str:
-    app_meta = payload.get("app_metadata") if isinstance(payload.get("app_metadata"), dict) else {}
-    user_meta = payload.get("user_metadata") if isinstance(payload.get("user_metadata"), dict) else {}
+    app_meta = (
+        payload.get("app_metadata")
+        if isinstance(payload.get("app_metadata"), dict)
+        else {}
+    )
+    user_meta = (
+        payload.get("user_metadata")
+        if isinstance(payload.get("user_metadata"), dict)
+        else {}
+    )
     raw = (
         app_meta.get("plan_tier")
         or user_meta.get("plan_tier")
@@ -220,20 +236,28 @@ def extract_plan_tier(payload: Dict[str, Any], role: str) -> str:
 
 
 def extract_tenant_id(payload: Dict[str, Any], user_id: str) -> str:
-    tenant_id = payload.get("tenant_id") or payload.get("org_id") or payload.get("organization_id")
+    tenant_id = (
+        payload.get("tenant_id")
+        or payload.get("org_id")
+        or payload.get("organization_id")
+    )
     normalized = str(tenant_id or "").strip()
     if normalized:
         return normalized
     return f"tenant_{user_id}"
 
 
-def build_auth_context(payload: Dict[str, Any], *, plan_tier_override: Optional[str] = None) -> AuthContext:
+def build_auth_context(
+    payload: Dict[str, Any], *, plan_tier_override: Optional[str] = None
+) -> AuthContext:
     user_id = str(payload.get("sub") or "").strip()
     if not user_id:
         raise JwtValidationError("JWT missing subject (sub)")
 
     role = extract_role(payload)
-    plan_tier = str(plan_tier_override or extract_plan_tier(payload, role)).strip().lower()
+    plan_tier = (
+        str(plan_tier_override or extract_plan_tier(payload, role)).strip().lower()
+    )
     if plan_tier not in {"free", "premium", "admin"}:
         plan_tier = "premium" if role == "admin" else "free"
 
@@ -249,4 +273,7 @@ def build_auth_context(payload: Dict[str, Any], *, plan_tier_override: Optional[
 
 
 def is_admin(auth: AuthContext) -> bool:
-    return str(auth.role).strip().lower() == "admin" or str(auth.plan_tier).strip().lower() == "admin"
+    return (
+        str(auth.role).strip().lower() == "admin"
+        or str(auth.plan_tier).strip().lower() == "admin"
+    )

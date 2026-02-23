@@ -53,7 +53,7 @@ def run_discovery(
 ) -> PatternLibrary:
     """
     Run pattern discovery on historical data.
-    
+
     Args:
         ticker: Ticker symbol
         date_from: Start date YYYY-MM-DD
@@ -61,13 +61,13 @@ def run_discovery(
         config: Discovery configuration
         output_path: Optional output path for library
         reports_dir: Directory containing backtest reports
-        
+
     Returns:
         PatternLibrary with discovered patterns
     """
     logger.info(f"Starting pattern discovery for {ticker}")
     logger.info(f"Date range: {date_from} to {date_to}")
-    
+
     # Phase 1: Extract snapshots
     logger.info("Phase 1: Extracting feature snapshots...")
     snapshots = extract_snapshots_from_backtest(
@@ -77,13 +77,15 @@ def run_discovery(
         reports_dir=reports_dir,
         config=config,
     )
-    
+
     if not snapshots:
-        logger.error("No snapshots extracted. Check your date range and reports directory.")
+        logger.error(
+            "No snapshots extracted. Check your date range and reports directory."
+        )
         sys.exit(1)
-    
+
     logger.info(f"Extracted {len(snapshots)} snapshots")
-    
+
     # Phase 2: Cluster pattern discovery
     cluster_patterns = []
     if config.clustering_enabled:
@@ -94,7 +96,7 @@ def run_discovery(
             ticker=ticker,
         )
         logger.info(f"Found {len(cluster_patterns)} cluster patterns")
-    
+
     # Phase 3: Sequential pattern mining
     sequential_patterns = []
     if config.sequential_enabled:
@@ -105,7 +107,7 @@ def run_discovery(
             ticker=ticker,
         )
         logger.info(f"Found {len(sequential_patterns)} sequential patterns")
-    
+
     # Phase 4: Create and save library
     logger.info("Phase 4: Creating pattern library...")
     manager = PatternLibraryManager()
@@ -116,13 +118,13 @@ def run_discovery(
         total_snapshots=len(snapshots),
         discovery_config=config,
     )
-    
+
     saved_path = manager.save_library(library, output_path)
     logger.info(f"Pattern library saved to: {saved_path}")
-    
+
     # Print summary
     print_summary(library)
-    
+
     return library
 
 
@@ -135,13 +137,11 @@ def print_summary(library: PatternLibrary):
     print(f"Total snapshots analyzed: {library.total_snapshots_analyzed}")
     print(f"Cluster patterns: {len(library.cluster_patterns)}")
     print(f"Sequential patterns: {len(library.sequential_patterns)}")
-    
+
     if library.cluster_patterns:
         print("\n--- Top Cluster Patterns ---")
         sorted_clusters = sorted(
-            library.cluster_patterns,
-            key=lambda p: p.win_rate * p.support,
-            reverse=True
+            library.cluster_patterns, key=lambda p: p.win_rate * p.support, reverse=True
         )
         for i, p in enumerate(sorted_clusters[:5]):
             print(f"\n{i+1}. {p.pattern_name}")
@@ -150,13 +150,13 @@ def print_summary(library: PatternLibrary):
             print(f"   Support: {p.support}")
             print(f"   Avg PnL: {p.avg_pnl_pct:.2f}%")
             print(f"   Direction: {p.direction.value}")
-    
+
     if library.sequential_patterns:
         print("\n--- Top Sequential Patterns ---")
         sorted_seq = sorted(
             library.sequential_patterns,
             key=lambda p: p.win_rate * p.support,
-            reverse=True
+            reverse=True,
         )
         for i, p in enumerate(sorted_seq[:5]):
             print(f"\n{i+1}. {p.pattern_name}")
@@ -165,7 +165,7 @@ def print_summary(library: PatternLibrary):
             print(f"   Win Rate: {p.win_rate:.1%}")
             print(f"   Support: {p.support}")
             print(f"   Direction: {p.direction.value}")
-    
+
     print("\n" + "=" * 60)
 
 
@@ -178,14 +178,14 @@ def run_match(
 ) -> List[PatternMatch]:
     """
     Run pattern matching on current features.
-    
+
     Args:
         ticker: Ticker symbol
         features: Feature vector dict
         recent_states: List of recent state labels
         config: Match configuration
         library_path: Optional path to library file
-        
+
     Returns:
         List of PatternMatch objects
     """
@@ -194,17 +194,17 @@ def run_match(
         matcher = PatternMatcher.from_library_path(library_path, config)
     else:
         matcher = PatternMatcher.for_ticker(ticker, config=config)
-    
+
     if not matcher:
         logger.error(f"No pattern library found for {ticker}")
         sys.exit(1)
-    
+
     # Convert features
     pattern_input = PatternInput.from_feature_vector(features)
-    
+
     # Match patterns
     matches = matcher.match(pattern_input, recent_states)
-    
+
     return matches
 
 
@@ -213,11 +213,11 @@ def print_matches(matches: List[PatternMatch]):
     if not matches:
         print("No matching patterns found.")
         return
-    
+
     print("\n" + "=" * 60)
     print(f"PATTERN MATCHES ({len(matches)} found)")
     print("=" * 60)
-    
+
     for i, m in enumerate(matches):
         print(f"\n{i+1}. {m.pattern_name}")
         print(f"   Type: {m.pattern_type.value}")
@@ -228,7 +228,7 @@ def print_matches(matches: List[PatternMatch]):
         print(f"   Action: {m.recommended_action.value}")
         print(f"   Evidence Strength: {m.evidence_strength:.1f}")
         print(f"   Reasoning: {m.evidence_reasoning}")
-    
+
     print("\n" + "=" * 60)
 
 
@@ -248,7 +248,7 @@ Examples:
   python scripts/run_pattern_discovery.py --list-libraries
         """,
     )
-    
+
     # Mode selection
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument(
@@ -266,7 +266,7 @@ Examples:
         action="store_true",
         help="List available pattern libraries",
     )
-    
+
     # Common arguments
     parser.add_argument(
         "--ticker",
@@ -274,7 +274,7 @@ Examples:
         required=False,
         help="Ticker symbol",
     )
-    
+
     # Discovery arguments
     parser.add_argument(
         "--date-from",
@@ -297,7 +297,7 @@ Examples:
         type=str,
         help="Output path for pattern library",
     )
-    
+
     # Discovery config
     parser.add_argument(
         "--min-support",
@@ -333,7 +333,7 @@ Examples:
         action="store_true",
         help="Disable sequential mining",
     )
-    
+
     # Match arguments
     parser.add_argument(
         "--features",
@@ -357,18 +357,18 @@ Examples:
         default=0.7,
         help="Minimum similarity threshold",
     )
-    
+
     args = parser.parse_args()
-    
+
     # List libraries mode
     if args.list_libraries:
         manager = PatternLibraryManager()
         libraries = manager.list_libraries()
-        
+
         if not libraries:
             print("No pattern libraries found.")
             return
-        
+
         print("\nAvailable Pattern Libraries:")
         print("-" * 60)
         for lib in libraries:
@@ -379,14 +379,14 @@ Examples:
             print(f"  Snapshots: {lib['total_snapshots_analyzed']}")
             print(f"  Updated: {lib['updated_at']}")
         return
-    
+
     # Discovery mode
     if args.discover:
         if not args.ticker:
             parser.error("--ticker is required for discovery")
         if not args.date_from or not args.date_to:
             parser.error("--date-from and --date-to are required for discovery")
-        
+
         config = DiscoveryConfig(
             clustering_enabled=not args.no_clustering,
             sequential_enabled=not args.no_sequential,
@@ -394,9 +394,9 @@ Examples:
             min_support=args.min_support,
             min_win_rate=args.min_win_rate,
         )
-        
+
         output_path = Path(args.output) if args.output else None
-        
+
         run_discovery(
             ticker=args.ticker,
             date_from=args.date_from,
@@ -406,26 +406,26 @@ Examples:
             reports_dir=Path(args.reports_dir),
         )
         return
-    
+
     # Match mode
     if args.match:
         if not args.ticker:
             parser.error("--ticker is required for matching")
         if not args.features:
             parser.error("--features is required for matching")
-        
+
         try:
             features = json.loads(args.features)
             recent_states = json.loads(args.recent_states)
         except json.JSONDecodeError as e:
             parser.error(f"Invalid JSON: {e}")
-        
+
         config = MatchConfig(
             min_similarity=args.min_similarity,
         )
-        
+
         library_path = Path(args.library_path) if args.library_path else None
-        
+
         matches = run_match(
             ticker=args.ticker,
             features=features,
@@ -433,16 +433,18 @@ Examples:
             config=config,
             library_path=library_path,
         )
-        
+
         print_matches(matches)
-        
+
         # Output as JSON for programmatic use
         print("\nJSON Output:")
-        print(json.dumps(
-            [m.model_dump() for m in matches],
-            indent=2,
-            default=str,
-        ))
+        print(
+            json.dumps(
+                [m.model_dump() for m in matches],
+                indent=2,
+                default=str,
+            )
+        )
         return
 
 

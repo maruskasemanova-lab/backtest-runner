@@ -15,7 +15,9 @@ def test_param_grids_cover_all_registered_strategies() -> None:
     assert not missing, f"Missing PARAM_GRIDS entries for strategies: {missing}"
 
 
-def test_run_single_day_parallel_mode_aggregates_isolated_strategy_runs(monkeypatch) -> None:
+def test_run_single_day_parallel_mode_aggregates_isolated_strategy_runs(
+    monkeypatch,
+) -> None:
     calls = []
 
     def _fake_isolated(**kwargs):
@@ -33,7 +35,9 @@ def test_run_single_day_parallel_mode_aggregates_isolated_strategy_runs(monkeypa
         }
         return pnl, 1, 1 if pnl > 0 else 0, max(0.0, pnl), abs(min(0.0, pnl)), stats
 
-    monkeypatch.setattr(wfo_optimizer, "_run_single_day_strategy_isolated", _fake_isolated)
+    monkeypatch.setattr(
+        wfo_optimizer, "_run_single_day_strategy_isolated", _fake_isolated
+    )
 
     result = wfo_optimizer.run_single_day(
         ticker="MU",
@@ -117,7 +121,9 @@ def test_run_walk_forward_propagates_parallel_mode(monkeypatch) -> None:
     optimize_flags = []
     evaluate_flags = []
 
-    def _fake_optimize(*, strategy_name: str, dates, parallel_all_strategies: bool = False, **_kwargs):
+    def _fake_optimize(
+        *, strategy_name: str, dates, parallel_all_strategies: bool = False, **_kwargs
+    ):
         optimize_flags.append(parallel_all_strategies)
         return wfo_optimizer.OptimizationResult(
             strategy=strategy_name,

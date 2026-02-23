@@ -13,7 +13,9 @@ _API_SERVER_PATH = Path(__file__).resolve().parents[1] / "api_server.py"
 _PROJECT_ROOT = str(_API_SERVER_PATH.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
-_API_SERVER_SPEC = importlib.util.spec_from_file_location("api_server_module", _API_SERVER_PATH)
+_API_SERVER_SPEC = importlib.util.spec_from_file_location(
+    "api_server_module", _API_SERVER_PATH
+)
 assert _API_SERVER_SPEC is not None and _API_SERVER_SPEC.loader is not None
 api_server = importlib.util.module_from_spec(_API_SERVER_SPEC)
 _API_SERVER_SPEC.loader.exec_module(api_server)
@@ -177,7 +179,9 @@ def test_run_adaptive_tuner_requires_overlap_when_l2_required(monkeypatch) -> No
     assert "no eligible dates" in str(exc.value.detail).lower()
 
 
-def test_run_adaptive_tuner_quick_mode_samples_dates_and_sets_metadata(monkeypatch) -> None:
+def test_run_adaptive_tuner_quick_mode_samples_dates_and_sets_metadata(
+    monkeypatch,
+) -> None:
     api_server.adaptive_tuner_jobs.clear()
     scheduled = []
 
@@ -267,12 +271,14 @@ def test_apply_adaptive_tuner_profile_updates_aos_config(monkeypatch, tmp_path) 
     )
     monkeypatch.setattr(api_server, "AOS_CONFIG_PATH", temp_aos)
 
-    request = api_server.AdaptiveTunerProfileApplyRequest(ticker="MU", profile_id="p123")
+    request = api_server.AdaptiveTunerProfileApplyRequest(
+        ticker="MU", profile_id="p123"
+    )
     result = asyncio.run(api_server.apply_adaptive_tuner_profile(request))
     assert result["success"] is True
     assert result["profile_id"] == "p123"
 
-    saved = json.loads(temp_aos.read_text())
+    saved = api_server._load_aos_config(temp_aos)
     mu_cfg = saved["tickers"]["MU"]
     assert mu_cfg["strategy_selection_mode"] == "all_enabled"
     assert mu_cfg["max_active_strategies"] == 5
@@ -288,7 +294,10 @@ def test_apply_adaptive_tuner_profile_updates_aos_config(monkeypatch, tmp_path) 
 
 def test_create_isolated_tuner_aos_config_snapshot(monkeypatch, tmp_path) -> None:
     base_aos = tmp_path / "aos_config.json"
-    base_payload = {"version": "1.0.0", "tickers": {"MU": {"strategy": "momentum_flow"}}}
+    base_payload = {
+        "version": "1.0.0",
+        "tickers": {"MU": {"strategy": "momentum_flow"}},
+    }
     base_aos.write_text(json.dumps(base_payload))
 
     isolated_dir = tmp_path / "isolated"
@@ -298,7 +307,8 @@ def test_create_isolated_tuner_aos_config_snapshot(monkeypatch, tmp_path) -> Non
     created = api_server._create_isolated_tuner_aos_config("jobabc")
     assert created.exists()
     assert created.parent == isolated_dir
-    assert json.loads(created.read_text()) == base_payload
+    saved = api_server._load_aos_config(created)
+    assert saved == base_payload
 
     api_server._cleanup_isolated_tuner_aos_config(created)
     assert not created.exists()
@@ -615,26 +625,30 @@ def test_v2_analyze_vectors_dimension_importance() -> None:
 def test_v2_analyze_vectors_interaction_effects() -> None:
     # Create trials with known interaction: strategy + regime combo matters
     trials = []
-    for i, (strat, regime, score) in enumerate([
-        (["momentum_flow"], ["TRENDING"], 8.0),
-        (["momentum_flow"], ["CHOPPY"], 1.0),
-        (["absorption_reversal"], ["TRENDING"], 2.0),
-        (["absorption_reversal"], ["CHOPPY"], 7.0),
-    ]):
-        trials.append({
-            "score": score,
-            "metrics": {"total_trades": 10},
-            "candidate": {
-                "enabled_strategies": strat,
-                "regime_filter": regime,
-                "l2_min_imbalance": 0.15,
-                "l2_min_signed_aggression": 0.15,
-                "base_threshold": 50,
-                "min_confirming_sources": 2,
-                "strategy_selection_mode": "all_enabled",
-                "flow_bias_enabled": True,
-            },
-        })
+    for i, (strat, regime, score) in enumerate(
+        [
+            (["momentum_flow"], ["TRENDING"], 8.0),
+            (["momentum_flow"], ["CHOPPY"], 1.0),
+            (["absorption_reversal"], ["TRENDING"], 2.0),
+            (["absorption_reversal"], ["CHOPPY"], 7.0),
+        ]
+    ):
+        trials.append(
+            {
+                "score": score,
+                "metrics": {"total_trades": 10},
+                "candidate": {
+                    "enabled_strategies": strat,
+                    "regime_filter": regime,
+                    "l2_min_imbalance": 0.15,
+                    "l2_min_signed_aggression": 0.15,
+                    "base_threshold": 50,
+                    "min_confirming_sources": 2,
+                    "strategy_selection_mode": "all_enabled",
+                    "flow_bias_enabled": True,
+                },
+            }
+        )
     analysis = api_server._analyze_vectors(trials, min_trades=3)
 
     interactions = analysis["top_interactions"]
@@ -810,9 +824,9 @@ def test_expectancy_scoring_rewards_low_wr_high_rr() -> None:
     assert score_reversal > 0, f"Reversal score {score_reversal} should be positive"
     assert score_momentum > 0, f"Momentum score {score_momentum} should be positive"
     # Reversal should not be dramatically worse (old code would ×0.3 it)
-    assert score_reversal > score_momentum * 0.3, (
-        f"Reversal {score_reversal} should not be crushed vs momentum {score_momentum}"
-    )
+    assert (
+        score_reversal > score_momentum * 0.3
+    ), f"Reversal {score_reversal} should not be crushed vs momentum {score_momentum}"
 
 
 def test_expectancy_scoring_penalizes_negative() -> None:
@@ -839,17 +853,35 @@ def test_l2_bonus_capped_at_10pct() -> None:
 
     # With L2 data on all days (max bonus)
     day_results_with_l2 = [
-        {"success": True, "pnl_pct": 0.10, "trades": 2, "win_rate_pct": 60.0, "l2_avg_score": 0.5},
-        {"success": True, "pnl_pct": 0.12, "trades": 2, "win_rate_pct": 60.0, "l2_avg_score": 0.6},
-        {"success": True, "pnl_pct": 0.08, "trades": 2, "win_rate_pct": 60.0, "l2_avg_score": 0.7},
+        {
+            "success": True,
+            "pnl_pct": 0.10,
+            "trades": 2,
+            "win_rate_pct": 60.0,
+            "l2_avg_score": 0.5,
+        },
+        {
+            "success": True,
+            "pnl_pct": 0.12,
+            "trades": 2,
+            "win_rate_pct": 60.0,
+            "l2_avg_score": 0.6,
+        },
+        {
+            "success": True,
+            "pnl_pct": 0.08,
+            "trades": 2,
+            "win_rate_pct": 60.0,
+            "l2_avg_score": 0.7,
+        },
     ]
     score_with_l2 = api_server._compute_tuner_score_robust(day_results_with_l2)
 
     # L2 bonus should increase score but cap at +10%
     assert score_with_l2 > score_no_l2, "L2 bonus should increase score"
-    assert score_with_l2 <= score_no_l2 * 1.101, (
-        f"L2 bonus {score_with_l2} should be at most 10% above {score_no_l2}"
-    )
+    assert (
+        score_with_l2 <= score_no_l2 * 1.101
+    ), f"L2 bonus {score_with_l2} should be at most 10% above {score_no_l2}"
 
 
 def test_trade_scarcity_relaxed() -> None:
@@ -874,7 +906,9 @@ def test_trade_scarcity_relaxed() -> None:
     assert score_sparse > 0, f"Sparse score {score_sparse} should be positive"
     ratio = score_sparse / score_active if score_active != 0 else 0
     # With 0.65 factor, ratio should be ~0.65 (not 0.5)
-    assert ratio > 0.55, f"Sparse/active ratio {ratio} too low — old heavy penalty still active?"
+    assert (
+        ratio > 0.55
+    ), f"Sparse/active ratio {ratio} too low — old heavy penalty still active?"
     assert ratio < 0.85, f"Sparse/active ratio {ratio} too high — penalty not applied?"
 
 
@@ -992,9 +1026,22 @@ def test_v2_candidate_key_with_regime_map() -> None:
     # Without regime map
     c1 = {**base, "regime_strategy_map": None}
     # With regime map
-    c2 = {**base, "regime_strategy_map": {"TRENDING": ["momentum_flow"], "MIXED": ["exhaustion_fade"]}}
+    c2 = {
+        **base,
+        "regime_strategy_map": {
+            "TRENDING": ["momentum_flow"],
+            "MIXED": ["exhaustion_fade"],
+        },
+    }
     # Different regime map
-    c3 = {**base, "regime_strategy_map": {"TRENDING": ["momentum_flow"], "MIXED": [], "CHOPPY": []}}
+    c3 = {
+        **base,
+        "regime_strategy_map": {
+            "TRENDING": ["momentum_flow"],
+            "MIXED": [],
+            "CHOPPY": [],
+        },
+    }
 
     key1 = api_server._v2_candidate_key(c1)
     key2 = api_server._v2_candidate_key(c2)

@@ -25,7 +25,9 @@ def live_artifact_file(artifacts_dir: Path, stream: str, run_id: str) -> Path:
     return artifacts_dir / f"{stream}_{run_id_safe}.jsonl"
 
 
-def read_jsonl_tail(path: Path, limit: int = 200, logger: Any = None) -> List[Dict[str, Any]]:
+def read_jsonl_tail(
+    path: Path, limit: int = 200, logger: Any = None
+) -> List[Dict[str, Any]]:
     capped = max(1, min(2000, int(limit)))
     if not path.exists():
         return []
@@ -65,7 +67,9 @@ def parse_utc_iso(value: Any) -> Optional[datetime]:
         return None
 
 
-def extract_runtime_summary(run_id: str, artifacts_dir: Path, logger: Any = None) -> Optional[Dict[str, Any]]:
+def extract_runtime_summary(
+    run_id: str, artifacts_dir: Path, logger: Any = None
+) -> Optional[Dict[str, Any]]:
     runtime_path = live_artifact_file(artifacts_dir, "runtime", run_id)
     if not runtime_path.exists():
         return None
@@ -77,7 +81,8 @@ def extract_runtime_summary(run_id: str, artifacts_dir: Path, logger: Any = None
         return None
 
     summary: Dict[str, Any] = {
-        "event": str(latest.get("event", "runtime_started")).strip() or "runtime_started",
+        "event": str(latest.get("event", "runtime_started")).strip()
+        or "runtime_started",
     }
     for key in (
         "ticker",
@@ -109,7 +114,9 @@ def infer_live_run_status(
 
     updated_dt = parse_utc_iso(updated_at)
     now_utc = datetime.now(timezone.utc)
-    if updated_dt is not None and (now_utc - updated_dt) <= timedelta(seconds=max(1, int(active_window_seconds))):
+    if updated_dt is not None and (now_utc - updated_dt) <= timedelta(
+        seconds=max(1, int(active_window_seconds))
+    ):
         return "active"
     return "idle"
 
@@ -170,7 +177,9 @@ def discover_live_trader_runs(
         row = dict(entry)
         row["status"] = status
         row["runtime"] = runtime_summary
-        row["ticker"] = str((runtime_summary or {}).get("ticker") or "").strip().upper() or None
+        row["ticker"] = (
+            str((runtime_summary or {}).get("ticker") or "").strip().upper() or None
+        )
         rows.append(row)
 
     capped = max(1, min(200, int(limit)))
@@ -187,7 +196,9 @@ def live_trader_events_payload(
 ) -> Dict[str, Any]:
     stream_key = str(stream or "decisions").strip().lower()
     if stream_key not in {"runtime", "decisions", "signals", "orders"}:
-        raise HTTPException(400, "stream must be one of: runtime, decisions, signals, orders")
+        raise HTTPException(
+            400, "stream must be one of: runtime, decisions, signals, orders"
+        )
 
     file_path = live_artifact_file(artifacts_dir, stream_key, run_id)
     if not file_path.exists():
@@ -217,7 +228,11 @@ def live_trader_snapshot_payload(
 
     for stream_key in ("runtime", "decisions", "signals", "orders"):
         file_path = live_artifact_file(artifacts_dir, stream_key, run_id_safe)
-        events = read_jsonl_tail(file_path, limit=tail_limit, logger=logger) if file_path.exists() else []
+        events = (
+            read_jsonl_tail(file_path, limit=tail_limit, logger=logger)
+            if file_path.exists()
+            else []
+        )
         stream_updated = (
             datetime.utcfromtimestamp(file_path.stat().st_mtime).isoformat() + "Z"
             if file_path.exists()
@@ -234,7 +249,9 @@ def live_trader_snapshot_payload(
         total_count += len(events)
 
     if not any(item["exists"] for item in streams.values()):
-        raise HTTPException(404, f"No live-trader artifacts found for run_id={run_id_safe}")
+        raise HTTPException(
+            404, f"No live-trader artifacts found for run_id={run_id_safe}"
+        )
 
     runtime_latest = streams.get("runtime", {}).get("latest")
     runtime_summary = runtime_latest if isinstance(runtime_latest, dict) else None

@@ -54,10 +54,10 @@ def test_evidence_engine_never_uses_candlestick_fallback_signal() -> None:
     assert decision.execute is True
     assert decision.signal is not None
     assert decision.signal.strategy_name == "MomentumFlow"
-    assert decision.patterns == []
-    assert decision.pattern_score == 0.0
-    assert decision.pattern_confirmation is False
-    assert decision.primary_pattern is None
+    assert not hasattr(decision, "patterns")
+    assert not hasattr(decision, "pattern_score")
+    assert not hasattr(decision, "pattern_confirmation")
+    assert not hasattr(decision, "primary_pattern")
     assert "patterns" not in (decision.signal.metadata or {})
 
 

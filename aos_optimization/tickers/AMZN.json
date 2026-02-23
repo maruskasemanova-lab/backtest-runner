@@ -1,0 +1,22 @@
+{
+  "strategy": "pullback",
+  "params": {
+    "pullback_threshold_pct": 0.25,
+    "volume_surge_ratio": 1.4,
+    "volume_stop_pct": 1.2,
+    "rr_ratio": 2.0,
+    "trailing_stop_pct": 0.8
+  },
+  "backup_strategy": "mean_reversion",
+  "regime_filter": [
+    "TRENDING",
+    "MIXED"
+  ],
+  "avoid_days": [],
+  "min_confidence": 55.0,
+  "max_daily_trades": 3,
+  "trailing_stop_pct": 0.8,
+  "long_only": false,
+  "trading_hours": [],
+  "time_filter_enabled": false
+}

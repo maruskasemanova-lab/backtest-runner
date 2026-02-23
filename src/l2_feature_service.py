@@ -1,6 +1,7 @@
 """
 L2 feature extraction and minute-level bar enrichment.
 """
+
 from __future__ import annotations
 
 import os
@@ -81,10 +82,12 @@ class L2FeatureService:
 
         precomputed_map: Dict[int, Dict[str, Any]] | None = None
         try:
-            precomputed_map, precomputed_stats = self.manager.load_precomputed_feature_map(
-                ticker=ticker,
-                start_time=start_dt_utc,
-                end_time=end_dt_utc,
+            precomputed_map, precomputed_stats = (
+                self.manager.load_precomputed_feature_map(
+                    ticker=ticker,
+                    start_time=start_dt_utc,
+                    end_time=end_dt_utc,
+                )
             )
             if precomputed_map is not None:
                 stats.update(precomputed_stats)
@@ -92,7 +95,9 @@ class L2FeatureService:
                 stats["has_l2"] = bool(precomputed_map)
                 return precomputed_map, stats
         except Exception as e:
-            self.logger.warning(f"Precomputed L2 feature-map load failed for {ticker}: {e}")
+            self.logger.warning(
+                f"Precomputed L2 feature-map load failed for {ticker}: {e}"
+            )
 
         try:
             flow_engine = OrderFlowEngine(manager=self.manager)

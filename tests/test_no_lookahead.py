@@ -24,11 +24,14 @@ class NoLookaheadInvariantTests(unittest.TestCase):
         manager._select_strategies = lambda session: ["mean_reversion"]  # type: ignore[attr-defined]
         manager._required_confirming_sources = lambda session, bar_time: 1  # type: ignore[attr-defined]
         manager.orchestrator.evidence_engine.combiner._min_confirming = 1
-        manager.ticker_params["NVDA"] = {"time_filter_enabled": False, "trading_hours": None}
+        manager.ticker_params["NVDA"] = {
+            "time_filter_enabled": False,
+            "trading_hours": None,
+        }
 
         # Keep only one deterministic strategy for test stability.
         for name, strat in manager.strategies.items():
-            strat.enabled = (name == "mean_reversion")
+            strat.enabled = name == "mean_reversion"
         manager.strategies["mean_reversion"].allowed_regimes = [
             Regime.TRENDING,
             Regime.CHOPPY,
@@ -78,7 +81,15 @@ class NoLookaheadInvariantTests(unittest.TestCase):
         session = manager.get_session("lookahead-test", "NVDA", "2026-02-03")
         self.assertIsNotNone(session)
         session.orchestrator.evidence_engine.combiner._min_confirming = 1
-        manager.ticker_params["NVDA"] = {"time_filter_enabled": False, "trading_hours": None}
+        # This invariant test focuses on signal/entry bar ordering only.
+        # Disable intraday-level entry gating to keep the scripted signal path deterministic.
+        session.config = session.config.merge(
+            {"intraday_levels_entry_quality_enabled": False}
+        )
+        manager.ticker_params["NVDA"] = {
+            "time_filter_enabled": False,
+            "trading_hours": None,
+        }
 
         for idx, close in enumerate(prices[1:], start=1):
             ts = start + timedelta(minutes=idx)

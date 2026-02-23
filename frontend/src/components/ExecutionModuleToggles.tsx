@@ -137,7 +137,7 @@ const MODULE_SETTING_FIELDS: Record<string, ModuleSettingField[]> = {
       type: "number",
       configKey: "fixed_stop_loss_pct",
       label: "Fixed Stop-Loss (%)",
-      min: 0,
+      min: 0.01,
       max: 5,
       step: 0.05,
       disabledWhen: (config) => String(config.stop_loss_mode || "strategy") === "strategy",

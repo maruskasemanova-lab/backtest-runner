@@ -16,7 +16,7 @@ check_port() {
 # Start Strategy Evaluator on port 8001
 echo "📊 Starting Strategy Evaluator on port 8001..."
 cd /Users/hotovo/.gemini/antigravity/scratch/market_regime_detection
-python3 -m uvicorn api_server:app --port 8001 --reload &
+python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8001 --reload &
 STRATEGY_PID=$!
 sleep 2
 
@@ -25,7 +25,17 @@ echo "🎯 Starting Backtest Runner API on port 8002..."
 cd /Users/hotovo/.gemini/antigravity/scratch/backtest-runner
 # Keep startup responsive for manual diagnostics by skipping heavy ticker-scope prewarm.
 export BACKTEST_STARTUP_PREWARM_ENABLED=0
-python3 -m uvicorn api_server:app --port 8002 --reload &
+# Full-range L2 mode for local app runs (no long-range L2 cap).
+export BACKTEST_RUN_L2_FORCE=1
+export BACKTEST_RUN_L2_MAX_DAYS=0
+export BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE=1
+export BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS=0
+# Keep long day-isolated/comparable runs responsive by loading one day first,
+# then extending range progressively in 1-day chunks.
+export BACKTEST_PROGRESSIVE_LOAD_ALLOW_COMPARABLE_MODE=1
+export BACKTEST_PROGRESSIVE_LOAD_COMPARABLE_INITIAL_DAYS=1
+export BACKTEST_PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS=1
+python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8002 --reload &
 RUNNER_PID=$!
 sleep 2
 

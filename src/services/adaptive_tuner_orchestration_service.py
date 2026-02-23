@@ -30,9 +30,13 @@ async def run_adaptive_tuner(
     ticker = str(request.ticker or "").upper().strip()
     if not ticker:
         raise HTTPException(400, "ticker is required")
-    version = deps.normalize_non_negative_int(request.adaptive_version, default=1, max_value=10)
+    version = deps.normalize_non_negative_int(
+        request.adaptive_version, default=1, max_value=10
+    )
     if version not in (1, 2):
-        raise HTTPException(400, "Only adaptive versions 1 and 2 are supported by this tuner.")
+        raise HTTPException(
+            400, "Only adaptive versions 1 and 2 are supported by this tuner."
+        )
 
     requested_dates = deps.iter_date_strings(request.date_from, request.date_to)
     if not requested_dates:
@@ -59,7 +63,9 @@ async def run_adaptive_tuner(
         request.quick_trial_boost, default=3, min_value=1, max_value=10
     )
     if quick_mode:
-        effective_dates = deps.sample_evenly_spaced_days(effective_dates, max_days=quick_max_days)
+        effective_dates = deps.sample_evenly_spaced_days(
+            effective_dates, max_days=quick_max_days
+        )
         if not effective_dates:
             raise HTTPException(
                 400,
@@ -67,7 +73,9 @@ async def run_adaptive_tuner(
             )
 
     job_id = deps.uuid4_factory().hex
-    method = str(request.method or ("random" if version == 2 else "grid")).strip().lower()
+    method = (
+        str(request.method or ("random" if version == 2 else "grid")).strip().lower()
+    )
     if method not in {"grid", "random", "optuna"}:
         method = "random" if version == 2 else "grid"
 
@@ -75,7 +83,9 @@ async def run_adaptive_tuner(
         "job_id": job_id,
         "status": "queued",
         "created_at": datetime.utcnow().isoformat() + "Z",
-        "request": request.model_dump() if hasattr(request, "model_dump") else request.dict(),
+        "request": (
+            request.model_dump() if hasattr(request, "model_dump") else request.dict()
+        ),
         "progress": {"completed_trials": 0, "total_trials": 0, "method": method},
         "trials": [],
         "best_trial": None,
@@ -83,8 +93,12 @@ async def run_adaptive_tuner(
         "requested_date_from": request.date_from,
         "requested_date_to": request.date_to,
         "source_effective_dates": source_effective_dates,
-        "source_effective_date_from": source_effective_dates[0] if source_effective_dates else None,
-        "source_effective_date_to": source_effective_dates[-1] if source_effective_dates else None,
+        "source_effective_date_from": (
+            source_effective_dates[0] if source_effective_dates else None
+        ),
+        "source_effective_date_to": (
+            source_effective_dates[-1] if source_effective_dates else None
+        ),
         "source_effective_days": len(source_effective_dates),
         "effective_dates": effective_dates,
         "effective_date_from": effective_dates[0] if effective_dates else None,
@@ -142,7 +156,9 @@ async def run_adaptive_tuner(
     }
 
 
-def get_adaptive_tuner_job(job_id: str, deps: AdaptiveTunerOrchestrationDeps) -> Dict[str, Any]:
+def get_adaptive_tuner_job(
+    job_id: str, deps: AdaptiveTunerOrchestrationDeps
+) -> Dict[str, Any]:
     """Get current status and results of an adaptive tuner job."""
     job = deps.adaptive_tuner_jobs.get(job_id)
     if not job:

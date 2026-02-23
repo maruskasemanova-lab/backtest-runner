@@ -49,7 +49,9 @@ def _api_post(url: str, payload: Dict[str, Any], timeout: float = 120.0) -> Any:
 def _api_delete(url: str, timeout: float = 120.0) -> Any:
     resp = requests.delete(url, timeout=timeout)
     if resp.status_code >= 400:
-        raise RuntimeError(f"DELETE {url} failed [{resp.status_code}]: {resp.text[:600]}")
+        raise RuntimeError(
+            f"DELETE {url} failed [{resp.status_code}]: {resp.text[:600]}"
+        )
     return resp.json()
 
 
@@ -80,7 +82,9 @@ def _apply_combo_profile(profile_id: str) -> Dict[str, Any]:
     return _api_post(f"{RUNNER_API}/api/strategy-combos/apply", payload, timeout=180.0)
 
 
-def _update_strategy_params(strategy_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+def _update_strategy_params(
+    strategy_name: str, params: Dict[str, Any]
+) -> Dict[str, Any]:
     payload = {"strategy_name": strategy_name, "params": params}
     return _api_post(f"{STRATEGY_API}/api/strategies/update", payload, timeout=120.0)
 
@@ -99,7 +103,9 @@ def _safe_optional_float(value: Any) -> Optional[float]:
         return None
 
 
-def _entry_volume_ratio(markers: List[Dict[str, Any]], bars: List[Dict[str, Any]]) -> Optional[float]:
+def _entry_volume_ratio(
+    markers: List[Dict[str, Any]], bars: List[Dict[str, Any]]
+) -> Optional[float]:
     if not markers or not bars:
         return None
     volumes = []
@@ -170,10 +176,22 @@ def _entry_l2_stats(markers: List[Dict[str, Any]]) -> Dict[str, Optional[float]]
     turn_candidates = 0
 
     for marker in entries:
-        details = marker.get("details") if isinstance(marker.get("details"), dict) else {}
-        metadata = details.get("metadata") if isinstance(details.get("metadata"), dict) else {}
-        order_flow = metadata.get("order_flow") if isinstance(metadata.get("order_flow"), dict) else {}
-        intrabar = metadata.get("intrabar_1s") if isinstance(metadata.get("intrabar_1s"), dict) else {}
+        details = (
+            marker.get("details") if isinstance(marker.get("details"), dict) else {}
+        )
+        metadata = (
+            details.get("metadata") if isinstance(details.get("metadata"), dict) else {}
+        )
+        order_flow = (
+            metadata.get("order_flow")
+            if isinstance(metadata.get("order_flow"), dict)
+            else {}
+        )
+        intrabar = (
+            metadata.get("intrabar_1s")
+            if isinstance(metadata.get("intrabar_1s"), dict)
+            else {}
+        )
 
         flow_score = _safe_optional_float(order_flow.get("flow_score"))
         signed_aggr = _safe_optional_float(order_flow.get("signed_aggression"))
@@ -200,7 +218,9 @@ def _entry_l2_stats(markers: List[Dict[str, Any]]) -> Dict[str, Optional[float]]
         if spread_bps is not None:
             spreads.append(spread_bps)
 
-        push_vals = [val for val in [push_ratio, w_long_push, w_short_push] if val is not None]
+        push_vals = [
+            val for val in [push_ratio, w_long_push, w_short_push] if val is not None
+        ]
         entry_abs_push = max((abs(val) for val in push_vals), default=0.0)
         abs_push.append(entry_abs_push)
 
@@ -228,8 +248,12 @@ def _entry_l2_stats(markers: List[Dict[str, Any]]) -> Dict[str, Optional[float]]
         "entry_avg_participation_ratio": _avg(participation),
         "entry_avg_spread_bps": _avg(spreads),
         "entry_avg_abs_push_ratio": _avg(abs_push),
-        "entry_window_5s_share": (window_5s_hits / entry_count) if entry_count > 0 else None,
-        "entry_turn_candidate_share": (turn_candidates / entry_count) if entry_count > 0 else None,
+        "entry_window_5s_share": (
+            (window_5s_hits / entry_count) if entry_count > 0 else None
+        ),
+        "entry_turn_candidate_share": (
+            (turn_candidates / entry_count) if entry_count > 0 else None
+        ),
     }
 
 
@@ -560,7 +584,9 @@ VARIANTS: List[Variant] = [
 ]
 
 
-def _build_run_payload(run_id: str, date_from: str, date_to: str, run_overrides: Dict[str, Any]) -> Dict[str, Any]:
+def _build_run_payload(
+    run_id: str, date_from: str, date_to: str, run_overrides: Dict[str, Any]
+) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "run_id": run_id,
         "ticker": TICKER,
@@ -583,7 +609,9 @@ def _build_run_payload(run_id: str, date_from: str, date_to: str, run_overrides:
     return payload
 
 
-def _poll_run_completion(run_id: str, ticker: str, run_date: str, timeout_sec: int = 5400) -> Dict[str, Any]:
+def _poll_run_completion(
+    run_id: str, ticker: str, run_date: str, timeout_sec: int = 5400
+) -> Dict[str, Any]:
     state_url = f"{RUNNER_API}/api/run/{run_id}/{ticker}/{run_date}/state"
     start = time.time()
     while True:
@@ -613,7 +641,9 @@ def _run_once(
     payload = _build_run_payload(run_id, date_from, date_to, variant.run_overrides)
 
     start_wall = time.time()
-    start_data = _api_post(f"{RUNNER_API}/api/run/start", payload, timeout=start_timeout_sec)
+    start_data = _api_post(
+        f"{RUNNER_API}/api/run/start", payload, timeout=start_timeout_sec
+    )
     run_key = str(start_data.get("run_key") or "").strip()
     if not run_key:
         raise RuntimeError(f"Missing run_key for run_id={run_id}")
@@ -637,7 +667,9 @@ def _run_once(
         timeout=120.0,
     )
     markers = summary.get("markers") if isinstance(summary.get("markers"), list) else []
-    bars = bars_payload.get("bars") if isinstance(bars_payload.get("bars"), list) else []
+    bars = (
+        bars_payload.get("bars") if isinstance(bars_payload.get("bars"), list) else []
+    )
 
     session = summary.get("session_summary") or {}
     total_trades = int(session.get("total_trades") or 0)
@@ -668,38 +700,60 @@ def _run_once(
         "total_pnl_pct": round(total_pnl_pct, 4),
         "total_pnl_dollars": round(total_pnl_dollars, 4),
         "avg_pnl_pct": round(avg_pnl_pct, 4),
-        "entry_volume_ratio_vs_median": None if entry_vol_ratio is None else round(entry_vol_ratio, 4),
-        "entry_avg_flow_score": None
-        if entry_l2_stats["entry_avg_flow_score"] is None
-        else round(float(entry_l2_stats["entry_avg_flow_score"]), 4),
-        "entry_avg_abs_signed_aggression": None
-        if entry_l2_stats["entry_avg_abs_signed_aggression"] is None
-        else round(float(entry_l2_stats["entry_avg_abs_signed_aggression"]), 4),
-        "entry_avg_abs_direction_margin": None
-        if entry_l2_stats["entry_avg_abs_direction_margin"] is None
-        else round(float(entry_l2_stats["entry_avg_abs_direction_margin"]), 4),
-        "entry_avg_participation_ratio": None
-        if entry_l2_stats["entry_avg_participation_ratio"] is None
-        else round(float(entry_l2_stats["entry_avg_participation_ratio"]), 4),
-        "entry_avg_spread_bps": None
-        if entry_l2_stats["entry_avg_spread_bps"] is None
-        else round(float(entry_l2_stats["entry_avg_spread_bps"]), 4),
-        "entry_avg_abs_push_ratio": None
-        if entry_l2_stats["entry_avg_abs_push_ratio"] is None
-        else round(float(entry_l2_stats["entry_avg_abs_push_ratio"]), 4),
-        "entry_window_5s_share": None
-        if entry_l2_stats["entry_window_5s_share"] is None
-        else round(float(entry_l2_stats["entry_window_5s_share"]), 4),
-        "entry_turn_candidate_share": None
-        if entry_l2_stats["entry_turn_candidate_share"] is None
-        else round(float(entry_l2_stats["entry_turn_candidate_share"]), 4),
-        "include_extended_hours": bool((summary.get("execution_config") or {}).get("include_extended_hours", False)),
+        "entry_volume_ratio_vs_median": (
+            None if entry_vol_ratio is None else round(entry_vol_ratio, 4)
+        ),
+        "entry_avg_flow_score": (
+            None
+            if entry_l2_stats["entry_avg_flow_score"] is None
+            else round(float(entry_l2_stats["entry_avg_flow_score"]), 4)
+        ),
+        "entry_avg_abs_signed_aggression": (
+            None
+            if entry_l2_stats["entry_avg_abs_signed_aggression"] is None
+            else round(float(entry_l2_stats["entry_avg_abs_signed_aggression"]), 4)
+        ),
+        "entry_avg_abs_direction_margin": (
+            None
+            if entry_l2_stats["entry_avg_abs_direction_margin"] is None
+            else round(float(entry_l2_stats["entry_avg_abs_direction_margin"]), 4)
+        ),
+        "entry_avg_participation_ratio": (
+            None
+            if entry_l2_stats["entry_avg_participation_ratio"] is None
+            else round(float(entry_l2_stats["entry_avg_participation_ratio"]), 4)
+        ),
+        "entry_avg_spread_bps": (
+            None
+            if entry_l2_stats["entry_avg_spread_bps"] is None
+            else round(float(entry_l2_stats["entry_avg_spread_bps"]), 4)
+        ),
+        "entry_avg_abs_push_ratio": (
+            None
+            if entry_l2_stats["entry_avg_abs_push_ratio"] is None
+            else round(float(entry_l2_stats["entry_avg_abs_push_ratio"]), 4)
+        ),
+        "entry_window_5s_share": (
+            None
+            if entry_l2_stats["entry_window_5s_share"] is None
+            else round(float(entry_l2_stats["entry_window_5s_share"]), 4)
+        ),
+        "entry_turn_candidate_share": (
+            None
+            if entry_l2_stats["entry_turn_candidate_share"] is None
+            else round(float(entry_l2_stats["entry_turn_candidate_share"]), 4)
+        ),
+        "include_extended_hours": bool(
+            (summary.get("execution_config") or {}).get("include_extended_hours", False)
+        ),
         "execution_config": summary.get("execution_config") or {},
         "l2_applied": summary.get("aos_applied", {}).get("l2", {}),
     }
 
     # Cleanup run to keep registry manageable.
-    _api_delete(f"{RUNNER_API}/api/run/{parsed_run_id}/{ticker}/{run_date}", timeout=120.0)
+    _api_delete(
+        f"{RUNNER_API}/api/run/{parsed_run_id}/{ticker}/{run_date}", timeout=120.0
+    )
     return result
 
 
@@ -717,7 +771,9 @@ def _screen_score(row: Dict[str, Any]) -> float:
     return pnl + activity_bonus + (0.20 * avg_pnl) + turn_bonus - low_sample_penalty
 
 
-def _robust_validation_score(screen_row: Optional[Dict[str, Any]], validation_row: Dict[str, Any]) -> float:
+def _robust_validation_score(
+    screen_row: Optional[Dict[str, Any]], validation_row: Dict[str, Any]
+) -> float:
     """
     Prefer holdout edge, penalize train->holdout drift (anti-overfit bias).
     """
@@ -730,7 +786,13 @@ def _robust_validation_score(screen_row: Optional[Dict[str, Any]], validation_ro
     low_sample_penalty = 0.08 * max(0, 4 - val_trades)
     turn_share = _safe_float(validation_row.get("entry_turn_candidate_share"), 0.0)
     turn_bonus = 0.04 * max(0.0, min(1.0, turn_share))
-    base_score = val_pnl + activity_bonus + (0.20 * val_avg_pnl) + turn_bonus - low_sample_penalty
+    base_score = (
+        val_pnl
+        + activity_bonus
+        + (0.20 * val_avg_pnl)
+        + turn_bonus
+        - low_sample_penalty
+    )
 
     if not isinstance(screen_row, dict):
         # No screen context: keep conservative score.
@@ -803,7 +865,9 @@ def run_research(
     }
 
     if selected_variant_names:
-        name_set = {str(name).strip() for name in selected_variant_names if str(name).strip()}
+        name_set = {
+            str(name).strip() for name in selected_variant_names if str(name).strip()
+        }
         variants = [v for v in VARIANTS if v.name in name_set]
         if not variants:
             raise RuntimeError(f"No matching variants selected: {sorted(name_set)}")
@@ -831,7 +895,11 @@ def run_research(
         if force_validate_all_selected:
             finalists = list(variants)
         else:
-            sorted_screen = sorted(report["screen_runs"], key=lambda r: _safe_float(r.get("screen_score")), reverse=True)
+            sorted_screen = sorted(
+                report["screen_runs"],
+                key=lambda r: _safe_float(r.get("screen_score")),
+                reverse=True,
+            )
             finalist_names = [
                 r["variant"]
                 for r in sorted_screen[: max(1, int(finalist_count))]
@@ -862,7 +930,11 @@ def run_research(
                 start_timeout_sec=start_timeout_sec,
             )
             screen_match = next(
-                (s for s in report["screen_runs"] if str(s.get("variant")) == str(row.get("variant"))),
+                (
+                    s
+                    for s in report["screen_runs"]
+                    if str(s.get("variant")) == str(row.get("variant"))
+                ),
                 None,
             )
             row["robust_score"] = round(_robust_validation_score(screen_match, row), 4)
@@ -871,7 +943,10 @@ def run_research(
         if run_extended_hours_check and report["validation_runs"]:
             winner = sorted(
                 report["validation_runs"],
-                key=lambda r: (_safe_float(r.get("robust_score"), -999), _safe_float(r.get("total_pnl_pct"), -999)),
+                key=lambda r: (
+                    _safe_float(r.get("robust_score"), -999),
+                    _safe_float(r.get("total_pnl_pct"), -999),
+                ),
                 reverse=True,
             )[0]
             winner_name = winner.get("variant")
@@ -879,11 +954,16 @@ def run_research(
             if winner_variant is not None:
                 _apply_combo_profile(SCALP_COMBO_PROFILE)
                 if winner_variant.strategy_overrides:
-                    _update_strategy_params(SCALP_STRATEGY, winner_variant.strategy_overrides)
+                    _update_strategy_params(
+                        SCALP_STRATEGY, winner_variant.strategy_overrides
+                    )
                 ext_variant = Variant(
                     name=f"{winner_variant.name}_extended_hours",
                     description="Winner variant with include_extended_hours=True",
-                    run_overrides={**winner_variant.run_overrides, "include_extended_hours": True},
+                    run_overrides={
+                        **winner_variant.run_overrides,
+                        "include_extended_hours": True,
+                    },
                     strategy_overrides=winner_variant.strategy_overrides,
                 )
                 report["winner_extended_hours_check"] = _run_once(
@@ -908,7 +988,9 @@ def run_research(
         except Exception as exc:
             report["errors"].append(f"strategy_restore_failed: {exc}")
 
-    report["meta"]["finished_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    report["meta"]["finished_at_utc"] = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+    )
     return report
 
 
@@ -916,10 +998,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run scalp L2 research experiments.")
     parser.add_argument("--screen-date", default="2026-02-10")
     parser.add_argument("--validate-date", default="2026-02-13")
-    parser.add_argument("--screen-from", default="", help="Optional screen range start (YYYY-MM-DD).")
-    parser.add_argument("--screen-to", default="", help="Optional screen range end (YYYY-MM-DD).")
-    parser.add_argument("--validate-from", default="", help="Optional validate range start (YYYY-MM-DD).")
-    parser.add_argument("--validate-to", default="", help="Optional validate range end (YYYY-MM-DD).")
+    parser.add_argument(
+        "--screen-from", default="", help="Optional screen range start (YYYY-MM-DD)."
+    )
+    parser.add_argument(
+        "--screen-to", default="", help="Optional screen range end (YYYY-MM-DD)."
+    )
+    parser.add_argument(
+        "--validate-from",
+        default="",
+        help="Optional validate range start (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--validate-to", default="", help="Optional validate range end (YYYY-MM-DD)."
+    )
     parser.add_argument("--output", default=str(REPORT_PATH))
     parser.add_argument(
         "--variants",
@@ -960,10 +1052,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    selected_variants = [part.strip() for part in str(args.variants).split(",") if part.strip()]
+    selected_variants = [
+        part.strip() for part in str(args.variants).split(",") if part.strip()
+    ]
     screen_from = str(args.screen_from or "").strip() or str(args.screen_date).strip()
     screen_to = str(args.screen_to or "").strip() or str(args.screen_date).strip()
-    validate_from = str(args.validate_from or "").strip() or str(args.validate_date).strip()
+    validate_from = (
+        str(args.validate_from or "").strip() or str(args.validate_date).strip()
+    )
     validate_to = str(args.validate_to or "").strip() or str(args.validate_date).strip()
     report = run_research(
         screen_from=screen_from,
@@ -974,8 +1070,12 @@ def main() -> None:
         finalist_count=max(1, int(args.finalists)),
         run_extended_hours_check=not bool(args.skip_extended_check),
         force_validate_all_selected=bool(args.force_validate_all_selected),
-        screen_trade_eval_mode=str(args.screen_trade_mode or "standard").strip().lower(),
-        validate_trade_eval_mode=str(args.validate_trade_mode or "intrabar_5s").strip().lower(),
+        screen_trade_eval_mode=str(args.screen_trade_mode or "standard")
+        .strip()
+        .lower(),
+        validate_trade_eval_mode=str(args.validate_trade_mode or "intrabar_5s")
+        .strip()
+        .lower(),
         start_timeout_sec=max(30.0, float(args.start_timeout_sec)),
     )
     out_path = Path(args.output)
@@ -996,7 +1096,10 @@ def main() -> None:
     if val_runs:
         top = sorted(
             val_runs,
-            key=lambda r: (_safe_float(r.get("robust_score"), -999), _safe_float(r.get("total_pnl_pct"), -999)),
+            key=lambda r: (
+                _safe_float(r.get("robust_score"), -999),
+                _safe_float(r.get("total_pnl_pct"), -999),
+            ),
             reverse=True,
         )[0]
         print(

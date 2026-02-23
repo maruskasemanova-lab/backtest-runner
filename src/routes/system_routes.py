@@ -12,7 +12,9 @@ from src.runtime_mode import is_serverless_environment, stateful_run_api_support
 router = APIRouter()
 _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_RANGE_DATE_RE = re.compile(r"^(?P<start>\d{4}-\d{2}-\d{2})_to_(?P<end>\d{4}-\d{2}-\d{2})$")
+_RANGE_DATE_RE = re.compile(
+    r"^(?P<start>\d{4}-\d{2}-\d{2})_to_(?P<end>\d{4}-\d{2}-\d{2})$"
+)
 _PROFILE_PLACEHOLDER_TOKENS = {"none", "null", "n/a", "na", "undefined", "-"}
 
 
@@ -46,8 +48,12 @@ def _run_reports_source_mode(request: Request) -> str:
     return "run_reports_store"
 
 
-def _external_report_dir_name(*, run_key: str, updated_at: Any, fallback_index: int) -> str:
-    normalized_run_key = re.sub(r"[^A-Za-z0-9_-]+", "_", str(run_key or "").strip()).strip("_")
+def _external_report_dir_name(
+    *, run_key: str, updated_at: Any, fallback_index: int
+) -> str:
+    normalized_run_key = re.sub(
+        r"[^A-Za-z0-9_-]+", "_", str(run_key or "").strip()
+    ).strip("_")
     if not normalized_run_key:
         normalized_run_key = f"run_{max(1, int(fallback_index))}"
 
@@ -87,7 +93,11 @@ def _build_diagnostic_summary(
         "from_cache": bool(from_cache),
         "keys": sorted(payload.keys()),
         "top_level_sizes": top_level_sizes,
-        "day_results_count": len(payload.get("day_results", [])) if isinstance(payload.get("day_results"), list) else 0,
+        "day_results_count": (
+            len(payload.get("day_results", []))
+            if isinstance(payload.get("day_results"), list)
+            else 0
+        ),
         "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 
@@ -106,7 +116,9 @@ def _coerce_non_negative_int(value: Any, *, field: str) -> int:
     try:
         parsed = int(value)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"{field} must be an integer >= 0.") from exc
+        raise HTTPException(
+            status_code=400, detail=f"{field} must be an integer >= 0."
+        ) from exc
     if parsed < 0:
         raise HTTPException(status_code=400, detail=f"{field} must be >= 0.")
     return parsed
@@ -155,58 +167,6 @@ def _collect_strategy_names_from_trades(trades: Any) -> List[str]:
     return sorted(set(names))
 
 
-def _collect_strategy_names_from_markers(markers: Any) -> List[str]:
-    if not isinstance(markers, list):
-        return []
-    names: List[str] = []
-    for marker in markers:
-        if not isinstance(marker, dict):
-            continue
-        strategy = str(marker.get("strategy") or "").strip()
-        if strategy:
-            names.append(strategy)
-    return sorted(set(names))
-
-
-def _normalize_strategy_token(value: Any) -> Optional[str]:
-    token = str(value or "").strip().lower()
-    if not token:
-        return None
-    token = re.sub(r"[^a-z0-9]+", "_", token).strip("_")
-    if not token:
-        return None
-    aliases = {
-        "momentumflow": "momentum_flow",
-        "momentum_flow": "momentum_flow",
-        "momentum": "momentum",
-        "vwapmagnet": "vwap_magnet",
-        "vwap_magnet": "vwap_magnet",
-        "absorptionreversal": "absorption_reversal",
-        "absorption_reversal": "absorption_reversal",
-        "pullback": "pullback",
-        "adaptive": "adaptive",
-        "exhaustionfade": "exhaustion_fade",
-        "exhaustion_fade": "exhaustion_fade",
-    }
-    return aliases.get(token, token)
-
-
-def _expand_strategy_aliases(token: str) -> Set[str]:
-    canonical = _normalize_strategy_token(token)
-    if not canonical:
-        return set()
-    alias_map: Dict[str, Set[str]] = {
-        "momentum_flow": {"momentum_flow", "momentum"},
-        "momentum": {"momentum", "momentum_flow"},
-        "vwap_magnet": {"vwap_magnet"},
-        "absorption_reversal": {"absorption_reversal"},
-        "pullback": {"pullback"},
-        "adaptive": {"adaptive"},
-        "exhaustion_fade": {"exhaustion_fade"},
-    }
-    return set(alias_map.get(canonical, {canonical}))
-
-
 def _normalize_profile_token(value: Any) -> Optional[str]:
     token = str(value).strip() if value is not None else ""
     if not token:
@@ -225,9 +185,21 @@ def _first_profile_token(*values: Any) -> Optional[str]:
 
 
 def _extract_profile_metadata(payload: Dict[str, Any]) -> Dict[str, Optional[str]]:
-    report_meta = payload.get("report_metadata", {}) if isinstance(payload.get("report_metadata"), dict) else {}
-    aos_applied = payload.get("aos_applied", {}) if isinstance(payload.get("aos_applied"), dict) else {}
-    execution_config = payload.get("execution_config", {}) if isinstance(payload.get("execution_config"), dict) else {}
+    report_meta = (
+        payload.get("report_metadata", {})
+        if isinstance(payload.get("report_metadata"), dict)
+        else {}
+    )
+    aos_applied = (
+        payload.get("aos_applied", {})
+        if isinstance(payload.get("aos_applied"), dict)
+        else {}
+    )
+    execution_config = (
+        payload.get("execution_config", {})
+        if isinstance(payload.get("execution_config"), dict)
+        else {}
+    )
     if not aos_applied and isinstance(report_meta.get("aos_applied"), dict):
         aos_applied = report_meta.get("aos_applied", {})
     unified_meta = (
@@ -423,7 +395,9 @@ def _expand_day_range(start: str, end: str) -> List[str]:
 
 
 def _extract_entry_reason(marker: Dict[str, Any]) -> Optional[str]:
-    details = marker.get("details", {}) if isinstance(marker.get("details"), dict) else {}
+    details = (
+        marker.get("details", {}) if isinstance(marker.get("details"), dict) else {}
+    )
     reasoning = str(details.get("reasoning") or "").strip()
     if reasoning:
         return reasoning
@@ -435,7 +409,7 @@ def _extract_entry_reason(marker: Dict[str, Any]) -> Optional[str]:
     idx = description.find(marker_token)
     if idx < 0:
         return None
-    reason = description[idx + len(marker_token):].strip()
+    reason = description[idx + len(marker_token) :].strip()
     confidence_token = "| Confidence:"
     confidence_idx = reason.find(confidence_token)
     if confidence_idx >= 0:
@@ -444,7 +418,9 @@ def _extract_entry_reason(marker: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_exit_reason(marker: Dict[str, Any]) -> Optional[str]:
-    details = marker.get("details", {}) if isinstance(marker.get("details"), dict) else {}
+    details = (
+        marker.get("details", {}) if isinstance(marker.get("details"), dict) else {}
+    )
     exit_reason = str(details.get("exit_reason") or "").strip()
     if exit_reason:
         return exit_reason
@@ -480,7 +456,12 @@ def _build_exit_reason_map(markers: Any) -> Dict[str, str]:
         if not isinstance(marker, dict):
             continue
         marker_type = str(marker.get("marker_type") or "").strip()
-        if marker_type not in {"exit_executed", "stop_loss_hit", "take_profit_hit", "time_exit"}:
+        if marker_type not in {
+            "exit_executed",
+            "stop_loss_hit",
+            "take_profit_hit",
+            "time_exit",
+        }:
             continue
         reason = _extract_exit_reason(marker)
         if not reason:
@@ -549,20 +530,40 @@ def _build_history_day_rows(
         return []
     ticker = str(payload.get("ticker") or "").strip().upper()
     date_label = str(payload.get("date") or "").strip()
-    saved_at = _normalize_iso_timestamp(report_saved_at) or _parse_report_saved_at(report_dir_name)
-    markers = payload.get("markers", []) if isinstance(payload.get("markers"), list) else []
+    saved_at = _normalize_iso_timestamp(report_saved_at) or _parse_report_saved_at(
+        report_dir_name
+    )
+    markers = (
+        payload.get("markers", []) if isinstance(payload.get("markers"), list) else []
+    )
     session_summary = payload.get("session_summary", {})
     if not isinstance(session_summary, dict):
         session_summary = {}
-    trades = session_summary.get("trades", []) if isinstance(session_summary.get("trades"), list) else []
-    execution_config = payload.get("execution_config", {}) if isinstance(payload.get("execution_config"), dict) else {}
-    aos_applied = payload.get("aos_applied", {}) if isinstance(payload.get("aos_applied"), dict) else {}
+    trades = (
+        session_summary.get("trades", [])
+        if isinstance(session_summary.get("trades"), list)
+        else []
+    )
+    execution_config = (
+        payload.get("execution_config", {})
+        if isinstance(payload.get("execution_config"), dict)
+        else {}
+    )
+    aos_applied = (
+        payload.get("aos_applied", {})
+        if isinstance(payload.get("aos_applied"), dict)
+        else {}
+    )
     profile_meta = _extract_profile_metadata(payload)
     entry_reasons = _build_entry_reason_map(markers)
     exit_reasons = _build_exit_reason_map(markers)
     marker_strategy_by_day = _build_marker_strategy_names_by_day(markers)
-    signal_markers_by_day = _count_markers_by_day(markers, marker_types={"signal_generated"})
-    regime_markers_by_day = _count_markers_by_day(markers, marker_types={"regime_detected"})
+    signal_markers_by_day = _count_markers_by_day(
+        markers, marker_types={"signal_generated"}
+    )
+    regime_markers_by_day = _count_markers_by_day(
+        markers, marker_types={"regime_detected"}
+    )
     run_signals = sum(signal_markers_by_day.values())
     run_regime_evaluations = sum(regime_markers_by_day.values())
     run_processed_bars = _safe_optional_int(payload.get("processed_bars"))
@@ -575,7 +576,9 @@ def _build_history_day_rows(
     if run_total_trades is None and trades:
         run_total_trades = len(trades)
     run_total_pnl_pct = _safe_optional_float(session_summary.get("total_pnl_pct"))
-    run_total_pnl_dollars = _safe_optional_float(session_summary.get("total_pnl_dollars"))
+    run_total_pnl_dollars = _safe_optional_float(
+        session_summary.get("total_pnl_dollars")
+    )
     range_days: List[str] = []
     day_from_label = _parse_run_day_from_label(date_label)
     if day_from_label:
@@ -641,7 +644,9 @@ def _build_history_day_rows(
             if strategy_name:
                 day_strategy_names.add(strategy_name)
         pnl_pct = sum(_safe_float(item.get("pnl_pct"), 0.0) for item in day_trades)
-        pnl_dollars = sum(_safe_float(item.get("pnl_dollars"), 0.0) for item in day_trades)
+        pnl_dollars = sum(
+            _safe_float(item.get("pnl_dollars"), 0.0) for item in day_trades
+        )
         rows.append(
             {
                 "date": day,
@@ -674,8 +679,12 @@ def _build_history_day_rows(
                 "unified_profile_name": profile_meta.get("unified_profile_name"),
                 "adaptive_profile_id": profile_meta.get("adaptive_profile_id"),
                 "adaptive_profile_name": profile_meta.get("adaptive_profile_name"),
-                "strategy_combo_profile_id": profile_meta.get("strategy_combo_profile_id"),
-                "strategy_combo_profile_name": profile_meta.get("strategy_combo_profile_name"),
+                "strategy_combo_profile_id": profile_meta.get(
+                    "strategy_combo_profile_id"
+                ),
+                "strategy_combo_profile_name": profile_meta.get(
+                    "strategy_combo_profile_name"
+                ),
             }
         )
     return rows
@@ -728,7 +737,13 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
             bucket["total_bars"] += row_total_bars
             bucket["total_bars_known_runs"] += 1
         bucket["trade_details"].extend(
-            item for item in (row.get("trade_details") if isinstance(row.get("trade_details"), list) else []) if isinstance(item, dict)
+            item
+            for item in (
+                row.get("trade_details")
+                if isinstance(row.get("trade_details"), list)
+                else []
+            )
+            if isinstance(item, dict)
         )
         for name in row.get("strategy_names", []):
             token = str(name or "").strip()
@@ -746,10 +761,14 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
         adaptive_profile_name = str(row.get("adaptive_profile_name") or "").strip()
         if adaptive_profile_name:
             bucket["adaptive_profile_names"].add(adaptive_profile_name)
-        strategy_combo_profile_id = str(row.get("strategy_combo_profile_id") or "").strip()
+        strategy_combo_profile_id = str(
+            row.get("strategy_combo_profile_id") or ""
+        ).strip()
         if strategy_combo_profile_id:
             bucket["strategy_combo_profile_ids"].add(strategy_combo_profile_id)
-        strategy_combo_profile_name = str(row.get("strategy_combo_profile_name") or "").strip()
+        strategy_combo_profile_name = str(
+            row.get("strategy_combo_profile_name") or ""
+        ).strip()
         if strategy_combo_profile_name:
             bucket["strategy_combo_profile_names"].add(strategy_combo_profile_name)
         profile_match_mode = str(row.get("profile_match_mode") or "").strip()
@@ -772,12 +791,20 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
                 "total_bars": _safe_optional_int(row.get("total_bars")),
                 "run_total_trades": _safe_optional_int(row.get("run_total_trades")),
                 "run_total_pnl_pct": _safe_optional_float(row.get("run_total_pnl_pct")),
-                "run_total_pnl_dollars": _safe_optional_float(row.get("run_total_pnl_dollars")),
+                "run_total_pnl_dollars": _safe_optional_float(
+                    row.get("run_total_pnl_dollars")
+                ),
                 "run_signals": _safe_optional_int(row.get("run_signals")),
-                "run_regime_evaluations": _safe_optional_int(row.get("run_regime_evaluations")),
+                "run_regime_evaluations": _safe_optional_int(
+                    row.get("run_regime_evaluations")
+                ),
                 "run_processed_bars": _safe_optional_int(row.get("run_processed_bars")),
                 "run_total_bars": _safe_optional_int(row.get("run_total_bars")),
-                "strategy_names": row.get("strategy_names") if isinstance(row.get("strategy_names"), list) else [],
+                "strategy_names": (
+                    row.get("strategy_names")
+                    if isinstance(row.get("strategy_names"), list)
+                    else []
+                ),
                 "unified_profile_id": row.get("unified_profile_id"),
                 "unified_profile_name": row.get("unified_profile_name"),
                 "adaptive_profile_id": row.get("adaptive_profile_id"),
@@ -785,8 +812,16 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
                 "strategy_combo_profile_id": row.get("strategy_combo_profile_id"),
                 "strategy_combo_profile_name": row.get("strategy_combo_profile_name"),
                 "profile_match_mode": row.get("profile_match_mode"),
-                "aos_applied": row.get("aos_applied") if isinstance(row.get("aos_applied"), dict) else {},
-                "execution_config": row.get("execution_config") if isinstance(row.get("execution_config"), dict) else {},
+                "aos_applied": (
+                    row.get("aos_applied")
+                    if isinstance(row.get("aos_applied"), dict)
+                    else {}
+                ),
+                "execution_config": (
+                    row.get("execution_config")
+                    if isinstance(row.get("execution_config"), dict)
+                    else {}
+                ),
             }
         )
 
@@ -813,8 +848,12 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
         unified_profile_names = sorted(bucket.get("unified_profile_names", set()))
         adaptive_profile_ids = sorted(bucket.get("adaptive_profile_ids", set()))
         adaptive_profile_names = sorted(bucket.get("adaptive_profile_names", set()))
-        strategy_combo_profile_ids = sorted(bucket.get("strategy_combo_profile_ids", set()))
-        strategy_combo_profile_names = sorted(bucket.get("strategy_combo_profile_names", set()))
+        strategy_combo_profile_ids = sorted(
+            bucket.get("strategy_combo_profile_ids", set())
+        )
+        strategy_combo_profile_names = sorted(
+            bucket.get("strategy_combo_profile_names", set())
+        )
         profile_match_modes = sorted(bucket.get("profile_match_modes", set()))
         row: Dict[str, Any] = {
             "date": day,
@@ -848,19 +887,35 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
             "unified_profile_id": _resolve_profile_values(set(unified_profile_ids)),
             "unified_profile_name": _resolve_profile_values(set(unified_profile_names)),
             "adaptive_profile_id": _resolve_profile_values(set(adaptive_profile_ids)),
-            "adaptive_profile_name": _resolve_profile_values(set(adaptive_profile_names)),
-            "strategy_combo_profile_id": _resolve_profile_values(set(strategy_combo_profile_ids)),
-            "strategy_combo_profile_name": _resolve_profile_values(set(strategy_combo_profile_names)),
+            "adaptive_profile_name": _resolve_profile_values(
+                set(adaptive_profile_names)
+            ),
+            "strategy_combo_profile_id": _resolve_profile_values(
+                set(strategy_combo_profile_ids)
+            ),
+            "strategy_combo_profile_name": _resolve_profile_values(
+                set(strategy_combo_profile_names)
+            ),
         }
         if len(runs) == 1:
             row["aos_applied"] = runs[0].get("aos_applied", {})
             row["execution_config"] = runs[0].get("execution_config", {})
-            row["run_total_trades"] = _safe_optional_int(runs[0].get("run_total_trades"))
-            row["run_total_pnl_pct"] = _safe_optional_float(runs[0].get("run_total_pnl_pct"))
-            row["run_total_pnl_dollars"] = _safe_optional_float(runs[0].get("run_total_pnl_dollars"))
+            row["run_total_trades"] = _safe_optional_int(
+                runs[0].get("run_total_trades")
+            )
+            row["run_total_pnl_pct"] = _safe_optional_float(
+                runs[0].get("run_total_pnl_pct")
+            )
+            row["run_total_pnl_dollars"] = _safe_optional_float(
+                runs[0].get("run_total_pnl_dollars")
+            )
             row["run_signals"] = _safe_optional_int(runs[0].get("run_signals"))
-            row["run_regime_evaluations"] = _safe_optional_int(runs[0].get("run_regime_evaluations"))
-            row["run_processed_bars"] = _safe_optional_int(runs[0].get("run_processed_bars"))
+            row["run_regime_evaluations"] = _safe_optional_int(
+                runs[0].get("run_regime_evaluations")
+            )
+            row["run_processed_bars"] = _safe_optional_int(
+                runs[0].get("run_processed_bars")
+            )
             row["run_total_bars"] = _safe_optional_int(runs[0].get("run_total_bars"))
         else:
             row["aos_applied"] = {}
@@ -881,9 +936,15 @@ def _compute_calendar_metrics(day_results: List[Dict[str, Any]]) -> Dict[str, An
     valid_days = sum(1 for item in day_results if item.get("success") is not False)
     failed_days = total_days - valid_days
     total_trades = sum(_safe_int(item.get("total_trades"), 0) for item in day_results)
-    total_pnl_pct = sum(_safe_float(item.get("pnl_pct"), 0.0) for item in day_results if item.get("success") is not False)
+    total_pnl_pct = sum(
+        _safe_float(item.get("pnl_pct"), 0.0)
+        for item in day_results
+        if item.get("success") is not False
+    )
     total_pnl_dollars = sum(
-        _safe_float(item.get("pnl_dollars"), 0.0) for item in day_results if item.get("success") is not False
+        _safe_float(item.get("pnl_dollars"), 0.0)
+        for item in day_results
+        if item.get("success") is not False
     )
     return {
         "total_days": total_days,
@@ -895,77 +956,6 @@ def _compute_calendar_metrics(day_results: List[Dict[str, Any]]) -> Dict[str, An
     }
 
 
-def _extract_profile_strategy_tokens(profile_payload: Dict[str, Any]) -> Set[str]:
-    tokens: Set[str] = set()
-    candidate = profile_payload.get("candidate", {}) if isinstance(profile_payload.get("candidate"), dict) else {}
-    enabled = candidate.get("enabled_strategies", [])
-    if isinstance(enabled, list):
-        for item in enabled:
-            normalized = _normalize_strategy_token(item)
-            if normalized:
-                tokens.update(_expand_strategy_aliases(normalized))
-
-    regime_map = candidate.get("regime_strategy_map", {})
-    if isinstance(regime_map, dict):
-        for values in regime_map.values():
-            if not isinstance(values, list):
-                continue
-            for item in values:
-                normalized = _normalize_strategy_token(item)
-                if normalized:
-                    tokens.update(_expand_strategy_aliases(normalized))
-    return tokens
-
-
-def _load_adaptive_profile_strategy_hints(ticker: str) -> Dict[str, Set[str]]:
-    config_path = _project_root() / "aos_optimization" / "aos_config.json"
-    if not config_path.exists() or not config_path.is_file():
-        return {}
-    try:
-        raw = config_path.read_text(encoding="utf-8")
-        payload = json.loads(raw)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    tickers_payload = payload.get("tickers", {}) if isinstance(payload.get("tickers"), dict) else {}
-    ticker_payload = tickers_payload.get(ticker, {}) if isinstance(tickers_payload.get(ticker), dict) else {}
-    profiles = ticker_payload.get("adaptive_tuner_profiles", [])
-    if not isinstance(profiles, list):
-        return {}
-
-    hints: Dict[str, Set[str]] = {}
-    for profile in profiles:
-        if not isinstance(profile, dict):
-            continue
-        profile_id = str(profile.get("profile_id") or "").strip()
-        if not profile_id:
-            continue
-        tokens = _extract_profile_strategy_tokens(profile)
-        if tokens:
-            hints[profile_id] = tokens
-    return hints
-
-
-def _collect_report_strategy_tokens(payload: Dict[str, Any]) -> Set[str]:
-    session_summary = payload.get("session_summary", {})
-    if not isinstance(session_summary, dict):
-        session_summary = {}
-    trades = session_summary.get("trades", []) if isinstance(session_summary.get("trades"), list) else []
-    markers = payload.get("markers", []) if isinstance(payload.get("markers"), list) else []
-
-    names: Set[str] = set()
-    for item in _collect_strategy_names_from_trades(trades):
-        normalized = _normalize_strategy_token(item)
-        if normalized:
-            names.add(normalized)
-    for item in _collect_strategy_names_from_markers(markers):
-        normalized = _normalize_strategy_token(item)
-        if normalized:
-            names.add(normalized)
-    return names
-
-
 def _report_has_closed_trades(payload: Dict[str, Any]) -> bool:
     session_summary = payload.get("session_summary", {})
     if not isinstance(session_summary, dict):
@@ -975,21 +965,6 @@ def _report_has_closed_trades(payload: Dict[str, Any]) -> bool:
         return True
     total_trades = _safe_int(session_summary.get("total_trades"), 0)
     return total_trades > 0
-
-
-def _match_profile_strategy_hint(
-    *,
-    requested_profile_id: str,
-    profile_strategy_hints: Dict[str, Set[str]],
-    report_strategy_tokens: Set[str],
-) -> bool:
-    requested = str(requested_profile_id or "").strip()
-    if not requested or not report_strategy_tokens:
-        return False
-    tokens = profile_strategy_hints.get(requested)
-    if not tokens:
-        return False
-    return len(tokens.intersection(report_strategy_tokens)) > 0
 
 
 def _load_aos_adaptive_profile_options(ticker: str) -> List[Dict[str, Any]]:
@@ -1004,9 +979,18 @@ def _load_aos_adaptive_profile_options(ticker: str) -> List[Dict[str, Any]]:
     if not isinstance(payload, dict):
         return []
 
-    tickers_payload = payload.get("tickers", {}) if isinstance(payload.get("tickers"), dict) else {}
-    ticker_payload = tickers_payload.get(ticker, {}) if isinstance(tickers_payload.get(ticker), dict) else {}
-    active_profile_id = str(ticker_payload.get("active_adaptive_tuner_profile_id") or "").strip() or None
+    tickers_payload = (
+        payload.get("tickers", {}) if isinstance(payload.get("tickers"), dict) else {}
+    )
+    ticker_payload = (
+        tickers_payload.get(ticker, {})
+        if isinstance(tickers_payload.get(ticker), dict)
+        else {}
+    )
+    active_profile_id = (
+        str(ticker_payload.get("active_adaptive_tuner_profile_id") or "").strip()
+        or None
+    )
     profiles = ticker_payload.get("adaptive_tuner_profiles", [])
     if not isinstance(profiles, list):
         profiles = []
@@ -1036,7 +1020,9 @@ def _load_aos_adaptive_profile_options(ticker: str) -> List[Dict[str, Any]]:
             continue
         if not existing.get("profile_name") and profile_name:
             existing["profile_name"] = profile_name
-        existing["active"] = bool(existing.get("active")) or bool(active_profile_id and active_profile_id == profile_id)
+        existing["active"] = bool(existing.get("active")) or bool(
+            active_profile_id and active_profile_id == profile_id
+        )
         existing_created_at = str(existing.get("latest_created_at") or "")
         if created_at and created_at > existing_created_at:
             existing["latest_created_at"] = created_at
@@ -1052,7 +1038,9 @@ def _load_aos_adaptive_profile_options(ticker: str) -> List[Dict[str, Any]]:
 
     options = list(collected.values())
     options.sort(key=lambda item: str(item.get("profile_id") or ""))
-    options.sort(key=lambda item: str(item.get("latest_created_at") or ""), reverse=True)
+    options.sort(
+        key=lambda item: str(item.get("latest_created_at") or ""), reverse=True
+    )
     options.sort(key=lambda item: 0 if bool(item.get("active")) else 1)
     return options
 
@@ -1069,9 +1057,17 @@ def _load_aos_unified_profile_options(ticker: str) -> List[Dict[str, Any]]:
     if not isinstance(payload, dict):
         return []
 
-    tickers_payload = payload.get("tickers", {}) if isinstance(payload.get("tickers"), dict) else {}
-    ticker_payload = tickers_payload.get(ticker, {}) if isinstance(tickers_payload.get(ticker), dict) else {}
-    active_profile_id = str(ticker_payload.get("active_unified_profile_id") or "").strip() or None
+    tickers_payload = (
+        payload.get("tickers", {}) if isinstance(payload.get("tickers"), dict) else {}
+    )
+    ticker_payload = (
+        tickers_payload.get(ticker, {})
+        if isinstance(tickers_payload.get(ticker), dict)
+        else {}
+    )
+    active_profile_id = (
+        str(ticker_payload.get("active_unified_profile_id") or "").strip() or None
+    )
     profiles = ticker_payload.get("unified_profiles", [])
     if not isinstance(profiles, list):
         profiles = []
@@ -1101,7 +1097,9 @@ def _load_aos_unified_profile_options(ticker: str) -> List[Dict[str, Any]]:
             continue
         if not existing.get("profile_name") and profile_name:
             existing["profile_name"] = profile_name
-        existing["active"] = bool(existing.get("active")) or bool(active_profile_id and active_profile_id == profile_id)
+        existing["active"] = bool(existing.get("active")) or bool(
+            active_profile_id and active_profile_id == profile_id
+        )
         existing_created_at = str(existing.get("latest_created_at") or "")
         if created_at and created_at > existing_created_at:
             existing["latest_created_at"] = created_at
@@ -1117,7 +1115,9 @@ def _load_aos_unified_profile_options(ticker: str) -> List[Dict[str, Any]]:
 
     options = list(collected.values())
     options.sort(key=lambda item: str(item.get("profile_id") or ""))
-    options.sort(key=lambda item: str(item.get("latest_created_at") or ""), reverse=True)
+    options.sort(
+        key=lambda item: str(item.get("latest_created_at") or ""), reverse=True
+    )
     options.sort(key=lambda item: 0 if bool(item.get("active")) else 1)
     return options
 
@@ -1163,7 +1163,11 @@ def _merge_profile_options(
 
     options = []
     for item in merged.values():
-        sources = sorted(item.get("sources", set())) if isinstance(item.get("sources"), set) else []
+        sources = (
+            sorted(item.get("sources", set()))
+            if isinstance(item.get("sources"), set)
+            else []
+        )
         options.append(
             {
                 "profile_id": item.get("profile_id"),
@@ -1174,7 +1178,9 @@ def _merge_profile_options(
             }
         )
     options.sort(key=lambda item: str(item.get("profile_id") or ""))
-    options.sort(key=lambda item: str(item.get("latest_created_at") or ""), reverse=True)
+    options.sort(
+        key=lambda item: str(item.get("latest_created_at") or ""), reverse=True
+    )
     options.sort(key=lambda item: 0 if bool(item.get("active")) else 1)
     return options
 
@@ -1205,7 +1211,9 @@ async def health():
 
 
 @router.get("/api/system/l2/runtime")
-async def get_l2_runtime(services: ApiServices = Depends(get_api_services)) -> Dict[str, Any]:
+async def get_l2_runtime(
+    services: ApiServices = Depends(get_api_services),
+) -> Dict[str, Any]:
     l2_features = services.l2_features
     l2_manager = services.l2_manager
     return {
@@ -1236,17 +1244,23 @@ async def update_l2_runtime(
         updated["iceberg_detection_enabled"] = enabled
 
     if "cache_max_tickers" in body:
-        value = _coerce_non_negative_int(body.get("cache_max_tickers"), field="cache_max_tickers")
+        value = _coerce_non_negative_int(
+            body.get("cache_max_tickers"), field="cache_max_tickers"
+        )
         setattr(l2_manager, "max_cached_tickers", value)
         updated["cache_max_tickers"] = value
 
     if "cache_max_rows" in body:
-        value = _coerce_non_negative_int(body.get("cache_max_rows"), field="cache_max_rows")
+        value = _coerce_non_negative_int(
+            body.get("cache_max_rows"), field="cache_max_rows"
+        )
         setattr(l2_manager, "max_cached_rows", value)
         updated["cache_max_rows"] = value
 
     if "cache_max_bytes" in body:
-        value = _coerce_non_negative_int(body.get("cache_max_bytes"), field="cache_max_bytes")
+        value = _coerce_non_negative_int(
+            body.get("cache_max_bytes"), field="cache_max_bytes"
+        )
         setattr(l2_manager, "max_cached_bytes", value)
         updated["cache_max_bytes"] = value
 
@@ -1293,11 +1307,15 @@ async def get_diagnostic_report(
 
     if not report_file.exists():
         relative = report_file.relative_to(_project_root())
-        raise HTTPException(status_code=404, detail=f"Diagnostic report not found: {relative}")
+        raise HTTPException(
+            status_code=404, detail=f"Diagnostic report not found: {relative}"
+        )
 
     if not report_file.is_file():
         relative = report_file.relative_to(_project_root())
-        raise HTTPException(status_code=400, detail=f"Diagnostic report path is not a file: {relative}")
+        raise HTTPException(
+            status_code=400, detail=f"Diagnostic report path is not a file: {relative}"
+        )
 
     store = _diagnostic_cache_store(request)
     payload: Optional[Dict[str, Any]] = None
@@ -1315,7 +1333,9 @@ async def get_diagnostic_report(
         read_cache = getattr(store, "get_diagnostic_payload_cache", None)
         if callable(build_key) and callable(read_cache):
             try:
-                cache_key = build_key(ticker=safe_ticker, profile=safe_profile, phase=phase)
+                cache_key = build_key(
+                    ticker=safe_ticker, profile=safe_profile, phase=phase
+                )
                 cached = read_cache(
                     cache_key=cache_key,
                     source_path=source_path,
@@ -1332,24 +1352,36 @@ async def get_diagnostic_report(
         try:
             raw = report_file.read_text(encoding="utf-8")
         except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to read diagnostic report: {exc}") from exc
+            raise HTTPException(
+                status_code=500, detail=f"Failed to read diagnostic report: {exc}"
+            ) from exc
 
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=500, detail=f"Diagnostic report is not valid JSON: {exc}") from exc
+            raise HTTPException(
+                status_code=500, detail=f"Diagnostic report is not valid JSON: {exc}"
+            ) from exc
 
         if not isinstance(parsed, dict):
-            raise HTTPException(status_code=500, detail="Diagnostic report root must be a JSON object.")
+            raise HTTPException(
+                status_code=500, detail="Diagnostic report root must be a JSON object."
+            )
         payload = parsed
 
-        write_cache = getattr(store, "upsert_diagnostic_payload_cache", None) if store is not None else None
+        write_cache = (
+            getattr(store, "upsert_diagnostic_payload_cache", None)
+            if store is not None
+            else None
+        )
         if callable(write_cache):
             try:
                 if not cache_key:
                     build_key = getattr(store, "diagnostic_cache_key", None)
                     if callable(build_key):
-                        cache_key = build_key(ticker=safe_ticker, profile=safe_profile, phase=phase)
+                        cache_key = build_key(
+                            ticker=safe_ticker, profile=safe_profile, phase=phase
+                        )
                 if cache_key:
                     write_cache(
                         cache_key=cache_key,
@@ -1399,7 +1431,9 @@ async def get_saved_run_history(
     safe_ticker = _sanitize_segment(ticker, field="ticker").upper()
     run_id_exact_filter = str(run_id or "").strip().lower()
     run_id_filter = str(run_id_contains or "").strip().lower()
-    requested_profile_id = _first_profile_token(unified_profile_id, adaptive_profile_id) or ""
+    requested_profile_id = (
+        _first_profile_token(unified_profile_id, adaptive_profile_id) or ""
+    )
 
     day_rows: List[Dict[str, Any]] = []
     matched_reports = 0
@@ -1425,7 +1459,9 @@ async def get_saved_run_history(
         payload_ticker = str(payload.get("ticker") or "").strip().upper()
         if payload_ticker != safe_ticker:
             return
-        normalized_saved_at = _normalize_iso_timestamp(report_saved_at) or _parse_report_saved_at(report_dir_name)
+        normalized_saved_at = _normalize_iso_timestamp(
+            report_saved_at
+        ) or _parse_report_saved_at(report_dir_name)
         current_latest = str(run_latest_saved_at.get(run_id_value) or "")
         if normalized_saved_at and normalized_saved_at > current_latest:
             run_latest_saved_at[run_id_value] = normalized_saved_at

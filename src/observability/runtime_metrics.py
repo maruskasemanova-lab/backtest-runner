@@ -40,7 +40,9 @@ class RuntimeMetrics:
         with self._lock:
             self._http_total += 1
             self._latency_ms.append(safe_duration)
-            self._status_counts[safe_status] = int(self._status_counts.get(safe_status, 0)) + 1
+            self._status_counts[safe_status] = (
+                int(self._status_counts.get(safe_status, 0)) + 1
+            )
             if safe_status >= 500:
                 self._http_5xx_total += 1
 
@@ -49,7 +51,9 @@ class RuntimeMetrics:
             sample = list(self._latency_ms)
             total = int(self._http_total)
             errors_5xx = int(self._http_5xx_total)
-            status_counts = {str(code): int(count) for code, count in self._status_counts.items()}
+            status_counts = {
+                str(code): int(count) for code, count in self._status_counts.items()
+            }
 
         p50 = _percentile(sample, 0.50)
         p95 = _percentile(sample, 0.95)

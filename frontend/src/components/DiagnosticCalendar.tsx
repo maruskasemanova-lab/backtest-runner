@@ -7,6 +7,9 @@ const monthFormatter = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
   timeZone: "UTC",
 });
+const DEFAULT_ACCOUNT_SIZE = 10_000;
+const DEFAULT_HISTORY_LIMIT = 5;
+const MAX_HISTORY_LIMIT = 5000;
 
 const toDateUtc = (value) => {
   if (!value || typeof value !== "string") return null;
@@ -36,6 +39,40 @@ const formatUsd = (value) => {
   return `${sign}$${numeric.toFixed(2)}`;
 };
 
+const resolveAccountSize = (...candidates) => {
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  }
+  return DEFAULT_ACCOUNT_SIZE;
+};
+
+const pnlPctFromDollars = (pnlDollars, accountSize) => {
+  const dollars = Number(pnlDollars);
+  const balance = Number(accountSize);
+  if (!Number.isFinite(dollars) || !Number.isFinite(balance) || balance <= 0) return 0;
+  return (dollars / balance) * 100;
+};
+
+const dayAccountSize = (dayResult) =>
+  resolveAccountSize(
+    dayResult?.execution_config?.account_size_usd,
+    dayResult?.runs?.[0]?.execution_config?.account_size_usd,
+    dayResult?.account_size_usd,
+  );
+
+const dayPnlPct = (dayResult) => pnlPctFromDollars(dayResult?.pnl_dollars, dayAccountSize(dayResult));
+
+const runAccountSize = (run) =>
+  resolveAccountSize(
+    run?.execution_config?.account_size_usd,
+    run?.account_size_usd,
+  );
+
+const runPnlPct = (run) => pnlPctFromDollars(run?.pnl_dollars, runAccountSize(run));
+const runTotalPnlPct = (run) => pnlPctFromDollars(run?.run_total_pnl_dollars, runAccountSize(run));
+const tradePnlPct = (trade) => pnlPctFromDollars(trade?.pnl_dollars, DEFAULT_ACCOUNT_SIZE);
+
 const toOptionalInt = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
@@ -63,8 +100,8 @@ const formatBarsPair = (processed, total) => {
 
 const normalizeHistoryLimit = (rawValue) => {
   const parsed = Number.parseInt(String(rawValue ?? ""), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 300;
-  return Math.min(parsed, 5000);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_HISTORY_LIMIT;
+  return Math.min(parsed, MAX_HISTORY_LIMIT);
 };
 
 const formatTimeUtc = (value) => {
@@ -249,7 +286,7 @@ const buildTradeSummary = (trade, index) => {
   const side = String(trade?.side || "").trim();
   if (strategy) parts.push(strategy);
   if (side) parts.push(side.toUpperCase());
-  parts.push(`${formatPct(trade?.pnl_pct)} / ${formatUsd(trade?.pnl_dollars)}`);
+  parts.push(`${formatPct(tradePnlPct(trade))} / ${formatUsd(trade?.pnl_dollars)}`);
   return parts.join(" | ");
 };
 
@@ -262,7 +299,7 @@ const buildDayTooltip = (isoDate, dayResult) => {
 
   const lines = [
     isoDate,
-    `Day PnL: ${formatPct(dayResult.pnl_pct)} (${formatUsd(dayResult.pnl_dollars)})`,
+    `Day PnL: ${formatPct(dayPnlPct(dayResult))} (${formatUsd(dayResult.pnl_dollars)})`,
     `Trades: ${Number(dayResult.total_trades ?? 0)}`,
   ];
   const runCount = Number(
@@ -287,7 +324,7 @@ const buildDayTooltip = (isoDate, dayResult) => {
     const exitReason = formatReasonLabel(trade?.exit_reason);
     if (entryReason) lines.push(`#${index + 1} Entry: ${entryReason}`);
     if (exitReason) lines.push(`#${index + 1} Exit: ${exitReason}`);
-    lines.push(`#${index + 1} PnL: ${formatPct(trade?.pnl_pct)} (${formatUsd(trade?.pnl_dollars)})`);
+    lines.push(`#${index + 1} PnL: ${formatPct(tradePnlPct(trade))} (${formatUsd(trade?.pnl_dollars)})`);
   });
 
   if (trades.length > 3) {
@@ -332,7 +369,7 @@ const getDayCellStyle = (dayResult, maxAbsPnlPct) => {
     };
   }
 
-  const pnlPct = Number(dayResult.pnl_pct ?? 0);
+  const pnlPct = dayPnlPct(dayResult);
   if (!Number.isFinite(pnlPct) || pnlPct === 0) return {};
 
   const scaleBase = maxAbsPnlPct > 0 ? maxAbsPnlPct : 1;
@@ -353,11 +390,11 @@ const getDayCellStyle = (dayResult, maxAbsPnlPct) => {
 
 function DiagnosticCalendar() {
   const [draftTicker, setDraftTicker] = useState("MU");
-  const [draftHistoryLimit, setDraftHistoryLimit] = useState("500");
+  const [draftHistoryLimit, setDraftHistoryLimit] = useState(String(DEFAULT_HISTORY_LIMIT));
   const [draftAdaptiveProfileId, setDraftAdaptiveProfileId] = useState("");
   const [draftRunId, setDraftRunId] = useState("");
   const [queryTicker, setQueryTicker] = useState("MU");
-  const [queryHistoryLimit, setQueryHistoryLimit] = useState(500);
+  const [queryHistoryLimit, setQueryHistoryLimit] = useState(DEFAULT_HISTORY_LIMIT);
   const [queryAdaptiveProfileId, setQueryAdaptiveProfileId] = useState("");
   const [queryRunId, setQueryRunId] = useState("");
   const [report, setReport] = useState(null);
@@ -459,7 +496,7 @@ function DiagnosticCalendar() {
   const maxAbsPnlPct = useMemo(() => {
     let maxValue = 0;
     successfulDays.forEach((item) => {
-      const pnl = Number(item.pnl_pct ?? 0);
+      const pnl = dayPnlPct(item);
       if (Number.isFinite(pnl)) maxValue = Math.max(maxValue, Math.abs(pnl));
     });
     return maxValue;
@@ -489,14 +526,11 @@ function DiagnosticCalendar() {
     const totalDays = dayResults.length;
     const validDays = dayResults.filter((item) => item.success !== false).length;
     const totalTrades = dayResults.reduce((sum, item) => sum + Number(item?.total_trades ?? 0), 0);
-    const totalPnlPct = dayResults.reduce((sum, item) => {
-      if (item?.success === false) return sum;
-      return sum + Number(item?.pnl_pct ?? 0);
-    }, 0);
     const totalPnlDollars = dayResults.reduce((sum, item) => {
       if (item?.success === false) return sum;
       return sum + Number(item?.pnl_dollars ?? 0);
     }, 0);
+    const totalPnlPct = pnlPctFromDollars(totalPnlDollars, DEFAULT_ACCOUNT_SIZE);
     return {
       failedDays,
       totalDays,
@@ -519,7 +553,7 @@ function DiagnosticCalendar() {
       if (firstFailed?.date) return firstFailed.date;
       const strongest = successfulDays
         .slice()
-        .sort((a, b) => Math.abs(Number(b.pnl_pct ?? 0)) - Math.abs(Number(a.pnl_pct ?? 0)))[0];
+        .sort((a, b) => Math.abs(dayPnlPct(b)) - Math.abs(dayPnlPct(a)))[0];
       return strongest?.date || dayResults[0].date;
     });
   }, [dayResults, dayResultMap, successfulDays]);
@@ -604,7 +638,9 @@ function DiagnosticCalendar() {
     });
   }, [selectedResult, selectedRunRecord]);
 
-  const dayDetailPnlPct = Number(selectedRunRecord?.pnl_pct ?? selectedResult?.pnl_pct ?? 0);
+  const dayDetailPnlPct = selectedRunRecord
+    ? runPnlPct(selectedRunRecord)
+    : dayPnlPct(selectedResult);
   const dayDetailPnlDollars = Number(selectedRunRecord?.pnl_dollars ?? selectedResult?.pnl_dollars ?? 0);
   const dayDetailTrades = Number(
     selectedRunRecord?.total_trades
@@ -624,7 +660,9 @@ function DiagnosticCalendar() {
     ?? toOptionalInt(selectedResult?.total_bars);
 
   const runDetailTrades = toOptionalInt(selectedRunRecord?.run_total_trades);
-  const runDetailPnlPct = toOptionalNumber(selectedRunRecord?.run_total_pnl_pct);
+  const runDetailPnlPct = selectedRunRecord
+    ? runTotalPnlPct(selectedRunRecord)
+    : null;
   const runDetailPnlDollars = toOptionalNumber(selectedRunRecord?.run_total_pnl_dollars);
   const runDetailSignals = toOptionalInt(selectedRunRecord?.run_signals);
   const runDetailRegimeEvals = toOptionalInt(selectedRunRecord?.run_regime_evaluations);
@@ -743,7 +781,7 @@ function DiagnosticCalendar() {
               <input
                 type="number"
                 min="1"
-                max="5000"
+                max={MAX_HISTORY_LIMIT}
                 step="1"
                 value={draftHistoryLimit}
                 onChange={(e) => setDraftHistoryLimit(e.target.value)}
@@ -856,7 +894,7 @@ function DiagnosticCalendar() {
                     const result = cell.result;
                     const isSelected = selectedDate === cell.isoDate;
                     const isFailed = result?.success === false;
-                    const pnl = Number(result?.pnl_pct ?? 0);
+                    const pnl = dayPnlPct(result);
                     const pnlClass =
                       isFailed
                         ? "failed"
@@ -891,7 +929,7 @@ function DiagnosticCalendar() {
                         {result ? (
                           <>
                             <span className="day-pnl">
-                              {result.success === false ? "ERR" : formatPct(result.pnl_pct ?? 0)}
+                              {result.success === false ? "ERR" : formatPct(dayPnlPct(result))}
                             </span>
                             <span className={`day-pnl-usd ${result.success === false ? "muted" : ""}`}>
                               {result.success === false ? "-" : formatUsd(result.pnl_dollars ?? 0)}
@@ -1071,7 +1109,7 @@ function DiagnosticCalendar() {
                               <summary>
                                 {String(run?.run_id || `run-${index + 1}`)} | T:{Number(run?.total_trades ?? 0)}
                                 {" | "}
-                                {formatPct(run?.pnl_pct)} / {formatUsd(run?.pnl_dollars)}
+                                {formatPct(runPnlPct(run))} / {formatUsd(run?.pnl_dollars)}
                                 {runSummaryProfile ? ` | P:${runSummaryProfile}` : ""}
                               </summary>
                               <div className="diagnostic-trade-content">
@@ -1103,14 +1141,14 @@ function DiagnosticCalendar() {
                                   <span>Run PnL</span>
                                   <strong
                                     className={
-                                      Number(run?.run_total_pnl_pct ?? 0) < 0
+                                      runTotalPnlPct(run) < 0
                                         ? "negative"
-                                        : Number(run?.run_total_pnl_pct ?? 0) > 0
+                                        : runTotalPnlPct(run) > 0
                                           ? "positive"
                                           : ""
                                     }
                                   >
-                                    {formatPct(run?.run_total_pnl_pct)} / {formatUsd(run?.run_total_pnl_dollars)}
+                                    {formatPct(runTotalPnlPct(run))} / {formatUsd(run?.run_total_pnl_dollars)}
                                   </strong>
                                 </div>
                                 {Array.isArray(run?.strategy_names) && run.strategy_names.length ? (
@@ -1199,8 +1237,8 @@ function DiagnosticCalendar() {
                               </div>
                               <div className="diagnostic-row">
                                 <span>PnL</span>
-                                <strong className={Number(trade?.pnl_pct ?? 0) < 0 ? "negative" : Number(trade?.pnl_pct ?? 0) > 0 ? "positive" : ""}>
-                                  {formatPct(trade?.pnl_pct)} / {formatUsd(trade?.pnl_dollars)}
+                                <strong className={Number(trade?.pnl_dollars ?? 0) < 0 ? "negative" : Number(trade?.pnl_dollars ?? 0) > 0 ? "positive" : ""}>
+                                  {formatPct(tradePnlPct(trade))} / {formatUsd(trade?.pnl_dollars)}
                                 </strong>
                               </div>
                             </div>

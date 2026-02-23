@@ -11,7 +11,9 @@ def test_runtime_dirs_fallback_when_settings_paths_are_stale(monkeypatch):
             if existing_only:
                 return []
             return [
-                Path("/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/data/l2"),
+                Path(
+                    "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/data/l2"
+                ),
                 Path("/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/data"),
             ]
 

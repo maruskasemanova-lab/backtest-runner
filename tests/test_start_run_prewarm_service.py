@@ -39,7 +39,9 @@ def _build_request(**overrides):
 
 def _build_deps():
     return SimpleNamespace(
-        logger=SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
+        logger=SimpleNamespace(
+            info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+        ),
         data_loader=SimpleNamespace(),
         databento_svc=SimpleNamespace(),
         get_discovery=lambda: SimpleNamespace(),
@@ -82,7 +84,11 @@ def test_prewarm_run_data_respects_aos_l2_defaults(monkeypatch):
     def _fake_enrich_bars_with_l2(**kwargs):
         captured["requested_l2_confirm"] = kwargs.get("requested_l2_confirm")
         bars = kwargs.get("bars", [])
-        return bars, {"covered_minutes": 1, "bars_with_l2": len(bars), "has_l2": True}, False
+        return (
+            bars,
+            {"covered_minutes": 1, "bars_with_l2": len(bars), "has_l2": True},
+            False,
+        )
 
     def _fake_load_reference_bars_map(**kwargs):
         return {"2026-02-03T14:30:00+00:00": {"ticker": "QQQ"}}
@@ -90,7 +96,9 @@ def test_prewarm_run_data_respects_aos_l2_defaults(monkeypatch):
     monkeypatch.setattr(svc, "load_run_bars", _fake_load_run_bars)
     monkeypatch.setattr(svc, "enrich_bars_with_l2", _fake_enrich_bars_with_l2)
     monkeypatch.setattr(svc, "load_reference_bars_map", _fake_load_reference_bars_map)
-    monkeypatch.setattr(svc, "get_start_run_data_cache_stats", lambda: {"memory": {}, "disk": {}})
+    monkeypatch.setattr(
+        svc, "get_start_run_data_cache_stats", lambda: {"memory": {}, "disk": {}}
+    )
     monkeypatch.setattr(svc, "get_prewarm_result", lambda key: None)
     monkeypatch.setattr(svc, "set_prewarm_result", lambda key, payload: None)
 
@@ -137,7 +145,11 @@ def test_prewarm_run_data_uses_result_cache_hit(monkeypatch):
         "cache_stats": {"memory": {}, "disk": {}},
     }
     monkeypatch.setattr(svc, "get_prewarm_result", lambda key: dict(cached_payload))
-    monkeypatch.setattr(svc, "get_start_run_data_cache_stats", lambda: {"memory": {"prewarm_results": 1}, "disk": {}})
+    monkeypatch.setattr(
+        svc,
+        "get_start_run_data_cache_stats",
+        lambda: {"memory": {"prewarm_results": 1}, "disk": {}},
+    )
 
     def _should_not_run(**kwargs):
         raise AssertionError("prewarm cache hit should bypass heavy loaders")
@@ -182,9 +194,12 @@ def test_prewarm_run_data_ticker_scope_resolves_full_coverage(monkeypatch):
         ),
     )
     monkeypatch.setattr(svc, "load_reference_bars_map", lambda **kwargs: {})
-    monkeypatch.setattr(svc, "get_start_run_data_cache_stats", lambda: {"memory": {}, "disk": {}})
+    monkeypatch.setattr(
+        svc, "get_start_run_data_cache_stats", lambda: {"memory": {}, "disk": {}}
+    )
     monkeypatch.setattr(svc, "get_prewarm_result", lambda key: None)
     monkeypatch.setattr(svc, "set_prewarm_result", lambda key, payload: None)
+    monkeypatch.setattr(svc, "PREWARM_TICKER_SCOPE_L2_FORCE", True)
 
     req = _build_request(
         prewarm_scope="ticker",
@@ -210,7 +225,7 @@ def test_prewarm_run_data_ticker_scope_resolves_full_coverage(monkeypatch):
     assert captured["range_end"] == "2026-02-10"
 
 
-def test_prewarm_run_data_ticker_scope_disables_l2_for_large_ranges(monkeypatch):
+def test_prewarm_run_data_ticker_scope_rejects_l2_for_large_ranges(monkeypatch):
     captured = {}
 
     def _fake_load_run_bars(**kwargs):
@@ -237,7 +252,9 @@ def test_prewarm_run_data_ticker_scope_disables_l2_for_large_ranges(monkeypatch)
     monkeypatch.setattr(svc, "load_run_bars", _fake_load_run_bars)
     monkeypatch.setattr(svc, "enrich_bars_with_l2", _fake_enrich_bars_with_l2)
     monkeypatch.setattr(svc, "load_reference_bars_map", lambda **kwargs: {})
-    monkeypatch.setattr(svc, "get_start_run_data_cache_stats", lambda: {"memory": {}, "disk": {}})
+    monkeypatch.setattr(
+        svc, "get_start_run_data_cache_stats", lambda: {"memory": {}, "disk": {}}
+    )
     monkeypatch.setattr(svc, "get_prewarm_result", lambda key: None)
     monkeypatch.setattr(svc, "set_prewarm_result", lambda key, payload: None)
     monkeypatch.setattr(svc, "PREWARM_TICKER_SCOPE_L2_MAX_DAYS", 3)
@@ -258,17 +275,16 @@ def test_prewarm_run_data_ticker_scope_disables_l2_for_large_ranges(monkeypatch)
         },
     )
 
-    result = asyncio.run(svc.prewarm_run_data(req, deps))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(svc.prewarm_run_data(req, deps))
 
-    assert captured["requested_l2_only"] is False
-    assert captured["requested_l2_confirm"] is False
-    assert result["l2_requested"] is True
-    assert result["use_l2"] is False
-    assert isinstance(result.get("l2_guard_reason"), str)
-    assert "L2 prewarm skipped for ticker scope" in result["l2_guard_reason"]
+    assert captured == {}
+    assert exc.value.status_code == 400
+    assert "L2 prewarm rejected for ticker scope" in str(exc.value.detail)
+    assert "BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE=1" in str(exc.value.detail)
 
 
-def test_prewarm_run_data_range_scope_disables_l2_for_large_ranges(monkeypatch):
+def test_prewarm_run_data_range_scope_rejects_l2_for_large_ranges(monkeypatch):
     captured = {}
 
     def _fake_load_run_bars(**kwargs):
@@ -295,7 +311,9 @@ def test_prewarm_run_data_range_scope_disables_l2_for_large_ranges(monkeypatch):
     monkeypatch.setattr(svc, "load_run_bars", _fake_load_run_bars)
     monkeypatch.setattr(svc, "enrich_bars_with_l2", _fake_enrich_bars_with_l2)
     monkeypatch.setattr(svc, "load_reference_bars_map", lambda **kwargs: {})
-    monkeypatch.setattr(svc, "get_start_run_data_cache_stats", lambda: {"memory": {}, "disk": {}})
+    monkeypatch.setattr(
+        svc, "get_start_run_data_cache_stats", lambda: {"memory": {}, "disk": {}}
+    )
     monkeypatch.setattr(svc, "get_prewarm_result", lambda key: None)
     monkeypatch.setattr(svc, "set_prewarm_result", lambda key, payload: None)
     monkeypatch.setattr(svc, "RUN_L2_MAX_DAYS", 3)
@@ -313,11 +331,10 @@ def test_prewarm_run_data_range_scope_disables_l2_for_large_ranges(monkeypatch):
         get_available_data_summary=lambda refresh=False: {"date_ranges": {}},
     )
 
-    result = asyncio.run(svc.prewarm_run_data(req, deps))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(svc.prewarm_run_data(req, deps))
 
-    assert captured["requested_l2_only"] is False
-    assert captured["requested_l2_confirm"] is False
-    assert result["l2_requested"] is True
-    assert result["use_l2"] is False
-    assert isinstance(result.get("l2_guard_reason"), str)
-    assert "L2 prewarm skipped for range scope" in result["l2_guard_reason"]
+    assert captured == {}
+    assert exc.value.status_code == 400
+    assert "L2 prewarm rejected for range scope" in str(exc.value.detail)
+    assert "BACKTEST_RUN_L2_FORCE=1" in str(exc.value.detail)

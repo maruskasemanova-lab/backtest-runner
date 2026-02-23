@@ -17,12 +17,12 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
-from itertools import product
 import statistics
 
 # Local imports
 import sys
-sys.path.append('/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src')
+
+sys.path.append("/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src")
 
 from strategies.mean_reversion import MeanReversionStrategy
 from strategies.momentum import MomentumStrategy
@@ -36,6 +36,7 @@ from strategies.base_strategy import Regime
 @dataclass
 class OptimizationResult:
     """Result of parameter optimization."""
+
     ticker: str
     strategy: str
     best_params: Dict[str, Any]
@@ -48,9 +49,10 @@ class OptimizationResult:
     test_pnl_pct: float = 0.0  # Out-of-sample validation
 
 
-@dataclass 
+@dataclass
 class TickerProfile:
     """Optimal configuration for a ticker."""
+
     ticker: str
     primary_strategy: str
     primary_params: Dict[str, Any]
@@ -65,340 +67,271 @@ class TickerProfile:
 class AOSOptimizer:
     """
     AOS Parameter Optimizer - finds profitable parameters for each ticker.
-    
+
     Key principles:
     1. Wider stops (2.5-3.0 ATR) to avoid noise
     2. Higher volume confirmation (1.5-2.0x average)
     3. Regime-appropriate strategies
     4. Walk-forward validation to avoid overfitting
     """
-    
+
     PARAM_GRID = {
-        'mean_reversion': {
-            'entry_deviation_pct': [0.8, 1.0, 1.2, 1.5],
-            'volume_stop_pct': [1.0, 1.2, 1.5],
-            'trailing_stop_pct': [0.5, 0.6, 0.8],
-            'min_confidence': [60.0, 65.0, 70.0]
+        "mean_reversion": {
+            "entry_deviation_pct": [0.8, 1.0, 1.2, 1.5],
+            "volume_stop_pct": [1.0, 1.2, 1.5],
+            "trailing_stop_pct": [0.5, 0.6, 0.8],
+            "min_confidence": [60.0, 65.0, 70.0],
         },
-        'momentum': {
-            'volume_threshold': [1.5, 1.8, 2.0],
-            'breakout_pct': [0.15, 0.2, 0.25],
-            'volume_stop_pct': [1.0, 1.2, 1.5],
-            'trailing_stop_pct': [1.0, 1.2, 1.5]
+        "momentum": {
+            "volume_threshold": [1.5, 1.8, 2.0],
+            "breakout_pct": [0.15, 0.2, 0.25],
+            "volume_stop_pct": [1.0, 1.2, 1.5],
+            "trailing_stop_pct": [1.0, 1.2, 1.5],
         },
-        'pullback': {
-            'pullback_threshold_pct': [0.2, 0.3, 0.4],
-            'volume_surge_ratio': [1.3, 1.5, 1.8],
-            'volume_stop_pct': [1.2, 1.5, 2.0],
-            'rr_ratio': [1.5, 2.0, 2.5],
-            'trailing_stop_pct': [0.8, 1.0, 1.2]
+        "pullback": {
+            "pullback_threshold_pct": [0.2, 0.3, 0.4],
+            "volume_surge_ratio": [1.3, 1.5, 1.8],
+            "volume_stop_pct": [1.2, 1.5, 2.0],
+            "rr_ratio": [1.5, 2.0, 2.5],
+            "trailing_stop_pct": [0.8, 1.0, 1.2],
         },
-        'vwap_magnet': {
-            'min_distance_pct': [0.15, 0.2, 0.3],
-            'max_distance_pct': [0.8, 1.0, 1.2],
-            'volume_stop_pct': [0.6, 0.8, 1.0],
-            'trailing_stop_pct': [0.4, 0.5, 0.6]
+        "vwap_magnet": {
+            "min_distance_pct": [0.15, 0.2, 0.3],
+            "max_distance_pct": [0.8, 1.0, 1.2],
+            "volume_stop_pct": [0.6, 0.8, 1.0],
+            "trailing_stop_pct": [0.4, 0.5, 0.6],
         },
-        'volume_profile': {
-            'profile_lookback': [45, 60, 90],
-            'symmetry_tolerance_pct': [0.1, 0.15, 0.2],
-            'atr_stop_mult': [2.0, 2.5, 3.0],
-            'trailing_stop_pct': [0.6, 0.8, 1.0]
+        "volume_profile": {
+            "profile_lookback": [45, 60, 90],
+            "symmetry_tolerance_pct": [0.1, 0.15, 0.2],
+            "atr_stop_mult": [2.0, 2.5, 3.0],
+            "trailing_stop_pct": [0.6, 0.8, 1.0],
         },
-        'gap_liquidity': {
-            'gap_threshold_pct': [0.2, 0.3, 0.5],
-            'swing_lookback': [15, 20, 30],
-            'atr_stop_mult': [2.0, 2.5, 3.0],
-            'rr_ratio': [2.0, 2.5, 3.0]
-        }
+        "gap_liquidity": {
+            "gap_threshold_pct": [0.2, 0.3, 0.5],
+            "swing_lookback": [15, 20, 30],
+            "atr_stop_mult": [2.0, 2.5, 3.0],
+            "rr_ratio": [2.0, 2.5, 3.0],
+        },
     }
-    
+
     # Known ticker characteristics (based on previous analysis)
     TICKER_CHARACTERISTICS = {
-        'NVDA': {
-            'volatility': 'high',
-            'best_regimes': ['TRENDING', 'MIXED'],
-            'avoid_choppy': True,
-            'preferred_strategies': ['pullback', 'momentum', 'volume_profile']
+        "NVDA": {
+            "volatility": "high",
+            "best_regimes": ["TRENDING", "MIXED"],
+            "avoid_choppy": True,
+            "preferred_strategies": ["pullback", "momentum", "volume_profile"],
         },
-        'TSLA': {
-            'volatility': 'very_high',
-            'best_regimes': ['TRENDING'],
-            'avoid_choppy': True,  # Loses money in choppy
-            'preferred_strategies': ['momentum', 'gap_liquidity']
+        "TSLA": {
+            "volatility": "very_high",
+            "best_regimes": ["TRENDING"],
+            "avoid_choppy": True,  # Loses money in choppy
+            "preferred_strategies": ["momentum", "gap_liquidity"],
         },
-        'AAPL': {
-            'volatility': 'medium',
-            'best_regimes': ['TRENDING', 'MIXED'],
-            'avoid_choppy': False,
-            'preferred_strategies': ['mean_reversion', 'vwap_magnet', 'pullback']
+        "AAPL": {
+            "volatility": "medium",
+            "best_regimes": ["TRENDING", "MIXED"],
+            "avoid_choppy": False,
+            "preferred_strategies": ["mean_reversion", "vwap_magnet", "pullback"],
         },
-        'AMD': {
-            'volatility': 'high',
-            'best_regimes': ['TRENDING', 'MIXED'],
-            'avoid_choppy': False,
-            'preferred_strategies': ['momentum', 'volume_profile', 'pullback']
+        "AMD": {
+            "volatility": "high",
+            "best_regimes": ["TRENDING", "MIXED"],
+            "avoid_choppy": False,
+            "preferred_strategies": ["momentum", "volume_profile", "pullback"],
         },
-        'GOOGL': {
-            'volatility': 'low',
-            'best_regimes': ['MIXED', 'CHOPPY'],
-            'avoid_choppy': False,
-            'preferred_strategies': ['mean_reversion', 'vwap_magnet']
+        "GOOGL": {
+            "volatility": "low",
+            "best_regimes": ["MIXED", "CHOPPY"],
+            "avoid_choppy": False,
+            "preferred_strategies": ["mean_reversion", "vwap_magnet"],
         },
-        'META': {
-            'volatility': 'medium',
-            'best_regimes': ['TRENDING', 'MIXED'],
-            'avoid_choppy': False,
-            'preferred_strategies': ['pullback', 'vwap_magnet', 'volume_profile']
+        "META": {
+            "volatility": "medium",
+            "best_regimes": ["TRENDING", "MIXED"],
+            "avoid_choppy": False,
+            "preferred_strategies": ["pullback", "vwap_magnet", "volume_profile"],
         },
-        'MSFT': {
-            'volatility': 'low',
-            'best_regimes': ['MIXED', 'CHOPPY'],
-            'avoid_choppy': False,
-            'preferred_strategies': ['mean_reversion', 'vwap_magnet']
+        "MSFT": {
+            "volatility": "low",
+            "best_regimes": ["MIXED", "CHOPPY"],
+            "avoid_choppy": False,
+            "preferred_strategies": ["mean_reversion", "vwap_magnet"],
         },
-        'MU': {
-            'volatility': 'high',
-            'best_regimes': ['TRENDING'],
-            'avoid_choppy': True,
-            'preferred_strategies': ['momentum', 'gap_liquidity', 'volume_profile']
+        "MU": {
+            "volatility": "high",
+            "best_regimes": ["TRENDING"],
+            "avoid_choppy": True,
+            "preferred_strategies": ["momentum", "gap_liquidity", "volume_profile"],
         },
-        'AMZN': {
-            'volatility': 'medium',
-            'best_regimes': ['TRENDING', 'MIXED'],
-            'avoid_choppy': False,
-            'preferred_strategies': ['pullback', 'mean_reversion', 'vwap_magnet']
-        }
+        "AMZN": {
+            "volatility": "medium",
+            "best_regimes": ["TRENDING", "MIXED"],
+            "avoid_choppy": False,
+            "preferred_strategies": ["pullback", "mean_reversion", "vwap_magnet"],
+        },
     }
-    
-    def __init__(self, output_dir: str = 'aos_optimization'):
+
+    def __init__(self, output_dir: str = "aos_optimization"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.results: List[OptimizationResult] = []
         self.ticker_profiles: Dict[str, TickerProfile] = {}
-    
-    def _get_param_combinations(self, strategy: str) -> List[Dict[str, Any]]:
-        """Generate all parameter combinations for a strategy."""
-        grid = self.PARAM_GRID.get(strategy, {})
-        if not grid:
-            return [{}]
-        
-        keys = list(grid.keys())
-        values = list(grid.values())
-        
-        combinations = []
-        for combo in product(*values):
-            param_dict = dict(zip(keys, combo))
-            combinations.append(param_dict)
-        
-        return combinations
-    
-    def _calculate_score(
-        self,
-        pnl_pct: float,
-        win_rate: float,
-        profit_factor: float,
-        num_trades: int,
-        max_drawdown: float = 0
-    ) -> float:
-        """
-        Calculate a combined score for strategy evaluation.
-        
-        Score = (Win Rate * Profit Factor * sqrt(Trades)) + PnL Bonus
-        
-        This rewards:
-        - High win rate (consistency)
-        - High profit factor (edge quality)
-        - More trades (statistical significance)
-        - Positive PnL (actual results)
-        """
-        if num_trades < 3:  # Minimum trades for significance
-            return -100
-        
-        # Base score
-        wr_factor = (win_rate / 100) if win_rate > 0 else 0
-        pf_factor = min(profit_factor, 5)  # Cap at 5 to avoid outliers
-        trade_factor = (num_trades ** 0.5)
-        
-        base_score = wr_factor * pf_factor * trade_factor
-        
-        # PnL bonus/penalty
-        pnl_factor = pnl_pct / 10  # Normalize
-        
-        # Drawdown penalty (if available)
-        dd_penalty = max_drawdown / 100 if max_drawdown > 0 else 0
-        
-        score = base_score + pnl_factor - dd_penalty
-        
-        return round(score, 2)
-    
+
     def create_ticker_profiles(self) -> Dict[str, TickerProfile]:
         """
         Create optimized profiles for each ticker based on characteristics.
-        
+
         This uses prior knowledge about ticker behavior to create initial profiles
         that will be refined through walk-forward testing.
         """
         profiles = {}
-        
+
         for ticker, chars in self.TICKER_CHARACTERISTICS.items():
             # Primary strategy based on characteristics
-            preferred = chars['preferred_strategies']
-            primary = preferred[0] if preferred else 'mean_reversion'
+            preferred = chars["preferred_strategies"]
+            primary = preferred[0] if preferred else "mean_reversion"
             backup = preferred[1] if len(preferred) > 1 else None
-            
+
             # Regime filter
-            regime_filter = chars['best_regimes']
-            if chars.get('avoid_choppy'):
-                regime_filter = [r for r in regime_filter if r != 'CHOPPY']
-            
+            regime_filter = chars["best_regimes"]
+            if chars.get("avoid_choppy"):
+                regime_filter = [r for r in regime_filter if r != "CHOPPY"]
+
             # Day filter (avoid Fridays for high volatility)
-            avoid_days = ['Friday'] if chars['volatility'] in ['high', 'very_high'] else []
-            
+            avoid_days = (
+                ["Friday"] if chars["volatility"] in ["high", "very_high"] else []
+            )
+
             # Confidence based on volatility
-            if chars['volatility'] == 'very_high':
+            if chars["volatility"] == "very_high":
                 min_confidence = 70.0
-            elif chars['volatility'] == 'high':
+            elif chars["volatility"] == "high":
                 min_confidence = 65.0
             else:
                 min_confidence = 60.0
-            
+
             profiles[ticker] = TickerProfile(
                 ticker=ticker,
                 primary_strategy=primary,
-                primary_params=self._get_default_params(primary, chars['volatility']),
+                primary_params=self._get_default_params(primary, chars["volatility"]),
                 backup_strategy=backup,
-                backup_params=self._get_default_params(backup, chars['volatility']) if backup else None,
+                backup_params=(
+                    self._get_default_params(backup, chars["volatility"])
+                    if backup
+                    else None
+                ),
                 regime_filter=regime_filter,
                 avoid_days=avoid_days,
                 min_confidence=min_confidence,
-                max_daily_trades=2 if chars['volatility'] in ['high', 'very_high'] else 3
+                max_daily_trades=(
+                    2 if chars["volatility"] in ["high", "very_high"] else 3
+                ),
             )
-        
+
         self.ticker_profiles = profiles
         return profiles
-    
+
     def _get_default_params(self, strategy: str, volatility: str) -> Dict[str, Any]:
         """Get default parameters adjusted for volatility."""
-        
+
         # Base params by strategy
         base_params = {
-            'mean_reversion': {
-                'entry_deviation_pct': 1.0,
-                'volume_stop_pct': 1.2,
-                'trailing_stop_pct': 0.6,
-                'min_confidence': 65.0
+            "mean_reversion": {
+                "entry_deviation_pct": 1.0,
+                "volume_stop_pct": 1.2,
+                "trailing_stop_pct": 0.6,
+                "min_confidence": 65.0,
             },
-            'momentum': {
-                'volume_threshold': 1.8,
-                'breakout_pct': 0.2,
-                'volume_stop_pct': 1.2,
-                'trailing_stop_pct': 1.2
+            "momentum": {
+                "volume_threshold": 1.8,
+                "breakout_pct": 0.2,
+                "volume_stop_pct": 1.2,
+                "trailing_stop_pct": 1.2,
             },
-            'pullback': {
-                'pullback_threshold_pct': 0.3,
-                'volume_surge_ratio': 1.5,
-                'volume_stop_pct': 1.5,
-                'rr_ratio': 2.0,
-                'trailing_stop_pct': 1.0
+            "pullback": {
+                "pullback_threshold_pct": 0.3,
+                "volume_surge_ratio": 1.5,
+                "volume_stop_pct": 1.5,
+                "rr_ratio": 2.0,
+                "trailing_stop_pct": 1.0,
             },
-            'vwap_magnet': {
-                'min_distance_pct': 0.2,
-                'max_distance_pct': 1.0,
-                'volume_stop_pct': 0.8,
-                'trailing_stop_pct': 0.5
+            "vwap_magnet": {
+                "min_distance_pct": 0.2,
+                "max_distance_pct": 1.0,
+                "volume_stop_pct": 0.8,
+                "trailing_stop_pct": 0.5,
             },
-            'volume_profile': {
-                'profile_lookback': 60,
-                'symmetry_tolerance_pct': 0.15,
-                'atr_stop_mult': 2.5,
-                'trailing_stop_pct': 0.8
+            "volume_profile": {
+                "profile_lookback": 60,
+                "symmetry_tolerance_pct": 0.15,
+                "atr_stop_mult": 2.5,
+                "trailing_stop_pct": 0.8,
             },
-            'gap_liquidity': {
-                'gap_threshold_pct': 0.3,
-                'swing_lookback': 20,
-                'atr_stop_mult': 2.5,
-                'rr_ratio': 2.5
-            }
+            "gap_liquidity": {
+                "gap_threshold_pct": 0.3,
+                "swing_lookback": 20,
+                "atr_stop_mult": 2.5,
+                "rr_ratio": 2.5,
+            },
         }
-        
+
         params = base_params.get(strategy, {}).copy()
-        
+
         # Adjust for volatility
-        if volatility in ['high', 'very_high']:
+        if volatility in ["high", "very_high"]:
             # Wider stops for high volatility
             for key in params:
-                if 'stop' in key.lower():
+                if "stop" in key.lower():
                     params[key] = params[key] * 1.25
-                if 'threshold' in key.lower():
+                if "threshold" in key.lower():
                     params[key] = params[key] * 1.2
-        elif volatility == 'low':
+        elif volatility == "low":
             # Tighter params for low volatility
             for key in params:
-                if 'stop' in key.lower():
+                if "stop" in key.lower():
                     params[key] = params[key] * 0.85
-                if 'threshold' in key.lower():
+                if "threshold" in key.lower():
                     params[key] = params[key] * 0.8
-        
+
         return params
-    
+
     def save_profiles(self, filepath: Optional[str] = None):
         """Save ticker profiles to JSON."""
         if filepath is None:
-            filepath = self.output_dir / 'ticker_profiles.json'
-        
+            filepath = self.output_dir / "ticker_profiles.json"
+
         profiles_dict = {}
         for ticker, profile in self.ticker_profiles.items():
             profiles_dict[ticker] = {
-                'ticker': profile.ticker,
-                'primary_strategy': profile.primary_strategy,
-                'primary_params': profile.primary_params,
-                'backup_strategy': profile.backup_strategy,
-                'backup_params': profile.backup_params,
-                'regime_filter': profile.regime_filter,
-                'avoid_days': profile.avoid_days,
-                'min_confidence': profile.min_confidence,
-                'max_daily_trades': profile.max_daily_trades
+                "ticker": profile.ticker,
+                "primary_strategy": profile.primary_strategy,
+                "primary_params": profile.primary_params,
+                "backup_strategy": profile.backup_strategy,
+                "backup_params": profile.backup_params,
+                "regime_filter": profile.regime_filter,
+                "avoid_days": profile.avoid_days,
+                "min_confidence": profile.min_confidence,
+                "max_daily_trades": profile.max_daily_trades,
             }
-        
-        with open(filepath, 'w') as f:
+
+        with open(filepath, "w") as f:
             json.dump(profiles_dict, f, indent=2)
-        
+
         print(f"💾 Ticker profiles saved to: {filepath}")
         return filepath
-    
-    def load_profiles(self, filepath: str) -> Dict[str, TickerProfile]:
-        """Load ticker profiles from JSON."""
-        with open(filepath, 'r') as f:
-            profiles_dict = json.load(f)
-        
-        profiles = {}
-        for ticker, data in profiles_dict.items():
-            profiles[ticker] = TickerProfile(
-                ticker=data['ticker'],
-                primary_strategy=data['primary_strategy'],
-                primary_params=data['primary_params'],
-                backup_strategy=data.get('backup_strategy'),
-                backup_params=data.get('backup_params'),
-                regime_filter=data.get('regime_filter'),
-                avoid_days=data.get('avoid_days', []),
-                min_confidence=data.get('min_confidence', 65.0),
-                max_daily_trades=data.get('max_daily_trades', 2)
-            )
-        
-        self.ticker_profiles = profiles
-        return profiles
-    
+
     def print_profiles_summary(self):
         """Print summary of all ticker profiles."""
         print("\n" + "=" * 80)
         print("📊 AOS TICKER PROFILES")
         print("=" * 80)
-        
+
         for ticker, profile in sorted(self.ticker_profiles.items()):
             chars = self.TICKER_CHARACTERISTICS.get(ticker, {})
-            vol = chars.get('volatility', 'unknown')
-            
+            vol = chars.get("volatility", "unknown")
+
             print(f"\n{'─' * 60}")
             print(f"📈 {ticker} (Volatility: {vol})")
             print(f"{'─' * 60}")
@@ -408,163 +341,80 @@ class AOSOptimizer:
             print(f"  Avoid Days:       {profile.avoid_days or 'None'}")
             print(f"  Min Confidence:   {profile.min_confidence}%")
             print(f"  Max Daily Trades: {profile.max_daily_trades}")
-            
+
             if profile.primary_params:
                 print(f"  Primary Params:")
                 for k, v in profile.primary_params.items():
                     print(f"    - {k}: {v}")
-        
+
         print("\n" + "=" * 80)
-
-
-class AOSRunner:
-    """
-    Main AOS execution engine.
-    
-    Takes optimized ticker profiles and runs live trading logic.
-    """
-    
-    def __init__(
-        self,
-        profiles: Dict[str, TickerProfile],
-        strategy_api_url: str = "http://localhost:8001"
-    ):
-        self.profiles = profiles
-        self.strategy_api_url = strategy_api_url
-        self.daily_trades: Dict[str, int] = {}  # ticker -> count
-        self.daily_pnl: Dict[str, float] = {}  # ticker -> pnl
-        
-    def should_trade(self, ticker: str, regime: str, day_of_week: str) -> Tuple[bool, str]:
-        """
-        Determine if we should trade this ticker based on profile rules.
-        
-        Returns (should_trade, reason)
-        """
-        profile = self.profiles.get(ticker)
-        if not profile:
-            return False, "No profile for ticker"
-        
-        # Check day filter
-        if day_of_week in profile.avoid_days:
-            return False, f"Avoiding {day_of_week}"
-        
-        # Check regime filter
-        if profile.regime_filter and regime not in profile.regime_filter:
-            return False, f"Regime {regime} not in filter {profile.regime_filter}"
-        
-        # Check daily trade limit
-        current_trades = self.daily_trades.get(ticker, 0)
-        if current_trades >= profile.max_daily_trades:
-            return False, f"Daily trade limit ({profile.max_daily_trades}) reached"
-        
-        return True, "OK"
-    
-    def get_strategy_for_ticker(self, ticker: str, regime: str) -> Tuple[str, Dict[str, Any]]:
-        """Get the appropriate strategy and params for a ticker."""
-        profile = self.profiles.get(ticker)
-        if not profile:
-            return 'mean_reversion', {}
-        
-        # Use primary strategy by default
-        strategy = profile.primary_strategy
-        params = profile.primary_params
-        
-        # Could add logic here to switch to backup based on conditions
-        
-        return strategy, params
-    
-    def record_trade(self, ticker: str, pnl: float):
-        """Record a completed trade."""
-        self.daily_trades[ticker] = self.daily_trades.get(ticker, 0) + 1
-        self.daily_pnl[ticker] = self.daily_pnl.get(ticker, 0.0) + pnl
-    
-    def reset_daily_stats(self):
-        """Reset daily statistics (call at start of each day)."""
-        self.daily_trades = {}
-        self.daily_pnl = {}
-
-
-def create_aos_config() -> Dict[str, Any]:
-    """
-    Create the main AOS configuration file.
-    
-    This combines all optimized settings into a single config that can be
-    used by the trading system.
-    """
-    optimizer = AOSOptimizer()
-    profiles = optimizer.create_ticker_profiles()
-    
-    # Print summary
-    optimizer.print_profiles_summary()
-    
-    # Save profiles
-    profiles_path = optimizer.save_profiles()
-    
-    # Create main config
-    config = {
-        'version': '1.0.0',
-        'created_at': datetime.now().isoformat(),
-        'description': 'AOS Configuration - Optimized for Walk-Forward Testing',
-        
-        'global_settings': {
-            'regime_detection_minutes': 30,
-            'max_daily_loss_pct': 3.0,
-            'trading_start_time': '09:45',  # 15 min after open
-            'trading_end_time': '15:55',
-            'avoid_days': ['Friday'],  # Global rule
-            'min_bars_for_signal': 30
-        },
-        
-        'strategies': {
-            'enabled': [
-                'mean_reversion',
-                'momentum', 
-                'pullback',
-                'vwap_magnet',
-                'volume_profile',
-                'gap_liquidity'
-            ],
-            'disabled': ['rotation']  # Low performance
-        },
-        
-        'tickers': {
-            ticker: {
-                'strategy': profile.primary_strategy,
-                'params': profile.primary_params,
-                'backup_strategy': profile.backup_strategy,
-                'regime_filter': profile.regime_filter,
-                'avoid_days': profile.avoid_days,
-                'min_confidence': profile.min_confidence,
-                'max_daily_trades': profile.max_daily_trades
-            }
-            for ticker, profile in profiles.items()
-        },
-        
-        'risk_management': {
-            'max_position_size_pct': 10.0,  # Max 10% of account per trade
-            'max_daily_trades_total': 6,
-            'stop_loss_atr_mult': 2.5,
-            'take_profit_atr_mult': 5.0,
-            'trailing_stop_activation_pct': 0.5
-        }
-    }
-    
-    # Save config
-    config_path = optimizer.output_dir / 'aos_config.json'
-    with open(config_path, 'w') as f:
-        json.dump(config, f, indent=2)
-    
-    print(f"\n💾 AOS config saved to: {config_path}")
-    
-    return config
 
 
 if __name__ == "__main__":
     print("🚀 AOS (Automatický Obchodní Systém) - Generating Configuration")
     print("=" * 80)
-    
-    config = create_aos_config()
-    
+
+    optimizer = AOSOptimizer()
+    profiles = optimizer.create_ticker_profiles()
+
+    # Print summary
+    optimizer.print_profiles_summary()
+
+    # Save profiles
+    profiles_path = optimizer.save_profiles()
+
+    # Create main config
+    config = {
+        "version": "1.0.0",
+        "created_at": datetime.now().isoformat(),
+        "description": "AOS Configuration - Optimized for Walk-Forward Testing",
+        "global_settings": {
+            "regime_detection_minutes": 30,
+            "max_daily_loss_pct": 3.0,
+            "trading_start_time": "09:45",  # 15 min after open
+            "trading_end_time": "15:55",
+            "avoid_days": ["Friday"],  # Global rule
+            "min_bars_for_signal": 30,
+        },
+        "strategies": {
+            "enabled": [
+                "mean_reversion",
+                "momentum",
+                "pullback",
+                "vwap_magnet",
+                "volume_profile",
+                "gap_liquidity",
+            ],
+            "disabled": ["rotation"],  # Low performance
+        },
+        "tickers": {
+            ticker: {
+                "strategy": profile.primary_strategy,
+                "params": profile.primary_params,
+                "backup_strategy": profile.backup_strategy,
+                "regime_filter": profile.regime_filter,
+                "avoid_days": profile.avoid_days,
+                "min_confidence": profile.min_confidence,
+                "max_daily_trades": profile.max_daily_trades,
+            }
+            for ticker, profile in profiles.items()
+        },
+        "risk_management": {
+            "max_position_size_pct": 10.0,  # Max 10% of account per trade
+            "max_daily_trades_total": 6,
+            "stop_loss_atr_mult": 2.5,
+            "take_profit_atr_mult": 5.0,
+            "trailing_stop_activation_pct": 0.5,
+        },
+    }
+
+    # Save config
+    config_path = optimizer.output_dir / "aos_config.json"
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
+    print(f"\n💾 AOS config saved to: {config_path}")
+
     print("\n✅ AOS configuration complete!")
     print("\nNext steps:")
     print("  1. Run walk-forward validation")

@@ -1,6 +1,7 @@
 """
 Decision Tracker - Tracks all trading decisions with explanations for visualization.
 """
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -10,9 +11,11 @@ import json
 
 class MarkerType(str, Enum):
     """Types of decision markers."""
+
     REGIME_DETECTED = "regime_detected"
     STRATEGY_SELECTED = "strategy_selected"
     SIGNAL_GENERATED = "signal_generated"
+    EXECUTION_STATUS = "execution_status"
     ENTRY_EXECUTED = "entry_executed"
     EXIT_EXECUTED = "exit_executed"
     STOP_LOSS_HIT = "stop_loss_hit"
@@ -25,6 +28,7 @@ class MarkerType(str, Enum):
 @dataclass
 class DecisionMarker:
     """A single decision marker with explanation."""
+
     id: str
     timestamp: datetime
     bar_index: int
@@ -37,7 +41,7 @@ class DecisionMarker:
     regime: Optional[str] = None
     confidence: Optional[float] = None
     details: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -51,33 +55,33 @@ class DecisionMarker:
             "strategy": self.strategy,
             "regime": self.regime,
             "confidence": self.confidence,
-            "details": self.details
+            "details": self.details,
         }
 
 
 class DecisionTracker:
     """Tracks all trading decisions for a session."""
-    
+
     def __init__(self, run_id: str, ticker: str, date: str):
         self.run_id = run_id
         self.ticker = ticker
         self.date = date
         self.markers: List[DecisionMarker] = []
         self._marker_counter = 0
-    
+
     def _generate_id(self) -> str:
         """Generate unique marker ID."""
         self._marker_counter += 1
         return f"{self.run_id}:{self.ticker}:{self.date}:{self._marker_counter}"
-    
+
     def add_regime_detected(
-        self, 
-        timestamp: datetime, 
-        bar_index: int, 
+        self,
+        timestamp: datetime,
+        bar_index: int,
         price: float,
-        regime: str, 
+        regime: str,
         explanation: str,
-        indicators: Dict[str, float]
+        indicators: Dict[str, float],
     ) -> DecisionMarker:
         """Record regime detection decision."""
         marker = DecisionMarker(
@@ -89,14 +93,11 @@ class DecisionTracker:
             description=explanation,
             price=price,
             regime=regime,
-            details={
-                "indicators": indicators,
-                "detection_time_minutes": 15  # default
-            }
+            details={"indicators": indicators, "detection_time_minutes": 15},  # default
         )
         self.markers.append(marker)
         return marker
-    
+
     def add_strategy_selected(
         self,
         timestamp: datetime,
@@ -104,9 +105,30 @@ class DecisionTracker:
         price: float,
         strategy: str,
         regime: str,
-        reasoning: str
+        reasoning: str,
+        alternative_strategies: Optional[List[str]] = None,
+        active_strategies: Optional[List[str]] = None,
+        selection_warnings: Optional[List[str]] = None,
+        switch_guard: Optional[Dict[str, Any]] = None,
     ) -> DecisionMarker:
         """Record strategy selection decision."""
+        normalized_active = [
+            str(name).strip() for name in (active_strategies or []) if str(name).strip()
+        ]
+        normalized_alternatives = [
+            str(name).strip()
+            for name in (
+                alternative_strategies
+                if alternative_strategies is not None
+                else normalized_active
+            )
+            if str(name).strip()
+        ]
+        normalized_warnings = [
+            str(item).strip()
+            for item in (selection_warnings or [])
+            if str(item).strip()
+        ]
         marker = DecisionMarker(
             id=self._generate_id(),
             timestamp=timestamp,
@@ -118,13 +140,18 @@ class DecisionTracker:
             strategy=strategy,
             regime=regime,
             details={
-                "alternative_strategies": [],
-                "selection_criteria": reasoning
-            }
+                "active_strategies": normalized_active,
+                "alternative_strategies": normalized_alternatives,
+                "selection_criteria": reasoning,
+                "selection_warnings": normalized_warnings,
+                "switch_guard": (
+                    dict(switch_guard) if isinstance(switch_guard, dict) else {}
+                ),
+            },
         )
         self.markers.append(marker)
         return marker
-    
+
     def add_signal(
         self,
         timestamp: datetime,
@@ -135,7 +162,7 @@ class DecisionTracker:
         confidence: float,
         reasoning: str,
         stop_loss: Optional[float] = None,
-        take_profit: Optional[float] = None
+        take_profit: Optional[float] = None,
     ) -> DecisionMarker:
         """Record signal generation."""
         marker = DecisionMarker(
@@ -152,12 +179,40 @@ class DecisionTracker:
             details={
                 "signal_type": signal_type,
                 "stop_loss": stop_loss,
-                "take_profit": take_profit
-            }
+                "take_profit": take_profit,
+            },
         )
         self.markers.append(marker)
         return marker
-    
+
+    def add_execution_status(
+        self,
+        timestamp: datetime,
+        bar_index: int,
+        price: float,
+        title: str,
+        description: str,
+        strategy: Optional[str] = None,
+        confidence: Optional[float] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> DecisionMarker:
+        """Record execution-layer status updates (pending/no-fill/drop reasons)."""
+        marker = DecisionMarker(
+            id=self._generate_id(),
+            timestamp=timestamp,
+            bar_index=bar_index,
+            marker_type=MarkerType.EXECUTION_STATUS,
+            title=title,
+            description=description,
+            price=price,
+            side=None,
+            strategy=strategy,
+            confidence=confidence,
+            details=dict(details or {}),
+        )
+        self.markers.append(marker)
+        return marker
+
     def add_entry(
         self,
         timestamp: datetime,
@@ -170,7 +225,7 @@ class DecisionTracker:
         take_profit: float,
         reasoning: str = "",
         confidence: float = 50,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
     ) -> DecisionMarker:
         """Record trade entry with detailed reasoning."""
         # Build detailed description
@@ -179,17 +234,21 @@ class DecisionTracker:
             description_parts.append(f"Reason: {reasoning}")
         if confidence:
             description_parts.append(f"Confidence: {confidence:.0f}%")
-        
+
         details = {
             "size": size,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
-            "risk_reward": abs(take_profit - price) / abs(price - stop_loss) if stop_loss != price else 0,
+            "risk_reward": (
+                abs(take_profit - price) / abs(price - stop_loss)
+                if stop_loss != price
+                else 0
+            ),
             "reasoning": reasoning,
             "confidence": confidence,
-            "metadata": metadata or {}
+            "metadata": metadata or {},
         }
-        
+
         marker = DecisionMarker(
             id=self._generate_id(),
             timestamp=timestamp,
@@ -201,11 +260,11 @@ class DecisionTracker:
             side=side,
             strategy=strategy,
             confidence=confidence,
-            details=details
+            details=details,
         )
         self.markers.append(marker)
         return marker
-    
+
     def add_exit(
         self,
         timestamp: datetime,
@@ -269,9 +328,11 @@ class DecisionTracker:
             and resolved_notional > 0
         ):
             resolved_cost_pct = (resolved_cost_usd / resolved_notional) * 100.0
-        
+
         # Build detailed description
-        description_parts = [f"Closed {side} position. PnL: {pnl_pct:+.2f}% (${resolved_pnl_usd:+.2f})"]
+        description_parts = [
+            f"Closed {side} position. PnL: {pnl_pct:+.2f}% (${resolved_pnl_usd:+.2f})"
+        ]
         if resolved_cost_usd is not None:
             cost_label = f"Costs: ${resolved_cost_usd:.2f}"
             if resolved_cost_pct is not None:
@@ -279,7 +340,7 @@ class DecisionTracker:
             description_parts.append(cost_label)
         if bars_held:
             description_parts.append(f"Held: {bars_held} bars")
-        
+
         details = {
             "schema_version": int(schema_version),
             "exit_reason": reason,
@@ -295,9 +356,9 @@ class DecisionTracker:
             "size": size,
             "costs": costs_payload,
             "gross_pnl_pct": gross_pnl_pct,
-            "gross_pnl_dollars": gross_pnl_dollars
+            "gross_pnl_dollars": gross_pnl_dollars,
         }
-        
+
         marker = DecisionMarker(
             id=self._generate_id(),
             timestamp=timestamp,
@@ -307,16 +368,13 @@ class DecisionTracker:
             description=" | ".join(description_parts),
             price=price,
             side=side,
-            details=details
+            details=details,
         )
         self.markers.append(marker)
         return marker
-    
+
     def add_session_start(
-        self,
-        timestamp: datetime,
-        bar_index: int,
-        price: float
+        self, timestamp: datetime, bar_index: int, price: float
     ) -> DecisionMarker:
         """Record session start."""
         marker = DecisionMarker(
@@ -327,21 +385,13 @@ class DecisionTracker:
             title="Session Started",
             description=f"Trading session started for {self.ticker}",
             price=price,
-            details={
-                "ticker": self.ticker,
-                "date": self.date,
-                "run_id": self.run_id
-            }
+            details={"ticker": self.ticker, "date": self.date, "run_id": self.run_id},
         )
         self.markers.append(marker)
         return marker
-    
+
     def add_session_end(
-        self,
-        timestamp: datetime,
-        bar_index: int,
-        price: float,
-        summary: Dict[str, Any]
+        self, timestamp: datetime, bar_index: int, price: float, summary: Dict[str, Any]
     ) -> DecisionMarker:
         """Record session end."""
         marker = DecisionMarker(
@@ -352,25 +402,20 @@ class DecisionTracker:
             title="Session Ended",
             description=f"Trading session ended. Total PnL: {summary.get('total_pnl_pct', 0):+.2f}%",
             price=price,
-            details=summary
+            details=summary,
         )
         self.markers.append(marker)
         return marker
-    
-    def get_markers(self, marker_type: Optional[MarkerType] = None) -> List[Dict[str, Any]]:
+
+    def get_markers(
+        self, marker_type: Optional[MarkerType] = None
+    ) -> List[Dict[str, Any]]:
         """Get all markers, optionally filtered by type."""
         markers = self.markers
         if marker_type:
             markers = [m for m in markers if m.marker_type == marker_type]
         return [m.to_dict() for m in markers]
-    
-    def get_marker_by_id(self, marker_id: str) -> Optional[Dict[str, Any]]:
-        """Get a specific marker by ID."""
-        for m in self.markers:
-            if m.id == marker_id:
-                return m.to_dict()
-        return None
-    
+
     def get_chart_annotations(self) -> List[Dict[str, Any]]:
         """Get markers formatted for chart annotations."""
         annotations = []
@@ -378,24 +423,27 @@ class DecisionTracker:
             color = self._get_marker_color(m.marker_type)
             shape = self._get_marker_shape(m.marker_type)
             position = self._get_marker_position(m)
-            
-            annotations.append({
-                "time": int(m.timestamp.timestamp()),
-                "position": position,
-                "color": color,
-                "shape": shape,
-                "text": m.title,
-                "id": m.id,
-                "marker_type": m.marker_type.value
-            })
+
+            annotations.append(
+                {
+                    "time": int(m.timestamp.timestamp()),
+                    "position": position,
+                    "color": color,
+                    "shape": shape,
+                    "text": m.title,
+                    "id": m.id,
+                    "marker_type": m.marker_type.value,
+                }
+            )
         return annotations
-    
+
     def _get_marker_color(self, marker_type: MarkerType) -> str:
         """Get color for marker type."""
         colors = {
             MarkerType.REGIME_DETECTED: "#3b82f6",  # blue
             MarkerType.STRATEGY_SELECTED: "#8b5cf6",  # purple
             MarkerType.SIGNAL_GENERATED: "#f59e0b",  # amber
+            MarkerType.EXECUTION_STATUS: "#f97316",  # orange
             MarkerType.ENTRY_EXECUTED: "#22c55e",  # green
             MarkerType.EXIT_EXECUTED: "#64748b",  # slate
             MarkerType.STOP_LOSS_HIT: "#ef4444",  # red
@@ -405,13 +453,14 @@ class DecisionTracker:
             MarkerType.SESSION_ENDED: "#3b82f6",  # blue
         }
         return colors.get(marker_type, "#64748b")
-    
+
     def _get_marker_shape(self, marker_type: MarkerType) -> str:
         """Get shape for marker type."""
         shapes = {
             MarkerType.REGIME_DETECTED: "circle",
             MarkerType.STRATEGY_SELECTED: "square",
             MarkerType.SIGNAL_GENERATED: "arrowUp",
+            MarkerType.EXECUTION_STATUS: "circle",
             MarkerType.ENTRY_EXECUTED: "arrowUp",
             MarkerType.EXIT_EXECUTED: "arrowDown",
             MarkerType.STOP_LOSS_HIT: "arrowDown",
@@ -421,20 +470,30 @@ class DecisionTracker:
             MarkerType.SESSION_ENDED: "circle",
         }
         return shapes.get(marker_type, "circle")
-    
+
     def _get_marker_position(self, marker: DecisionMarker) -> str:
         """Get position (aboveBar/belowBar) for marker."""
-        if marker.marker_type in [MarkerType.ENTRY_EXECUTED, MarkerType.SIGNAL_GENERATED]:
+        if marker.marker_type in [
+            MarkerType.ENTRY_EXECUTED,
+            MarkerType.SIGNAL_GENERATED,
+        ]:
             return "belowBar" if marker.side == "long" else "aboveBar"
-        elif marker.marker_type in [MarkerType.EXIT_EXECUTED, MarkerType.STOP_LOSS_HIT, MarkerType.TAKE_PROFIT_HIT]:
+        elif marker.marker_type in [
+            MarkerType.EXIT_EXECUTED,
+            MarkerType.STOP_LOSS_HIT,
+            MarkerType.TAKE_PROFIT_HIT,
+        ]:
             return "aboveBar" if marker.side == "long" else "belowBar"
         return "aboveBar"
-    
+
     def to_json(self) -> str:
         """Serialize tracker to JSON."""
-        return json.dumps({
-            "run_id": self.run_id,
-            "ticker": self.ticker,
-            "date": self.date,
-            "markers": [m.to_dict() for m in self.markers]
-        }, default=str)
+        return json.dumps(
+            {
+                "run_id": self.run_id,
+                "ticker": self.ticker,
+                "date": self.date,
+                "markers": [m.to_dict() for m in self.markers],
+            },
+            default=str,
+        )

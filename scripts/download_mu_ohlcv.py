@@ -30,9 +30,9 @@ def download_range(client: db.Historical, ticker: str, start: str, end: str) -> 
         print(f"  [SKIP] {out_name} already exists ({size_mb:.1f} MB)")
         return True
 
-    end_exclusive = (
-        datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)
-    ).strftime("%Y-%m-%d")
+    end_exclusive = (datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)).strftime(
+        "%Y-%m-%d"
+    )
 
     print(f"  [DOWNLOAD] {ticker} {start} -> {end} ...")
     try:

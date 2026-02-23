@@ -13,7 +13,9 @@ def _build_services(*, l2_manager, l2_features, databento_svc=None) -> ApiServic
     noop_async = lambda *_args, **_kwargs: None
     noop_sync = lambda *_args, **_kwargs: {}
     if databento_svc is None:
-        databento_svc = SimpleNamespace(get_available_data_summary=lambda refresh=False: {})
+        databento_svc = SimpleNamespace(
+            get_available_data_summary=lambda refresh=False: {}
+        )
     return ApiServices(
         data_loader=SimpleNamespace(),
         l2_manager=l2_manager,

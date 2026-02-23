@@ -57,4 +57,3 @@ def test_intrabar_frames_reuse_runtime_cache(monkeypatch):
     assert calls["count"] == 1
     assert not first.empty
     assert not second.empty
-

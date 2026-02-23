@@ -9,6 +9,9 @@ class StrategyApiPolicyError(ValueError):
     pass
 
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
 def parse_csv_env(name: str, default: str = "") -> List[str]:
     raw = str(os.getenv(name, default) or "").strip()
     if not raw:
@@ -30,7 +33,9 @@ def normalize_base_url(url: str) -> str:
         raise StrategyApiPolicyError("Strategy API URL is empty")
     parsed = urlparse(raw)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise StrategyApiPolicyError("Strategy API URL must include http/https scheme and host")
+        raise StrategyApiPolicyError(
+            "Strategy API URL must include http/https scheme and host"
+        )
     # Keep path/query/fragment stripped for allowlist comparison.
     return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
 
@@ -41,7 +46,11 @@ def default_internal_strategy_api_url() -> str:
 
 
 def resolve_strategy_allowlist(internal_url: str | None = None) -> List[str]:
-    internal = normalize_base_url(internal_url) if internal_url else default_internal_strategy_api_url()
+    internal = (
+        normalize_base_url(internal_url)
+        if internal_url
+        else default_internal_strategy_api_url()
+    )
     configured = parse_csv_env(
         "BACKTEST_STRATEGY_API_ALLOWLIST",
         "http://localhost:8001,http://127.0.0.1:8001",
@@ -66,7 +75,11 @@ def enforce_strategy_url_policy(
     is_admin: bool,
     internal_url: str | None = None,
 ) -> str:
-    internal = normalize_base_url(internal_url) if internal_url else default_internal_strategy_api_url()
+    internal = (
+        normalize_base_url(internal_url)
+        if internal_url
+        else default_internal_strategy_api_url()
+    )
     if not is_admin:
         return internal
 
@@ -79,9 +92,28 @@ def enforce_strategy_url_policy(
     return normalized
 
 
+def _is_loopback_host(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    hostname = str(parsed.hostname or "").strip().lower()
+    return hostname in _LOOPBACK_HOSTS
+
+
+def _resolve_runtime_reachable_strategy_url(
+    requested_url: str, internal_url: str
+) -> str:
+    if _is_loopback_host(requested_url) and not _is_loopback_host(internal_url):
+        return internal_url
+    return requested_url
+
+
 def enforce_strategy_url_allowlist_only(requested_url: str) -> str:
+    internal = default_internal_strategy_api_url()
     normalized = normalize_base_url(requested_url)
-    allowlist = resolve_strategy_allowlist()
+    normalized = _resolve_runtime_reachable_strategy_url(normalized, internal)
+    allowlist = resolve_strategy_allowlist(internal_url=internal)
     if normalized not in allowlist:
         raise StrategyApiPolicyError(
             f"Strategy API URL '{normalized}' is not in allowed list"

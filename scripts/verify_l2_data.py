@@ -14,7 +14,7 @@ else:
         print(f"Start: {stored_data.start}")
         print(f"End: {stored_data.end}")
         # print(f"Symbol: {stored_data.sym_instruments}") # Attribute error
-        
+
         # Read a few rows to confirm content
         df = stored_data.to_df()
         print(f"Total Rows: {len(df)}")
@@ -22,10 +22,10 @@ else:
         print(df.head())
         print("\nColumns:")
         print(df.columns)
-        
+
         # Check unique symbols if possible
-        if 'symbol' in df.columns:
+        if "symbol" in df.columns:
             print(f"Symbols: {df['symbol'].unique()}")
-        
+
     except Exception as e:
         print(f"Error reading file: {e}")

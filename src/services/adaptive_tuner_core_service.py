@@ -37,7 +37,9 @@ def normalize_clamped_int(
     return max(min_value, min(max_value, parsed))
 
 
-def normalize_bool_options(values: Optional[List[bool]], default: List[bool]) -> List[bool]:
+def normalize_bool_options(
+    values: Optional[List[bool]], default: List[bool]
+) -> List[bool]:
     if not isinstance(values, list) or not values:
         return list(default)
     normalized = []
@@ -126,7 +128,9 @@ def normalize_strategy_sets(
     for strategy_set in raw_sets:
         if not isinstance(strategy_set, list) or not strategy_set:
             continue
-        cleaned = sorted(set(str(s).strip().lower() for s in strategy_set if str(s).strip()))
+        cleaned = sorted(
+            set(str(s).strip().lower() for s in strategy_set if str(s).strip())
+        )
         if not cleaned:
             continue
         key = tuple(cleaned)
@@ -192,7 +196,11 @@ def normalize_time_window_sets(
         if not isinstance(tw, list) or not tw:
             continue
         cleaned = sorted(
-            set(h for h in (int(x) for x in tw if isinstance(x, (int, float))) if 0 <= h <= 23)
+            set(
+                h
+                for h in (int(x) for x in tw if isinstance(x, (int, float)))
+                if 0 <= h <= 23
+            )
         )
         if not cleaned:
             continue
@@ -207,7 +215,9 @@ def normalize_time_window_sets(
 def normalize_regime_strategy_map_sets(
     raw_sets: Optional[List[Optional[Dict[str, List[str]]]]],
     enabled_strategies: List[str],
-    build_regime_strategy_map_options: Callable[[List[str]], List[Optional[Dict[str, List[str]]]]],
+    build_regime_strategy_map_options: Callable[
+        [List[str]], List[Optional[Dict[str, List[str]]]]
+    ],
 ) -> List[Optional[Dict[str, List[str]]]]:
     """Normalize v2 regime->strategy map sets.
 
@@ -217,7 +227,9 @@ def normalize_regime_strategy_map_sets(
     if not isinstance(raw_sets, list) or not raw_sets:
         return defaults
 
-    allowed = {str(name).strip().lower() for name in enabled_strategies if str(name).strip()}
+    allowed = {
+        str(name).strip().lower() for name in enabled_strategies if str(name).strip()
+    }
     normalized: List[Optional[Dict[str, List[str]]]] = []
     seen_maps = set()
     has_flat_mode = False
@@ -349,7 +361,9 @@ def resolve_tuner_trial_budget(
     )
     boost = 1
     if quick_mode:
-        boost = normalize_clamped_int(quick_trial_boost, default=3, min_value=1, max_value=10)
+        boost = normalize_clamped_int(
+            quick_trial_boost, default=3, min_value=1, max_value=10
+        )
     effective = min(max_trials, requested * boost)
     return {"requested": requested, "boost": boost, "effective": effective}
 

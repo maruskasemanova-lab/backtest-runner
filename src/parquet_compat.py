@@ -11,7 +11,9 @@ def _quote_ident(name: str) -> str:
     return f'"{token}"'
 
 
-def read_parquet_compat(path: str | Path, columns: Optional[Iterable[str]] = None) -> pd.DataFrame:
+def read_parquet_compat(
+    path: str | Path, columns: Optional[Iterable[str]] = None
+) -> pd.DataFrame:
     """
     Read parquet with a lightweight fallback when pyarrow is unavailable.
 
@@ -43,7 +45,9 @@ def read_parquet_compat(path: str | Path, columns: Optional[Iterable[str]] = Non
             conn.close()
 
 
-def write_parquet_compat(df: pd.DataFrame, path: str | Path, *, index: bool = False) -> None:
+def write_parquet_compat(
+    df: pd.DataFrame, path: str | Path, *, index: bool = False
+) -> None:
     target = str(Path(path))
     try:
         df.to_parquet(target, index=index)

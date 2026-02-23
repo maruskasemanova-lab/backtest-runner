@@ -116,3 +116,42 @@ Stories:
   - Domain: `frontend`
   - Key files: `frontend/src/components/DecisionPanel.jsx`
   - Acceptance: marker details show new exit reasons and cost components.
+
+## EPIC-06: Backend Monolith Refactor (P0/P1)
+
+Objective: reduce backend complexity in the largest runner/strategy modules without contract regressions.
+
+Success metrics:
+- Monolithic functions are decomposed into composable units with deterministic sequencing.
+- API request/response contracts stay backward compatible.
+- No-lookahead and no same-bar execution invariants remain test-green after each story.
+
+Stories:
+- `BR-01` Decompose execution config resolver.
+  - Domain: `orchestration`
+  - Key files: `src/services/start_run_execution_config_service.py`, `src/services/start_run_service.py`
+  - Acceptance: `resolve_execution_config` split into focused sub-resolvers; start payload remains backward compatible.
+- `BR-02` Split `start_run` into explicit orchestration phases.
+  - Domain: `orchestration`
+  - Key files: `src/services/start_run_service.py`, `src/services/start_run_data_service.py`
+  - Acceptance: phase modules isolate responsibilities; run-start diagnostics and behavior remain unchanged.
+- `BR-03` Extract marker and summary builders from `session_runner.py`.
+  - Domain: `orchestration`
+  - Key files: `session_runner.py`, `src/services/*markers*` (new)
+  - Acceptance: marker schema parity maintained and `tests/test_session_runner_markers.py` remains green.
+- `BR-04` Decompose runtime processing monolith.
+  - Domain: `strategy-engine`
+  - Key files: `../market_regime_detection/src/day_trading_runtime_impl.py`
+  - Acceptance: runtime pipeline split into bar/entry/indicator/position modules while preserving causal execution ordering.
+- `BR-05` Decompose regime and exit policy blocks.
+  - Domain: `strategy-engine`
+  - Key files: `../market_regime_detection/src/day_trading_regime_impl.py`, `../market_regime_detection/src/exit_policy_engine.py`
+  - Acceptance: strategy selection and exit policy logic become testable policy units with unchanged outputs.
+- `BR-06` Split L2/data orchestration services.
+  - Domain: `data-l2`
+  - Key files: `src/databento_service.py`, `src/l2_data_manager.py`, `src/routes/system_routes.py`
+  - Acceptance: file/catalog/download and L2 feature responsibilities are separated without data-coverage regression.
+- `BR-07` Normalize large strategy modules.
+  - Domain: `strategy-engine`
+  - Key files: `../market_regime_detection/src/strategies/vwap_magnet.py`, `../market_regime_detection/src/strategies/*`
+  - Acceptance: strategy signal builders share reusable helper slices; per-strategy behavior and thresholds remain identical.

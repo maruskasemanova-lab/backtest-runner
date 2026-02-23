@@ -36,14 +36,21 @@ def _load_day_trading_manager() -> Any:
         sys.path.insert(0, str(workspace_root))
 
     try:
-        from market_regime_detection.src.day_trading_manager import DayTradingManager as dtm
+        from market_regime_detection.src.day_trading_manager import (
+            DayTradingManager as dtm,
+        )
+
         return dtm
     except Exception:
         pass
 
-    hyphen_module_path = workspace_root / "market-regime-detection" / "src" / "day_trading_manager.py"
+    hyphen_module_path = (
+        workspace_root / "market-regime-detection" / "src" / "day_trading_manager.py"
+    )
     if hyphen_module_path.exists():
-        spec = importlib.util.spec_from_file_location("_wfo_day_trading_manager", hyphen_module_path)
+        spec = importlib.util.spec_from_file_location(
+            "_wfo_day_trading_manager", hyphen_module_path
+        )
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
@@ -182,16 +189,12 @@ class TickerOptResult:
     test_win_rate: float
 
 
-def parse_date(s: str) -> datetime:
-    return datetime.strptime(s, "%Y-%m-%d")
-
-
 def canonical_strategy_name(strategy_name: str) -> str:
     """Normalize strategy labels from trades/session into snake_case keys."""
     if not strategy_name:
         return ""
     normalized = strategy_name.strip().replace("-", "_").replace(" ", "_")
-    snake = re.sub(r'(?<!^)(?=[A-Z])', "_", normalized).lower()
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", normalized).lower()
     snake = re.sub(r"_+", "_", snake).strip("_")
 
     compact = re.sub(r"[^a-z0-9]", "", snake)
@@ -199,19 +202,6 @@ def canonical_strategy_name(strategy_name: str) -> str:
         if key.replace("_", "") == compact:
             return key
     return snake
-
-
-def date_range(start: str, end: str) -> List[str]:
-    """Inclusive date range, weekdays only."""
-    s = parse_date(start)
-    e = parse_date(end)
-    out = []
-    cur = s
-    while cur <= e:
-        if cur.weekday() < 5:
-            out.append(cur.strftime("%Y-%m-%d"))
-        cur += timedelta(days=1)
-    return out
 
 
 def get_trading_dates(ticker: str, loader: DataLoader) -> List[str]:
@@ -233,7 +223,11 @@ def get_trading_dates(ticker: str, loader: DataLoader) -> List[str]:
             dfs.append(loader.load_csv(file))
 
     df = pd.concat(dfs, ignore_index=True)
-    df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    df = (
+        df.drop_duplicates(subset=["timestamp"])
+        .sort_values("timestamp")
+        .reset_index(drop=True)
+    )
     df = loader.filter_trading_range(df, dr["start"], dr["end"])
     df["date_only"] = loader._market_timestamp_series(df).dt.date
     dates = sorted({d.strftime("%Y-%m-%d") for d in df["date_only"].unique()})
@@ -249,7 +243,9 @@ def grid(values: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
     return combos
 
 
-def _session_metrics(session: Any) -> Tuple[float, int, int, float, float, Dict[str, Dict[str, float]]]:
+def _session_metrics(
+    session: Any,
+) -> Tuple[float, int, int, float, float, Dict[str, Dict[str, float]]]:
     """Extract aggregate + per-strategy metrics from DayTradingManager session."""
     if not session:
         return 0.0, 0, 0, 0.0, 0.0, {}
@@ -388,13 +384,15 @@ def run_single_day(
         per_strategy_stats: Dict[str, Dict[str, float]] = {}
 
         for strategy_name in sorted(params_by_strategy.keys()):
-            pnl, trades, wins, gross_wins, gross_losses, strat_stats = _run_single_day_strategy_isolated(
-                ticker=ticker,
-                date=date,
-                day_rows=day_rows,
-                strategy_name=strategy_name,
-                strategy_params=params_by_strategy.get(strategy_name, {}) or {},
-                regime_detection_minutes=regime_detection_minutes,
+            pnl, trades, wins, gross_wins, gross_losses, strat_stats = (
+                _run_single_day_strategy_isolated(
+                    ticker=ticker,
+                    date=date,
+                    day_rows=day_rows,
+                    strategy_name=strategy_name,
+                    strategy_params=params_by_strategy.get(strategy_name, {}) or {},
+                    regime_detection_minutes=regime_detection_minutes,
+                )
             )
             total_pnl += pnl
             total_trades += trades
@@ -404,7 +402,13 @@ def run_single_day(
             for key, bucket in strat_stats.items():
                 merged = per_strategy_stats.setdefault(
                     key,
-                    {"pnl": 0.0, "trades": 0.0, "wins": 0.0, "gross_wins": 0.0, "gross_losses": 0.0},
+                    {
+                        "pnl": 0.0,
+                        "trades": 0.0,
+                        "wins": 0.0,
+                        "gross_wins": 0.0,
+                        "gross_losses": 0.0,
+                    },
                 )
                 for metric in ("pnl", "trades", "wins", "gross_wins", "gross_losses"):
                     merged[metric] += float(bucket.get(metric, 0.0) or 0.0)
@@ -428,7 +432,7 @@ def run_single_day(
             strategy_selection_mode="all_enabled",
             max_active_strategies=max(1, min(20, len(getattr(dtm, "strategies", {})))),
         )
-    
+
     # Apply params to strategies
     for strat_name, params in params_by_strategy.items():
         strat = dtm.strategies.get(strat_name)
@@ -462,11 +466,17 @@ def score_result(
         return -100.0
 
     win_rate = wins / trades if trades > 0 else 0
-    profit_factor = gross_wins / gross_losses if gross_losses > 0 else (2.0 if gross_wins > 0 else 0.0)
+    profit_factor = (
+        gross_wins / gross_losses
+        if gross_losses > 0
+        else (2.0 if gross_wins > 0 else 0.0)
+    )
     trade_weight = min(1.5, 0.5 + trades / 20.0)
 
     # Balance profitability, consistency, and PF, then scale by sample size.
-    score = ((pnl * 1.5) + (win_rate * 40.0) + ((profit_factor - 1.0) * 20.0)) * trade_weight
+    score = (
+        (pnl * 1.5) + (win_rate * 40.0) + ((profit_factor - 1.0) * 20.0)
+    ) * trade_weight
 
     if trades < min_trades:
         score -= (min_trades - trades) * 8
@@ -491,11 +501,11 @@ def optimize_strategy_for_dates(
         trades=0,
         win_rate=0.0,
         profit_factor=0.0,
-        days_used=0
+        days_used=0,
     )
-    
+
     combos = grid(param_grid)
-    
+
     target_strategy = canonical_strategy_name(strategy_name)
     for params in combos:
         total_pnl = 0.0
@@ -504,12 +514,12 @@ def optimize_strategy_for_dates(
         total_gross_wins = 0.0
         total_gross_losses = 0.0
         days_used = 0
-        
+
         for date in dates:
             day_rows = day_rows_map.get(date)
             if not day_rows:
                 continue
-            
+
             _, _, _, _, _, per_strategy_stats = run_single_day(
                 ticker=ticker,
                 date=date,
@@ -528,10 +538,10 @@ def optimize_strategy_for_dates(
             total_gross_wins += float(strategy_stats.get("gross_wins", 0.0))
             total_gross_losses += float(strategy_stats.get("gross_losses", 0.0))
             days_used += 1
-        
+
         if days_used == 0:
             continue
-        
+
         score = score_result(
             total_pnl,
             total_trades,
@@ -540,9 +550,13 @@ def optimize_strategy_for_dates(
             total_gross_losses,
         )
         win_rate = (total_wins / total_trades * 100) if total_trades > 0 else 0
-        
+
         if score > best.score:
-            pf = total_gross_wins / total_gross_losses if total_gross_losses > 0 else (2.0 if total_gross_wins > 0 else 0.0)
+            pf = (
+                total_gross_wins / total_gross_losses
+                if total_gross_losses > 0
+                else (2.0 if total_gross_wins > 0 else 0.0)
+            )
             best = OptimizationResult(
                 strategy=strategy_name,
                 params=params,
@@ -551,9 +565,9 @@ def optimize_strategy_for_dates(
                 trades=total_trades,
                 win_rate=win_rate,
                 profit_factor=pf,
-                days_used=days_used
+                days_used=days_used,
             )
-    
+
     return best
 
 
@@ -570,12 +584,12 @@ def evaluate_on_dates(
     total_wins = 0
     total_gross_wins = 0.0
     total_gross_losses = 0.0
-    
+
     for date in dates:
         day_rows = day_rows_map.get(date)
         if not day_rows:
             continue
-        
+
         pnl, trades, wins, gross_wins, gross_losses, _ = run_single_day(
             ticker=ticker,
             date=date,
@@ -588,7 +602,7 @@ def evaluate_on_dates(
         total_wins += wins
         total_gross_wins += gross_wins
         total_gross_losses += gross_losses
-    
+
     return total_pnl, total_trades, total_wins, total_gross_wins, total_gross_losses
 
 
@@ -606,26 +620,35 @@ def run_walk_forward(
     print(f"\n{'='*60}")
     print(f"🔧 Optimizing {ticker}")
     print(f"{'='*60}")
-    
+
     if len(all_dates) < train_days + test_days:
-        print(f"   ⚠️  Not enough data ({len(all_dates)} days, need {train_days + test_days})")
+        print(
+            f"   ⚠️  Not enough data ({len(all_dates)} days, need {train_days + test_days})"
+        )
         return TickerOptResult(
             ticker=ticker,
             best_params={},
-            train_pnl=0, test_pnl=0,
-            train_trades=0, test_trades=0,
-            train_win_rate=0, test_win_rate=0
+            train_pnl=0,
+            test_pnl=0,
+            train_trades=0,
+            test_trades=0,
+            train_win_rate=0,
+            test_win_rate=0,
         )
 
     windows: List[Tuple[List[str], List[str]]] = []
     start_idx = 0
     while start_idx + train_days + test_days <= len(all_dates):
-        train_slice = all_dates[start_idx:start_idx + train_days]
-        test_slice = all_dates[start_idx + train_days:start_idx + train_days + test_days]
+        train_slice = all_dates[start_idx : start_idx + train_days]
+        test_slice = all_dates[
+            start_idx + train_days : start_idx + train_days + test_days
+        ]
         windows.append((train_slice, test_slice))
         start_idx += test_days
 
-    print(f"   Windows: {len(windows)} | Train days/window: {train_days} | Test days/window: {test_days}")
+    print(
+        f"   Windows: {len(windows)} | Train days/window: {train_days} | Test days/window: {test_days}"
+    )
 
     rolling_best_params: Dict[str, Dict[str, Any]] = {}
     train_pnl_total = 0.0
@@ -637,8 +660,12 @@ def run_walk_forward(
 
     for idx, (train_dates, test_dates) in enumerate(windows, 1):
         print(f"\n   ─ Window {idx}/{len(windows)}")
-        print(f"     Train: {train_dates[0]} → {train_dates[-1]} ({len(train_dates)} days)")
-        print(f"     Test:  {test_dates[0]} → {test_dates[-1]} ({len(test_dates)} days)")
+        print(
+            f"     Train: {train_dates[0]} → {train_dates[-1]} ({len(train_dates)} days)"
+        )
+        print(
+            f"     Test:  {test_dates[0]} → {test_dates[-1]} ({len(test_dates)} days)"
+        )
 
         best_results: Dict[str, OptimizationResult] = {}
         for strategy_name, param_grid in PARAM_GRIDS.items():
@@ -658,7 +685,9 @@ def run_walk_forward(
                     f"PnL: {result.total_pnl_pct:+.2f}% | Trades: {result.trades:3} | WR: {result.win_rate:.1f}%"
                 )
 
-        window_params = {name: res.params for name, res in best_results.items() if res.params}
+        window_params = {
+            name: res.params for name, res in best_results.items() if res.params
+        }
         if not window_params:
             print("     ⚠️  No valid params in this window, skipping evaluation")
             continue
@@ -688,13 +717,25 @@ def run_walk_forward(
 
         train_wr = (train_wins / train_trades * 100) if train_trades > 0 else 0.0
         test_wr = (test_wins / test_trades * 100) if test_trades > 0 else 0.0
-        print(f"     📈 Train: PnL {train_pnl:+.2f}% | {train_trades} trades | WR {train_wr:.1f}%")
-        print(f"     📉 Test:  PnL {test_pnl:+.2f}% | {test_trades} trades | WR {test_wr:.1f}%")
+        print(
+            f"     📈 Train: PnL {train_pnl:+.2f}% | {train_trades} trades | WR {train_wr:.1f}%"
+        )
+        print(
+            f"     📉 Test:  PnL {test_pnl:+.2f}% | {test_trades} trades | WR {test_wr:.1f}%"
+        )
 
-    train_win_rate = (train_wins_total / train_trades_total * 100) if train_trades_total > 0 else 0.0
-    test_win_rate = (test_wins_total / test_trades_total * 100) if test_trades_total > 0 else 0.0
-    print(f"\n   📈 Aggregate Train: PnL {train_pnl_total:+.2f}% | {train_trades_total} trades | WR {train_win_rate:.1f}%")
-    print(f"   📉 Aggregate Test:  PnL {test_pnl_total:+.2f}% | {test_trades_total} trades | WR {test_win_rate:.1f}%")
+    train_win_rate = (
+        (train_wins_total / train_trades_total * 100) if train_trades_total > 0 else 0.0
+    )
+    test_win_rate = (
+        (test_wins_total / test_trades_total * 100) if test_trades_total > 0 else 0.0
+    )
+    print(
+        f"\n   📈 Aggregate Train: PnL {train_pnl_total:+.2f}% | {train_trades_total} trades | WR {train_win_rate:.1f}%"
+    )
+    print(
+        f"   📉 Aggregate Test:  PnL {test_pnl_total:+.2f}% | {test_trades_total} trades | WR {test_win_rate:.1f}%"
+    )
 
     return TickerOptResult(
         ticker=ticker,
@@ -704,54 +745,65 @@ def run_walk_forward(
         train_trades=train_trades_total,
         test_trades=test_trades_total,
         train_win_rate=train_win_rate,
-        test_win_rate=test_win_rate
+        test_win_rate=test_win_rate,
     )
 
 
 def main():
     parser = argparse.ArgumentParser(description="Walk-Forward Strategy Optimizer")
-    parser.add_argument("--tickers", type=str, default="",
-                        help="Comma-separated list of tickers (default: all available)")
-    parser.add_argument("--train-days", type=int, default=10,
-                        help="Number of in-sample training days")
-    parser.add_argument("--test-days", type=int, default=3,
-                        help="Number of out-of-sample test days")
-    parser.add_argument("--output", "-o", type=str, default="strategy_overrides.json",
-                        help="Output file for strategy overrides")
+    parser.add_argument(
+        "--tickers",
+        type=str,
+        default="",
+        help="Comma-separated list of tickers (default: all available)",
+    )
+    parser.add_argument(
+        "--train-days", type=int, default=10, help="Number of in-sample training days"
+    )
+    parser.add_argument(
+        "--test-days", type=int, default=3, help="Number of out-of-sample test days"
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default="strategy_overrides.json",
+        help="Output file for strategy overrides",
+    )
     parser.add_argument(
         "--parallel-all-strategies",
         action="store_true",
         help="Evaluate/run WFO windows with all eligible strategies active in parallel (all_enabled mode)",
     )
     args = parser.parse_args()
-    
+
     print("=" * 70)
     print("🚀 WALK-FORWARD STRATEGY OPTIMIZER")
     print("=" * 70)
-    
+
     # Get tickers
     discovery = get_discovery()
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     else:
         tickers = discovery.get_tickers()
-    
+
     print(f"Tickers: {', '.join(tickers)}")
     print(f"Train Days: {args.train_days}")
     print(f"Test Days: {args.test_days}")
     print(f"Parallel All Strategies: {args.parallel_all_strategies}")
-    
+
     loader = DataLoader()
     all_results: List[TickerOptResult] = []
     final_overrides: Dict[str, Dict[str, Any]] = {}
-    
+
     for ticker in tickers:
         # Get available dates
         dates = get_trading_dates(ticker, loader)
         if not dates:
             print(f"\n⚠️  {ticker}: No data available")
             continue
-        
+
         dr = discovery.get_date_range(ticker)
         if not dr["start"] or not dr["end"]:
             continue
@@ -768,8 +820,12 @@ def main():
                 dfs.append(loader.load_csv(file))
 
         df = pd.concat(dfs, ignore_index=True)
-        df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-        
+        df = (
+            df.drop_duplicates(subset=["timestamp"])
+            .sort_values("timestamp")
+            .reset_index(drop=True)
+        )
+
         # Build day_rows_map
         day_rows_map: Dict[str, List[Tuple]] = {}
         for date in dates:
@@ -777,7 +833,7 @@ def main():
             if day_df.empty:
                 continue
             day_rows_map[date] = list(day_df.itertuples(index=False))
-        
+
         # Run optimization
         result = run_walk_forward(
             ticker=ticker,
@@ -787,35 +843,39 @@ def main():
             test_days=args.test_days,
             parallel_all_strategies=args.parallel_all_strategies,
         )
-        
+
         all_results.append(result)
         if result.best_params:
             final_overrides[ticker] = result.best_params
-    
+
     # Print summary
     print("\n" + "=" * 70)
     print("📊 OPTIMIZATION SUMMARY")
     print("=" * 70)
-    
+
     total_train_pnl = 0
     total_test_pnl = 0
-    
+
     for r in all_results:
         icon = "🟢" if r.test_pnl > 0 else "🔴"
-        print(f"{r.ticker:6} | Train: {r.train_pnl:+6.2f}% ({r.train_trades:3} trades) | "
-              f"Test: {icon} {r.test_pnl:+6.2f}% ({r.test_trades:3} trades)")
+        print(
+            f"{r.ticker:6} | Train: {r.train_pnl:+6.2f}% ({r.train_trades:3} trades) | "
+            f"Test: {icon} {r.test_pnl:+6.2f}% ({r.test_trades:3} trades)"
+        )
         total_train_pnl += r.train_pnl
         total_test_pnl += r.test_pnl
-    
+
     print("-" * 70)
     test_icon = "🟢" if total_test_pnl > 0 else "🔴"
-    print(f"TOTAL  | Train: {total_train_pnl:+6.2f}% | Test: {test_icon} {total_test_pnl:+6.2f}%")
-    
+    print(
+        f"TOTAL  | Train: {total_train_pnl:+6.2f}% | Test: {test_icon} {total_test_pnl:+6.2f}%"
+    )
+
     # Save results
     output_path = Path(args.output)
     output_path.write_text(json.dumps(final_overrides, indent=2))
     print(f"\n💾 Saved optimized parameters to: {output_path}")
-    
+
     # Also save detailed results
     results_path = Path("wfo_results.json")
     results_data = {
@@ -839,14 +899,11 @@ def main():
             }
             for r in all_results
         ],
-        "totals": {
-            "train_pnl": total_train_pnl,
-            "test_pnl": total_test_pnl
-        }
+        "totals": {"train_pnl": total_train_pnl, "test_pnl": total_test_pnl},
     }
     results_path.write_text(json.dumps(results_data, indent=2))
     print(f"💾 Saved detailed results to: {results_path}")
-    
+
     print("\n✅ Optimization complete!")
 
 

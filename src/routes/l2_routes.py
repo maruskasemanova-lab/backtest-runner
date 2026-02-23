@@ -93,12 +93,18 @@ async def get_icebergs(
 
     if sort == "hidden_size":
         filtered.sort(
-            key=lambda row: (int(row.get("hidden_size", 0) or 0), _iceberg_epoch_seconds(row)),
+            key=lambda row: (
+                int(row.get("hidden_size", 0) or 0),
+                _iceberg_epoch_seconds(row),
+            ),
             reverse=True,
         )
     elif sort == "trade_size":
         filtered.sort(
-            key=lambda row: (int(row.get("trade_size", 0) or 0), _iceberg_epoch_seconds(row)),
+            key=lambda row: (
+                int(row.get("trade_size", 0) or 0),
+                _iceberg_epoch_seconds(row),
+            ),
             reverse=True,
         )
     else:

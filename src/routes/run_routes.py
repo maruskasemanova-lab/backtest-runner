@@ -132,7 +132,9 @@ async def get_bar_details_endpoint(
     services: ApiServices = Depends(get_api_services),
 ):
     """Get 1-second intrabar frames for a specific minute bar."""
-    return get_bar_details(run_id, ticker, date, minute_key, services.build_run_control_deps())
+    return get_bar_details(
+        run_id, ticker, date, minute_key, services.build_run_control_deps()
+    )
 
 
 @router.get("/api/run/{run_id}/{ticker}/{date}/markers")
@@ -144,7 +146,9 @@ async def get_markers_endpoint(
     services: ApiServices = Depends(get_api_services),
 ):
     """Get all decision markers."""
-    return get_markers(run_id, ticker, date, marker_type, services.build_run_control_deps())
+    return get_markers(
+        run_id, ticker, date, marker_type, services.build_run_control_deps()
+    )
 
 
 @router.get("/api/run/{run_id}/{ticker}/{date}/chart-annotations")
@@ -155,7 +159,9 @@ async def get_chart_annotations_endpoint(
     services: ApiServices = Depends(get_api_services),
 ):
     """Get markers formatted for chart display."""
-    return get_chart_annotations(run_id, ticker, date, services.build_run_control_deps())
+    return get_chart_annotations(
+        run_id, ticker, date, services.build_run_control_deps()
+    )
 
 
 @router.get("/api/run/{run_id}/{ticker}/{date}/summary")

@@ -63,8 +63,12 @@ class ShortRoundTrip:
             "trade_id": self.trade_id,
             "entry_date": self.entry_date.isoformat(),
             "exit_date": self.exit_date.isoformat(),
-            "entry_time_utc": self.entry_time_utc.isoformat() if self.entry_time_utc else None,
-            "exit_time_utc": self.exit_time_utc.isoformat() if self.exit_time_utc else None,
+            "entry_time_utc": (
+                self.entry_time_utc.isoformat() if self.entry_time_utc else None
+            ),
+            "exit_time_utc": (
+                self.exit_time_utc.isoformat() if self.exit_time_utc else None
+            ),
             "quantity": round(self.quantity, 6),
             "entry_price": round(self.entry_price, 6),
             "exit_price": round(self.exit_price, 6),
@@ -225,7 +229,9 @@ def load_ibkr_fills_from_xml(
                 gross_amount=_safe_float(trade.attrib.get("tradeMoney")),
                 commission=_safe_float(trade.attrib.get("ibCommission")),
                 net_amount=_safe_float(trade.attrib.get("netCash")),
-                open_close_indicator=str(trade.attrib.get("openCloseIndicator", "")).strip().upper(),
+                open_close_indicator=str(trade.attrib.get("openCloseIndicator", ""))
+                .strip()
+                .upper(),
             )
         )
     return fills
@@ -282,9 +288,13 @@ def match_short_round_trips(
     ordered = sorted(
         fills,
         key=lambda item: (
-            item.trade_timestamp_utc
-            if item.trade_timestamp_utc is not None
-            else datetime.combine(item.trade_date, datetime.min.time(), tzinfo=timezone.utc),
+            (
+                item.trade_timestamp_utc
+                if item.trade_timestamp_utc is not None
+                else datetime.combine(
+                    item.trade_date, datetime.min.time(), tzinfo=timezone.utc
+                )
+            ),
             item.row_index,
         ),
     )
@@ -346,18 +356,24 @@ def match_short_round_trips(
 
             buy_qty_remaining -= take_qty
             lot["qty_remaining"] = lot_qty - take_qty
-            lot["entry_net_remaining"] = float(lot["entry_net_remaining"]) - (sell_unit_net * take_qty)
+            lot["entry_net_remaining"] = float(lot["entry_net_remaining"]) - (
+                sell_unit_net * take_qty
+            )
             if float(lot["qty_remaining"]) <= 1e-9:
                 open_short_lots.popleft()
 
         if buy_qty_remaining > 1e-9:
             unmatched_buy_quantity += buy_qty_remaining
 
-    open_short_qty_remaining = sum(float(lot.get("qty_remaining", 0.0)) for lot in open_short_lots)
+    open_short_qty_remaining = sum(
+        float(lot.get("qty_remaining", 0.0)) for lot in open_short_lots
+    )
     return matched, open_short_qty_remaining, unmatched_buy_quantity
 
 
-def build_daily_summary(round_trips: Iterable[ShortRoundTrip]) -> Dict[str, Dict[str, float]]:
+def build_daily_summary(
+    round_trips: Iterable[ShortRoundTrip],
+) -> Dict[str, Dict[str, float]]:
     summary: Dict[str, Dict[str, float]] = defaultdict(
         lambda: {"trade_count": 0.0, "net_pnl": 0.0, "quantity": 0.0}
     )
@@ -433,7 +449,9 @@ def forced_replay_short_round_trips_with_engine(
         if qty <= 0 or entry_price <= 0 or exit_price <= 0:
             continue
 
-        session = dtm.get_or_create_session(run_id=run_id, ticker=ticker, date=entry_date)
+        session = dtm.get_or_create_session(
+            run_id=run_id, ticker=ticker, date=entry_date
+        )
 
         entry_time = _parse_any_iso_datetime_to_utc(trade.get("entry_time_utc"))
         exit_time = _parse_any_iso_datetime_to_utc(trade.get("exit_time_utc"))
@@ -442,8 +460,12 @@ def forced_replay_short_round_trips_with_engine(
         else:
             trades_without_execution_timestamps += 1
             # Date-only fallback keeps deterministic replay for CSV-based fixtures.
-            entry_time = entry_time or datetime.fromisoformat(f"{entry_date}T15:30:00+00:00")
-            exit_time = exit_time or datetime.fromisoformat(f"{exit_date}T15:31:00+00:00")
+            entry_time = entry_time or datetime.fromisoformat(
+                f"{entry_date}T15:30:00+00:00"
+            )
+            exit_time = exit_time or datetime.fromisoformat(
+                f"{exit_date}T15:31:00+00:00"
+            )
             if exit_time <= entry_time:
                 exit_time = entry_time + timedelta(seconds=1)
 
@@ -472,9 +494,16 @@ def forced_replay_short_round_trips_with_engine(
         bucket["ibkr_net_pnl_dollars"] += ibkr_net
         bucket["ibkr_gross_pnl_dollars"] += ibkr_gross
         bucket["engine_trade_count"] += 1.0
-        bucket["engine_net_pnl_dollars"] += _safe_float(getattr(engine_trade, "pnl_dollars", 0.0))
-        bucket["engine_total_costs_dollars"] += _safe_float(getattr(engine_trade, "total_costs", 0.0))
-        bucket["engine_gross_pnl_dollars"] += _safe_float(_safe_float(getattr(engine_trade, "pnl_dollars", 0.0)) + _safe_float(getattr(engine_trade, "total_costs", 0.0)))
+        bucket["engine_net_pnl_dollars"] += _safe_float(
+            getattr(engine_trade, "pnl_dollars", 0.0)
+        )
+        bucket["engine_total_costs_dollars"] += _safe_float(
+            getattr(engine_trade, "total_costs", 0.0)
+        )
+        bucket["engine_gross_pnl_dollars"] += _safe_float(
+            _safe_float(getattr(engine_trade, "pnl_dollars", 0.0))
+            + _safe_float(getattr(engine_trade, "total_costs", 0.0))
+        )
         replayed += 1
 
     ordered_days = sorted(per_day.keys())
@@ -527,7 +556,9 @@ def forced_replay_short_round_trips_with_engine(
         totals["engine_gross_pnl_dollars"] += engine_gross
 
     total_ibkr_costs = totals["ibkr_gross_pnl_dollars"] - totals["ibkr_net_pnl_dollars"]
-    timestamp_resolution = "execution_timestamp" if trades_with_execution_timestamps > 0 else "date_only"
+    timestamp_resolution = (
+        "execution_timestamp" if trades_with_execution_timestamps > 0 else "date_only"
+    )
     return {
         "timestamp_resolution": timestamp_resolution,
         "trades_with_execution_timestamps": int(trades_with_execution_timestamps),
@@ -536,16 +567,24 @@ def forced_replay_short_round_trips_with_engine(
         "replayed_trades": int(replayed),
         "ibkr_trade_count": int(totals["ibkr_trade_count"]),
         "engine_trade_count": int(totals["engine_trade_count"]),
-        "trade_count_delta": int(totals["engine_trade_count"] - totals["ibkr_trade_count"]),
+        "trade_count_delta": int(
+            totals["engine_trade_count"] - totals["ibkr_trade_count"]
+        ),
         "ibkr_net_pnl_dollars": round(totals["ibkr_net_pnl_dollars"], 6),
         "engine_net_pnl_dollars": round(totals["engine_net_pnl_dollars"], 6),
-        "net_pnl_delta_dollars": round(totals["engine_net_pnl_dollars"] - totals["ibkr_net_pnl_dollars"], 6),
+        "net_pnl_delta_dollars": round(
+            totals["engine_net_pnl_dollars"] - totals["ibkr_net_pnl_dollars"], 6
+        ),
         "ibkr_implied_total_costs_dollars": round(total_ibkr_costs, 6),
         "engine_total_costs_dollars": round(totals["engine_total_costs_dollars"], 6),
-        "cost_delta_dollars": round(totals["engine_total_costs_dollars"] - total_ibkr_costs, 6),
+        "cost_delta_dollars": round(
+            totals["engine_total_costs_dollars"] - total_ibkr_costs, 6
+        ),
         "ibkr_gross_pnl_dollars": round(totals["ibkr_gross_pnl_dollars"], 6),
         "engine_gross_pnl_dollars": round(totals["engine_gross_pnl_dollars"], 6),
-        "gross_pnl_delta_dollars": round(totals["engine_gross_pnl_dollars"] - totals["ibkr_gross_pnl_dollars"], 6),
+        "gross_pnl_delta_dollars": round(
+            totals["engine_gross_pnl_dollars"] - totals["ibkr_gross_pnl_dollars"], 6
+        ),
         "per_day": per_day_rows,
     }
 
@@ -597,15 +636,25 @@ async def run_backtest_for_day(
         session_summary = _extract_session_summary(summary_payload)
         trades_raw = session_summary.get("trades", [])
         trades = trades_raw if isinstance(trades_raw, list) else []
-        short_trades = [trade for trade in trades if str(trade.get("side", "")).strip().lower() == "short"]
+        short_trades = [
+            trade
+            for trade in trades
+            if str(trade.get("side", "")).strip().lower() == "short"
+        ]
 
         short_trade_count = len(short_trades)
-        short_trade_pnl = sum(_safe_float(trade.get("pnl_dollars")) for trade in short_trades)
+        short_trade_pnl = sum(
+            _safe_float(trade.get("pnl_dollars")) for trade in short_trades
+        )
 
         return {
             "date": trade_date,
-            "backtest_total_trades": int(_safe_float(session_summary.get("total_trades"))),
-            "backtest_total_pnl_dollars": round(_safe_float(session_summary.get("total_pnl_dollars")), 6),
+            "backtest_total_trades": int(
+                _safe_float(session_summary.get("total_trades"))
+            ),
+            "backtest_total_pnl_dollars": round(
+                _safe_float(session_summary.get("total_pnl_dollars")), 6
+            ),
             "backtest_short_trades": short_trade_count,
             "backtest_short_pnl_dollars": round(short_trade_pnl, 6),
             "error": None,
@@ -706,7 +755,9 @@ def compare_scalp_daily_to_backtest(
 
 def _resolve_include_extended_hours(args: argparse.Namespace) -> Optional[bool]:
     if args.include_extended_hours and args.regular_hours_only:
-        raise SystemExit("Cannot set both --include-extended-hours and --regular-hours-only.")
+        raise SystemExit(
+            "Cannot set both --include-extended-hours and --regular-hours-only."
+        )
     if args.include_extended_hours:
         return True
     if args.regular_hours_only:
@@ -716,7 +767,9 @@ def _resolve_include_extended_hours(args: argparse.Namespace) -> Optional[bool]:
 
 def _default_fixture_path(ticker: str, date_from: str, date_to: str) -> Path:
     safe_ticker = str(ticker).strip().upper()
-    return Path(f"tests/fixtures/ibkr_{safe_ticker}_short_scalps_{date_from}_{date_to}.json")
+    return Path(
+        f"tests/fixtures/ibkr_{safe_ticker}_short_scalps_{date_from}_{date_to}.json"
+    )
 
 
 def _default_report_path(ticker: str) -> Path:
@@ -756,8 +809,12 @@ def main() -> None:
         help="Timezone used to interpret Flex XML dateTime values before converting to UTC.",
     )
     parser.add_argument("--ticker", default="MU", help="Ticker symbol to analyze.")
-    parser.add_argument("--date-from", default="2025-10-01", help="Inclusive start date (YYYY-MM-DD).")
-    parser.add_argument("--date-to", default="2026-02-13", help="Inclusive end date (YYYY-MM-DD).")
+    parser.add_argument(
+        "--date-from", default="2025-10-01", help="Inclusive start date (YYYY-MM-DD)."
+    )
+    parser.add_argument(
+        "--date-to", default="2026-02-13", help="Inclusive end date (YYYY-MM-DD)."
+    )
     parser.add_argument(
         "--strategy-api-url",
         default="http://127.0.0.1:8001",
@@ -802,8 +859,14 @@ def main() -> None:
         raise SystemExit("date-from must be <= date-to")
 
     include_extended_hours = _resolve_include_extended_hours(args)
-    fixture_out = Path(args.fixture_out) if args.fixture_out else _default_fixture_path(ticker, args.date_from, args.date_to)
-    report_out = Path(args.report_out) if args.report_out else _default_report_path(ticker)
+    fixture_out = (
+        Path(args.fixture_out)
+        if args.fixture_out
+        else _default_fixture_path(ticker, args.date_from, args.date_to)
+    )
+    report_out = (
+        Path(args.report_out) if args.report_out else _default_report_path(ticker)
+    )
 
     fills = load_ibkr_fills(
         source_path=source_path,
@@ -817,7 +880,9 @@ def main() -> None:
     fills_first_date = fill_days[0] if fill_days else None
     fills_last_date = fill_days[-1] if fill_days else None
 
-    short_round_trips, open_short_qty_remaining, unmatched_buy_quantity = match_short_round_trips(fills)
+    short_round_trips, open_short_qty_remaining, unmatched_buy_quantity = (
+        match_short_round_trips(fills)
+    )
     same_day_scalps = [trade for trade in short_round_trips if trade.holding_days == 0]
 
     short_round_trip_daily = build_daily_summary(short_round_trips)

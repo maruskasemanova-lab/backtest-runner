@@ -20,6 +20,7 @@ Critical invariants and required validation workflow for safe LLM-assisted chang
 ### Reset/Checkpoint Semantics
 
 - `comparable_mode=true` forces cold-start behavior.
+- `comparable_mode=true` cold-start semantics must hold even when progressive range loading is enabled.
 - Warm-start checkpoint load must remain explicit and opt-in.
 - Session reset and full reset scopes must remain distinct.
 

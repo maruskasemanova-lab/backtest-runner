@@ -18,7 +18,12 @@ import pandas as pd
 
 from available_data import get_discovery
 from data_loader import DataLoader
-from wfo_optimizer import PARAM_GRIDS, evaluate_on_dates, get_trading_dates, optimize_strategy_for_dates
+from wfo_optimizer import (
+    PARAM_GRIDS,
+    evaluate_on_dates,
+    get_trading_dates,
+    optimize_strategy_for_dates,
+)
 
 
 @dataclass
@@ -46,11 +51,15 @@ def split_dates_chronological(
     validation = dates[train_end:val_end]
     test = dates[val_end:]
     if not validation or not test:
-        raise ValueError("Split produced empty validation/test bucket. Add more history.")
+        raise ValueError(
+            "Split produced empty validation/test bucket. Add more history."
+        )
     return SplitResult(train_dates=train, validation_dates=validation, test_dates=test)
 
 
-def build_day_rows_map(ticker: str, loader: DataLoader) -> Tuple[List[str], Dict[str, List[Tuple]]]:
+def build_day_rows_map(
+    ticker: str, loader: DataLoader
+) -> Tuple[List[str], Dict[str, List[Tuple]]]:
     discovery = get_discovery()
     dates = get_trading_dates(ticker, loader)
     if not dates:
@@ -72,7 +81,11 @@ def build_day_rows_map(ticker: str, loader: DataLoader) -> Tuple[List[str], Dict
             dfs.append(loader.load_csv(file))
 
     df = pd.concat(dfs, ignore_index=True)
-    df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    df = (
+        df.drop_duplicates(subset=["timestamp"])
+        .sort_values("timestamp")
+        .reset_index(drop=True)
+    )
 
     day_rows_map: Dict[str, List[Tuple]] = {}
     for date in dates:
@@ -87,12 +100,16 @@ def win_rate(wins: int, trades: int) -> float:
     return (wins / trades * 100.0) if trades > 0 else 0.0
 
 
-def run_for_ticker(ticker: str, loader: DataLoader, train_ratio: float, validation_ratio: float) -> Dict[str, Any]:
+def run_for_ticker(
+    ticker: str, loader: DataLoader, train_ratio: float, validation_ratio: float
+) -> Dict[str, Any]:
     dates, day_rows_map = build_day_rows_map(ticker, loader)
     if not dates or not day_rows_map:
         return {"ticker": ticker, "error": "No data available"}
 
-    split = split_dates_chronological(dates, train_ratio=train_ratio, validation_ratio=validation_ratio)
+    split = split_dates_chronological(
+        dates, train_ratio=train_ratio, validation_ratio=validation_ratio
+    )
 
     best_results = {}
     for strategy_name, param_grid in PARAM_GRIDS.items():
@@ -107,7 +124,11 @@ def run_for_ticker(ticker: str, loader: DataLoader, train_ratio: float, validati
 
     overrides = {name: r.params for name, r in best_results.items() if r.params}
     if not overrides:
-        return {"ticker": ticker, "error": "No valid optimized parameters", "split": split.__dict__}
+        return {
+            "ticker": ticker,
+            "error": "No valid optimized parameters",
+            "split": split.__dict__,
+        }
 
     tr_pnl, tr_trades, tr_wins, _, _ = evaluate_on_dates(
         ticker=ticker,
@@ -132,15 +153,31 @@ def run_for_ticker(ticker: str, loader: DataLoader, train_ratio: float, validati
         "ticker": ticker,
         "split": split.__dict__,
         "best_params": overrides,
-        "train": {"pnl_pct": tr_pnl, "trades": tr_trades, "win_rate": win_rate(tr_wins, tr_trades)},
-        "validation": {"pnl_pct": val_pnl, "trades": val_trades, "win_rate": win_rate(val_wins, val_trades)},
-        "test": {"pnl_pct": test_pnl, "trades": test_trades, "win_rate": win_rate(test_wins, test_trades)},
+        "train": {
+            "pnl_pct": tr_pnl,
+            "trades": tr_trades,
+            "win_rate": win_rate(tr_wins, tr_trades),
+        },
+        "validation": {
+            "pnl_pct": val_pnl,
+            "trades": val_trades,
+            "win_rate": win_rate(val_wins, val_trades),
+        },
+        "test": {
+            "pnl_pct": test_pnl,
+            "trades": test_trades,
+            "win_rate": win_rate(test_wins, test_trades),
+        },
     }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Strict chronological 60/20/20 OOS validation")
-    parser.add_argument("--tickers", type=str, default="", help="Comma-separated tickers; default all")
+    parser = argparse.ArgumentParser(
+        description="Strict chronological 60/20/20 OOS validation"
+    )
+    parser.add_argument(
+        "--tickers", type=str, default="", help="Comma-separated tickers; default all"
+    )
     parser.add_argument("--train-ratio", type=float, default=0.6)
     parser.add_argument("--validation-ratio", type=float, default=0.2)
     parser.add_argument("--output", type=str, default="oos_validation_results.json")
@@ -184,4 +221,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

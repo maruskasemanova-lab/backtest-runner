@@ -38,15 +38,13 @@ from .models import (
     DiscoverResponse,
     MatchRequest,
     MatchResponse,
-    EvidenceRequest,
     EvidenceResponse,
 )
 from .extractor import extract_snapshots_from_backtest, FeatureExtractor
 from .clustering import discover_cluster_patterns
 from .sequential import discover_sequential_patterns
-from .library import PatternLibraryManager, get_pattern_library_path
+from .library import PatternLibraryManager
 from .matcher import PatternMatcher
-from .evidence import format_evidence_for_api, PatternEvidenceSource
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +67,9 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Pattern Discovery API starting up...")
     PATTERN_LIBRARY_PATH.mkdir(parents=True, exist_ok=True)
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Pattern Discovery API shutting down...")
 
@@ -97,6 +95,7 @@ app.add_middleware(
 # Health & Status
 # ============================================================================
 
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -117,6 +116,7 @@ async def health():
 # Pattern Discovery Jobs
 # ============================================================================
 
+
 @app.post("/api/pattern-discovery/discover", response_model=DiscoverResponse)
 async def start_discovery(
     request: DiscoverRequest,
@@ -124,12 +124,12 @@ async def start_discovery(
 ):
     """
     Start a pattern discovery job.
-    
+
     Extracts features from backtest data, discovers patterns through
     clustering and sequential mining, and saves to pattern library.
     """
     job_id = f"pd-{uuid.uuid4().hex[:12]}"
-    
+
     # Initialize job state
     discovery_jobs[job_id] = {
         "job_id": job_id,
@@ -146,14 +146,14 @@ async def start_discovery(
         "results": None,
         "errors": [],
     }
-    
+
     # Start background task
     background_tasks.add_task(
         run_discovery_job,
         job_id,
         request,
     )
-    
+
     return DiscoverResponse(
         job_id=job_id,
         status="pending",
@@ -165,10 +165,10 @@ async def start_discovery(
 async def get_discovery_job(job_id: str):
     """Get status and results of a discovery job."""
     job = discovery_jobs.get(job_id)
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     return job
 
 
@@ -188,11 +188,11 @@ async def run_discovery_job(
     job = discovery_jobs[job_id]
     job["status"] = "running"
     job["started_at"] = datetime.utcnow().isoformat()
-    
+
     try:
         # Phase 1: Extract snapshots
         job["progress"] = {"phase": "extracting_snapshots", "current": 0, "total": 100}
-        
+
         reports_dir = Path("reports")
         snapshots = extract_snapshots_from_backtest(
             ticker=request.ticker,
@@ -201,15 +201,15 @@ async def run_discovery_job(
             reports_dir=reports_dir,
             config=request.discovery_config,
         )
-        
+
         job["progress"] = {"phase": "extracting_snapshots", "current": 30, "total": 100}
-        
+
         if not snapshots:
             raise ValueError("No snapshots extracted from backtest data")
-        
+
         # Phase 2: Cluster pattern discovery
         job["progress"] = {"phase": "clustering", "current": 30, "total": 100}
-        
+
         cluster_patterns = []
         if request.discovery_config.clustering_enabled:
             cluster_patterns = discover_cluster_patterns(
@@ -217,12 +217,12 @@ async def run_discovery_job(
                 config=request.discovery_config,
                 ticker=request.ticker,
             )
-        
+
         job["progress"] = {"phase": "clustering", "current": 60, "total": 100}
-        
+
         # Phase 3: Sequential pattern mining
         job["progress"] = {"phase": "sequential_mining", "current": 60, "total": 100}
-        
+
         sequential_patterns = []
         if request.discovery_config.sequential_enabled:
             sequential_patterns = discover_sequential_patterns(
@@ -230,12 +230,12 @@ async def run_discovery_job(
                 config=request.discovery_config,
                 ticker=request.ticker,
             )
-        
+
         job["progress"] = {"phase": "sequential_mining", "current": 80, "total": 100}
-        
+
         # Phase 4: Save library
         job["progress"] = {"phase": "saving_library", "current": 80, "total": 100}
-        
+
         library = library_manager.create_library(
             ticker=request.ticker,
             cluster_patterns=cluster_patterns,
@@ -243,9 +243,9 @@ async def run_discovery_job(
             total_snapshots=len(snapshots),
             discovery_config=request.discovery_config,
         )
-        
+
         library_path = library_manager.save_library(library)
-        
+
         # Update job state
         job["status"] = "completed"
         job["completed_at"] = datetime.utcnow().isoformat()
@@ -256,12 +256,14 @@ async def run_discovery_job(
             "sequential_patterns_found": len(sequential_patterns),
             "total_patterns_saved": len(cluster_patterns) + len(sequential_patterns),
             "library_path": str(library_path),
-            "best_pattern": _get_best_pattern_info(cluster_patterns, sequential_patterns),
+            "best_pattern": _get_best_pattern_info(
+                cluster_patterns, sequential_patterns
+            ),
         }
-        
+
         # Cache matcher for this ticker
         pattern_matchers[request.ticker] = PatternMatcher(library=library)
-        
+
     except Exception as e:
         logger.exception(f"Discovery job {job_id} failed")
         job["status"] = "failed"
@@ -278,7 +280,7 @@ def _get_best_pattern_info(
     all_patterns = list(cluster_patterns) + list(sequential_patterns)
     if not all_patterns:
         return None
-    
+
     best = max(all_patterns, key=lambda p: p.win_rate * p.support)
     return {
         "pattern_id": best.pattern_id,
@@ -292,18 +294,18 @@ def _get_best_pattern_info(
 # Pattern Library Management
 # ============================================================================
 
+
 @app.get("/api/pattern-discovery/patterns/{ticker}")
 async def get_patterns_for_ticker(ticker: str):
     """Get pattern library for a ticker."""
     ticker = ticker.upper()
     library = library_manager.load_library_for_ticker(ticker)
-    
+
     if not library:
         raise HTTPException(
-            status_code=404,
-            detail=f"No pattern library found for {ticker}"
+            status_code=404, detail=f"No pattern library found for {ticker}"
         )
-    
+
     return {
         "ticker": library.ticker,
         "version": library.version,
@@ -350,13 +352,12 @@ async def get_library_stats(ticker: str):
     """Get statistics for a ticker's pattern library."""
     ticker = ticker.upper()
     library = library_manager.load_library_for_ticker(ticker)
-    
+
     if not library:
         raise HTTPException(
-            status_code=404,
-            detail=f"No pattern library found for {ticker}"
+            status_code=404, detail=f"No pattern library found for {ticker}"
         )
-    
+
     return library_manager.get_library_stats(library)
 
 
@@ -364,15 +365,16 @@ async def get_library_stats(ticker: str):
 # Pattern Matching
 # ============================================================================
 
+
 @app.post("/api/pattern-discovery/match", response_model=MatchResponse)
 async def match_patterns(request: MatchRequest):
     """
     Match current market state against patterns.
-    
+
     Returns list of matching patterns with evidence for trading decisions.
     """
     ticker = request.ticker.upper()
-    
+
     # Get or create matcher
     matcher = pattern_matchers.get(ticker)
     if not matcher:
@@ -384,13 +386,13 @@ async def match_patterns(request: MatchRequest):
             )
         matcher = PatternMatcher(library=library, config=request.config)
         pattern_matchers[ticker] = matcher
-    
+
     # Convert feature vector to PatternInput
     features = PatternInput.from_feature_vector(request.feature_vector)
-    
+
     # Match patterns
     matches = matcher.match(features, request.recent_states)
-    
+
     # Format response
     return MatchResponse(
         matches=matches,
@@ -406,18 +408,18 @@ async def get_evidence(
 ):
     """
     Get pattern evidence for strategy engine.
-    
+
     This endpoint is called by the strategy engine to get
     pattern evidence for the EvidenceDecisionEngine.
     """
     ticker = ticker.upper()
-    
+
     try:
         feature_vector = json.loads(feature_vector_json)
         recent_states = json.loads(recent_states_json)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
-    
+
     # Get matcher
     matcher = pattern_matchers.get(ticker)
     if not matcher:
@@ -432,11 +434,11 @@ async def get_evidence(
             )
         matcher = PatternMatcher(library=library)
         pattern_matchers[ticker] = matcher
-    
+
     # Get evidence
     features = PatternInput.from_feature_vector(feature_vector)
     best_match = matcher.get_best_match(features, recent_states)
-    
+
     if not best_match:
         return EvidenceResponse(
             source_name="no_match",
@@ -445,7 +447,7 @@ async def get_evidence(
             calibrated=0.0,
             reasoning="No matching pattern found",
         )
-    
+
     return EvidenceResponse(
         source_name=best_match.pattern_name,
         direction=best_match.direction.value,
@@ -459,8 +461,10 @@ async def get_evidence(
 # Pattern-Aware Tuning
 # ============================================================================
 
+
 class PatternTunerRequest(BaseModel):
     """Request for pattern-aware tuning."""
+
     ticker: str
     date_from: str
     date_to: str
@@ -477,11 +481,11 @@ async def start_pattern_tuner(
 ):
     """
     Start a pattern-aware adaptive tuning job.
-    
+
     Tunes pattern matching parameters along with strategy parameters.
     """
     job_id = f"pt-{uuid.uuid4().hex[:12]}"
-    
+
     # Initialize job state
     discovery_jobs[job_id] = {
         "job_id": job_id,
@@ -499,14 +503,14 @@ async def start_pattern_tuner(
         "results": None,
         "errors": [],
     }
-    
+
     # Start background task
     background_tasks.add_task(
         run_pattern_tuner_job,
         job_id,
         request,
     )
-    
+
     return {
         "job_id": job_id,
         "status": "pending",
@@ -522,19 +526,19 @@ async def run_pattern_tuner_job(
     job = discovery_jobs[job_id]
     job["status"] = "running"
     job["started_at"] = datetime.utcnow().isoformat()
-    
+
     try:
         # This would integrate with the existing adaptive tuner
         # For now, we'll do a simplified version
-        
+
         job["progress"] = {"phase": "loading_library", "current": 10, "total": 100}
-        
+
         library = library_manager.load_library_for_ticker(request.ticker)
         if not library:
             raise ValueError(f"No pattern library found for {request.ticker}")
-        
+
         job["progress"] = {"phase": "tuning", "current": 50, "total": 100}
-        
+
         # Extract pattern tuning dimensions
         pattern_config = request.pattern_config
         min_similarity_options = pattern_config.get(
@@ -546,7 +550,7 @@ async def run_pattern_tuner_job(
         evidence_weight_options = pattern_config.get(
             "pattern_evidence_weight_options", [0.0, 0.1, 0.15]
         )
-        
+
         # Run tuning trials (simplified - would use Optuna in production)
         best_config = {
             "pattern_min_similarity": min_similarity_options[0],
@@ -554,7 +558,7 @@ async def run_pattern_tuner_job(
             "pattern_evidence_weight": evidence_weight_options[0],
         }
         best_score = 0.0
-        
+
         for sim in min_similarity_options:
             for wr in min_win_rate_options:
                 for ew in evidence_weight_options:
@@ -566,7 +570,7 @@ async def run_pattern_tuner_job(
                         min_win_rate=wr,
                         evidence_weight=ew,
                     )
-                    
+
                     if score > best_score:
                         best_score = score
                         best_config = {
@@ -574,16 +578,19 @@ async def run_pattern_tuner_job(
                             "pattern_min_win_rate": wr,
                             "pattern_evidence_weight": ew,
                         }
-        
+
         job["status"] = "completed"
         job["completed_at"] = datetime.utcnow().isoformat()
         job["progress"] = {"phase": "completed", "current": 100, "total": 100}
         job["results"] = {
             "best_config": best_config,
             "best_score": best_score,
-            "library_used": str(library_manager.library_dir / f"{request.ticker}_patterns_{library.version}.json"),
+            "library_used": str(
+                library_manager.library_dir
+                / f"{request.ticker}_patterns_{library.version}.json"
+            ),
         }
-        
+
     except Exception as e:
         logger.exception(f"Pattern tuner job {job_id} failed")
         job["status"] = "failed"
@@ -599,25 +606,22 @@ def _evaluate_pattern_config(
 ) -> float:
     """
     Evaluate a pattern configuration.
-    
+
     Simplified scoring - in production would run actual backtests.
     """
     # Count patterns that pass filters
-    valid_patterns = [
-        p for p in library.cluster_patterns
-        if p.win_rate >= min_win_rate
-    ]
-    
+    valid_patterns = [p for p in library.cluster_patterns if p.win_rate >= min_win_rate]
+
     if not valid_patterns:
         return 0.0
-    
+
     # Score based on pattern quality and coverage
     avg_win_rate = sum(p.win_rate for p in valid_patterns) / len(valid_patterns)
     total_support = sum(p.support for p in valid_patterns)
-    
+
     # Combine metrics
     score = avg_win_rate * min(1.0, total_support / 100) * (1 + evidence_weight)
-    
+
     return score
 
 
@@ -625,10 +629,11 @@ def _evaluate_pattern_config(
 # Main Entry Point
 # ============================================================================
 
+
 def main():
     """Run the Pattern Discovery API server."""
     import uvicorn
-    
+
     uvicorn.run(
         "src.pattern_discovery.api_server:app",
         host=PATTERN_DISCOVERY_HOST,

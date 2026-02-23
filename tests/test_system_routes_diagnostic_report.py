@@ -22,14 +22,18 @@ def _build_client(monkeypatch, tmp_path, *, state_setup=None):
 def _write_session_summary(tmp_path, folder_name: str, payload: dict) -> None:
     report_dir = tmp_path / "reports" / folder_name
     report_dir.mkdir(parents=True, exist_ok=True)
-    (report_dir / "session_summary.json").write_text(json.dumps(payload), encoding="utf-8")
+    (report_dir / "session_summary.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
 
 
 def test_get_diagnostic_report_returns_payload(monkeypatch, tmp_path):
     report_dir = tmp_path / "reports" / "mu_diagnostic"
     report_dir.mkdir(parents=True, exist_ok=True)
     payload = {"phase": 0, "status": "ok", "day_results": [{"date": "2025-11-03"}]}
-    (report_dir / "phase0_diagnostic.json").write_text(json.dumps(payload), encoding="utf-8")
+    (report_dir / "phase0_diagnostic.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
 
     client = _build_client(monkeypatch, tmp_path)
     response = client.get("/api/reports/diagnostic/MU")
@@ -59,7 +63,9 @@ def test_get_diagnostic_report_rejects_invalid_ticker(monkeypatch, tmp_path):
 def test_get_diagnostic_report_rejects_invalid_json(monkeypatch, tmp_path):
     report_dir = tmp_path / "reports" / "mu_diagnostic"
     report_dir.mkdir(parents=True, exist_ok=True)
-    (report_dir / "phase0_diagnostic.json").write_text("{invalid json}", encoding="utf-8")
+    (report_dir / "phase0_diagnostic.json").write_text(
+        "{invalid json}", encoding="utf-8"
+    )
 
     client = _build_client(monkeypatch, tmp_path)
     response = client.get("/api/reports/diagnostic/MU")
@@ -77,7 +83,9 @@ def test_get_diagnostic_report_summary_only(monkeypatch, tmp_path):
         "day_results": [{"date": "2025-11-03"}, {"date": "2025-11-04"}],
         "details": {"foo": "bar"},
     }
-    (report_dir / "phase0_diagnostic.json").write_text(json.dumps(payload), encoding="utf-8")
+    (report_dir / "phase0_diagnostic.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
 
     client = _build_client(monkeypatch, tmp_path)
     response = client.get("/api/reports/diagnostic/MU?summary_only=true")
@@ -100,7 +108,9 @@ def test_get_diagnostic_report_uses_cache_when_file_unchanged(monkeypatch, tmp_p
         def diagnostic_cache_key(self, *, ticker, profile, phase):
             return f"{ticker}:{profile}:{phase}"
 
-        def get_diagnostic_payload_cache(self, *, cache_key, source_path, source_mtime_ns):
+        def get_diagnostic_payload_cache(
+            self, *, cache_key, source_path, source_mtime_ns
+        ):
             item = self.cache.get((cache_key, source_path, source_mtime_ns))
             return item
 
@@ -128,7 +138,9 @@ def test_get_diagnostic_report_uses_cache_when_file_unchanged(monkeypatch, tmp_p
     client = _build_client(
         monkeypatch,
         tmp_path,
-        state_setup=lambda app: setattr(app.state, "v2_services", SimpleNamespace(store=stub_store)),
+        state_setup=lambda app: setattr(
+            app.state, "v2_services", SimpleNamespace(store=stub_store)
+        ),
     )
 
     first = client.get("/api/reports/diagnostic/MU")
@@ -239,7 +251,9 @@ def test_get_saved_run_history_aggregates_days_and_reasons(monkeypatch, tmp_path
     assert payload["split"]["end"] == "2026-02-04"
     assert payload["metrics"]["total_trades"] == 2
 
-    day_a = next(item for item in payload["day_results"] if item["date"] == "2026-02-03")
+    day_a = next(
+        item for item in payload["day_results"] if item["date"] == "2026-02-03"
+    )
     assert day_a["total_trades"] == 1
     assert day_a["signals"] == 1
     assert day_a["regime_evaluations"] == 1
@@ -255,13 +269,18 @@ def test_get_saved_run_history_aggregates_days_and_reasons(monkeypatch, tmp_path
     assert day_a["runs"][0]["run_regime_evaluations"] == 2
     assert day_a["runs"][0]["profile_match_mode"] is None
 
-    day_b = next(item for item in payload["day_results"] if item["date"] == "2026-02-04")
+    day_b = next(
+        item for item in payload["day_results"] if item["date"] == "2026-02-04"
+    )
     assert day_b["total_trades"] == 1
     assert day_b["signals"] == 1
     assert day_b["regime_evaluations"] == 1
     assert day_b["trade_details"][0]["entry_reason"] == "Adaptive trend continuation"
     assert day_b["trade_details"][0]["exit_reason"] == "stop_loss"
-    assert any(option["run_id"] == "backtest-a" for option in payload["filter_options"]["run_ids"])
+    assert any(
+        option["run_id"] == "backtest-a"
+        for option in payload["filter_options"]["run_ids"]
+    )
     assert any(
         option["profile_id"] == "c4bb2197e651"
         for option in payload["filter_options"]["adaptive_profiles"]
@@ -345,12 +364,16 @@ def test_get_saved_run_history_filters_by_profile_exact_only(monkeypatch, tmp_pa
     result_days = [item["date"] for item in payload["day_results"]]
     assert result_days == ["2026-02-06"]
 
-    day_exact = next(item for item in payload["day_results"] if item["date"] == "2026-02-06")
+    day_exact = next(
+        item for item in payload["day_results"] if item["date"] == "2026-02-06"
+    )
     assert day_exact["runs"][0]["profile_match_mode"] == "exact"
     assert day_exact["adaptive_profile_id"] == "c4bb2197e651"
 
 
-def test_get_saved_run_history_ignores_placeholder_profile_tokens(monkeypatch, tmp_path):
+def test_get_saved_run_history_ignores_placeholder_profile_tokens(
+    monkeypatch, tmp_path
+):
     _write_session_summary(
         tmp_path,
         "20260214_103000_MU_placeholder-profile",
@@ -604,7 +627,9 @@ def test_get_saved_run_history_includes_aos_profile_options(monkeypatch, tmp_pat
     assert "aos_config" in str(c4_profile.get("source"))
 
 
-def test_get_saved_run_history_does_not_profile_match_legacy_reports(monkeypatch, tmp_path):
+def test_get_saved_run_history_does_not_profile_match_legacy_reports(
+    monkeypatch, tmp_path
+):
     aos_dir = tmp_path / "aos_optimization"
     aos_dir.mkdir(parents=True, exist_ok=True)
     aos_payload = {
@@ -658,7 +683,9 @@ def test_get_saved_run_history_does_not_profile_match_legacy_reports(monkeypatch
     assert payload["day_results"] == []
 
 
-def test_get_saved_run_history_returns_empty_when_reports_dir_missing(monkeypatch, tmp_path):
+def test_get_saved_run_history_returns_empty_when_reports_dir_missing(
+    monkeypatch, tmp_path
+):
     client = _build_client(monkeypatch, tmp_path)
     response = client.get("/api/reports/history/MU")
     assert response.status_code == 200
@@ -702,7 +729,9 @@ def test_get_saved_run_history_reads_external_report_store(monkeypatch, tmp_path
     client = _build_client(
         monkeypatch,
         tmp_path,
-        state_setup=lambda app: setattr(app.state, "run_reports_store", _StubRunReportsStore()),
+        state_setup=lambda app: setattr(
+            app.state, "run_reports_store", _StubRunReportsStore()
+        ),
     )
     response = client.get("/api/reports/history/MU")
     assert response.status_code == 200
@@ -714,7 +743,9 @@ def test_get_saved_run_history_reads_external_report_store(monkeypatch, tmp_path
     assert payload["filter_options"]["run_ids"][0]["run_id"] == "supabase-run"
 
 
-def test_get_saved_run_history_store_mode_does_not_fallback_to_filesystem(monkeypatch, tmp_path):
+def test_get_saved_run_history_store_mode_does_not_fallback_to_filesystem(
+    monkeypatch, tmp_path
+):
     _write_session_summary(
         tmp_path,
         "20260214_100000_MU_filesystem-only",

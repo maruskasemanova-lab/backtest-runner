@@ -1,6 +1,7 @@
 """
 Centralized runtime settings for data roots and Databento credentials.
 """
+
 from __future__ import annotations
 
 import os
@@ -107,7 +108,10 @@ class SystemSettings:
         return str(self._settings.get("databento_api_key") or "").strip()
 
     def resolve_databento_api_key(self) -> str:
-        return str(os.environ.get("DATABENTO_API_KEY") or self.get_persisted_databento_api_key()).strip()
+        return str(
+            os.environ.get("DATABENTO_API_KEY")
+            or self.get_persisted_databento_api_key()
+        ).strip()
 
     def set_databento_api_key(self, api_key: str) -> bool:
         key = str(api_key or "").strip()
@@ -161,12 +165,15 @@ class SystemSettings:
         resolved_key = self.resolve_databento_api_key()
         persisted_key = self.get_persisted_databento_api_key()
         return {
-            "ohlcv_data_dirs": [str(p) for p in self.get_ohlcv_dirs(existing_only=False)],
+            "ohlcv_data_dirs": [
+                str(p) for p in self.get_ohlcv_dirs(existing_only=False)
+            ],
             "l2_data_dirs": [str(p) for p in self.get_l2_dirs(existing_only=False)],
             "databento_api_key_set": bool(resolved_key),
             "databento_api_key_hint": mask_secret(resolved_key),
-            "databento_api_key_source": "env"
-            if os.environ.get("DATABENTO_API_KEY")
-            else ("settings" if persisted_key else "unset"),
+            "databento_api_key_source": (
+                "env"
+                if os.environ.get("DATABENTO_API_KEY")
+                else ("settings" if persisted_key else "unset")
+            ),
         }
-

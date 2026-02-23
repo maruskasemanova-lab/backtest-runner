@@ -16,13 +16,8 @@
       "volume_stop_pct": 1.5,
       "trailing_stop_pct": 1.5
     },
-    "regime_filter": [
-      "TRENDING",
-      "MIXED"
-    ],
-    "avoid_days": [
-      "Friday"
-    ],
+    "regime_filter": ["TRENDING", "MIXED"],
+    "avoid_days": ["Friday"],
     "min_confidence": 65.0,
     "max_daily_trades": 2
   },
@@ -42,12 +37,8 @@
       "atr_stop_mult": 3.125,
       "rr_ratio": 2.5
     },
-    "regime_filter": [
-      "TRENDING"
-    ],
-    "avoid_days": [
-      "Friday"
-    ],
+    "regime_filter": ["TRENDING"],
+    "avoid_days": ["Friday"],
     "min_confidence": 70.0,
     "max_daily_trades": 2
   },
@@ -67,10 +58,7 @@
       "volume_stop_pct": 0.8,
       "trailing_stop_pct": 0.5
     },
-    "regime_filter": [
-      "TRENDING",
-      "MIXED"
-    ],
+    "regime_filter": ["TRENDING", "MIXED"],
     "avoid_days": [],
     "min_confidence": 60.0,
     "max_daily_trades": 3
@@ -91,13 +79,8 @@
       "atr_stop_mult": 3.125,
       "trailing_stop_pct": 1.0
     },
-    "regime_filter": [
-      "TRENDING",
-      "MIXED"
-    ],
-    "avoid_days": [
-      "Friday"
-    ],
+    "regime_filter": ["TRENDING", "MIXED"],
+    "avoid_days": ["Friday"],
     "min_confidence": 65.0,
     "max_daily_trades": 2
   },
@@ -117,10 +100,7 @@
       "volume_stop_pct": 0.68,
       "trailing_stop_pct": 0.425
     },
-    "regime_filter": [
-      "MIXED",
-      "CHOPPY"
-    ],
+    "regime_filter": ["MIXED", "CHOPPY"],
     "avoid_days": [],
     "min_confidence": 60.0,
     "max_daily_trades": 3
@@ -142,10 +122,7 @@
       "volume_stop_pct": 0.8,
       "trailing_stop_pct": 0.5
     },
-    "regime_filter": [
-      "TRENDING",
-      "MIXED"
-    ],
+    "regime_filter": ["TRENDING", "MIXED"],
     "avoid_days": [],
     "min_confidence": 60.0,
     "max_daily_trades": 3
@@ -166,10 +143,7 @@
       "volume_stop_pct": 0.68,
       "trailing_stop_pct": 0.425
     },
-    "regime_filter": [
-      "MIXED",
-      "CHOPPY"
-    ],
+    "regime_filter": ["MIXED", "CHOPPY"],
     "avoid_days": [],
     "min_confidence": 60.0,
     "max_daily_trades": 3
@@ -181,21 +155,23 @@
       "volume_threshold": 2.16,
       "breakout_pct": 0.2,
       "volume_stop_pct": 1.5,
-      "trailing_stop_pct": 1.5
+      "trailing_stop_pct": 1.5,
+      "time_window": { "start": "09:30", "end": "11:30" },
+      "min_stop_loss_pct": 0.55,
+      "break_even_activation_min_mfe_pct": 1.10,
+      "l2_block_z_threshold": 1.65
     },
-    "backup_strategy": "gap_liquidity",
+    "backup_strategy": "volume_profile",
     "backup_params": {
-      "gap_threshold_pct": 0.36,
-      "swing_lookback": 20,
+      "profile_lookback": 60,
+      "symmetry_tolerance_pct": 0.15,
       "atr_stop_mult": 3.125,
-      "rr_ratio": 2.5
+      "trailing_stop_pct": 1.0,
+      "poc_mode": "favor_bounce_mean_reversion",
+      "time_window": { "start": "14:30", "end": "15:30" }
     },
-    "regime_filter": [
-      "TRENDING"
-    ],
-    "avoid_days": [
-      "Friday"
-    ],
+    "regime_filter": ["TRENDING", "MIXED", "CHOPPY"],
+    "avoid_days": ["Friday"],
     "min_confidence": 65.0,
     "max_daily_trades": 2
   },
@@ -216,10 +192,7 @@
       "trailing_stop_pct": 0.6,
       "min_confidence": 65.0
     },
-    "regime_filter": [
-      "TRENDING",
-      "MIXED"
-    ],
+    "regime_filter": ["TRENDING", "MIXED"],
     "avoid_days": [],
     "min_confidence": 60.0,
     "max_daily_trades": 3

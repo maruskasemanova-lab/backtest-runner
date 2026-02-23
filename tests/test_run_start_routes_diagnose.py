@@ -100,7 +100,9 @@ def test_run_diagnose_returns_structured_failure():
         }
 
     async def _prewarm_run(_request):
-        raise HTTPException(status_code=400, detail="No data available for the specified date/range")
+        raise HTTPException(
+            status_code=400, detail="No data available for the specified date/range"
+        )
 
     services = SimpleNamespace(
         prewarm_status=_prewarm_status,
@@ -133,7 +135,9 @@ def test_run_diagnose_coverage_only_failure_without_probe():
         }
 
     async def _prewarm_run(_request):
-        raise HTTPException(status_code=400, detail="No data available for the specified date/range")
+        raise HTTPException(
+            status_code=400, detail="No data available for the specified date/range"
+        )
 
     class _CoverageFailDatabento(_FakeDatabentoService):
         def get_range_coverage(self, ticker, schema, start_date, end_date):
@@ -157,7 +161,9 @@ def test_run_diagnose_coverage_only_failure_without_probe():
     )
     client = _build_client(services)
 
-    response = client.post("/api/run/diagnose", json={"ticker": "MU", "date": "2025-12-25"})
+    response = client.post(
+        "/api/run/diagnose", json={"ticker": "MU", "date": "2025-12-25"}
+    )
 
     assert response.status_code == 200
     payload = response.json()

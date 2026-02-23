@@ -50,9 +50,9 @@ def test_evidence_engine_accepts_high_confidence_strategy_signal() -> None:
     # Warmup calibration applies a conservative confidence penalty.
     decision = _evaluate(engine, confidence=90.0)
     assert decision.execute is True
-    assert decision.patterns == []
-    assert decision.pattern_score == 0.0
-    assert decision.pattern_confirmation is False
+    assert not hasattr(decision, "patterns")
+    assert not hasattr(decision, "pattern_score")
+    assert not hasattr(decision, "pattern_confirmation")
     assert decision.signal is not None
 
 
@@ -60,6 +60,6 @@ def test_evidence_engine_rejects_low_confidence_strategy_signal() -> None:
     engine = EvidenceDecisionEngine(min_confirming_sources=1, base_threshold=68.0)
     decision = _evaluate(engine, confidence=60.0)
     assert decision.execute is False
-    assert decision.patterns == []
-    assert decision.pattern_score == 0.0
-    assert decision.pattern_confirmation is False
+    assert not hasattr(decision, "patterns")
+    assert not hasattr(decision, "pattern_score")
+    assert not hasattr(decision, "pattern_confirmation")

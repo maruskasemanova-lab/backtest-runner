@@ -43,7 +43,9 @@ def test_build_feature_map_prefers_precomputed_features(
             "l2_iceberg_bias": [1.0, -2.0],
         }
     )
-    write_parquet_compat(precomputed, precomputed_dir / "MU_2026-02-10.parquet", index=False)
+    write_parquet_compat(
+        precomputed, precomputed_dir / "MU_2026-02-10.parquet", index=False
+    )
 
     monkeypatch.setenv("BACKTEST_L2_PRECOMPUTED_FEATURES_ENABLED", "1")
     monkeypatch.setenv("BACKTEST_L2_PRECOMPUTED_DIR", str(precomputed_dir))
@@ -55,7 +57,9 @@ def test_build_feature_map_prefers_precomputed_features(
 
     monkeypatch.setattr(manager, "load_data", _unexpected_raw_load)
 
-    service = L2FeatureService(manager=manager, logger=logging.getLogger("test-l2-precomputed"))
+    service = L2FeatureService(
+        manager=manager, logger=logging.getLogger("test-l2-precomputed")
+    )
     feature_map, stats = service.build_feature_map(
         ticker="MU",
         start_dt_utc=datetime(2026, 2, 10, 14, 30, tzinfo=timezone.utc),

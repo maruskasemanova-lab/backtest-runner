@@ -1,0 +1,23 @@
+{
+  "strategy": "momentum",
+  "params": {
+    "volume_threshold": 1.8,
+    "breakout_pct": 0.2,
+    "volume_stop_pct": 1.5,
+    "trailing_stop_pct": 1.2
+  },
+  "backup_strategy": "volume_profile",
+  "regime_filter": [
+    "TRENDING",
+    "MIXED"
+  ],
+  "avoid_days": [
+    "Friday"
+  ],
+  "min_confidence": 60.0,
+  "max_daily_trades": 3,
+  "trailing_stop_pct": 1.2,
+  "long_only": false,
+  "trading_hours": [],
+  "time_filter_enabled": false
+}

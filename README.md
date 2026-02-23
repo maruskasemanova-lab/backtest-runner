@@ -107,6 +107,18 @@ Run Codex with project-local BMAD prompts:
 ./scripts/codex-project.sh
 ```
 
+Axon workflow helper (CLI + MCP):
+
+```bash
+./scripts/axon-flow.sh doctor
+./scripts/axon-flow.sh index
+./scripts/axon-flow.sh q "start run comparable_mode checkpoint"
+./scripts/axon-flow.sh impact StartRunRequest 3
+./scripts/axon-flow.sh dead
+```
+
+Project `.mcp.json` includes an `axon` MCP server entry (`axon serve --watch`), so MCP-capable tools (Cursor/Codex/Claude) can auto-start it and keep the code graph fresh while editing.
+
 ## Architecture
 
 ```

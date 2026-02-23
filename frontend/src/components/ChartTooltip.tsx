@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+const DEFAULT_ACCOUNT_SIZE = 10_000;
 
 /**
  * ChartTooltip - A tooltip component for chart markers
@@ -40,6 +41,11 @@ function ChartTooltip({ marker, visible, x, y }) {
   if (!visible || !marker) return null;
   
   const { marker_type, price, side, strategy, confidence, details } = marker;
+  const pnlPctFromDollars = (pnlDollars) => {
+    const dollars = Number(pnlDollars);
+    if (!Number.isFinite(dollars)) return null;
+    return (dollars / DEFAULT_ACCOUNT_SIZE) * 100;
+  };
   
   // Format timestamp
   const formatTime = (timestamp) => {
@@ -194,12 +200,18 @@ function ChartTooltip({ marker, visible, x, y }) {
           <span className="tooltip-label">Exit Reason:</span>
           <span className="tooltip-value">{details.exit_reason || 'Unknown'}</span>
         </div>
-        {details.pnl_pct != null && (
+        {details.pnl_dollars != null && (
           <div className="tooltip-row">
             <span className="tooltip-label">PnL:</span>
-            <span className={`tooltip-value ${details.pnl_pct >= 0 ? 'positive' : 'negative'}`}>
-              {details.pnl_pct >= 0 ? '+' : ''}{details.pnl_pct.toFixed(2)}%
-            </span>
+            {(() => {
+              const pnlPct = pnlPctFromDollars(details.pnl_dollars);
+              if (pnlPct == null) return <span className="tooltip-value">n/a</span>;
+              return (
+                <span className={`tooltip-value ${pnlPct >= 0 ? 'positive' : 'negative'}`}>
+                  {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+                </span>
+              );
+            })()}
           </div>
         )}
         {details.pnl_dollars != null && (

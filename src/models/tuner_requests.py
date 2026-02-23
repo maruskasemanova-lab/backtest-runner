@@ -10,7 +10,9 @@ class AdaptiveTunerRequest(BaseModel):
     strategy_api_url: str = "http://localhost:8001"
     method: str = "grid"  # grid | random | optuna
     n_trials: int = 16
-    score_metric: str = "pnl_pct"  # pnl_pct | pnl_dollars | win_rate | trade_adjusted | robust
+    score_metric: str = (
+        "pnl_pct"  # pnl_pct | pnl_dollars | win_rate | trade_adjusted | robust
+    )
     seed: int = 42
     adaptive_version: int = 1  # 1 = flat search, 2 = multi-dimensional vector discovery
     persist_best: bool = False

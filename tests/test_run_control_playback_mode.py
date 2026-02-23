@@ -79,7 +79,9 @@ def test_play_resume_sets_intrabar_trade_eval_mode_from_bool_payload():
             return {"speed_ms": "10hz", "trade_eval_mode": True}
 
     result = asyncio.run(
-        play_run("r1", "MU", "2026-02-03", deps, request=None, raw_request=_RawRequest())
+        play_run(
+            "r1", "MU", "2026-02-03", deps, request=None, raw_request=_RawRequest()
+        )
     )
 
     assert result["success"] is True

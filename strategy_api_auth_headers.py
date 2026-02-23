@@ -45,15 +45,17 @@ def _read_env_key_from_file(path: Path, key: str) -> str:
         if not stripped or stripped.startswith("#"):
             continue
         if stripped.startswith("export "):
-            stripped = stripped[len("export "):].lstrip()
+            stripped = stripped[len("export ") :].lstrip()
         if not stripped.startswith(prefix):
             continue
-        return _strip_env_value(stripped[len(prefix):])
+        return _strip_env_value(stripped[len(prefix) :])
     return ""
 
 
 def _iter_configured_env_paths() -> Iterable[Path]:
-    configured = str(os.getenv("BACKTEST_STRATEGY_INTERNAL_API_ENV_FILES") or "").strip()
+    configured = str(
+        os.getenv("BACKTEST_STRATEGY_INTERNAL_API_ENV_FILES") or ""
+    ).strip()
     if configured:
         for raw in configured.split(","):
             token = str(raw or "").strip()
@@ -117,9 +119,10 @@ def resolve_strategy_internal_api_token(strategy_api_url: Optional[str] = None) 
     return ""
 
 
-def build_strategy_api_headers(strategy_api_url: Optional[str] = None) -> Dict[str, str]:
+def build_strategy_api_headers(
+    strategy_api_url: Optional[str] = None,
+) -> Dict[str, str]:
     token = resolve_strategy_internal_api_token(strategy_api_url)
     if not token:
         return {}
     return {"x-internal-token": token}
-

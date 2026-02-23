@@ -2,6 +2,7 @@
 Databento data loader service.
 Downloads and catalogs L2, OHLCV, and trades data from Databento.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -76,7 +77,9 @@ class DataCatalog:
     def list_all(self) -> List[Dict[str, Any]]:
         return list(self._entries)
 
-    def find(self, ticker: str, schema: str, start: str, end: str) -> Optional[Dict[str, Any]]:
+    def find(
+        self, ticker: str, schema: str, start: str, end: str
+    ) -> Optional[Dict[str, Any]]:
         for entry in self._entries:
             if (
                 entry.get("ticker") == ticker
@@ -88,7 +91,9 @@ class DataCatalog:
         return None
 
     def upsert(self, entry: CatalogEntry):
-        existing = self.find(entry.ticker, entry.schema, entry.start_date, entry.end_date)
+        existing = self.find(
+            entry.ticker, entry.schema, entry.start_date, entry.end_date
+        )
         payload = asdict(entry)
         if existing:
             existing.update(payload)
@@ -113,9 +118,6 @@ class DataCatalog:
             return True
         return False
 
-    def list_by_ticker(self, ticker: str) -> List[Dict[str, Any]]:
-        return [entry for entry in self._entries if entry.get("ticker") == ticker]
-
 
 class DatabentoService:
     """Downloads data from Databento and manages a unified local catalog."""
@@ -126,16 +128,21 @@ class DatabentoService:
         ohlcv_dir: str = "data",
         catalog_path: str = "data/data_catalog.json",
     ):
-        resolved_catalog_path = str(
-            os.getenv("BACKTEST_DATA_CATALOG_PATH", "") or ""
-        ).strip() or catalog_path
+        resolved_catalog_path = (
+            str(os.getenv("BACKTEST_DATA_CATALOG_PATH", "") or "").strip()
+            or catalog_path
+        )
         self.settings = SystemSettings()
         self.catalog = DataCatalog(resolved_catalog_path)
         self._active_downloads: Dict[str, Dict[str, Any]] = {}
         self._project_root = Path(__file__).resolve().parents[1]
         # Cache real OHLCV ET date ranges keyed by (path, mtime_ns, size_bytes).
-        self._ohlcv_range_cache: Dict[Tuple[str, int, int], Optional[Tuple[str, str]]] = {}
-        self._remote_manifest_url = str(os.getenv("BACKTEST_REMOTE_MANIFEST_URL", "") or "").strip()
+        self._ohlcv_range_cache: Dict[
+            Tuple[str, int, int], Optional[Tuple[str, str]]
+        ] = {}
+        self._remote_manifest_url = str(
+            os.getenv("BACKTEST_REMOTE_MANIFEST_URL", "") or ""
+        ).strip()
         timeout_raw = str(os.getenv("BACKTEST_REMOTE_TIMEOUT_SEC", "30") or "").strip()
         try:
             timeout_value = float(timeout_raw)
@@ -238,7 +245,9 @@ class DatabentoService:
 
         api_key = self._resolve_api_key()
         if not api_key:
-            raise RuntimeError("DATABENTO_API_KEY is not set (env var or system settings)")
+            raise RuntimeError(
+                "DATABENTO_API_KEY is not set (env var or system settings)"
+            )
         return db.Historical(api_key)
 
     @staticmethod
@@ -272,7 +281,10 @@ class DatabentoService:
             end_date = parts[2]
             schema = "mbp-10"
 
-        if not (DatabentoService._is_valid_iso_date(start_date) and DatabentoService._is_valid_iso_date(end_date)):
+        if not (
+            DatabentoService._is_valid_iso_date(start_date)
+            and DatabentoService._is_valid_iso_date(end_date)
+        ):
             return None
         return ticker, schema, start_date, end_date
 
@@ -290,7 +302,10 @@ class DatabentoService:
         end_date = parts[2]
         if not timeframe:
             return None
-        if not (DatabentoService._is_valid_iso_date(start_date) and DatabentoService._is_valid_iso_date(end_date)):
+        if not (
+            DatabentoService._is_valid_iso_date(start_date)
+            and DatabentoService._is_valid_iso_date(end_date)
+        ):
             return None
         schema = f"ohlcv-{timeframe}"
         return ticker.upper(), schema, start_date, end_date
@@ -351,7 +366,9 @@ class DatabentoService:
         now = float(time.time())
         last_sync = float(getattr(self, "_last_remote_sync_epoch_s", 0.0) or 0.0)
         min_interval = float(getattr(self, "_remote_sync_min_interval_s", 30.0) or 30.0)
-        should_sync = bool(force) or last_sync <= 0.0 or (now - last_sync) >= min_interval
+        should_sync = (
+            bool(force) or last_sync <= 0.0 or (now - last_sync) >= min_interval
+        )
         synced = 0
         if should_sync:
             synced = int(self.sync_remote_manifest(manifest_url))
@@ -369,15 +386,14 @@ class DatabentoService:
         }
 
     def _remote_cache_dir(self) -> Path:
-        configured = str(os.getenv("BACKTEST_REMOTE_CACHE_DIR", "data/remote_cache") or "").strip()
+        configured = str(
+            os.getenv("BACKTEST_REMOTE_CACHE_DIR", "data/remote_cache") or ""
+        ).strip()
         base = Path(configured) if configured else Path("data/remote_cache")
         if not base.is_absolute():
             base = (self._project_root / base).resolve()
         base.mkdir(parents=True, exist_ok=True)
         return base
-
-    def _remote_cache_path_for_url(self, url: str) -> Path:
-        return self._remote_cache_path_for_locator(url)
 
     def _remote_cache_path_for_locator(self, locator: str) -> Path:
         parsed = urlparse(locator)
@@ -404,12 +420,21 @@ class DatabentoService:
 
         endpoint = str(os.getenv("BACKTEST_REMOTE_S3_ENDPOINT", "") or "").strip()
         if not endpoint:
-            account_id = str(os.getenv("BACKTEST_REMOTE_S3_ACCOUNT_ID", "") or "").strip()
+            account_id = str(
+                os.getenv("BACKTEST_REMOTE_S3_ACCOUNT_ID", "") or ""
+            ).strip()
             if account_id:
                 endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
-        access_key = str(os.getenv("BACKTEST_REMOTE_S3_ACCESS_KEY_ID", "") or "").strip()
-        secret_key = str(os.getenv("BACKTEST_REMOTE_S3_SECRET_ACCESS_KEY", "") or "").strip()
-        region = str(os.getenv("BACKTEST_REMOTE_S3_REGION", "auto") or "auto").strip() or "auto"
+        access_key = str(
+            os.getenv("BACKTEST_REMOTE_S3_ACCESS_KEY_ID", "") or ""
+        ).strip()
+        secret_key = str(
+            os.getenv("BACKTEST_REMOTE_S3_SECRET_ACCESS_KEY", "") or ""
+        ).strip()
+        region = (
+            str(os.getenv("BACKTEST_REMOTE_S3_REGION", "auto") or "auto").strip()
+            or "auto"
+        )
 
         try:
             import boto3  # type: ignore
@@ -435,7 +460,9 @@ class DatabentoService:
         self._remote_s3_client = client
         return client
 
-    def _download_remote_file_to_cache(self, locator: str, dest: Path) -> Optional[Path]:
+    def _download_remote_file_to_cache(
+        self, locator: str, dest: Path
+    ) -> Optional[Path]:
         tmp_path = dest.with_suffix(dest.suffix + ".part")
         timeout = float(getattr(self, "_remote_request_timeout_s", 30.0) or 30.0)
         try:
@@ -461,10 +488,14 @@ class DatabentoService:
                 last_exc: Optional[Exception] = None
                 for attempt in range(3):
                     try:
-                        with requests.get(locator, timeout=timeout, stream=True) as response:
+                        with requests.get(
+                            locator, timeout=timeout, stream=True
+                        ) as response:
                             response.raise_for_status()
                             with tmp_path.open("wb") as handle:
-                                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                                for chunk in response.iter_content(
+                                    chunk_size=1024 * 1024
+                                ):
                                     if chunk:
                                         handle.write(chunk)
                         last_exc = None
@@ -488,7 +519,11 @@ class DatabentoService:
 
     def _resolve_remote_entry_to_cache(self, locator: str) -> Optional[Path]:
         cache_path = self._remote_cache_path_for_locator(locator)
-        if cache_path.exists() and cache_path.is_file() and cache_path.stat().st_size > 0:
+        if (
+            cache_path.exists()
+            and cache_path.is_file()
+            and cache_path.stat().st_size > 0
+        ):
             return cache_path
         return self._download_remote_file_to_cache(locator, cache_path)
 
@@ -523,11 +558,15 @@ class DatabentoService:
             if last_exc:
                 raise last_exc
         except Exception as exc:
-            logger.warning("Failed to fetch remote manifest %s: %s", manifest_locator, exc)
+            logger.warning(
+                "Failed to fetch remote manifest %s: %s", manifest_locator, exc
+            )
             return None
 
     def sync_remote_manifest(self, manifest_url: Optional[str] = None) -> int:
-        url = str(manifest_url or getattr(self, "_remote_manifest_url", "") or "").strip()
+        url = str(
+            manifest_url or getattr(self, "_remote_manifest_url", "") or ""
+        ).strip()
         if not url:
             return 0
 
@@ -551,21 +590,43 @@ class DatabentoService:
             end_date = str(row.get("end_date", "")).strip()
             if not ticker or not schema:
                 continue
-            if not (self._is_valid_iso_date(start_date) and self._is_valid_iso_date(end_date)):
+            if not (
+                self._is_valid_iso_date(start_date)
+                and self._is_valid_iso_date(end_date)
+            ):
                 continue
 
-            file_mbn = str(row.get("file_mbn") or row.get("public_url_mbn") or "").strip() or None
-            file_parquet = str(row.get("file_parquet") or row.get("public_url_parquet") or "").strip() or None
-            file_csv = str(row.get("file_csv") or row.get("public_url_csv") or "").strip() or None
+            file_mbn = (
+                str(row.get("file_mbn") or row.get("public_url_mbn") or "").strip()
+                or None
+            )
+            file_parquet = (
+                str(
+                    row.get("file_parquet") or row.get("public_url_parquet") or ""
+                ).strip()
+                or None
+            )
+            file_csv = (
+                str(row.get("file_csv") or row.get("public_url_csv") or "").strip()
+                or None
+            )
             if not any((file_mbn, file_parquet, file_csv)):
                 continue
 
             status = str(row.get("status", "ready") or "ready").strip().lower()
             if status not in {"ready", "downloading", "converting", "error"}:
                 status = "ready"
-            dataset = str(row.get("dataset", "XNAS.ITCH") or "XNAS.ITCH").strip() or "XNAS.ITCH"
-            source_root = str(row.get("source_root", "remote_manifest") or "remote_manifest").strip()
-            downloaded_at = str(row.get("downloaded_at") or row.get("uploaded_at") or "").strip() or None
+            dataset = (
+                str(row.get("dataset", "XNAS.ITCH") or "XNAS.ITCH").strip()
+                or "XNAS.ITCH"
+            )
+            source_root = str(
+                row.get("source_root", "remote_manifest") or "remote_manifest"
+            ).strip()
+            downloaded_at = (
+                str(row.get("downloaded_at") or row.get("uploaded_at") or "").strip()
+                or None
+            )
             error_message = str(row.get("error_message") or "").strip() or None
             try:
                 size_bytes = max(0, int(row.get("size_bytes", 0) or 0))
@@ -674,7 +735,9 @@ class DatabentoService:
         except OSError:
             return None
 
-        if not hasattr(self, "_ohlcv_range_cache") or not isinstance(self._ohlcv_range_cache, dict):
+        if not hasattr(self, "_ohlcv_range_cache") or not isinstance(
+            self._ohlcv_range_cache, dict
+        ):
             self._ohlcv_range_cache = {}
 
         mtime_ns = int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1e9)))
@@ -723,7 +786,9 @@ class DatabentoService:
 
         preferred_file = self._preferred_entry_file(entry)
         if self._is_remote_location(preferred_file):
-            if self._is_valid_iso_date(start_date) and self._is_valid_iso_date(end_date):
+            if self._is_valid_iso_date(start_date) and self._is_valid_iso_date(
+                end_date
+            ):
                 return start_date, end_date
             return "", ""
 
@@ -818,7 +883,11 @@ class DatabentoService:
                 continue
 
             grouped: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
-            for pattern in ("*_ohlcv-*_*.csv", "*_ohlcv-*_*.parquet", "*_ohlcv-*_*.parq"):
+            for pattern in (
+                "*_ohlcv-*_*.csv",
+                "*_ohlcv-*_*.parquet",
+                "*_ohlcv-*_*.parq",
+            ):
                 for file_path in data_dir.glob(pattern):
                     parsed = self._parse_ohlcv_basename(file_path.stem)
                     if not parsed:
@@ -858,9 +927,11 @@ class DatabentoService:
                     file_parquet=str(parquet_path) if parquet_path else None,
                     size_bytes=preferred.stat().st_size if preferred.exists() else 0,
                     status="ready",
-                    downloaded_at=datetime.fromtimestamp(preferred.stat().st_mtime).isoformat()
-                    if preferred.exists()
-                    else None,
+                    downloaded_at=(
+                        datetime.fromtimestamp(preferred.stat().st_mtime).isoformat()
+                        if preferred.exists()
+                        else None
+                    ),
                     source_root=info.get("source_root"),
                     managed=self._is_managed_path(preferred),
                 )
@@ -924,7 +995,9 @@ class DatabentoService:
         entries = self.list_catalog(refresh=refresh)
         remote_only = bool(getattr(self, "_available_data_remote_only", False))
         if remote_only:
-            entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
+            entries = [
+                entry for entry in entries if self._is_remote_catalog_entry(entry)
+            ]
         tickers = set()
         l2_tickers = set()
         date_ranges: Dict[str, Dict[str, Any]] = {}
@@ -1040,9 +1113,13 @@ class DatabentoService:
         require_remote = bool(getattr(self, "_remote_manifest_required", False))
         if require_remote:
             if not str(getattr(self, "_remote_manifest_url", "") or "").strip():
-                raise RuntimeError("BACKTEST_REMOTE_MANIFEST_URL is required but not configured.")
+                raise RuntimeError(
+                    "BACKTEST_REMOTE_MANIFEST_URL is required but not configured."
+                )
             if not summary["tickers"]:
-                raise RuntimeError("Remote manifest is required but yielded no available tickers.")
+                raise RuntimeError(
+                    "Remote manifest is required but yielded no available tickers."
+                )
         return summary
 
     @staticmethod
@@ -1066,7 +1143,9 @@ class DatabentoService:
 
     @staticmethod
     def _preferred_entry_file(entry: Dict[str, Any]) -> Optional[str]:
-        return entry.get("file_parquet") or entry.get("file_csv") or entry.get("file_mbn")
+        return (
+            entry.get("file_parquet") or entry.get("file_csv") or entry.get("file_mbn")
+        )
 
     def _has_ready_coverage_for_day(
         self,
@@ -1077,7 +1156,11 @@ class DatabentoService:
     ) -> bool:
         ticker_upper = str(ticker or "").upper()
         schema_lower = str(schema or "").lower()
-        rows = entries if entries is not None else self.list_catalog(refresh=False, ticker=ticker_upper)
+        rows = (
+            entries
+            if entries is not None
+            else self.list_catalog(refresh=False, ticker=ticker_upper)
+        )
         if bool(getattr(self, "_available_data_remote_only", False)):
             rows = [entry for entry in rows if self._is_remote_catalog_entry(entry)]
         for entry in rows:
@@ -1121,16 +1204,22 @@ class DatabentoService:
         days = self._iter_days(start_date, end_date)
         entries = self.list_catalog(refresh=False, ticker=ticker_upper)
         if bool(getattr(self, "_available_data_remote_only", False)):
-            entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
+            entries = [
+                entry for entry in entries if self._is_remote_catalog_entry(entry)
+            ]
         has_schema_entries = any(
-            str(entry.get("schema", "")).lower() == schema_lower
-            for entry in entries
+            str(entry.get("schema", "")).lower() == schema_lower for entry in entries
         )
-        if not has_schema_entries and str(getattr(self, "_remote_manifest_url", "") or "").strip():
+        if (
+            not has_schema_entries
+            and str(getattr(self, "_remote_manifest_url", "") or "").strip()
+        ):
             self._sync_remote_manifest_if_due(force=True)
             entries = self.list_catalog(refresh=False, ticker=ticker_upper)
             if bool(getattr(self, "_available_data_remote_only", False)):
-                entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
+                entries = [
+                    entry for entry in entries if self._is_remote_catalog_entry(entry)
+                ]
         covered_days: List[str] = []
         missing_days: List[str] = []
         for day in days:
@@ -1167,16 +1256,23 @@ class DatabentoService:
         candidates: List[Dict[str, Any]] = []
         entries = self.list_catalog(refresh=False, ticker=ticker)
         if bool(getattr(self, "_available_data_remote_only", False)):
-            entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
+            entries = [
+                entry for entry in entries if self._is_remote_catalog_entry(entry)
+            ]
         has_schema_entries = any(
             str(entry.get("schema", "")).lower().startswith(schema_prefix.lower())
             for entry in entries
         )
-        if not has_schema_entries and str(getattr(self, "_remote_manifest_url", "") or "").strip():
+        if (
+            not has_schema_entries
+            and str(getattr(self, "_remote_manifest_url", "") or "").strip()
+        ):
             self._sync_remote_manifest_if_due(force=True)
             entries = self.list_catalog(refresh=False, ticker=ticker)
             if bool(getattr(self, "_available_data_remote_only", False)):
-                entries = [entry for entry in entries if self._is_remote_catalog_entry(entry)]
+                entries = [
+                    entry for entry in entries if self._is_remote_catalog_entry(entry)
+                ]
         for entry in entries:
             if entry.get("status") != "ready":
                 continue
@@ -1196,7 +1292,9 @@ class DatabentoService:
             if not preferred_file:
                 continue
             if self._is_remote_location(preferred_file):
-                preferred_path = self._resolve_remote_entry_to_cache(str(preferred_file))
+                preferred_path = self._resolve_remote_entry_to_cache(
+                    str(preferred_file)
+                )
             else:
                 preferred_path = self._resolve_entry_path(preferred_file)
             if not preferred_path or not preferred_path.exists():
@@ -1262,9 +1360,9 @@ class DatabentoService:
                     if not covered:
                         continue
                     row_key = _sort_key(row)
-                    if (
-                        len(covered) > len(best_cover)
-                        or (len(covered) == len(best_cover) and (best_key is None or row_key < best_key))
+                    if len(covered) > len(best_cover) or (
+                        len(covered) == len(best_cover)
+                        and (best_key is None or row_key < best_key)
                     ):
                         best_row = row
                         best_cover = covered
@@ -1294,7 +1392,9 @@ class DatabentoService:
         """Get cost estimate from Databento before downloading."""
         client = self._get_client()
         # Databento end is exclusive - add 1 day.
-        end_exclusive = (datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        end_exclusive = (
+            datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)
+        ).strftime("%Y-%m-%d")
 
         cost = client.metadata.get_cost(
             dataset=dataset,
@@ -1327,7 +1427,9 @@ class DatabentoService:
         return f"{ticker}_{start}_{end}.mbn"
 
     def _precomputed_l2_dir(self) -> Path:
-        configured = str(os.getenv("BACKTEST_L2_PRECOMPUTED_DIR", "data/l2_precomputed") or "").strip()
+        configured = str(
+            os.getenv("BACKTEST_L2_PRECOMPUTED_DIR", "data/l2_precomputed") or ""
+        ).strip()
         base = Path(configured) if configured else Path("data/l2_precomputed")
         if not base.is_absolute():
             base = (self._project_root / base).resolve()
@@ -1335,7 +1437,9 @@ class DatabentoService:
         return base
 
     @staticmethod
-    def _feature_rows_from_map(feature_map: Dict[int, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _feature_rows_from_map(
+        feature_map: Dict[int, Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         for minute_key in sorted(feature_map.keys()):
             features = feature_map.get(minute_key) or {}
@@ -1354,7 +1458,11 @@ class DatabentoService:
         from .l2_data_manager import L2DataManager
         from .l2_feature_service import L2FeatureService
 
-        l2_dirs = [str(path) for path in getattr(self, "_l2_scan_dirs", []) if isinstance(path, Path)]
+        l2_dirs = [
+            str(path)
+            for path in getattr(self, "_l2_scan_dirs", [])
+            if isinstance(path, Path)
+        ]
         if not l2_dirs:
             l2_dirs = [str(self.l2_dir)]
 
@@ -1417,8 +1525,12 @@ class DatabentoService:
         out_path = out_dir / filename
 
         # Databento end is exclusive.
-        end_exclusive = (datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        logger.info(f"Downloading {schema} for {ticker}: {start} -> {end} (exclusive: {end_exclusive})")
+        end_exclusive = (
+            datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+        logger.info(
+            f"Downloading {schema} for {ticker}: {start} -> {end} (exclusive: {end_exclusive})"
+        )
 
         data = client.timeseries.get_range(
             dataset=dataset,
@@ -1623,7 +1735,9 @@ class DatabentoService:
                     total_rows += int(entry.row_count or 0)
                     should_precompute = bool(
                         str(schema).lower() == "mbp-10"
-                        and bool(getattr(self, "_auto_precompute_l2_on_download", False))
+                        and bool(
+                            getattr(self, "_auto_precompute_l2_on_download", False)
+                        )
                     )
                     if should_precompute:
                         try:
@@ -1632,7 +1746,13 @@ class DatabentoService:
                                 self._blocking_precompute_l2_day,
                                 ticker,
                                 day,
-                                bool(getattr(self, "_auto_precompute_l2_include_icebergs", False)),
+                                bool(
+                                    getattr(
+                                        self,
+                                        "_auto_precompute_l2_include_icebergs",
+                                        False,
+                                    )
+                                ),
                             )
                             if bool(precompute_result.get("built")):
                                 logger.info(

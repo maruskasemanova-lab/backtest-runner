@@ -1,4 +1,22 @@
 function SessionSummary({ runState, markers }: { runState?: any; markers?: any[] }) {
+  const DEFAULT_ACCOUNT_SIZE = 10_000;
+
+  const toNetPnlUsd = (trade: any): number | null => {
+    const value = Number(trade?.details?.pnl_usd ?? trade?.details?.pnl_dollars);
+    return Number.isFinite(value) ? value : null;
+  };
+
+  const pctFromDollars = (pnlUsd: number, accountSize: number): number => {
+    if (!Number.isFinite(pnlUsd) || !Number.isFinite(accountSize) || accountSize <= 0) return 0;
+    return (pnlUsd / accountSize) * 100;
+  };
+
+  const resolveAccountSize = (): number => {
+    const candidate = Number(runState?.execution_config?.account_size_usd);
+    if (Number.isFinite(candidate) && candidate > 0) return candidate;
+    return DEFAULT_ACCOUNT_SIZE;
+  };
+
   // Deduplicate markers by id to avoid double-counting
   const uniqueMarkers: any[] = Object.values(
     (markers || []).reduce((acc: Record<string, any>, m: any) => {
@@ -16,12 +34,22 @@ function SessionSummary({ runState, markers }: { runState?: any; markers?: any[]
     m.marker_type === 'take_profit_hit'
   );
   
-  // Count wins by gross PnL if available, else net
-  const getScore = (t) => t.details?.gross_pnl_pct ?? t.details?.pnl_pct ?? 0;
-  const winningTrades = trades.filter(t => getScore(t) > 0);
-  const losingTrades = trades.filter(t => getScore(t) <= 0);
-  
-  const totalPnl = trades.reduce((sum, t) => sum + (t.details?.pnl_pct || 0), 0);
+  const winningTrades = trades.filter((t) => {
+    const pnlUsd = toNetPnlUsd(t);
+    if (pnlUsd != null) return pnlUsd > 0;
+    return Number(t?.details?.pnl_pct ?? 0) > 0;
+  });
+  const losingTrades = trades.filter((t) => {
+    const pnlUsd = toNetPnlUsd(t);
+    if (pnlUsd != null) return pnlUsd <= 0;
+    return Number(t?.details?.pnl_pct ?? 0) <= 0;
+  });
+
+  const accountSize = resolveAccountSize();
+  const fallbackTotalPnlUsd = trades.reduce((sum, t) => sum + (toNetPnlUsd(t) ?? 0), 0);
+  const summaryTotalPnlUsd = Number(runState?.session_summary?.total_pnl_dollars);
+  const totalPnlUsd = Number.isFinite(summaryTotalPnlUsd) ? summaryTotalPnlUsd : fallbackTotalPnlUsd;
+  const totalPnl = pctFromDollars(totalPnlUsd, accountSize);
   const winRate = trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0;
   
   // Get latest regime/strategy marker (for multi-day runs)

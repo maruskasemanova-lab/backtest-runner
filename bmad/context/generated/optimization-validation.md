@@ -22,16 +22,16 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `wfo_optimizer.py` | yes | 854 | `13f270b 2026-02-06` |
-| `walk_forward_runner.py` | yes | 496 | `13f270b 2026-02-06` |
-| `performance_tracker.py` | yes | 822 | `13f270b 2026-02-06` |
-| `oos_validator.py` | yes | 187 | `13f270b 2026-02-06` |
-| `monte_carlo.py` | yes | 178 | `64da33c 2026-02-10` |
-| `tuning_runner.py` | yes | 340 | `583f2bc 2026-02-06` |
-| `aos_walk_forward.py` | yes | 585 | `13f270b 2026-02-06` |
-| `aos_optimizer.py` | yes | 572 | `9249b8b 2026-02-05` |
-| `run_strategy_test.py` | yes | 552 | `97ee653 2026-02-08` |
-| `batch_runner.py` | yes | 187 | `36d343c 2026-02-03` |
+| `wfo_optimizer.py` | yes | 911 | `577ee8a 2026-02-22` |
+| `walk_forward_runner.py` | yes | 526 | `577ee8a 2026-02-22` |
+| `performance_tracker.py` | yes | 876 | `577ee8a 2026-02-22` |
+| `oos_validator.py` | yes | 223 | `13f270b 2026-02-06` |
+| `monte_carlo.py` | yes | 193 | `64da33c 2026-02-10` |
+| `tuning_runner.py` | yes | 359 | `583f2bc 2026-02-06` |
+| `aos_walk_forward.py` | yes | 633 | `13f270b 2026-02-06` |
+| `aos_optimizer.py` | yes | 422 | `577ee8a 2026-02-22` |
+| `run_strategy_test.py` | yes | 622 | `97ee653 2026-02-08` |
+| `batch_runner.py` | yes | 208 | `36d343c 2026-02-03` |
 
 ## Change Checks
 
@@ -56,39 +56,38 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 
 ### `wfo_optimizer.py`
 - `function` `_load_day_trading_manager` (line 32)
-- `function` `suppress_output` (line 59)
-- `class` `OptimizationResult` (line 162)
-- `class` `TickerOptResult` (line 174)
-- `function` `parse_date` (line 185)
-- `function` `canonical_strategy_name` (line 189)
-- `function` `date_range` (line 204)
-- `function` `get_trading_dates` (line 217)
-- `function` `grid` (line 243)
-- `function` `_session_metrics` (line 252)
-- `function` `_process_day_with_manager` (line 294)
-- `function` `_run_single_day_strategy_isolated` (line 323)
-- ... 6 more symbols
+- `function` `suppress_output` (line 66)
+- `class` `OptimizationResult` (line 169)
+- `class` `TickerOptResult` (line 181)
+- `function` `canonical_strategy_name` (line 192)
+- `function` `get_trading_dates` (line 207)
+- `function` `grid` (line 237)
+- `function` `_session_metrics` (line 246)
+- `function` `_process_day_with_manager` (line 290)
+- `function` `_run_single_day_strategy_isolated` (line 319)
+- `function` `run_single_day` (line 360)
+- `function` `score_result` (line 454)
+- ... 4 more symbols
 
 ### `walk_forward_runner.py`
-- `class` `WalkForwardConfig` (line 22)
+- `class` `WalkForwardConfig` (line 21)
 - `class` `DailyResult` (line 37)
-- `class` `WalkForwardRunner` (line 53)
-- `async_function` `main` (line 440)
+- `class` `WalkForwardRunner` (line 54)
+- `async_function` `main` (line 459)
 
 ### `performance_tracker.py`
-- `class` `Regime` (line 15)
-- `class` `TradeRecord` (line 23)
-- `class` `StrategyPerformance` (line 74)
-- `class` `PerformanceTracker` (line 268)
-- `function` `create_tracker` (line 762)
+- `class` `Regime` (line 16)
+- `class` `TradeRecord` (line 25)
+- `class` `StrategyPerformance` (line 95)
+- `class` `PerformanceTracker` (line 298)
 
 ### `oos_validator.py`
-- `class` `SplitResult` (line 25)
-- `function` `split_dates_chronological` (line 31)
-- `function` `build_day_rows_map` (line 53)
-- `function` `win_rate` (line 86)
-- `function` `run_for_ticker` (line 90)
-- `function` `main` (line 141)
+- `class` `SplitResult` (line 30)
+- `function` `split_dates_chronological` (line 36)
+- `function` `build_day_rows_map` (line 60)
+- `function` `win_rate` (line 99)
+- `function` `run_for_ticker` (line 103)
+- `function` `main` (line 174)
 
 ### `monte_carlo.py`
 - `function` `_pick_pnl_column` (line 18)
@@ -96,47 +95,45 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 - `function` `max_drawdown` (line 47)
 - `function` `simulate_drawdown_distribution` (line 66)
 - `function` `percentile` (line 93)
-- `function` `summarize` (line 100)
-- `function` `main` (line 125)
+- `function` `summarize` (line 103)
+- `function` `main` (line 130)
 
 ### `tuning_runner.py`
 - `function` `suppress_output` (line 40)
-- `class` `TuneResult` (line 52)
-- `function` `parse_date` (line 60)
-- `function` `date_range` (line 64)
-- `function` `load_ticker_df` (line 77)
-- `function` `get_available_dates` (line 90)
-- `function` `select_training_dates` (line 95)
-- `function` `run_day` (line 101)
-- `function` `score_result` (line 143)
-- `function` `grid` (line 152)
-- `function` `tune_strategy_for_ticker` (line 160)
-- `function` `evaluate_test_week` (line 201)
+- `class` `TuneResult` (line 53)
+- `function` `parse_date` (line 61)
+- `function` `date_range` (line 65)
+- `function` `load_ticker_df` (line 78)
+- `function` `get_available_dates` (line 91)
+- `function` `select_training_dates` (line 96)
+- `function` `run_day` (line 104)
+- `function` `score_result` (line 146)
+- `function` `grid` (line 155)
+- `function` `tune_strategy_for_ticker` (line 163)
+- `function` `evaluate_test_week` (line 210)
 - ... 1 more symbols
 
 ### `aos_walk_forward.py`
 - `class` `AOSConfig` (line 40)
-- `class` `DailyAOSResult` (line 49)
-- `class` `AOSWalkForwardRunner` (line 68)
-- `async_function` `main` (line 548)
+- `class` `DailyAOSResult` (line 50)
+- `class` `AOSWalkForwardRunner` (line 70)
+- `async_function` `main` (line 591)
 
 ### `aos_optimizer.py`
 - `class` `OptimizationResult` (line 37)
-- `class` `TickerProfile` (line 52)
-- `class` `AOSOptimizer` (line 65)
-- `class` `AOSRunner` (line 420)
-- `function` `create_aos_config` (line 487)
+- `class` `TickerProfile` (line 53)
+- `class` `AOSOptimizer` (line 67)
 
 ### `run_strategy_test.py`
 - `class` `TradeResult` (line 19)
-- `class` `BacktestReport` (line 39)
-- `class` `StrategyTester` (line 73)
-- `async_function` `main` (line 521)
+- `class` `BacktestReport` (line 40)
+- `class` `StrategyTester` (line 75)
+- `async_function` `main` (line 587)
 
 ### `batch_runner.py`
 - `class` `BatchReport` (line 19)
-- `class` `BatchRunner` (line 54)
-- `async_function` `main` (line 169)
+- `class` `BatchRunner` (line 55)
+- `async_function` `main` (line 185)
 
 ## Endpoint Summary
 

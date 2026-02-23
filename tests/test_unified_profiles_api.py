@@ -11,13 +11,17 @@ _API_SERVER_PATH = Path(__file__).resolve().parents[1] / "api_server.py"
 _PROJECT_ROOT = str(_API_SERVER_PATH.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
-_API_SERVER_SPEC = importlib.util.spec_from_file_location("api_server_module", _API_SERVER_PATH)
+_API_SERVER_SPEC = importlib.util.spec_from_file_location(
+    "api_server_module", _API_SERVER_PATH
+)
 assert _API_SERVER_SPEC is not None and _API_SERVER_SPEC.loader is not None
 api_server = importlib.util.module_from_spec(_API_SERVER_SPEC)
 _API_SERVER_SPEC.loader.exec_module(api_server)
 
 
-def test_capture_unified_profile_persists_strategy_and_execution(monkeypatch, tmp_path) -> None:
+def test_capture_unified_profile_persists_strategy_and_execution(
+    monkeypatch, tmp_path
+) -> None:
     temp_aos = tmp_path / "aos_config.json"
     temp_positioning = tmp_path / "positioning_config.json"
     temp_aos.write_text(
@@ -86,16 +90,21 @@ def test_capture_unified_profile_persists_strategy_and_execution(monkeypatch, tm
     assert "strategy_profile" in result["profile"]
     assert "execution_profile" in result["profile"]
 
-    saved_aos = json.loads(temp_aos.read_text())
+    saved_aos = api_server._load_aos_config(temp_aos)
     mu_cfg = saved_aos["tickers"]["MU"]
     assert mu_cfg["active_unified_profile_id"] == result["profile"]["profile_id"]
     assert len(mu_cfg["unified_profiles"]) == 1
     unified_entry = mu_cfg["unified_profiles"][0]
-    assert unified_entry["strategy_profile"]["strategy_params"]["momentum"]["enabled"] is True
+    assert (
+        unified_entry["strategy_profile"]["strategy_params"]["momentum"]["enabled"]
+        is True
+    )
     assert unified_entry["execution_profile"]["positioning"]["trailing_stop_pct"] == 0.7
 
 
-def test_apply_unified_profile_sets_active_and_updates_positioning(monkeypatch, tmp_path) -> None:
+def test_apply_unified_profile_sets_active_and_updates_positioning(
+    monkeypatch, tmp_path
+) -> None:
     temp_aos = tmp_path / "aos_config.json"
     temp_positioning = tmp_path / "positioning_config.json"
     temp_aos.write_text(
@@ -110,7 +119,10 @@ def test_apply_unified_profile_sets_active_and_updates_positioning(monkeypatch, 
                                 "profile_name": "MU Unified",
                                 "strategy_profile": {
                                     "strategy_params": {
-                                        "momentum": {"enabled": True, "min_confidence": 58.0}
+                                        "momentum": {
+                                            "enabled": True,
+                                            "min_confidence": 58.0,
+                                        }
                                     },
                                     "strategy_selection_mode": "all_enabled",
                                     "max_active_strategies": 4,
@@ -161,7 +173,7 @@ def test_apply_unified_profile_sets_active_and_updates_positioning(monkeypatch, 
     assert result["apply_result"]["applied_count"] == 1
     assert result["applied_execution"] is True
 
-    saved_aos = json.loads(temp_aos.read_text())
+    saved_aos = api_server._load_aos_config(temp_aos)
     mu_cfg = saved_aos["tickers"]["MU"]
     assert mu_cfg["active_unified_profile_id"] == "unified123"
     assert mu_cfg["strategy_selection_mode"] == "all_enabled"
@@ -175,7 +187,9 @@ def test_apply_unified_profile_sets_active_and_updates_positioning(monkeypatch, 
     assert mu_positioning["trailing_stop_pct"] == 0.6
 
 
-def test_unified_profile_options_include_legacy_combo_adaptive_variants(monkeypatch, tmp_path) -> None:
+def test_unified_profile_options_include_legacy_combo_adaptive_variants(
+    monkeypatch, tmp_path
+) -> None:
     temp_aos = tmp_path / "aos_config.json"
     temp_positioning = tmp_path / "positioning_config.json"
     temp_aos.write_text(
@@ -213,7 +227,9 @@ def test_unified_profile_options_include_legacy_combo_adaptive_variants(monkeypa
                                 "profile_id": "tuned-b",
                                 "profile_name": "Tuned B",
                                 "updated_at": "2026-02-10T10:00:00Z",
-                                "candidate": {"strategy_selection_mode": "adaptive_top_n"},
+                                "candidate": {
+                                    "strategy_selection_mode": "adaptive_top_n"
+                                },
                             },
                         ],
                     }
@@ -248,7 +264,13 @@ def test_unified_profile_options_include_legacy_combo_adaptive_variants(monkeypa
     assert "legacy-unified-MU-combo-a-tuned-b" in ids
     assert "legacy-unified-MU-combo-b-tuned-b" in ids
 
-    active_row = next(item for item in profiles if item["profile_id"] == payload["active_profile_id"])
-    assert active_row["strategy_profile"]["active_strategy_combo_profile_id"] == "combo-b"
-    assert active_row["strategy_profile"]["active_adaptive_tuner_profile_id"] == "tuned-a"
+    active_row = next(
+        item for item in profiles if item["profile_id"] == payload["active_profile_id"]
+    )
+    assert (
+        active_row["strategy_profile"]["active_strategy_combo_profile_id"] == "combo-b"
+    )
+    assert (
+        active_row["strategy_profile"]["active_adaptive_tuner_profile_id"] == "tuned-a"
+    )
     assert active_row["execution_profile"]["positioning"]["risk_per_trade_pct"] == 0.9

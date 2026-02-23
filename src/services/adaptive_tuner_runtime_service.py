@@ -20,7 +20,9 @@ class AdaptiveTunerRuntimeDeps:
     compute_tuner_score: Callable[..., float]
     compute_tuner_score_robust: Callable[[List[Dict[str, Any]]], float]
     apply_strategy_param_map: Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]]
-    apply_orchestrator_config: Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]]
+    apply_orchestrator_config: Callable[
+        [str, Dict[str, Any]], Awaitable[Dict[str, Any]]
+    ]
     adaptive_tuner_merge_lock: Any
     load_aos_config: Callable[[], Dict[str, Any]]
     save_aos_config: Callable[[Dict[str, Any]], bool]
@@ -74,7 +76,10 @@ async def evaluate_adaptive_tuner_candidate(
                 candidate.get("strategy_selection_mode")
             ),
             max_active_strategies=_normalize_clamped_int(
-                candidate.get("max_active_strategies"), default=3, min_value=1, max_value=20
+                candidate.get("max_active_strategies"),
+                default=3,
+                min_value=1,
+                max_value=20,
             ),
         )
         run_key: Optional[str] = None
@@ -86,7 +91,11 @@ async def evaluate_adaptive_tuner_candidate(
                 raise RuntimeError(f"Runner not found for key {run_key}")
             await runner.run_all(speed_ms=0)
             summary_payload = runner.get_summary()
-            session_summary = summary_payload.get("session_summary") if isinstance(summary_payload, dict) else None
+            session_summary = (
+                summary_payload.get("session_summary")
+                if isinstance(summary_payload, dict)
+                else None
+            )
             summary = session_summary if isinstance(session_summary, dict) else {}
             pnl_pct = float(summary.get("total_pnl_pct", 0.0) or 0.0)
             pnl_dollars = float(summary.get("total_pnl_dollars", 0.0) or 0.0)
@@ -148,9 +157,13 @@ async def evaluate_adaptive_tuner_candidate(
             "total_days": len(dates),
             "total_trades": total_trades,
             "total_pnl_pct": round(total_pnl_pct, 4),
-            "avg_pnl_pct": round((total_pnl_pct / valid_days), 4) if valid_days > 0 else 0.0,
+            "avg_pnl_pct": (
+                round((total_pnl_pct / valid_days), 4) if valid_days > 0 else 0.0
+            ),
             "total_pnl_dollars": round(total_pnl_dollars, 4),
-            "avg_pnl_dollars": round((total_pnl_dollars / valid_days), 4) if valid_days > 0 else 0.0,
+            "avg_pnl_dollars": (
+                round((total_pnl_dollars / valid_days), 4) if valid_days > 0 else 0.0
+            ),
             "avg_win_rate_pct": round(avg_win_rate_pct, 4),
         },
         "day_results": day_results,
@@ -206,7 +219,10 @@ async def evaluate_v2_candidate(
                 candidate.get("strategy_selection_mode")
             ),
             max_active_strategies=_normalize_clamped_int(
-                candidate.get("max_active_strategies"), default=3, min_value=1, max_value=20
+                candidate.get("max_active_strategies"),
+                default=3,
+                min_value=1,
+                max_value=20,
             ),
         )
         run_key: Optional[str] = None
@@ -219,7 +235,12 @@ async def evaluate_v2_candidate(
 
             # Push per-strategy param overrides (v2) before running the backtest
             v2_param_overrides = {}
-            for pkey in ("min_confidence", "atr_stop_multiplier", "rr_ratio", "trailing_stop_pct"):
+            for pkey in (
+                "min_confidence",
+                "atr_stop_multiplier",
+                "rr_ratio",
+                "trailing_stop_pct",
+            ):
                 pval = candidate.get(pkey)
                 if pval is not None:
                     try:
@@ -230,11 +251,15 @@ async def evaluate_v2_candidate(
                 enabled_strats = candidate.get("enabled_strategies", [])
                 if isinstance(enabled_strats, list) and enabled_strats:
                     param_map = {
-                        str(s).strip(): dict(v2_param_overrides) for s in enabled_strats if s
+                        str(s).strip(): dict(v2_param_overrides)
+                        for s in enabled_strats
+                        if s
                     }
                     if param_map:
                         try:
-                            await _apply_strategy_param_map(request.strategy_api_url, param_map)
+                            await _apply_strategy_param_map(
+                                request.strategy_api_url, param_map
+                            )
                         except Exception:
                             pass  # best-effort
 
@@ -242,7 +267,9 @@ async def evaluate_v2_candidate(
             orchestrator_payload: Dict[str, Any] = {}
             if candidate.get("base_threshold") is not None:
                 try:
-                    orchestrator_payload["base_threshold"] = float(candidate.get("base_threshold"))
+                    orchestrator_payload["base_threshold"] = float(
+                        candidate.get("base_threshold")
+                    )
                 except (TypeError, ValueError):
                     pass
             if candidate.get("min_confirming_sources") is not None:
@@ -277,7 +304,11 @@ async def evaluate_v2_candidate(
 
             await runner.run_all(speed_ms=0)
             summary_payload = runner.get_summary()
-            session_summary = summary_payload.get("session_summary") if isinstance(summary_payload, dict) else None
+            session_summary = (
+                summary_payload.get("session_summary")
+                if isinstance(summary_payload, dict)
+                else None
+            )
             summary = session_summary if isinstance(session_summary, dict) else {}
             pnl_pct = float(summary.get("total_pnl_pct", 0.0) or 0.0)
             pnl_dollars = float(summary.get("total_pnl_dollars", 0.0) or 0.0)
@@ -288,28 +319,36 @@ async def evaluate_v2_candidate(
             total_win_rate_pct += win_rate_pct
             total_trades += trades
             valid_days += 1
-            day_results.append({
-                "date": date,
-                "success": True,
-                "pnl_pct": pnl_pct,
-                "pnl_dollars": pnl_dollars,
-                "win_rate_pct": win_rate_pct,
-                "trades": trades,
-                "regime_breakdown": summary.get("regime_trade_breakdown", {}),
-                "l2_avg_score": float(summary.get("l2_avg_confirmation_score", 0.0) or 0.0),
-            })
+            day_results.append(
+                {
+                    "date": date,
+                    "success": True,
+                    "pnl_pct": pnl_pct,
+                    "pnl_dollars": pnl_dollars,
+                    "win_rate_pct": win_rate_pct,
+                    "trades": trades,
+                    "regime_breakdown": summary.get("regime_trade_breakdown", {}),
+                    "l2_avg_score": float(
+                        summary.get("l2_avg_confirmation_score", 0.0) or 0.0
+                    ),
+                }
+            )
         except HTTPException as exc:
-            day_results.append({
-                "date": date,
-                "success": False,
-                "error": f"HTTP {exc.status_code}: {exc.detail}",
-            })
+            day_results.append(
+                {
+                    "date": date,
+                    "success": False,
+                    "error": f"HTTP {exc.status_code}: {exc.detail}",
+                }
+            )
         except Exception as exc:
-            day_results.append({
-                "date": date,
-                "success": False,
-                "error": str(exc),
-            })
+            day_results.append(
+                {
+                    "date": date,
+                    "success": False,
+                    "error": str(exc),
+                }
+            )
         finally:
             if run_key:
                 active_runners.pop(run_key, None)
@@ -351,9 +390,13 @@ async def evaluate_v2_candidate(
             "total_days": len(dates),
             "total_trades": total_trades,
             "total_pnl_pct": round(total_pnl_pct, 4),
-            "avg_pnl_pct": round((total_pnl_pct / valid_days), 4) if valid_days > 0 else 0.0,
+            "avg_pnl_pct": (
+                round((total_pnl_pct / valid_days), 4) if valid_days > 0 else 0.0
+            ),
             "total_pnl_dollars": round(total_pnl_dollars, 4),
-            "avg_pnl_dollars": round((total_pnl_dollars / valid_days), 4) if valid_days > 0 else 0.0,
+            "avg_pnl_dollars": (
+                round((total_pnl_dollars / valid_days), 4) if valid_days > 0 else 0.0
+            ),
             "avg_win_rate_pct": round(avg_win_rate_pct, 4),
         },
         # V2 enriched metadata
@@ -403,7 +446,9 @@ async def persist_tuner_result_to_primary_aos(
 
     async with adaptive_tuner_merge_lock:
         final_config = _load_aos_config()
-        if "tickers" not in final_config or not isinstance(final_config.get("tickers"), dict):
+        if "tickers" not in final_config or not isinstance(
+            final_config.get("tickers"), dict
+        ):
             final_config["tickers"] = {}
 
         updated_ticker_cfg = copy.deepcopy(final_config["tickers"].get(ticker, {}))
@@ -441,12 +486,17 @@ async def persist_tuner_result_to_primary_aos(
                         best_candidate if isinstance(best_candidate, dict) else {},
                         request.adaptive_version,
                     )
-                updated_ticker_cfg["active_adaptive_tuner_profile_id"] = saved_profile["profile_id"]
+                updated_ticker_cfg["active_adaptive_tuner_profile_id"] = saved_profile[
+                    "profile_id"
+                ]
                 persist_best_applied = True
             else:
-                updated_ticker_cfg["active_adaptive_tuner_profile_id"] = str(
-                    updated_ticker_cfg.get("active_adaptive_tuner_profile_id", "")
-                ).strip() or saved_profile["profile_id"]
+                updated_ticker_cfg["active_adaptive_tuner_profile_id"] = (
+                    str(
+                        updated_ticker_cfg.get("active_adaptive_tuner_profile_id", "")
+                    ).strip()
+                    or saved_profile["profile_id"]
+                )
 
         final_config["tickers"][ticker] = updated_ticker_cfg
         if not _save_aos_config(final_config):

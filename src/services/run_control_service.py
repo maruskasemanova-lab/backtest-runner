@@ -93,7 +93,9 @@ async def play_run(
             runner.config.intrabar_eval_step_seconds = 1
             return
         runner.config.intrabar_execution_recalc_1s = True
-        runner.config.intrabar_eval_step_seconds = 5 if normalized == "intrabar_5s" else 1
+        runner.config.intrabar_eval_step_seconds = (
+            5 if normalized == "intrabar_5s" else 1
+        )
 
     def _effective_trade_eval_mode() -> str:
         if not bool(getattr(runner.config, "intrabar_execution_recalc_1s", False)):
@@ -124,7 +126,9 @@ async def play_run(
     if raw_speed is None:
         raw_speed = "max"
 
-    raw_trade_mode = getattr(request, "trade_eval_mode", None) if request is not None else None
+    raw_trade_mode = (
+        getattr(request, "trade_eval_mode", None) if request is not None else None
+    )
     if raw_trade_mode is None and payload is not None:
         raw_trade_mode = payload.get("trade_eval_mode")
 
@@ -133,11 +137,39 @@ async def play_run(
         normalized_trade_mode = "intrabar_1s" if raw_trade_mode else "standard"
     elif isinstance(raw_trade_mode, str):
         normalized = raw_trade_mode.strip().lower()
-        if normalized in {"standard", "bar", "bars", "fast", "default", "minute", "false", "0", "off"}:
+        if normalized in {
+            "standard",
+            "bar",
+            "bars",
+            "fast",
+            "default",
+            "minute",
+            "false",
+            "0",
+            "off",
+        }:
             normalized_trade_mode = "standard"
-        elif normalized in {"intrabar_5s", "intrabar-5s", "intrabar5s", "5s", "5sec", "5secs", "5second", "5seconds"}:
+        elif normalized in {
+            "intrabar_5s",
+            "intrabar-5s",
+            "intrabar5s",
+            "5s",
+            "5sec",
+            "5secs",
+            "5second",
+            "5seconds",
+        }:
             normalized_trade_mode = "intrabar_5s"
-        elif normalized in {"intrabar_1s", "intrabar", "1s", "second", "seconds", "true", "1", "on"}:
+        elif normalized in {
+            "intrabar_1s",
+            "intrabar",
+            "1s",
+            "second",
+            "seconds",
+            "true",
+            "1",
+            "on",
+        }:
             normalized_trade_mode = "intrabar_1s"
 
     if normalized_trade_mode is not None:
@@ -150,7 +182,11 @@ async def play_run(
         return {
             "success": True,
             "resumed": True,
-            "speed_ms": runner.last_run_speed if hasattr(runner, "last_run_speed") else "unknown",
+            "speed_ms": (
+                runner.last_run_speed
+                if hasattr(runner, "last_run_speed")
+                else "unknown"
+            ),
             "trade_eval_mode": effective_trade_mode,
         }
 
@@ -175,7 +211,10 @@ async def play_run(
             deps.reports_dir.mkdir(parents=True, exist_ok=True)
             run_date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_run_id = str(runner.config.run_id).replace(":", "_")
-            out_dir = deps.reports_dir / f"{run_date_str}_{runner.config.ticker}_{safe_run_id}"
+            out_dir = (
+                deps.reports_dir
+                / f"{run_date_str}_{runner.config.ticker}_{safe_run_id}"
+            )
             runner.save_reports(str(out_dir))
         except Exception as exc:
             deps.logger.error("Failed to auto-save reports: %s", exc)
@@ -183,7 +222,9 @@ async def play_run(
         try:
             await _persist_runner_summary_to_store(runner, deps)
         except Exception as exc:
-            deps.logger.error("Failed to persist run summary to external report store: %s", exc)
+            deps.logger.error(
+                "Failed to persist run summary to external report store: %s", exc
+            )
 
         if getattr(runner, "_checkpoint_auto_save", False):
             url = getattr(runner, "_checkpoint_strategy_url", "")
@@ -197,7 +238,11 @@ async def play_run(
                 )
 
     asyncio.create_task(_run_and_maybe_save())
-    return {"success": True, "speed_ms": raw_speed, "trade_eval_mode": effective_trade_mode}
+    return {
+        "success": True,
+        "speed_ms": raw_speed,
+        "trade_eval_mode": effective_trade_mode,
+    }
 
 
 def pause_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
@@ -222,11 +267,15 @@ async def restart_run(run_id: str, ticker: str, date: str, deps: RunControlDeps)
     _, runner = deps.run_registry.require(run_id, ticker, date)
 
     if getattr(runner, "is_running", False):
-        raise HTTPException(409, "Cannot restart while run is active. Pause/stop first.")
+        raise HTTPException(
+            409, "Cannot restart while run is active. Pause/stop first."
+        )
 
     restart_config = getattr(runner, "_restart_session_config", None)
     if not isinstance(restart_config, dict):
-        raise HTTPException(409, "Run cannot be restarted (missing session config snapshot).")
+        raise HTTPException(
+            409, "Run cannot be restarted (missing session config snapshot)."
+        )
 
     await deps.clear_remote_strategy_sessions(
         runner.config.strategy_api_url,
@@ -273,7 +322,9 @@ def get_processed_bars(run_id: str, ticker: str, date: str, deps: RunControlDeps
     }
 
 
-def get_bar_details(run_id: str, ticker: str, date: str, minute_key: int, deps: RunControlDeps):
+def get_bar_details(
+    run_id: str, ticker: str, date: str, minute_key: int, deps: RunControlDeps
+):
     from src.intrabar_frame_builder import IntrabarFrameBuilder
     from src.l2_data_manager import L2DataManager
 
@@ -305,13 +356,19 @@ def get_bar_details(run_id: str, ticker: str, date: str, minute_key: int, deps: 
                 "has_data": True,
                 "seconds": len(records),
                 "coverage_ratio": (
-                    float(frames["coverage_ratio"].iloc[0]) if "coverage_ratio" in frames.columns else 0.0
+                    float(frames["coverage_ratio"].iloc[0])
+                    if "coverage_ratio" in frames.columns
+                    else 0.0
                 ),
                 "total_trade_ticks": (
-                    int(frames["trade_ticks_sec"].sum()) if "trade_ticks_sec" in frames.columns else 0
+                    int(frames["trade_ticks_sec"].sum())
+                    if "trade_ticks_sec" in frames.columns
+                    else 0
                 ),
                 "total_book_updates": (
-                    int(frames["book_updates_sec"].sum()) if "book_updates_sec" in frames.columns else 0
+                    int(frames["book_updates_sec"].sum())
+                    if "book_updates_sec" in frames.columns
+                    else 0
                 ),
             },
         }

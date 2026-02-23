@@ -37,7 +37,9 @@ def main() -> None:
     board = load_board()
     stories: List[Dict[str, Any]] = board.get("stories", [])
     if args.id:
-        matches = [s for s in stories if str(s.get("id", "")).upper() == args.id.upper()]
+        matches = [
+            s for s in stories if str(s.get("id", "")).upper() == args.id.upper()
+        ]
         if not matches:
             raise SystemExit(f"Story not found: {args.id}")
         chosen = matches[0]
@@ -62,4 +64,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

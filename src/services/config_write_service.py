@@ -57,7 +57,9 @@ def _resolve_active_adaptive_candidate(
     ticker_cfg: Dict[str, Any],
     normalize_tuner_profiles: Callable[[Any], Any],
 ) -> Dict[str, Any]:
-    active_profile_id = str(ticker_cfg.get("active_adaptive_tuner_profile_id", "")).strip()
+    active_profile_id = str(
+        ticker_cfg.get("active_adaptive_tuner_profile_id", "")
+    ).strip()
     if not active_profile_id:
         return {}
     profiles = normalize_tuner_profiles(ticker_cfg.get("adaptive_tuner_profiles", []))
@@ -114,13 +116,19 @@ def _build_strategy_profile_snapshot(
     if isinstance(adaptive_cfg, dict):
         strategy_profile["adaptive"] = dict(adaptive_cfg)
 
-    active_combo_profile_id = str(ticker_cfg.get("active_strategy_combo_profile_id", "")).strip()
+    active_combo_profile_id = str(
+        ticker_cfg.get("active_strategy_combo_profile_id", "")
+    ).strip()
     if active_combo_profile_id:
         strategy_profile["active_strategy_combo_profile_id"] = active_combo_profile_id
 
-    active_adaptive_profile_id = str(ticker_cfg.get("active_adaptive_tuner_profile_id", "")).strip()
+    active_adaptive_profile_id = str(
+        ticker_cfg.get("active_adaptive_tuner_profile_id", "")
+    ).strip()
     if active_adaptive_profile_id:
-        strategy_profile["active_adaptive_tuner_profile_id"] = active_adaptive_profile_id
+        strategy_profile["active_adaptive_tuner_profile_id"] = (
+            active_adaptive_profile_id
+        )
         active_candidate = _resolve_active_adaptive_candidate(
             ticker_cfg=ticker_cfg,
             normalize_tuner_profiles=normalize_tuner_profiles,
@@ -172,7 +180,9 @@ def _build_execution_profile_snapshot(
     return execution_profile
 
 
-async def capture_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str, Any]:
+async def capture_unified_profile(
+    request: Any, deps: ConfigWriteDeps
+) -> Dict[str, Any]:
     ticker = str(request.ticker or "").upper().strip()
     if not ticker:
         raise HTTPException(400, "ticker is required")
@@ -254,7 +264,10 @@ async def capture_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[s
         "success": True,
         "ticker": ticker,
         "profile": entry,
-        "active_profile_id": str(ticker_cfg.get("active_unified_profile_id", "")).strip() or None,
+        "active_profile_id": str(
+            ticker_cfg.get("active_unified_profile_id", "")
+        ).strip()
+        or None,
     }
 
 
@@ -312,7 +325,9 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
             ticker_cfg["max_active_strategies"] = max(1, min(20, max_active))
 
         if "time_filter_enabled" in strategy_profile:
-            ticker_cfg["time_filter_enabled"] = bool(strategy_profile.get("time_filter_enabled"))
+            ticker_cfg["time_filter_enabled"] = bool(
+                strategy_profile.get("time_filter_enabled")
+            )
         if "long_only" in strategy_profile:
             ticker_cfg["long_only"] = bool(strategy_profile.get("long_only"))
 
@@ -320,7 +335,10 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
         if hours:
             ticker_cfg["trading_hours"] = hours
 
-        for key in ("adverse_flow_consistency_threshold", "adverse_book_pressure_threshold"):
+        for key in (
+            "adverse_flow_consistency_threshold",
+            "adverse_book_pressure_threshold",
+        ):
             if key not in strategy_profile:
                 continue
             try:
@@ -374,12 +392,16 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
     if not deps.save_aos_config(config):
         raise HTTPException(500, "Failed to save active unified profile")
     if applied_execution and not deps.save_positioning_config(positioning_config):
-        raise HTTPException(500, "Failed to save positioning config for unified profile")
+        raise HTTPException(
+            500, "Failed to save positioning config for unified profile"
+        )
 
     apply_result: Dict[str, Any] = {}
     if bool(getattr(request, "apply_now", True)):
         try:
-            strategy_api_url = enforce_strategy_url_allowlist_only(request.strategy_api_url)
+            strategy_api_url = enforce_strategy_url_allowlist_only(
+                request.strategy_api_url
+            )
         except StrategyApiPolicyError as exc:
             raise HTTPException(400, str(exc))
         strategy_params = (
@@ -388,7 +410,9 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
             else {}
         )
         if strategy_params:
-            apply_result = await deps.apply_strategy_param_map(strategy_api_url, strategy_params)
+            apply_result = await deps.apply_strategy_param_map(
+                strategy_api_url, strategy_params
+            )
 
     return {
         "success": True,
@@ -430,7 +454,9 @@ async def capture_strategy_combo(request: Any, deps: ConfigWriteDeps) -> Dict[st
     if not isinstance(ticker_cfg, dict):
         ticker_cfg = {}
 
-    profiles = deps.normalize_strategy_combo_profiles(ticker_cfg.get("strategy_combo_profiles", []))
+    profiles = deps.normalize_strategy_combo_profiles(
+        ticker_cfg.get("strategy_combo_profiles", [])
+    )
     entry = deps.build_strategy_combo_profile_entry(
         ticker=ticker,
         profile_name=profile_name,
@@ -448,7 +474,10 @@ async def capture_strategy_combo(request: Any, deps: ConfigWriteDeps) -> Dict[st
         "success": True,
         "ticker": ticker,
         "profile": entry,
-        "active_profile_id": str(ticker_cfg.get("active_strategy_combo_profile_id", "")).strip() or None,
+        "active_profile_id": str(
+            ticker_cfg.get("active_strategy_combo_profile_id", "")
+        ).strip()
+        or None,
     }
 
 
@@ -467,9 +496,15 @@ async def apply_strategy_combo(request: Any, deps: ConfigWriteDeps) -> Dict[str,
     if not isinstance(ticker_cfg, dict):
         ticker_cfg = {}
 
-    profiles = deps.normalize_strategy_combo_profiles(ticker_cfg.get("strategy_combo_profiles", []))
+    profiles = deps.normalize_strategy_combo_profiles(
+        ticker_cfg.get("strategy_combo_profiles", [])
+    )
     target_profile = next(
-        (profile for profile in profiles if str(profile.get("profile_id")) == profile_id),
+        (
+            profile
+            for profile in profiles
+            if str(profile.get("profile_id")) == profile_id
+        ),
         None,
     )
     if not isinstance(target_profile, dict):
@@ -529,7 +564,10 @@ def update_aos_config(request: Any, deps: ConfigWriteDeps) -> Dict[str, Any]:
         if incoming_positioning is None:
             incoming_positioning = {}
         if isinstance(incoming_positioning, dict):
-            incoming_positioning = {**legacy_positioning_payload, **incoming_positioning}
+            incoming_positioning = {
+                **legacy_positioning_payload,
+                **incoming_positioning,
+            }
         else:
             raise HTTPException(400, "positioning must be an object or null")
 
@@ -566,9 +604,13 @@ def update_aos_config(request: Any, deps: ConfigWriteDeps) -> Dict[str, Any]:
 
     deps.logger.info("Updated AOS config for %s: %s", ticker_upper, incoming_config)
     if incoming_positioning is not positioning_marker:
-        deps.logger.info("Updated positioning config for %s: %s", ticker_upper, incoming_positioning)
+        deps.logger.info(
+            "Updated positioning config for %s: %s", ticker_upper, incoming_positioning
+        )
     payload = dict(existing)
-    merged_positioning = deps.get_ticker_positioning_config(ticker_upper, positioning_config)
+    merged_positioning = deps.get_ticker_positioning_config(
+        ticker_upper, positioning_config
+    )
     if merged_positioning:
         payload["positioning"] = merged_positioning
     return {"success": True, "config": payload}
@@ -610,20 +652,29 @@ def apply_adaptive_tuner_profile(request: Any, deps: ConfigWriteDeps) -> Dict[st
     if not isinstance(ticker_cfg, dict):
         ticker_cfg = {}
 
-    profiles = deps.normalize_tuner_profiles(ticker_cfg.get("adaptive_tuner_profiles", []))
+    profiles = deps.normalize_tuner_profiles(
+        ticker_cfg.get("adaptive_tuner_profiles", [])
+    )
     target_profile = next(
-        (profile for profile in profiles if str(profile.get("profile_id")) == profile_id),
+        (
+            profile
+            for profile in profiles
+            if str(profile.get("profile_id")) == profile_id
+        ),
         None,
     )
     if not isinstance(target_profile, dict):
         raise HTTPException(404, f"Adaptive tuner profile not found: {profile_id}")
 
     best_candidate = target_profile.get("candidate", {})
-    adaptive_version = deps.normalize_non_negative_int(
-        target_profile.get("adaptive_version", 1),
-        default=1,
-        max_value=10,
-    ) or 1
+    adaptive_version = (
+        deps.normalize_non_negative_int(
+            target_profile.get("adaptive_version", 1),
+            default=1,
+            max_value=10,
+        )
+        or 1
+    )
     safe_candidate = best_candidate if isinstance(best_candidate, dict) else {}
     if adaptive_version >= 2:
         updated_cfg = deps.build_v2_candidate_config(

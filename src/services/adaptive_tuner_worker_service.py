@@ -46,7 +46,9 @@ async def run_v2_adaptive_tuner_job(
     MAX_PARALLEL_ADAPTIVE_TUNERS = deps.max_parallel_adaptive_tuners
     _normalize_clamped_int = deps.normalize_clamped_int
     _resolve_tuner_trial_budget = deps.resolve_tuner_trial_budget
-    _create_isolated_tuner_aos_config_locked = deps.create_isolated_tuner_aos_config_locked
+    _create_isolated_tuner_aos_config_locked = (
+        deps.create_isolated_tuner_aos_config_locked
+    )
     _cleanup_isolated_tuner_aos_config = deps.cleanup_isolated_tuner_aos_config
     _load_aos_config = deps.load_aos_config
     _save_aos_config = deps.save_aos_config
@@ -74,7 +76,9 @@ async def run_v2_adaptive_tuner_job(
     isolated_aos_config_path: Optional[Path] = None
     async with adaptive_tuner_slots:
         try:
-            isolated_aos_config_path = await _create_isolated_tuner_aos_config_locked(job_id)
+            isolated_aos_config_path = await _create_isolated_tuner_aos_config_locked(
+                job_id
+            )
             isolated_aos_config_str = str(isolated_aos_config_path)
             job["isolated_aos_config_path"] = isolated_aos_config_str
             job["max_parallel_jobs"] = MAX_PARALLEL_ADAPTIVE_TUNERS
@@ -84,7 +88,9 @@ async def run_v2_adaptive_tuner_job(
                 original_config.get("tickers", {}).get(ticker, {})
             )
             cfg_work = copy.deepcopy(original_config)
-            if "tickers" not in cfg_work or not isinstance(cfg_work.get("tickers"), dict):
+            if "tickers" not in cfg_work or not isinstance(
+                cfg_work.get("tickers"), dict
+            ):
                 cfg_work["tickers"] = {}
 
             search_space = _build_v2_search_space(request, original_ticker_config)
@@ -109,7 +115,11 @@ async def run_v2_adaptive_tuner_job(
 
             job["started_at"] = datetime.utcnow().isoformat() + "Z"
             job["status"] = "running"
-            job["progress"] = {"completed_trials": 0, "total_trials": 0, "method": method}
+            job["progress"] = {
+                "completed_trials": 0,
+                "total_trials": 0,
+                "method": method,
+            }
             job["trials"] = []
             job["best_trial"] = None
             job["trial_budget"] = trial_budget
@@ -118,12 +128,18 @@ async def run_v2_adaptive_tuner_job(
                 "l2_options": {
                     "min_delta": len(search_space.get("l2_min_delta", [])),
                     "min_imbalance": len(search_space.get("l2_min_imbalance", [])),
-                    "min_signed_aggression": len(search_space.get("l2_min_signed_aggression", [])),
+                    "min_signed_aggression": len(
+                        search_space.get("l2_min_signed_aggression", [])
+                    ),
                 },
-                "regime_filter_sets_count": len(search_space.get("regime_filter_sets", [])),
+                "regime_filter_sets_count": len(
+                    search_space.get("regime_filter_sets", [])
+                ),
                 "evidence_options": {
                     "base_threshold": len(search_space.get("base_threshold", [])),
-                    "min_confirming_sources": len(search_space.get("min_confirming_sources", [])),
+                    "min_confirming_sources": len(
+                        search_space.get("min_confirming_sources", [])
+                    ),
                 },
             }
             if bool(request.quick_mode) and trial_budget["boost"] > 1:
@@ -137,6 +153,7 @@ async def run_v2_adaptive_tuner_job(
             if method == "optuna":
                 try:
                     import optuna as _optuna  # type: ignore
+
                     optuna_module = _optuna
                 except Exception:
                     optuna_module = None
@@ -148,7 +165,9 @@ async def run_v2_adaptive_tuner_job(
                 # Random sampling
                 method_used = "random"
                 candidates = _build_v2_random_candidates(
-                    search_space, n_trials=n_trials, seed=request.seed,
+                    search_space,
+                    n_trials=n_trials,
+                    seed=request.seed,
                     neighborhood_search=bool(request.neighborhood_search),
                 )
                 job["progress"]["total_trials"] = len(candidates)
@@ -161,7 +180,9 @@ async def run_v2_adaptive_tuner_job(
                         next_ticker_cfg
                     )
                     if not _save_aos_config(cfg_work, isolated_aos_config_str):
-                        raise RuntimeError("Failed to save temporary AOS config for v2 tuner trial")
+                        raise RuntimeError(
+                            "Failed to save temporary AOS config for v2 tuner trial"
+                        )
 
                     result = await _evaluate_v2_candidate(
                         job_id=job_id,
@@ -174,30 +195,42 @@ async def run_v2_adaptive_tuner_job(
                     )
                     job["trials"].append(result)
                     current_best = job.get("best_trial")
-                    if (
-                        not isinstance(current_best, dict)
-                        or float(result["score"]) > float(current_best.get("score", -1e12))
-                    ):
+                    if not isinstance(current_best, dict) or float(
+                        result["score"]
+                    ) > float(current_best.get("score", -1e12)):
                         job["best_trial"] = result
                     job["progress"]["completed_trials"] = idx
             else:
                 # Optuna TPE sampling for v2
                 method_used = "optuna"
                 sampler = optuna_module.samplers.TPESampler(seed=request.seed)
-                study = optuna_module.create_study(direction="maximize", sampler=sampler)
+                study = optuna_module.create_study(
+                    direction="maximize", sampler=sampler
+                )
                 job["progress"]["total_trials"] = n_trials
 
                 for idx in range(1, n_trials + 1):
                     trial = study.ask()
-                    ss_idx = trial.suggest_int("strategy_set_idx", 0, len(search_space["strategy_sets"]) - 1)
-                    rf_idx = trial.suggest_int("regime_filter_idx", 0, len(search_space["regime_filter_sets"]) - 1)
-                    tw_idx = trial.suggest_int("time_window_idx", 0, len(search_space["time_window_sets"]) - 1)
+                    ss_idx = trial.suggest_int(
+                        "strategy_set_idx", 0, len(search_space["strategy_sets"]) - 1
+                    )
+                    rf_idx = trial.suggest_int(
+                        "regime_filter_idx",
+                        0,
+                        len(search_space["regime_filter_sets"]) - 1,
+                    )
+                    tw_idx = trial.suggest_int(
+                        "time_window_idx", 0, len(search_space["time_window_sets"]) - 1
+                    )
                     rsm_idx = trial.suggest_int(
-                        "regime_strategy_map_idx", 0, len(search_space["regime_strategy_maps"]) - 1
+                        "regime_strategy_map_idx",
+                        0,
+                        len(search_space["regime_strategy_maps"]) - 1,
                     )
                     candidate = {
                         "strategy_selection_mode": trial.suggest_categorical(
-                            "strategy_selection_mode", search_space["strategy_selection_mode"]
+                            "strategy_selection_mode",
+                            search_space["strategy_selection_mode"],
                         ),
                         "max_active_strategies": trial.suggest_int(
                             "max_active_strategies",
@@ -220,7 +253,9 @@ async def run_v2_adaptive_tuner_job(
                         "use_ohlcv_fallbacks": trial.suggest_categorical(
                             "use_ohlcv_fallbacks", search_space["use_ohlcv_fallbacks"]
                         ),
-                        "enabled_strategies": list(search_space["strategy_sets"][ss_idx]),
+                        "enabled_strategies": list(
+                            search_space["strategy_sets"][ss_idx]
+                        ),
                         "l2_min_delta": trial.suggest_categorical(
                             "l2_min_delta", search_space["l2_min_delta"]
                         ),
@@ -228,12 +263,16 @@ async def run_v2_adaptive_tuner_job(
                             "l2_min_imbalance", search_space["l2_min_imbalance"]
                         ),
                         "l2_min_signed_aggression": trial.suggest_categorical(
-                            "l2_min_signed_aggression", search_space["l2_min_signed_aggression"]
+                            "l2_min_signed_aggression",
+                            search_space["l2_min_signed_aggression"],
                         ),
                         "l2_min_directional_consistency": trial.suggest_categorical(
-                            "l2_min_directional_consistency", search_space["l2_min_directional_consistency"]
+                            "l2_min_directional_consistency",
+                            search_space["l2_min_directional_consistency"],
                         ),
-                        "regime_filter": list(search_space["regime_filter_sets"][rf_idx]),
+                        "regime_filter": list(
+                            search_space["regime_filter_sets"][rf_idx]
+                        ),
                         "base_threshold": trial.suggest_categorical(
                             "base_threshold", search_space["base_threshold"]
                         ),
@@ -253,10 +292,12 @@ async def run_v2_adaptive_tuner_job(
                         ),
                         "trading_hours": list(search_space["time_window_sets"][tw_idx]),
                         "adverse_flow_consistency": trial.suggest_categorical(
-                            "adverse_flow_consistency", search_space["adverse_flow_consistency"]
+                            "adverse_flow_consistency",
+                            search_space["adverse_flow_consistency"],
                         ),
                         "adverse_book_pressure": trial.suggest_categorical(
-                            "adverse_book_pressure", search_space["adverse_book_pressure"]
+                            "adverse_book_pressure",
+                            search_space["adverse_book_pressure"],
                         ),
                         "time_exit_bars": trial.suggest_categorical(
                             "time_exit_bars", search_space["time_exit_bars"]
@@ -264,7 +305,9 @@ async def run_v2_adaptive_tuner_job(
                         "trailing_stop_pct": trial.suggest_categorical(
                             "trailing_stop_pct", search_space["trailing_stop_pct"]
                         ),
-                        "regime_strategy_map": search_space["regime_strategy_maps"][rsm_idx],
+                        "regime_strategy_map": search_space["regime_strategy_maps"][
+                            rsm_idx
+                        ],
                     }
 
                     next_ticker_cfg = _build_v2_candidate_config(
@@ -274,7 +317,9 @@ async def run_v2_adaptive_tuner_job(
                         next_ticker_cfg
                     )
                     if not _save_aos_config(cfg_work, isolated_aos_config_str):
-                        raise RuntimeError("Failed to save temporary AOS config for v2 tuner trial")
+                        raise RuntimeError(
+                            "Failed to save temporary AOS config for v2 tuner trial"
+                        )
 
                     result = await _evaluate_v2_candidate(
                         job_id=job_id,
@@ -289,9 +334,8 @@ async def run_v2_adaptive_tuner_job(
                     study.tell(trial, score)
                     job["trials"].append(result)
                     current_best = job.get("best_trial")
-                    if (
-                        not isinstance(current_best, dict)
-                        or score > float(current_best.get("score", -1e12))
+                    if not isinstance(current_best, dict) or score > float(
+                        current_best.get("score", -1e12)
                     ):
                         job["best_trial"] = result
                     job["progress"]["completed_trials"] = idx
@@ -329,9 +373,15 @@ async def run_v2_adaptive_tuner_job(
                 "date_from": dates[0] if dates else request.date_from,
                 "date_to": dates[-1] if dates else request.date_to,
                 "evaluated_days": len(dates),
-                "source_effective_days": int(job.get("source_effective_days", len(dates)) or len(dates)),
+                "source_effective_days": int(
+                    job.get("source_effective_days", len(dates)) or len(dates)
+                ),
                 "trials": int(job["progress"].get("completed_trials", 0)),
-                "best_score": float(best_trial.get("score", 0.0)) if isinstance(best_trial, dict) else None,
+                "best_score": (
+                    float(best_trial.get("score", 0.0))
+                    if isinstance(best_trial, dict)
+                    else None
+                ),
                 "score_metric": request.score_metric,
                 "adaptive_version": request.adaptive_version,
                 "persist_best": bool(request.persist_best),
@@ -369,7 +419,9 @@ async def run_adaptive_tuner_job(
     MAX_PARALLEL_ADAPTIVE_TUNERS = deps.max_parallel_adaptive_tuners
     _normalize_clamped_int = deps.normalize_clamped_int
     _resolve_tuner_trial_budget = deps.resolve_tuner_trial_budget
-    _create_isolated_tuner_aos_config_locked = deps.create_isolated_tuner_aos_config_locked
+    _create_isolated_tuner_aos_config_locked = (
+        deps.create_isolated_tuner_aos_config_locked
+    )
     _cleanup_isolated_tuner_aos_config = deps.cleanup_isolated_tuner_aos_config
     _load_aos_config = deps.load_aos_config
     _save_aos_config = deps.save_aos_config
@@ -401,7 +453,9 @@ async def run_adaptive_tuner_job(
     isolated_aos_config_path: Optional[Path] = None
     async with adaptive_tuner_slots:
         try:
-            isolated_aos_config_path = await _create_isolated_tuner_aos_config_locked(job_id)
+            isolated_aos_config_path = await _create_isolated_tuner_aos_config_locked(
+                job_id
+            )
             isolated_aos_config_str = str(isolated_aos_config_path)
             job["isolated_aos_config_path"] = isolated_aos_config_str
             job["max_parallel_jobs"] = MAX_PARALLEL_ADAPTIVE_TUNERS
@@ -411,12 +465,18 @@ async def run_adaptive_tuner_job(
                 original_config.get("tickers", {}).get(ticker, {})
             )
             cfg_work = copy.deepcopy(original_config)
-            if "tickers" not in cfg_work or not isinstance(cfg_work.get("tickers"), dict):
+            if "tickers" not in cfg_work or not isinstance(
+                cfg_work.get("tickers"), dict
+            ):
                 cfg_work["tickers"] = {}
 
             job["started_at"] = datetime.utcnow().isoformat() + "Z"
             job["status"] = "running"
-            job["progress"] = {"completed_trials": 0, "total_trials": 0, "method": method}
+            job["progress"] = {
+                "completed_trials": 0,
+                "total_trials": 0,
+                "method": method,
+            }
             job["trials"] = []
             job["best_trial"] = None
             job["trial_budget"] = trial_budget
@@ -431,6 +491,7 @@ async def run_adaptive_tuner_job(
             if method == "optuna":
                 try:
                     import optuna as _optuna  # type: ignore
+
                     optuna_module = _optuna
                 except Exception:
                     optuna_module = None
@@ -466,7 +527,9 @@ async def run_adaptive_tuner_job(
                         next_ticker_cfg
                     )
                     if not _save_aos_config(cfg_work, isolated_aos_config_str):
-                        raise RuntimeError("Failed to save temporary AOS config for tuner trial")
+                        raise RuntimeError(
+                            "Failed to save temporary AOS config for tuner trial"
+                        )
 
                     result = await _evaluate_adaptive_tuner_candidate(
                         job_id=job_id,
@@ -479,22 +542,24 @@ async def run_adaptive_tuner_job(
                     )
                     job["trials"].append(result)
                     current_best = job.get("best_trial")
-                    if (
-                        not isinstance(current_best, dict)
-                        or float(result["score"]) > float(current_best.get("score", -1e12))
-                    ):
+                    if not isinstance(current_best, dict) or float(
+                        result["score"]
+                    ) > float(current_best.get("score", -1e12)):
                         job["best_trial"] = result
                     job["progress"]["completed_trials"] = idx
             else:
                 assert optuna_module is not None
                 sampler = optuna_module.samplers.TPESampler(seed=request.seed)
-                study = optuna_module.create_study(direction="maximize", sampler=sampler)
+                study = optuna_module.create_study(
+                    direction="maximize", sampler=sampler
+                )
                 job["progress"]["total_trials"] = n_trials
                 for idx in range(1, n_trials + 1):
                     trial = study.ask()
                     candidate = {
                         "strategy_selection_mode": trial.suggest_categorical(
-                            "strategy_selection_mode", search_space["strategy_selection_mode"]
+                            "strategy_selection_mode",
+                            search_space["strategy_selection_mode"],
                         ),
                         "max_active_strategies": trial.suggest_int(
                             "max_active_strategies",
@@ -527,7 +592,9 @@ async def run_adaptive_tuner_job(
                         next_ticker_cfg
                     )
                     if not _save_aos_config(cfg_work, isolated_aos_config_str):
-                        raise RuntimeError("Failed to save temporary AOS config for tuner trial")
+                        raise RuntimeError(
+                            "Failed to save temporary AOS config for tuner trial"
+                        )
 
                     result = await _evaluate_adaptive_tuner_candidate(
                         job_id=job_id,
@@ -542,9 +609,8 @@ async def run_adaptive_tuner_job(
                     study.tell(trial, score)
                     job["trials"].append(result)
                     current_best = job.get("best_trial")
-                    if (
-                        not isinstance(current_best, dict)
-                        or score > float(current_best.get("score", -1e12))
+                    if not isinstance(current_best, dict) or score > float(
+                        current_best.get("score", -1e12)
                     ):
                         job["best_trial"] = result
                     job["progress"]["completed_trials"] = idx
@@ -571,9 +637,15 @@ async def run_adaptive_tuner_job(
                 "date_from": dates[0] if dates else request.date_from,
                 "date_to": dates[-1] if dates else request.date_to,
                 "evaluated_days": len(dates),
-                "source_effective_days": int(job.get("source_effective_days", len(dates)) or len(dates)),
+                "source_effective_days": int(
+                    job.get("source_effective_days", len(dates)) or len(dates)
+                ),
                 "trials": int(job["progress"].get("completed_trials", 0)),
-                "best_score": float(best_trial.get("score", 0.0)) if isinstance(best_trial, dict) else None,
+                "best_score": (
+                    float(best_trial.get("score", 0.0))
+                    if isinstance(best_trial, dict)
+                    else None
+                ),
                 "score_metric": request.score_metric,
                 "adaptive_version": request.adaptive_version,
                 "persist_best": bool(request.persist_best),
@@ -598,4 +670,3 @@ async def run_adaptive_tuner_job(
             job["finished_at"] = datetime.utcnow().isoformat() + "Z"
         finally:
             _cleanup_isolated_tuner_aos_config(isolated_aos_config_path)
-

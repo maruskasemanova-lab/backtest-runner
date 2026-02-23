@@ -1,0 +1,23 @@
+{
+  "strategy": "momentum",
+  "params": {
+    "volume_threshold": 2.0,
+    "breakout_pct": 0.25,
+    "volume_stop_pct": 2.0,
+    "trailing_stop_pct": 1.5
+  },
+  "backup_strategy": "gap_liquidity",
+  "regime_filter": [
+    "TRENDING"
+  ],
+  "avoid_days": [
+    "Friday"
+  ],
+  "min_confidence": 70.0,
+  "max_daily_trades": 2,
+  "notes": "Only trade strong trends, high confidence required",
+  "trailing_stop_pct": 1.5,
+  "long_only": false,
+  "trading_hours": [],
+  "time_filter_enabled": false
+}

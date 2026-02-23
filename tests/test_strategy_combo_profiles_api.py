@@ -11,7 +11,9 @@ _API_SERVER_PATH = Path(__file__).resolve().parents[1] / "api_server.py"
 _PROJECT_ROOT = str(_API_SERVER_PATH.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
-_API_SERVER_SPEC = importlib.util.spec_from_file_location("api_server_module", _API_SERVER_PATH)
+_API_SERVER_SPEC = importlib.util.spec_from_file_location(
+    "api_server_module", _API_SERVER_PATH
+)
 assert _API_SERVER_SPEC is not None and _API_SERVER_SPEC.loader is not None
 api_server = importlib.util.module_from_spec(_API_SERVER_SPEC)
 _API_SERVER_SPEC.loader.exec_module(api_server)
@@ -76,14 +78,21 @@ def test_capture_strategy_combo_persists_profile(monkeypatch, tmp_path) -> None:
     assert result["ticker"] == "MU"
     assert result["profile"]["profile_name"] == "MU short window v1"
     assert result["active_profile_id"] == result["profile"]["profile_id"]
-    saved = json.loads(temp_aos.read_text())
+    saved = api_server._load_aos_config(temp_aos)
     mu_cfg = saved["tickers"]["MU"]
     assert mu_cfg["active_strategy_combo_profile_id"] == result["profile"]["profile_id"]
     assert len(mu_cfg["strategy_combo_profiles"]) == 1
-    assert mu_cfg["strategy_combo_profiles"][0]["strategy_params"]["mean_reversion"]["enabled"] is False
+    assert (
+        mu_cfg["strategy_combo_profiles"][0]["strategy_params"]["mean_reversion"][
+            "enabled"
+        ]
+        is False
+    )
 
 
-def test_apply_strategy_combo_sets_active_and_apply_result(monkeypatch, tmp_path) -> None:
+def test_apply_strategy_combo_sets_active_and_apply_result(
+    monkeypatch, tmp_path
+) -> None:
     temp_aos = tmp_path / "aos_config.json"
     temp_aos.write_text(
         json.dumps(
@@ -98,7 +107,10 @@ def test_apply_strategy_combo_sets_active_and_apply_result(monkeypatch, tmp_path
                                 "created_at": "2026-02-09T20:00:00Z",
                                 "updated_at": "2026-02-09T20:00:00Z",
                                 "strategy_params": {
-                                    "momentum_flow": {"enabled": True, "min_confidence": 57.0}
+                                    "momentum_flow": {
+                                        "enabled": True,
+                                        "min_confidence": 57.0,
+                                    }
                                 },
                             }
                         ]
@@ -131,5 +143,5 @@ def test_apply_strategy_combo_sets_active_and_apply_result(monkeypatch, tmp_path
     assert result["success"] is True
     assert result["profile_id"] == "combo123"
     assert result["apply_result"]["applied_count"] == 1
-    saved = json.loads(temp_aos.read_text())
+    saved = api_server._load_aos_config(temp_aos)
     assert saved["tickers"]["MU"]["active_strategy_combo_profile_id"] == "combo123"

@@ -63,7 +63,9 @@ def _check_file_exists(path: Path, errors: List[str]) -> None:
         errors.append(f"Missing required file: {path}")
 
 
-def _check_command_content(path: Path, errors: List[str], warnings: List[str], strict: bool) -> None:
+def _check_command_content(
+    path: Path, errors: List[str], warnings: List[str], strict: bool
+) -> None:
     if not path.exists():
         return
 
@@ -96,7 +98,10 @@ def _check_generated_assets(config: Dict[str, Any], errors: List[str]) -> None:
         if not file_path.exists():
             errors.append(f"Missing generated file: {file_path}")
 
-    newest_input = max(MAP_PATH.stat().st_mtime, (ROOT / "scripts" / "generate_context_pack.py").stat().st_mtime)
+    newest_input = max(
+        MAP_PATH.stat().st_mtime,
+        (ROOT / "scripts" / "generate_context_pack.py").stat().st_mtime,
+    )
     for filename in expected:
         file_path = GEN_DIR / filename
         if not file_path.exists():
@@ -124,13 +129,17 @@ def _check_machine_index(errors: List[str]) -> None:
         errors.append("Machine index is missing 'route_catalog' list")
 
 
-def _check_mapped_files(config: Dict[str, Any], errors: List[str], warnings: List[str], strict: bool) -> None:
+def _check_mapped_files(
+    config: Dict[str, Any], errors: List[str], warnings: List[str], strict: bool
+) -> None:
     for domain in config.get("domains", []):
         domain_id = domain.get("id", "unknown")
         for raw in domain.get("files", []):
             path = resolve_path(raw)
             if not path.exists():
-                errors.append(f"Mapped file does not exist ({domain_id}): {raw} -> {path}")
+                errors.append(
+                    f"Mapped file does not exist ({domain_id}): {raw} -> {path}"
+                )
 
         if not domain.get("critical_invariants"):
             msg = f"Domain '{domain_id}' has no critical_invariants"

@@ -31,7 +31,7 @@ BEST_CONFIG = {
     "rr_ratio": 2.0,
     "trading_hours": [9, 10, 11, 12],
     "trailing_stop_pct": 0.5,
-    "time_exit_bars": 35
+    "time_exit_bars": 35,
 }
 
 
@@ -42,7 +42,7 @@ async def run_holdout_test():
     print("=" * 80)
     print(f"\nHoldout Period: {HOLDOUT_START} to {HOLDOUT_END}")
     print(f"Configuration: {BEST_CONFIG['enabled_strategies']}")
-    
+
     async with httpx.AsyncClient() as client:
         # Check health
         try:
@@ -54,7 +54,7 @@ async def run_holdout_test():
         except Exception as e:
             print(f"Cannot connect: {e}")
             return
-        
+
         # Start run
         run_config = {
             "run_id": "mu_holdout_validation",
@@ -69,59 +69,61 @@ async def run_holdout_test():
             "account_size_usd": 100,
             "risk_per_trade_pct": 2.0,
         }
-        
+
         # Merge config
         for key, value in BEST_CONFIG.items():
             run_config[key] = value
-        
+
         print("Starting holdout backtest...")
         start_response = await client.post(
             f"{RUNNER_API_URL}/api/run/start",
             json=run_config,
             timeout=30.0,
         )
-        
+
         if start_response.status_code != 200:
-            print(f"Start failed: {start_response.status_code} - {start_response.text[:500]}")
+            print(
+                f"Start failed: {start_response.status_code} - {start_response.text[:500]}"
+            )
             return
-        
+
         start_data = start_response.json()
         run_id = start_data.get("run_id", "")
         print(f"Run ID: {run_id}")
-        
+
         # Play
         play_response = await client.post(
             f"{RUNNER_API_URL}/api/run/{run_id}/{TICKER}/{HOLDOUT_START}/play",
             json={"speed": "max"},
             timeout=120.0,
         )
-        
+
         if play_response.status_code != 200:
             print(f"Play failed: {play_response.text[:200]}")
             return
-        
+
         print("Running backtest...")
-        
+
         # Poll for completion
         for i in range(120):
             await asyncio.sleep(1)
-            
+
             status_response = await client.get(
                 f"{RUNNER_API_URL}/api/run/{run_id}/status",
                 timeout=10.0,
             )
-            
+
             if status_response.status_code == 200:
                 status_data = status_response.json()
                 state = status_data.get("state", "")
-                
+
                 if state == "COMPLETED":
                     # Get performance
                     perf_response = await client.get(
                         f"{RUNNER_API_URL}/api/run/{run_id}/performance",
                         timeout=10.0,
                     )
-                    
+
                     if perf_response.status_code == 200:
                         perf = perf_response.json()
                         print("\n" + "=" * 80)
@@ -131,14 +133,14 @@ async def run_holdout_test():
                         print(f"Trades: {perf.get('total_trades', 0)}")
                         print(f"Win Rate: {perf.get('win_rate_pct', 0):.1f}%")
                         print(f"Sharpe: {perf.get('sharpe_ratio', 0):.2f}")
-                        
+
                         # Save results
                         result = {
                             "period": "holdout",
                             "date_from": HOLDOUT_START,
                             "date_to": HOLDOUT_END,
                             "config": BEST_CONFIG,
-                            "results": perf
+                            "results": perf,
                         }
                         with open("reports/mu_holdout_validation.json", "w") as f:
                             json.dump(result, f, indent=2)
@@ -147,7 +149,7 @@ async def run_holdout_test():
                 elif state in ["FAILED", "ERROR"]:
                     print(f"Run {state}")
                     break
-            
+
             if (i + 1) % 10 == 0:
                 print(f"  Waiting... ({i+1}s)")
 

@@ -14,6 +14,7 @@ Aggressor Classification Priority:
 2. price >= ask -> buy; price <= bid -> sell
 3. price vs mid: price >= mid -> buy; price < mid -> sell
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ MARKET_TZ = ZoneInfo("America/New_York")
 @dataclass
 class OrderFlowSnapshot:
     """Snapshot of order-flow metrics for a single minute bar."""
+
     # Existing flow metrics (units: shares)
     delta: float
     cumulative_delta: float
@@ -64,7 +66,11 @@ class OrderFlowEngine:
 
     @staticmethod
     def _to_utc_datetime(value: Any) -> datetime:
-        dt = value if isinstance(value, datetime) else pd.to_datetime(value).to_pydatetime()
+        dt = (
+            value
+            if isinstance(value, datetime)
+            else pd.to_datetime(value).to_pydatetime()
+        )
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
@@ -93,7 +99,11 @@ class OrderFlowEngine:
         """Cap fat-finger depth spikes using robust quantile/MAD thresholds."""
         clipped = depth_rows.copy()
         for col in depth_rows.columns:
-            series = pd.to_numeric(depth_rows[col], errors="coerce").fillna(0.0).clip(lower=0.0)
+            series = (
+                pd.to_numeric(depth_rows[col], errors="coerce")
+                .fillna(0.0)
+                .clip(lower=0.0)
+            )
             if len(series) >= 8:
                 median = float(series.median())
                 mad = float((series - median).abs().median())
@@ -181,7 +191,9 @@ class OrderFlowEngine:
             bid_depth_total = float(bid_depth_rows.sum(axis=1).mean())
             ask_depth_total = float(ask_depth_rows.sum(axis=1).mean())
             denom = bid_depth_total + ask_depth_total
-            book_pressure = self._safe_div(bid_depth_total - ask_depth_total, denom, 0.0)
+            book_pressure = self._safe_div(
+                bid_depth_total - ask_depth_total, denom, 0.0
+            )
 
             top_bid = float(bid_depth_rows["bid_sz_00"].mean())
             top_ask = float(ask_depth_rows["ask_sz_00"].mean())
@@ -267,10 +279,16 @@ class OrderFlowEngine:
             imbalance = self._safe_div(delta, total_volume, 0.0)
             signed_aggression = self._safe_div(delta, total_volume, 0.0)
 
-            prices = group["price"].astype(float) if "price" in group.columns else pd.Series(dtype=float)
+            prices = (
+                group["price"].astype(float)
+                if "price" in group.columns
+                else pd.Series(dtype=float)
+            )
             first_price = float(prices.iloc[0]) if len(prices) else 0.0
             last_price = float(prices.iloc[-1]) if len(prices) else 0.0
-            price_change_pct = self._safe_div((last_price - first_price) * 100.0, first_price, 0.0)
+            price_change_pct = self._safe_div(
+                (last_price - first_price) * 100.0, first_price, 0.0
+            )
 
             # Large flow + small price progress => absorption proxy in [0, 1].
             volume_score = max(0.0, min(1.0, total_volume / 5000.0))
@@ -338,8 +356,12 @@ class OrderFlowEngine:
             book = book_map.get(minute_key, {})
 
             delta = float(trade.get("delta", 0.0))
-            running_cumulative = float(trade.get("cumulative_delta", running_cumulative + delta))
-            delta_acceleration = float(trade.get("delta_acceleration", delta - prev_delta))
+            running_cumulative = float(
+                trade.get("cumulative_delta", running_cumulative + delta)
+            )
+            delta_acceleration = float(
+                trade.get("delta_acceleration", delta - prev_delta)
+            )
             prev_delta = delta
 
             snapshot = OrderFlowSnapshot(
@@ -390,7 +412,9 @@ class OrderFlowEngine:
 
         # Calculate coverage ratio
         expected_minutes = int((end_dt_utc - start_dt_utc).total_seconds() / 60)
-        coverage_ratio = len(feature_map) / expected_minutes if expected_minutes > 0 else 0.0
+        coverage_ratio = (
+            len(feature_map) / expected_minutes if expected_minutes > 0 else 0.0
+        )
         for minute_key in feature_map:
             features = feature_map[minute_key]
             features["l2_quality_coverage_ratio"] = coverage_ratio

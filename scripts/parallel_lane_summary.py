@@ -103,7 +103,12 @@ def _strategy_breakdown(trades: List[LaneTrade]) -> Dict[str, int]:
     return dict(sorted(out.items(), key=lambda item: (-item[1], item[0])))
 
 
-def build_summary(lane_a_payload: Dict[str, Any], lane_b_payload: Dict[str, Any], lane_a: List[LaneTrade], lane_b: List[LaneTrade]) -> Dict[str, Any]:
+def build_summary(
+    lane_a_payload: Dict[str, Any],
+    lane_b_payload: Dict[str, Any],
+    lane_a: List[LaneTrade],
+    lane_b: List[LaneTrade],
+) -> Dict[str, Any]:
     combined = lane_a + lane_b
     combined_pnl = round(sum(t.pnl_dollars for t in combined), 4)
     return {
@@ -129,9 +134,19 @@ def build_summary(lane_a_payload: Dict[str, Any], lane_b_payload: Dict[str, Any]
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Synthetic 2-lane parallel portfolio summary")
-    parser.add_argument("--lane-a", required=True, help="Path to lane A report dir or session_summary.json")
-    parser.add_argument("--lane-b", required=True, help="Path to lane B report dir or session_summary.json")
+    parser = argparse.ArgumentParser(
+        description="Synthetic 2-lane parallel portfolio summary"
+    )
+    parser.add_argument(
+        "--lane-a",
+        required=True,
+        help="Path to lane A report dir or session_summary.json",
+    )
+    parser.add_argument(
+        "--lane-b",
+        required=True,
+        help="Path to lane B report dir or session_summary.json",
+    )
     parser.add_argument("--output", help="Optional output JSON path")
     args = parser.parse_args()
 

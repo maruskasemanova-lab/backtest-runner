@@ -118,13 +118,22 @@ Deployment note:
 Important request fields:
 
 - identity: `run_id`, `ticker`, `date` OR `date_from` + `date_to`
+- optional intraday playback slice: `start_time`, `end_time` (ISO datetimes; when provided, runner bars are filtered to this sub-range inside the selected date/day window)
+- optional trading-only intraday slice: `trade_start_time`, `trade_end_time` (ISO datetimes; bars outside this sub-range may still be loaded for warmup, but are sent to strategy API with `warmup_only=true` so entries/exits are suppressed)
 - session scope override: optional `include_extended_hours` (`true` => include pre/post-market bars, `false` => regular session only, `null/omitted` => keep AOS time-filter behavior)
 - execution realism: `account_size_usd`, `risk_per_trade_pct`, `max_fill_participation_rate`, `min_fill_ratio`
-- stop-risk policy: `stop_loss_mode` (`strategy|fixed|capped`), `fixed_stop_loss_pct`
+  - position sizing is fixed-notional by default from `account_size_usd` (then bounded by fill constraints and optional `max_position_notional_pct` cap); `risk_per_trade_pct` is kept for backward-compatible payloads.
+- stop-risk policy: `stop_loss_mode` (`strategy|fixed|capped`), `fixed_stop_loss_pct` (`> 0` required when mode is `fixed` or `capped`)
 - strategy trailing baseline: optional `trailing_stop_pct` (global trailing distance in %, applied as `global_trailing_stop_pct` on strategy API side)
 - strategy exit/risk baselines: optional `global_exit_rr_ratio`, `global_risk_atr_stop_multiplier`, `global_risk_volume_stop_pct`, `global_risk_min_stop_loss_pct` (fanout as `global_*` strategy params)
 - exit behavior: `enable_partial_take_profit`, `partial_take_profit_rr`, `time_exit_bars`, `adverse_flow_*`, `adverse_flow_consistency_threshold`, `adverse_book_pressure_threshold`
 - L2 gating: `l2_only`, `l2_confirm_enabled`, `l2_min_*`, `l2_lookback_bars`
+- options-flow gate: `tcbbo_gate_enabled`, `tcbbo_min_net_premium`, `tcbbo_sweep_boost`, `tcbbo_lookback_bars`
+- intraday levels tracker (session-scoped): `intraday_levels_enabled`, `intraday_levels_swing_left_bars`, `intraday_levels_swing_right_bars`, `intraday_levels_test_tolerance_pct`, `intraday_levels_break_tolerance_pct`, `intraday_levels_breakout_volume_lookback`, `intraday_levels_breakout_volume_multiplier`, `intraday_levels_volume_profile_bin_size_pct`, `intraday_levels_value_area_pct`, `liquidity_sweep_detection_enabled`, `sweep_min_aggression_z`, `sweep_min_book_pressure_z`, `sweep_max_price_change_pct`
+- intraday entry-quality gate controls: `intraday_levels_entry_quality_enabled`, `intraday_levels_min_levels_for_context`, `intraday_levels_entry_tolerance_pct`, `intraday_levels_break_cooldown_bars`, `intraday_levels_rotation_max_tests`, `intraday_levels_rotation_volume_max_ratio`, `intraday_levels_recent_bounce_lookback_bars`, `intraday_levels_require_recent_bounce_for_mean_reversion`, `intraday_levels_momentum_break_max_age_bars`, `intraday_levels_momentum_min_room_pct`, `intraday_levels_momentum_min_broken_ratio`, `intraday_levels_min_confluence_score`
+- walking-forward intraday context controls: `intraday_levels_memory_enabled`, `intraday_levels_memory_min_tests`, `intraday_levels_memory_max_age_days`, `intraday_levels_memory_decay_after_days`, `intraday_levels_memory_decay_weight`, `intraday_levels_memory_max_levels`, `intraday_levels_opening_range_enabled`, `intraday_levels_opening_range_minutes`, `intraday_levels_opening_range_break_tolerance_pct`, `intraday_levels_poc_migration_enabled`, `intraday_levels_poc_migration_interval_bars`, `intraday_levels_poc_migration_trend_threshold_pct`, `intraday_levels_poc_migration_range_threshold_pct`, `intraday_levels_composite_profile_enabled`, `intraday_levels_composite_profile_days`, `intraday_levels_composite_profile_current_day_weight`
+- advanced intraday context controls: `intraday_levels_spike_detection_enabled`, `intraday_levels_spike_min_wick_ratio`, `intraday_levels_prior_day_anchors_enabled`, `intraday_levels_gap_analysis_enabled`, `intraday_levels_gap_min_pct`, `intraday_levels_gap_momentum_threshold_pct`, `intraday_levels_rvol_filter_enabled`, `intraday_levels_rvol_lookback_bars`, `intraday_levels_rvol_min_threshold`, `intraday_levels_rvol_strong_threshold`, `intraday_levels_adaptive_window_enabled`, `intraday_levels_adaptive_window_min_bars`, `intraday_levels_adaptive_window_rvol_threshold`, `intraday_levels_adaptive_window_atr_ratio_max`, `intraday_levels_micro_confirmation_enabled`, `intraday_levels_micro_confirmation_bars`, `intraday_levels_micro_confirmation_disable_for_sweep`, `intraday_levels_micro_confirmation_sweep_bars`, `intraday_levels_micro_confirmation_require_intrabar`, `intraday_levels_micro_confirmation_intrabar_window_seconds`, `intraday_levels_micro_confirmation_intrabar_min_coverage_points`, `intraday_levels_micro_confirmation_intrabar_min_move_pct`, `intraday_levels_micro_confirmation_intrabar_min_push_ratio`, `intraday_levels_micro_confirmation_intrabar_max_spread_bps`, `intraday_levels_confluence_sizing_enabled`
+- context-aware risk controls: `context_aware_risk_enabled`, `context_risk_sl_buffer_pct`, `context_risk_min_sl_pct`, `context_risk_min_room_pct`, `context_risk_min_effective_rr`, `context_risk_trailing_tighten_zone`, `context_risk_trailing_tighten_factor`, `context_risk_level_trail_enabled`, `context_risk_max_anchor_search_pct`, `context_risk_min_level_tests_for_sl`, `sweep_atr_buffer_multiplier`
 - strategy selection: `strategy_selection_mode` (`adaptive_top_n|all_enabled`), `max_active_strategies`
 - optional momentum nesting override: `momentum_diversification_override` (object, merged into strategy `adaptive.momentum_diversification` for this run only; supports single config and optional `sleeves[]` multi-sleeve layout)
 - intrabar execution realism: optional `intrabar_execution_recalc_1s` (defaults to auto-on when L2 is available)
@@ -134,11 +143,15 @@ Important request fields:
 
 Runtime safety notes:
 
-- long-range runs can auto-disable L2 enrichment by default when date span exceeds `BACKTEST_RUN_L2_MAX_DAYS` (default `10`) to prevent memory exhaustion; override with `BACKTEST_RUN_L2_FORCE=1`.
+- when `l2_only=true` or `l2_confirm_enabled=true` and the requested range exceeds `BACKTEST_RUN_L2_MAX_DAYS` (default `10`) while `BACKTEST_RUN_L2_FORCE!=1`, run start fails with `HTTP 400` (no silent L2 downgrade).
 - when `l2_only=true` or `l2_confirm_enabled=true`, missing L2 day coverage is treated as a hard start error (`HTTP 400`), not a silent fallback.
+- when `liquidity_sweep_detection_enabled=true` and neither `l2_only` nor `l2_confirm_enabled` is requested, runner auto-enables `l2_confirm_enabled` (execution payload exposes `liquidity_sweep_l2_auto_enabled=true` + source).
+- progressive run loading can remain enabled in `comparable_mode` (day-isolated audit) via `BACKTEST_PROGRESSIVE_LOAD_ALLOW_COMPARABLE_MODE=1` (default enabled) to avoid full-range L2 blocking at run start.
+- comparable-mode progressive pacing can be tuned independently with `BACKTEST_PROGRESSIVE_LOAD_COMPARABLE_INITIAL_DAYS` and `BACKTEST_PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS` (defaults `1`/`1`).
 - raw L2 dataframe cache is bounded by `BACKTEST_L2_CACHE_MAX_TICKERS`, `BACKTEST_L2_CACHE_MAX_ROWS`, and `BACKTEST_L2_CACHE_MAX_BYTES` (defaults favor memory safety over aggressive reuse).
 - strategy update fanout (`/api/strategies/update` bursts during run start) is concurrency-limited by `BACKTEST_STRATEGY_UPDATE_MAX_CONCURRENCY` (default `8`) to reduce start latency without unbounded request pressure.
 - runner->strategy API HTTP calls use bounded timeout `BACKTEST_STRATEGY_API_TIMEOUT_SECONDS` (default `6.0`) to fail fast when strategy API is slow/unreachable.
+- when effective strategy mode resolves to `all_enabled`, runner performs best-effort pre-session strategy sync (`enabled=true` for every strategy currently returned by strategy API) so active strategy set is not accidentally constrained by stale per-strategy enabled flags.
 
 Important response fields:
 
@@ -148,7 +161,9 @@ Important response fields:
 - `l2_applied` (effective L2 parameters and coverage stats)
 - `execution_config` (effective execution defaults)
   - includes effective `strategy_selection_mode` and `max_active_strategies`
+  - includes `all_enabled_remote_sync` diagnostic payload when `strategy_selection_mode=all_enabled` (attempt/applied/strategy_count and sync status details)
   - includes `apply_aos_optimizations_on_start` (whether remote AOS sync was executed during start)
+  - includes resolved intraday context/risk controls (spike/gap/RVOL/adaptive-window/micro-confirm/confluence-sizing and `context_risk_*` fields)
   - includes `momentum_diversification_applied`, `momentum_diversification_source` (`request|adaptive_profile|aos_config|none`), and effective `momentum_diversification`
   - active unified profile metadata is exposed via `aos_applied.unified_profile` when present
   - legacy combo/adaptive metadata remains for backward compatibility when unified profile is not active
@@ -161,8 +176,8 @@ Purpose: Warm run-start caches (bars/reference/L2 enrichment) for a ticker and d
 Compatibility notes:
 
 - accepts `ticker` with `date` or `date_from/date_to` (scope `range`) and optional `prewarm_scope=ticker` to warm full available ticker coverage, plus optional L2 flags (`l2_only`, `l2_confirm_enabled`, `comparable_mode`).
-- ticker-scope prewarm limits L2 by default (`BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS=10`) to avoid large startup-memory spikes on wide ticker coverage. Set `0` to remove the cap or set `BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE=1` to force L2 prewarm regardless of span.
-- guardrail: range-scope prewarm also auto-disables L2 enrichment when requested range exceeds run L2 window (`BACKTEST_RUN_L2_MAX_DAYS`, default `10`, unless `BACKTEST_RUN_L2_FORCE=1`) to prevent startup-memory spikes.
+- ticker-scope prewarm enforces an explicit L2 guard (`BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS`, default `10`): when exceeded and `BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE!=1`, prewarm fails with `HTTP 400` (no silent L2 downgrade).
+- range-scope prewarm enforces run L2 guard (`BACKTEST_RUN_L2_MAX_DAYS`, default `10`): when exceeded and `BACKTEST_RUN_L2_FORCE!=1`, prewarm fails with `HTTP 400`.
 - uses local AOS snapshot for time-filter/L2 defaults; does not reset or mutate remote strategy session state.
 - accepts optional `include_extended_hours` session-scope override (same semantics as run start).
 - returns `cache_hit` (`true` when identical request was already prewarmed in-memory during current backend process).
@@ -254,6 +269,7 @@ Purpose: Diagnostics and render payloads for frontend and analysis scripts.
 Compatibility notes:
 
 - marker schema changes require frontend compatibility checks.
+- execution-layer pending/no-fill outcomes are emitted as marker type `execution_status` (with `details.execution_status`, `details.execution_action`, `details.reason`) and are intentionally excluded from `signals` counts, which remain based on `signal_generated`.
 - summary fields are consumed by reports and regression workflows.
 - `total_pnl_pct` in runner summary is normalized from `total_pnl_dollars / account_size_usd` to keep percent and dollar PnL directionally consistent.
 - run `state` payload includes `selection_warnings[]` (resolved from strategy-selection responses) so FE can surface strict-selection config gaps without fallback.
@@ -469,18 +485,30 @@ Auth note:
 
 - strategy API protects `/api/session/*`, `/api/orchestrator/*`, and strategy mutation routes when `STRATEGY_INTERNAL_API_TOKEN` is set.
 - runner must send `x-internal-token` header value that matches strategy API token (typically via `BACKTEST_STRATEGY_INTERNAL_API_TOKEN` or `STRATEGY_INTERNAL_API_TOKEN`).
+- transport compatibility: canonical runner path sends config as query params; strategy API also accepts JSON body fallback for manual/debug clients (when both are provided, explicit query keys win).
 
 Key settings passed from runner:
 
 - regime cadence: `regime_detection_minutes`, `regime_refresh_bars`
-- risk/fill: `risk_per_trade_pct`, `max_position_notional_pct`, `max_fill_participation_rate`, `min_fill_ratio`
-- stop-risk policy: `stop_loss_mode`, `fixed_stop_loss_pct`
+- risk/fill: `account_size_usd`, `risk_per_trade_pct`, `max_position_notional_pct`, `max_fill_participation_rate`, `min_fill_ratio`
+  - session sizing targets fixed notional from `account_size_usd`; `max_position_notional_pct` remains an upper cap.
+- stop-risk policy: `stop_loss_mode`, `fixed_stop_loss_pct` (`> 0` required when mode is `fixed` or `capped`)
 - exits: `time_exit_bars`, `partial_take_profit_*`, `adverse_flow_*`, `adverse_flow_consistency_threshold`, `adverse_book_pressure_threshold`
+  - optional runtime formula hooks for exit decisions: `time_exit_formula*`, `adverse_flow_exit_formula*`
+- break-even governance:
+  - activation thresholds: `break_even_min_hold_bars`, `break_even_activation_min_mfe_pct`, `break_even_activation_min_r`, `break_even_activation_min_r_trending_5m`, `break_even_activation_min_r_choppy_5m`
+  - proof gating toggles/thresholds: `break_even_activation_use_levels`, `break_even_activation_use_l2`, `break_even_level_*`, `break_even_l2_*`
+  - stop computation: `break_even_costs_pct`, `break_even_buffer_pct`, `break_even_min_buffer_pct`, `break_even_atr_buffer_k`, `break_even_5m_atr_buffer_k`, `break_even_tick_size`, `break_even_min_tick_buffer`
+  - intrabar anti-spike: `break_even_anti_spike_bars`, `break_even_anti_spike_hits_required`, `break_even_anti_spike_require_close_beyond` (`breakeven_stop` confirms on 1s close-beyond OR required consecutive stop touches inside anti-spike window)
+  - 5m contextual adaptation: `break_even_5m_no_go_proximity_pct`, `break_even_5m_mfe_atr_factor`, `break_even_5m_l2_bias_threshold`, `break_even_5m_l2_bias_tighten_factor`
+  - optional runtime formula hooks (safe expression grammar, boolean result): `break_even_movement_formula*`, `break_even_proof_formula*`, `break_even_activation_formula*`, `break_even_trailing_handoff_formula*`
 - global risk guardrails (via `/api/config/trading`): `portfolio_drawdown_halt_pct` (run-level halt), `headwind_activation_score` (cross-asset threshold boost trigger)
 - L2 confirmation: `l2_confirm_enabled`, `l2_min_*`, `l2_lookback_bars`
+- options-flow confirmation gate: `tcbbo_gate_enabled`, `tcbbo_min_net_premium`, `tcbbo_sweep_boost`, `tcbbo_lookback_bars`
+- intraday-level runtime gating: same `intraday_levels_*` tracker + entry-quality fields used by runner start payload
 - strategy selection: `strategy_selection_mode`, `max_active_strategies`
 - momentum diversification override transport: `momentum_diversification_json` (JSON string; strategy API validates/normalizes into session defaults, including optional `sleeves[]` multi-sleeve definitions with per-sleeve thresholds)
-- profile-driven runtime overrides: optional `max_daily_trades` (`0` => unlimited for that session) and optional `mu_choppy_hard_block_enabled` (session override for MU CHOPPY guard)
+- profile-driven runtime overrides: optional `regime_detection_minutes` / `regime_refresh_bars` cadence, optional `max_daily_trades` (`0` => unlimited for that session), and optional `mu_choppy_hard_block_enabled` (session override for MU CHOPPY guard)
 - reset policy: `cold_start_each_day`
 
 ### `POST /api/session/bar`
@@ -510,6 +538,16 @@ Compatibility note:
 - Optional per-strategy custom formulas are evaluated in-session:
   - entry gate: enabled `custom_entry_formula` can reject otherwise-valid entry signals.
   - exit gate: enabled `custom_exit_formula` can force-close active position (`custom_formula_exit`).
+- Optional runtime exit-policy formulas are also supported in session config:
+  - break-even hooks: movement/proof/final activation + trailing handoff
+  - non-BE hooks: `time_exit`, `adverse_flow_exit`
+  - invalid runtime formulas in `/api/session/config` are rejected with `HTTP 400`
+- Session responses include `intraday_levels` snapshot payload (session-scoped S/R levels + bounce/break events + volume-profile POC/value area), and indicator payloads may include `indicators.intraday_levels` for strategy context. This state resets with each new session day.
+- Entry evaluation responses can include `level_context` payload (gate result + checks + reasons + POC/VA context + composite profile/opening-range/POC-migration context + near confluence score + recent break/bounce context + optional `target_price_override` for MR).
+- `position_opened.metadata` includes resolved entry risk payload (`risk_controls` + `context_risk`) computed from executed entry/SL/TP values; `context_risk` carries `sl_reason`, `tp_reason`, `effective_rr`, and `risk_pct` even when context-aware risk adjustment is disabled.
+- Break-even diagnostics are session-native and propagated in payloads as `break_even` snapshot (state machine status, activation/proof diagnostics, computed stop/costs/buffer, anti-spike counters, runtime formula evaluation snapshots). Runner forwards this to marker details and market context.
+- Closed-position payloads include flow diagnostics (`flow_strategy`, `book_pressure_confirmed`, `book_pressure_avg`, `book_pressure_trend`, `signed_aggression`, `flow_snapshot`), preserved `level_context`/`signal_metadata`, `break_even`, and `entry_quality_diagnostics` (first-bar stop-loss analysis tags + entry confluence/risk snapshot).
+- Session summary now includes `entry_timing_diagnostics` and per-strategy `vwap_magnet_entry_timing_diagnostics` for fast-stop analysis.
 
 ### `GET /api/strategies` / `POST /api/strategies/update`
 

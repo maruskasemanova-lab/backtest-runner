@@ -39,14 +39,16 @@ while current <= end:
 def download_day(client: db.Historical, day: str) -> bool:
     """Download L2 data for a single day."""
     out_path = OUTPUT_DIR / f"{TICKER}_{day}_{day}.parquet"
-    
+
     if out_path.exists():
         print(f"  [SKIP] {day} already exists: {out_path}")
         return True
-    
+
     # Databento uses exclusive end date
-    end_exclusive = (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-    
+    end_exclusive = (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)).strftime(
+        "%Y-%m-%d"
+    )
+
     print(f"  [DOWNLOAD] {day}...")
     try:
         data = client.timeseries.get_range(
@@ -57,18 +59,18 @@ def download_day(client: db.Historical, day: str) -> bool:
             end=end_exclusive,
             stype_in="raw_symbol",
         )
-        
+
         # Convert to parquet
         df = data.to_df()
         if df.empty:
             print(f"  [WARN] {day}: No data returned")
             return False
-        
+
         df.to_parquet(str(out_path))
         size_mb = out_path.stat().st_size / (1024 * 1024)
         print(f"  [OK] {day}: {len(df):,} rows, {size_mb:.1f} MB")
         return True
-        
+
     except Exception as e:
         print(f"  [ERROR] {day}: {e}")
         return False
@@ -79,18 +81,18 @@ def main():
     print(f"Output directory: {OUTPUT_DIR}")
     print(f"Days to download: {len(DATES_TO_DOWNLOAD)}")
     print("-" * 50)
-    
+
     client = db.Historical(API_KEY)
-    
+
     success = 0
     failed = 0
-    
+
     for day in DATES_TO_DOWNLOAD:
         if download_day(client, day):
             success += 1
         else:
             failed += 1
-    
+
     print("-" * 50)
     print(f"Done: {success} success, {failed} failed")
 

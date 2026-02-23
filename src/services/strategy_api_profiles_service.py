@@ -51,6 +51,16 @@ def normalize_strategy_key(name: Any) -> str:
     return text.replace("-", "_").replace(" ", "_")
 
 
+def _parse_positive_int_override(value: Any, *, min_value: int) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return max(min_value, parsed)
+
+
 def resolve_active_adaptive_tuner_candidate(
     ticker_config: Dict[str, Any],
     deps: StrategyApiIntegrationDeps,
@@ -60,12 +70,15 @@ def resolve_active_adaptive_tuner_candidate(
     )
     if not active_profile_id:
         return {}
-    profiles = deps.normalize_tuner_profiles(ticker_config.get("adaptive_tuner_profiles", []))
+    profiles = deps.normalize_tuner_profiles(
+        ticker_config.get("adaptive_tuner_profiles", [])
+    )
     target_profile = next(
         (
             profile
             for profile in profiles
-            if _normalize_profile_ref_token(profile.get("profile_id")) == active_profile_id
+            if _normalize_profile_ref_token(profile.get("profile_id"))
+            == active_profile_id
         ),
         None,
     )
@@ -84,15 +97,20 @@ def resolve_active_unified_profile(
     ticker_config: Dict[str, Any],
     deps: StrategyApiIntegrationDeps,
 ) -> Dict[str, Any]:
-    active_profile_id = _normalize_profile_ref_token(ticker_config.get("active_unified_profile_id"))
+    active_profile_id = _normalize_profile_ref_token(
+        ticker_config.get("active_unified_profile_id")
+    )
     if not active_profile_id:
         return {}
-    profiles = deps.normalize_unified_profiles(ticker_config.get("unified_profiles", []))
+    profiles = deps.normalize_unified_profiles(
+        ticker_config.get("unified_profiles", [])
+    )
     target_profile = next(
         (
             profile
             for profile in profiles
-            if _normalize_profile_ref_token(profile.get("profile_id")) == active_profile_id
+            if _normalize_profile_ref_token(profile.get("profile_id"))
+            == active_profile_id
         ),
         None,
     )
@@ -114,6 +132,13 @@ def extract_profile_runtime_overrides(
     runtime["max_active_strategies"] = deps.normalize_clamped_int(
         candidate.get("max_active_strategies"), default=3, min_value=1, max_value=20
     )
+    for key, min_value in (
+        ("regime_detection_minutes", 1),
+        ("regime_refresh_bars", 3),
+    ):
+        value = _parse_positive_int_override(candidate.get(key), min_value=min_value)
+        if value is not None:
+            runtime[key] = value
     try:
         time_exit_bars = int(candidate.get("time_exit_bars"))
         if time_exit_bars > 0:
@@ -220,6 +245,26 @@ def extract_profile_runtime_overrides(
     context_exit = candidate.get("adaptive", {}).get("context_exit_response")
     if isinstance(context_exit, dict) and context_exit:
         runtime["context_exit_response"] = context_exit
+    else:
+        # Map flat candidate keys to nested context_exit_response format.
+        # Profile candidates store these as top-level flat keys like
+        # "context_flow_reversal_move_to_breakeven" but the strategy API
+        # expects them nested under adaptive.context_exit_response.
+        _FLAT_CONTEXT_EXIT_KEYS = {
+            "context_flow_reversal_move_to_breakeven": "flow_reversal_move_to_breakeven",
+            "context_flow_reversal_exit_when_losing": "flow_reversal_exit_when_losing",
+            "context_regime_flip_tighten_stop_pct": "regime_flip_tighten_stop_pct",
+            "context_regime_flip_shorten_time_pct": "regime_flip_shorten_time_pct",
+            "context_regime_flip_exit_when_losing": "regime_flip_exit_when_losing",
+            "context_regime_flip_exit_loss_threshold_pct": "regime_flip_exit_loss_threshold_pct",
+            "context_momentum_stall_time_multiplier": "momentum_stall_time_multiplier",
+        }
+        flat_context: Dict[str, Any] = {}
+        for flat_key, nested_key in _FLAT_CONTEXT_EXIT_KEYS.items():
+            if flat_key in candidate:
+                flat_context[nested_key] = candidate[flat_key]
+        if flat_context:
+            runtime["context_exit_response"] = flat_context
 
     return runtime
 
@@ -251,7 +296,9 @@ def _extract_unified_runtime_overrides(
             min_value=1,
             max_value=20,
         )
-    if "trading_hours" in strategy_profile and isinstance(strategy_profile.get("trading_hours"), list):
+    if "trading_hours" in strategy_profile and isinstance(
+        strategy_profile.get("trading_hours"), list
+    ):
         normalized_hours = []
         seen_hours = set()
         for raw_hour in strategy_profile.get("trading_hours", []):
@@ -265,10 +312,25 @@ def _extract_unified_runtime_overrides(
             normalized_hours.append(hour)
         if normalized_hours:
             runtime["trading_hours"] = sorted(normalized_hours)
-            runtime["time_filter_enabled"] = bool(strategy_profile.get("time_filter_enabled", True))
+            runtime["time_filter_enabled"] = bool(
+                strategy_profile.get("time_filter_enabled", True)
+            )
 
     if "long_only" in strategy_profile:
         runtime["long_only"] = bool(strategy_profile.get("long_only"))
+
+    for key, min_value in (
+        ("regime_detection_minutes", 1),
+        ("regime_refresh_bars", 3),
+    ):
+        raw_value = (
+            strategy_profile.get(key) if key in strategy_profile else runtime.get(key)
+        )
+        value = _parse_positive_int_override(raw_value, min_value=min_value)
+        if value is not None:
+            runtime[key] = value
+        else:
+            runtime.pop(key, None)
 
     for key in (
         "l2_min_delta",
@@ -285,6 +347,27 @@ def _extract_unified_runtime_overrides(
         "trailing_stop_pct",
         "adverse_flow_consistency_threshold",
         "adverse_book_pressure_threshold",
+        "intraday_levels_entry_tolerance_pct",
+        "intraday_levels_memory_enabled",
+        "intraday_levels_memory_min_tests",
+        "intraday_levels_memory_max_age_days",
+        "intraday_levels_memory_decay_after_days",
+        "intraday_levels_memory_decay_weight",
+        "intraday_levels_memory_max_levels",
+        "intraday_levels_poc_migration_enabled",
+        "intraday_levels_poc_migration_interval_bars",
+        "intraday_levels_poc_migration_trend_threshold_pct",
+        "intraday_levels_poc_migration_range_threshold_pct",
+        "intraday_levels_micro_confirmation_enabled",
+        "intraday_levels_micro_confirmation_bars",
+        "intraday_levels_micro_confirmation_disable_for_sweep",
+        "intraday_levels_micro_confirmation_sweep_bars",
+        "intraday_levels_micro_confirmation_require_intrabar",
+        "intraday_levels_micro_confirmation_intrabar_window_seconds",
+        "intraday_levels_micro_confirmation_intrabar_min_coverage_points",
+        "intraday_levels_micro_confirmation_intrabar_min_move_pct",
+        "intraday_levels_micro_confirmation_intrabar_min_push_ratio",
+        "intraday_levels_micro_confirmation_intrabar_max_spread_bps",
     ):
         if key not in strategy_profile:
             continue
@@ -319,7 +402,8 @@ async def apply_active_strategy_combo(
         (
             profile
             for profile in profiles
-            if _normalize_profile_ref_token(profile.get("profile_id")) == active_profile_id
+            if _normalize_profile_ref_token(profile.get("profile_id"))
+            == active_profile_id
         ),
         None,
     )
@@ -343,7 +427,9 @@ async def apply_active_strategy_combo(
             "applied_count": 0,
             "failed_count": 0,
         }
-    apply_result = await deps.apply_strategy_param_map(strategy_api_url, strategy_params)
+    apply_result = await deps.apply_strategy_param_map(
+        strategy_api_url, strategy_params
+    )
     return {
         "active_profile_id": active_profile_id,
         "profile_name": target_profile.get("profile_name"),
@@ -361,12 +447,15 @@ async def apply_active_adaptive_tuner_profile(
     )
     active_profile_name = None
     if active_profile_id:
-        profiles = deps.normalize_tuner_profiles(ticker_config.get("adaptive_tuner_profiles", []))
+        profiles = deps.normalize_tuner_profiles(
+            ticker_config.get("adaptive_tuner_profiles", [])
+        )
         target_profile = next(
             (
                 profile
                 for profile in profiles
-                if _normalize_profile_ref_token(profile.get("profile_id")) == active_profile_id
+                if _normalize_profile_ref_token(profile.get("profile_id"))
+                == active_profile_id
             ),
             None,
         )
@@ -415,7 +504,12 @@ async def apply_active_adaptive_tuner_profile(
     result["enabled_sync"] = enable_apply
 
     v2_params: Dict[str, Any] = {}
-    for key in ("min_confidence", "atr_stop_multiplier", "rr_ratio", "trailing_stop_pct"):
+    for key in (
+        "min_confidence",
+        "atr_stop_multiplier",
+        "rr_ratio",
+        "trailing_stop_pct",
+    ):
         raw = candidate.get(key)
         if raw is None:
             continue
@@ -427,7 +521,9 @@ async def apply_active_adaptive_tuner_profile(
         # Respect active strategy-combo profile as the more specific source.
         # Adaptive v2 params are treated as fallback for enabled strategies
         # that are not explicitly configured in the active combo.
-        override_combo_params = bool(candidate.get("override_combo_strategy_params", False))
+        override_combo_params = bool(
+            candidate.get("override_combo_strategy_params", False)
+        )
         combo_param_strategies: set[str] = set()
         active_combo_profile_id = _normalize_profile_ref_token(
             ticker_config.get("active_strategy_combo_profile_id")
@@ -440,7 +536,8 @@ async def apply_active_adaptive_tuner_profile(
                 (
                     profile
                     for profile in combo_profiles
-                    if _normalize_profile_ref_token(profile.get("profile_id")) == active_combo_profile_id
+                    if _normalize_profile_ref_token(profile.get("profile_id"))
+                    == active_combo_profile_id
                 ),
                 None,
             )
@@ -449,7 +546,9 @@ async def apply_active_adaptive_tuner_profile(
                 if isinstance(strategy_params, dict):
                     for strategy_name, strategy_cfg in strategy_params.items():
                         if isinstance(strategy_cfg, dict) and strategy_cfg:
-                            combo_param_strategies.add(normalize_strategy_key(strategy_name))
+                            combo_param_strategies.add(
+                                normalize_strategy_key(strategy_name)
+                            )
 
         if override_combo_params:
             v2_targets = list(enabled_strategies)
@@ -461,7 +560,9 @@ async def apply_active_adaptive_tuner_profile(
             ]
         if v2_targets:
             param_map = {name: dict(v2_params) for name in v2_targets}
-            param_apply = await deps.apply_strategy_param_map(strategy_api_url, param_map)
+            param_apply = await deps.apply_strategy_param_map(
+                strategy_api_url, param_map
+            )
             result["v2_param_sync"] = param_apply
             if override_combo_params:
                 result["v2_param_sync_override_combo"] = True
@@ -478,7 +579,9 @@ async def apply_active_adaptive_tuner_profile(
     orchestrator_payload: Dict[str, Any] = {}
     if candidate.get("base_threshold") is not None:
         try:
-            orchestrator_payload["base_threshold"] = float(candidate.get("base_threshold"))
+            orchestrator_payload["base_threshold"] = float(
+                candidate.get("base_threshold")
+            )
         except (TypeError, ValueError):
             pass
     if candidate.get("min_confirming_sources") is not None:
@@ -533,12 +636,20 @@ async def apply_aos_optimizations(
             positioning_ticker_config = merged_positioning
 
     if not ticker_config:
-        return {"positioning": positioning_ticker_config} if positioning_ticker_config else {}
+        return (
+            {"positioning": positioning_ticker_config}
+            if positioning_ticker_config
+            else {}
+        )
 
     unified_profile = resolve_active_unified_profile(ticker_config, deps)
     if unified_profile:
-        unified_profile_id = _normalize_profile_ref_token(unified_profile.get("profile_id")) or None
-        unified_profile_name = str(unified_profile.get("profile_name") or "").strip() or None
+        unified_profile_id = (
+            _normalize_profile_ref_token(unified_profile.get("profile_id")) or None
+        )
+        unified_profile_name = (
+            str(unified_profile.get("profile_name") or "").strip() or None
+        )
         strategy_profile = unified_profile.get("strategy_profile")
         if not isinstance(strategy_profile, dict):
             strategy_profile = {}
@@ -558,7 +669,9 @@ async def apply_aos_optimizations(
         }
         if remote_sync:
             if strategy_params:
-                strategy_sync = await deps.apply_strategy_param_map(strategy_api_url, strategy_params)
+                strategy_sync = await deps.apply_strategy_param_map(
+                    strategy_api_url, strategy_params
+                )
                 applied["unified_profile"]["strategy_sync"] = strategy_sync
         else:
             applied["remote_sync_skipped"] = True
@@ -582,7 +695,9 @@ async def apply_aos_optimizations(
             )
             applied["trading_hours_source"] = "unified_profile"
         else:
-            raw_hours = strategy_profile.get("trading_hours", ticker_config.get("trading_hours"))
+            raw_hours = strategy_profile.get(
+                "trading_hours", ticker_config.get("trading_hours")
+            )
             if isinstance(raw_hours, list) and raw_hours:
                 applied["trading_hours"] = list(raw_hours)
             else:
@@ -590,7 +705,9 @@ async def apply_aos_optimizations(
             applied["time_filter_enabled"] = bool(
                 strategy_profile.get(
                     "time_filter_enabled",
-                    ticker_config.get("time_filter_enabled", bool(applied.get("trading_hours"))),
+                    ticker_config.get(
+                        "time_filter_enabled", bool(applied.get("trading_hours"))
+                    ),
                 )
             )
             applied["trading_hours_source"] = "ticker_config"
@@ -603,15 +720,24 @@ async def apply_aos_optimizations(
             applied["long_only_source"] = "unified_profile"
         else:
             params = dict(ticker_config.get("params", {}))
-            applied["long_only"] = bool(ticker_config.get("long_only", params.get("long_only", False)))
+            applied["long_only"] = bool(
+                ticker_config.get("long_only", params.get("long_only", False))
+            )
             applied["long_only_source"] = "ticker_config"
 
-        strategy_selection_mode = str(
-            runtime_overrides.get(
-                "strategy_selection_mode",
-                strategy_profile.get("strategy_selection_mode", ticker_config.get("strategy_selection_mode", "adaptive_top_n")),
+        strategy_selection_mode = (
+            str(
+                runtime_overrides.get(
+                    "strategy_selection_mode",
+                    strategy_profile.get(
+                        "strategy_selection_mode",
+                        ticker_config.get("strategy_selection_mode", "adaptive_top_n"),
+                    ),
+                )
             )
-        ).strip().lower()
+            .strip()
+            .lower()
+        )
         if strategy_selection_mode not in {"adaptive_top_n", "all_enabled"}:
             strategy_selection_mode = "adaptive_top_n"
         applied["strategy_selection_mode"] = strategy_selection_mode
@@ -619,7 +745,10 @@ async def apply_aos_optimizations(
             raw_max_active = int(
                 runtime_overrides.get(
                     "max_active_strategies",
-                    strategy_profile.get("max_active_strategies", ticker_config.get("max_active_strategies", 3)),
+                    strategy_profile.get(
+                        "max_active_strategies",
+                        ticker_config.get("max_active_strategies", 3),
+                    ),
                 )
             )
         except (TypeError, ValueError):
@@ -690,7 +819,9 @@ async def apply_aos_optimizations(
             applied["strategy_combo"] = combo_applied
 
         try:
-            async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+            async with aiohttp.ClientSession(
+                timeout=_STRATEGY_API_CLIENT_TIMEOUT
+            ) as session:
                 if strategy_name and params:
                     async with session.post(
                         f"{strategy_api_url}/api/strategies/update",
@@ -700,7 +831,9 @@ async def apply_aos_optimizations(
                         if resp.status == 200:
                             applied["strategy"] = strategy_name
                             applied["params"] = params
-                            deps.logger.info(f"Applied AOS params for {ticker}: {params}")
+                            deps.logger.info(
+                                f"Applied AOS params for {ticker}: {params}"
+                            )
                         else:
                             deps.logger.warning(
                                 f"AOS update failed for {ticker}:{strategy_name} (HTTP {resp.status})"
@@ -729,11 +862,13 @@ async def apply_aos_optimizations(
     else:
         applied["remote_sync_skipped"] = True
         if active_profile_id or active_profile_runtime:
-            enabled_raw = active_candidate.get("enabled_strategies", []) if isinstance(active_candidate, dict) else []
+            enabled_raw = (
+                active_candidate.get("enabled_strategies", [])
+                if isinstance(active_candidate, dict)
+                else []
+            )
             enabled_strategies = [
-                str(item).strip()
-                for item in enabled_raw
-                if str(item).strip()
+                str(item).strip() for item in enabled_raw if str(item).strip()
             ]
             applied["adaptive_profile"] = {
                 "active_profile_id": active_profile_id or None,
@@ -753,17 +888,23 @@ async def apply_aos_optimizations(
     else:
         applied["trading_hours"] = ticker_config.get("trading_hours")
         applied["time_filter_enabled"] = bool(
-            ticker_config.get("time_filter_enabled", bool(ticker_config.get("trading_hours")))
+            ticker_config.get(
+                "time_filter_enabled", bool(ticker_config.get("trading_hours"))
+            )
         )
         applied["trading_hours_source"] = "ticker_config"
     if "long_only" in active_profile_runtime:
         applied["long_only"] = bool(active_profile_runtime.get("long_only"))
         applied["long_only_source"] = "adaptive_profile"
     else:
-        applied["long_only"] = bool(ticker_config.get("long_only", params.get("long_only", False)))
+        applied["long_only"] = bool(
+            ticker_config.get("long_only", params.get("long_only", False))
+        )
         applied["long_only_source"] = "ticker_config"
     applied["strategy_selection_mode"] = (
-        str(ticker_config.get("strategy_selection_mode", "adaptive_top_n")).strip().lower()
+        str(ticker_config.get("strategy_selection_mode", "adaptive_top_n"))
+        .strip()
+        .lower()
         or "adaptive_top_n"
     )
     try:

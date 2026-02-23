@@ -2,26 +2,25 @@
 Unified Backtest Runner API Server.
 Orchestrates the look-ahead free data feeding and strategy evaluation.
 """
+
 import asyncio
 import copy
-import json
 import os
 import random
 import re
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Union
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body, Request
+from fastapi import FastAPI, WebSocket, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 import logging
 from pathlib import Path
 from uuid import uuid4
-import pandas as pd
 
 from data_loader import DataLoader
 from session_runner import SessionRunner, RunConfig
@@ -34,8 +33,6 @@ from src.config_io import (
 from src.l2_data_manager import L2DataManager
 from src.l2_feature_service import L2FeatureService
 from src.databento_service import DatabentoService
-from src.time_utils import to_utc_datetime, epoch_minute_key, format_iso_utc
-from src.l2_schema import L2_PAYLOAD_KEYS, get_default_l2_feature_bucket
 from src.momentum_diversification import (
     normalize_momentum_diversification_payload,
     build_regime_strategy_map_options,
@@ -44,28 +41,9 @@ from src.momentum_diversification import (
     STRATEGY_FAMILY_MAP,
 )
 from src.normalization import (
-    normalize_strategy_selection_mode,
-    normalize_clamped_int,
-    normalize_strategy_sets,
-    normalize_regime_filter_sets,
-    sanitize_strategy_params,
-    normalize_strategy_combo_profiles,
     normalize_unified_profiles,
-    normalize_tuner_profiles,
-    normalize_time_window_sets,
 )
-from src.aos_config import (
-    load_aos_config,
-    save_aos_config,
-    load_positioning_config,
-    save_positioning_config,
-    get_ticker_positioning_config,
-    POSITIONING_CONFIG_KEYS,
-)
-from src.tuner_scoring import (
-    compute_tuner_score,
-    compute_tuner_score_robust,
-)
+from src.aos_config import POSITIONING_CONFIG_KEYS
 from src.routes.context import ApiServices
 from src.routes.system_routes import router as system_router
 from src.routes.l2_routes import router as l2_router
@@ -76,6 +54,8 @@ from src.routes.config_write_routes import router as config_write_router
 from src.routes.run_routes import router as run_router
 from src.routes.adaptive_tuner_routes import router as adaptive_tuner_router
 from src.routes.run_start_routes import router as run_start_router
+from src.routes.tcbbo_routes import router as tcbbo_router
+from src.routes.chart_preview_routes import router as chart_preview_router
 from src.models.config_requests import (
     AdaptiveTunerProfileApplyRequest,
     StrategyComboCaptureRequest,
@@ -88,12 +68,8 @@ from src.models.config_requests import (
 from src.models.run_requests import PlayRequest, PrewarmRunRequest, StartRunRequest
 from src.models.tuner_requests import AdaptiveTunerRequest
 from src.services.live_trader_service import (
-    sanitize_live_run_id,
-    live_artifact_file,
     read_jsonl_tail,
     parse_utc_iso,
-    extract_runtime_summary,
-    infer_live_run_status,
     discover_live_trader_runs,
     live_trader_events_payload,
     live_trader_snapshot_payload,
@@ -105,31 +81,15 @@ from src.services.config_write_service import (
     apply_unified_profile as service_apply_unified_profile,
     capture_strategy_combo as service_capture_strategy_combo,
     apply_strategy_combo as service_apply_strategy_combo,
-    update_aos_config as service_update_aos_config,
-    update_positioning_config as service_update_positioning_config,
     apply_adaptive_tuner_profile as service_apply_adaptive_tuner_profile,
 )
 from src.services.run_control_service import (
     RunControlDeps,
-    get_run_state as service_get_run_state,
-    step_run as service_step_run,
-    play_run as service_play_run,
-    pause_run as service_pause_run,
-    resume_run as service_resume_run,
-    stop_run as service_stop_run,
-    restart_run as service_restart_run,
-    get_processed_bars as service_get_processed_bars,
-    get_bar_details as service_get_bar_details,
     get_markers as service_get_markers,
-    get_chart_annotations as service_get_chart_annotations,
-    get_run_summary as service_get_run_summary,
     delete_run as service_delete_run,
-    list_runs as service_list_runs,
 )
 from src.services.adaptive_tuner_orchestration_service import (
     AdaptiveTunerOrchestrationDeps,
-    get_adaptive_tuner_job as service_get_adaptive_tuner_job,
-    list_adaptive_tuner_jobs as service_list_adaptive_tuner_jobs,
     run_adaptive_tuner as service_run_adaptive_tuner,
 )
 from src.services.start_run_service import (
@@ -152,7 +112,6 @@ from src.services.adaptive_tuner_runtime_service import (
 from src.services.adaptive_tuner_v2_service import (
     AdaptiveTunerV2Deps,
     analyze_vectors as service_analyze_vectors,
-    build_v2_baseline_candidate as service_build_v2_baseline_candidate,
     build_v2_candidate_config as service_build_v2_candidate_config,
     build_v2_random_candidates as service_build_v2_random_candidates,
     build_v2_search_space as service_build_v2_search_space,
@@ -205,7 +164,6 @@ from src.services.strategy_api_profiles_service import (
     apply_aos_optimizations as service_apply_aos_optimizations,
     extract_profile_runtime_overrides as service_extract_profile_runtime_overrides,
     normalize_strategy_key as service_normalize_strategy_key,
-    resolve_active_adaptive_tuner_candidate as service_resolve_active_adaptive_tuner_candidate,
 )
 from src.services.strategy_api_session_service import (
     apply_orchestrator_config as service_apply_orchestrator_config,
@@ -216,6 +174,13 @@ from src.services.strategy_api_session_service import (
     reset_remote_orchestrator_state_scoped as service_reset_remote_orchestrator_state_scoped,
     save_remote_checkpoint as service_save_remote_checkpoint,
 )
+from src.services.profile_options_service import (
+    build_adaptive_tuner_options_payload as service_build_adaptive_tuner_options_payload,
+    build_strategy_combo_options_payload as service_build_strategy_combo_options_payload,
+    build_unified_profile_options_payload as service_build_unified_profile_options_payload,
+)
+from src.services.ws_hub_service import WebSocketHub
+from src.services.local_config_service import LocalConfigService
 from src.security.network_policy import (
     StrategyApiPolicyError,
     cors_allow_origins_from_env,
@@ -223,14 +188,12 @@ from src.security.network_policy import (
     should_allow_credentials,
 )
 from src.routes.v2_routes import router as v2_router
-from src.services.saas_service import (
-    InMemorySlidingWindowLimiter,
-    SaaSStateStore,
-    SupabaseRunReportsStore,
-    SupabaseUserSettingsStore,
-    V2Services,
+from src.services.saas_bootstrap_service import (
+    bootstrap_saas_runtime,
+    parse_bool_value as service_parse_bool_value,
+    safe_env_float as service_safe_env_float,
+    safe_env_int as service_safe_env_int,
 )
-from src.observability.runtime_metrics import RuntimeMetrics
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BacktestRunner")
@@ -239,47 +202,40 @@ logger = logging.getLogger("BacktestRunner")
 app = FastAPI(
     title="Unified Backtest Runner",
     description="Walk-forward backtesting with strategy evaluation and decision visualization",
-    version="1.0.0"
+    version="1.0.0",
 )
+_default_router_lifespan = app.router.lifespan_context
 
 _cors_allow_origins = cors_allow_origins_from_env(
     env_name="BACKTEST_CORS_ALLOW_ORIGINS",
     default="http://localhost:5173,http://127.0.0.1:5173",
 )
-
-
-def _build_cors_allow_origin_regex(allow_origins: List[str]) -> Optional[str]:
-    """Allow Netlify deploy-preview origins for explicitly allowlisted Netlify sites."""
-    env_regex = str(os.getenv("BACKTEST_CORS_ALLOW_ORIGIN_REGEX", "") or "").strip()
-    if env_regex:
-        return env_regex
-
-    patterns: List[str] = []
-    seen: set[str] = set()
-    for origin in allow_origins:
+_cors_allow_origin_regex = str(
+    os.getenv("BACKTEST_CORS_ALLOW_ORIGIN_REGEX", "") or ""
+).strip()
+if not _cors_allow_origin_regex:
+    _cors_regex_patterns: List[str] = []
+    _cors_regex_seen: set[str] = set()
+    for _origin in _cors_allow_origins:
         try:
-            parsed = urlparse(str(origin))
+            _parsed_origin = urlparse(str(_origin))
         except Exception:
             continue
-        host = str(parsed.hostname or "").strip().lower()
-        if not host.endswith(".netlify.app"):
+        _host = str(_parsed_origin.hostname or "").strip().lower()
+        if not _host.endswith(".netlify.app"):
             continue
         # Allow:
         # - canonical site: https://<site>.netlify.app
         # - preview deploy: https://<deploy-id>--<site>.netlify.app
-        escaped_host = re.escape(host)
-        pattern = rf"https://(?:[a-z0-9-]+--)?{escaped_host}"
-        if pattern in seen:
+        _escaped_host = re.escape(_host)
+        _pattern = rf"https://(?:[a-z0-9-]+--)?{_escaped_host}"
+        if _pattern in _cors_regex_seen:
             continue
-        seen.add(pattern)
-        patterns.append(pattern)
-
-    if not patterns:
-        return None
-    return rf"^(?:{'|'.join(patterns)})$"
-
-
-_cors_allow_origin_regex = _build_cors_allow_origin_regex(_cors_allow_origins)
+        _cors_regex_seen.add(_pattern)
+        _cors_regex_patterns.append(_pattern)
+    _cors_allow_origin_regex = (
+        rf"^(?:{'|'.join(_cors_regex_patterns)})$" if _cors_regex_patterns else None
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -296,7 +252,6 @@ l2_manager = L2DataManager()
 l2_features = L2FeatureService(manager=l2_manager, logger=logger)
 active_runners: Dict[str, SessionRunner] = {}
 run_registry = RunRegistry(active_runners)
-connected_clients: List[WebSocket] = []
 databento_svc = DatabentoService()
 l2_manager.databento_service = databento_svc
 adaptive_tuner_jobs: Dict[str, Dict[str, Any]] = {}
@@ -304,49 +259,38 @@ MAX_PARALLEL_ADAPTIVE_TUNERS = 3
 adaptive_tuner_slots = asyncio.Semaphore(MAX_PARALLEL_ADAPTIVE_TUNERS)
 adaptive_tuner_merge_lock = asyncio.Lock()
 MAX_WS_CLIENTS = max(1, int(os.getenv("BACKTEST_MAX_WS_CLIENTS", "250")))
+ws_hub = WebSocketHub(max_clients=MAX_WS_CLIENTS, logger=logger)
+connected_clients: List[WebSocket] = ws_hub.clients
 STRATEGY_OVERRIDES_PATH = Path(__file__).parent / "strategy_overrides.json"
 AOS_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "aos_config.json"
-POSITIONING_CONFIG_PATH = Path(__file__).parent / "aos_optimization" / "positioning_config.json"
-ADAPTIVE_TUNER_AOS_DIR = Path(__file__).parent / "aos_optimization" / ".adaptive_tuner_aos"
-LIVE_TRADER_ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "ibkr-realtime-trader" / "artifacts"
+POSITIONING_CONFIG_PATH = (
+    Path(__file__).parent / "aos_optimization" / "positioning_config.json"
+)
+ADAPTIVE_TUNER_AOS_DIR = (
+    Path(__file__).parent / "aos_optimization" / ".adaptive_tuner_aos"
+)
+LIVE_TRADER_ARTIFACTS_DIR = (
+    Path(__file__).resolve().parent.parent / "ibkr-realtime-trader" / "artifacts"
+)
 MARKET_TZ = ZoneInfo("America/New_York")
 LIVE_RUN_ACTIVE_WINDOW_SECONDS = 180
 _startup_prewarm_task: Optional[asyncio.Task] = None
 
 
-def _parse_bool_env(raw_value: Optional[str], default: bool) -> bool:
-    if raw_value is None:
-        return bool(default)
-    normalized = str(raw_value).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _parse_startup_prewarm_tickers(raw_value: Optional[str]) -> List[str]:
-    if not raw_value:
-        return []
-    tickers: List[str] = []
-    seen = set()
-    for token in str(raw_value).split(","):
-        candidate = token.strip().upper()
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        tickers.append(candidate)
-    return tickers
-
-
-STARTUP_PREWARM_ENABLED = _parse_bool_env(
+STARTUP_PREWARM_ENABLED = service_parse_bool_value(
     os.getenv("BACKTEST_STARTUP_PREWARM_ENABLED"),
     True,
 )
-STARTUP_PREWARM_TICKERS = _parse_startup_prewarm_tickers(
-    os.getenv("BACKTEST_STARTUP_PREWARM_TICKERS", "MU")
+STARTUP_PREWARM_TICKERS = list(
+    dict.fromkeys(
+        token.strip().upper()
+        for token in str(os.getenv("BACKTEST_STARTUP_PREWARM_TICKERS", "MU") or "").split(
+            ","
+        )
+        if token.strip()
+    )
 )
-STARTUP_PREWARM_L2_CONFIRM = _parse_bool_env(
+STARTUP_PREWARM_L2_CONFIRM = service_parse_bool_value(
     os.getenv("BACKTEST_STARTUP_PREWARM_L2_CONFIRM"),
     False,
 )
@@ -369,10 +313,6 @@ def _refresh_runtime_data_services() -> None:
     api_services.l2_features = l2_features
 
 
-async def _broadcast_with_api_services(message: Dict[str, Any]) -> None:
-    await broadcast(message)
-
-
 api_services = ApiServices(
     data_loader=data_loader,
     l2_manager=l2_manager,
@@ -383,248 +323,78 @@ api_services = ApiServices(
     get_live_trader_artifacts_dir=lambda: LIVE_TRADER_ARTIFACTS_DIR,
     live_run_active_window_seconds=LIVE_RUN_ACTIVE_WINDOW_SECONDS,
     load_strategy_overrides=lambda: _load_strategy_overrides(),
-    build_strategy_combo_options_payload=lambda ticker: _build_strategy_combo_options_payload(ticker),
+    build_strategy_combo_options_payload=lambda ticker: service_build_strategy_combo_options_payload(
+        ticker=ticker,
+        load_aos_config=_load_aos_config,
+        normalize_strategy_combo_profiles=_normalize_strategy_combo_profiles,
+    ),
     load_aos_config=lambda: _load_aos_config(),
     load_positioning_config=lambda: _load_positioning_config(),
     merge_positioning_into_aos_snapshot=(
-        lambda aos_cfg, pos_cfg: _merge_positioning_into_aos_snapshot(aos_cfg, pos_cfg)
+        lambda aos_cfg, pos_cfg: _local_config_service().merge_positioning_into_aos_snapshot(
+            aos_config=aos_cfg,
+            positioning_config=pos_cfg,
+        )
     ),
     get_ticker_positioning_config=lambda ticker: _get_ticker_positioning_config(ticker),
     positioning_config_keys=POSITIONING_CONFIG_KEYS,
-    build_adaptive_tuner_options_payload=lambda ticker: _build_adaptive_tuner_options_payload(ticker),
-    build_unified_profile_options_payload=lambda ticker: _build_unified_profile_options_payload(ticker),
+    build_adaptive_tuner_options_payload=lambda ticker: service_build_adaptive_tuner_options_payload(
+        ticker=ticker,
+        load_aos_config=_load_aos_config,
+        normalize_tuner_profiles=_normalize_tuner_profiles,
+        covered_days_for_schema=lambda ticker_upper, schema: service_covered_days_for_schema(
+            ticker_upper,
+            schema,
+            databento_svc,
+        ),
+        range_summary_from_days=service_range_summary_from_days,
+    ),
+    build_unified_profile_options_payload=lambda ticker: _build_unified_profile_options_payload(
+        ticker
+    ),
     build_config_write_deps=lambda: _build_config_write_deps(),
     build_run_control_deps=lambda: _build_run_control_deps(),
     build_adaptive_tuner_deps=lambda: _build_adaptive_tuner_deps(),
     start_run=lambda request: start_run(request),
     prewarm_run=lambda request: prewarm_run(request),
     prewarm_status=lambda request: prewarm_status(request),
-    broadcast=_broadcast_with_api_services,
+    broadcast=lambda message: broadcast(message),
     refresh_runtime_data_services=_refresh_runtime_data_services,
     reset_discovery=reset_discovery,
 )
 app.state.api_services = api_services
 
 
-def _safe_env_int(name: str, default: int, *, min_value: int = 1) -> int:
-    raw = os.getenv(name)
-    try:
-        value = int(str(raw).strip()) if raw is not None else int(default)
-    except Exception:
-        value = int(default)
-    return max(min_value, value)
+_safe_env_int = service_safe_env_int
+_safe_env_float = service_safe_env_float
+_parse_bool_value = service_parse_bool_value
 
 
-def _safe_env_float(name: str, default: float, *, min_value: float = 0.05) -> float:
-    raw = os.getenv(name)
-    try:
-        value = float(str(raw).strip()) if raw is not None else float(default)
-    except Exception:
-        value = float(default)
-    return max(min_value, value)
-
-
-def _parse_bool_value(raw: Any, default: bool = False) -> bool:
-    if raw is None:
-        return bool(default)
-    if isinstance(raw, bool):
-        return raw
-    token = str(raw).strip().lower()
-    if token in {"1", "true", "yes", "on"}:
-        return True
-    if token in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _load_report_storage_config() -> Dict[str, Any]:
-    default_path = Path(__file__).resolve().parent / "config" / "report_storage.json"
-    raw_path = str(os.getenv("BACKTEST_REPORT_STORAGE_CONFIG_PATH") or "").strip()
-    config_path = Path(raw_path).expanduser() if raw_path else default_path
-    if not config_path.exists() or not config_path.is_file():
-        return {}
-    try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.warning("Failed to load report storage config %s: %s", config_path, exc)
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def _build_supabase_user_settings_store() -> Optional[SupabaseUserSettingsStore]:
-    enabled_raw = str(os.getenv("BACKTEST_SUPABASE_USER_SETTINGS_ENABLED", "0") or "").strip().lower()
-    enabled = enabled_raw in {"1", "true", "yes", "on"}
-    if not enabled:
-        return None
-
-    supabase_url = str(
-        os.getenv("BACKTEST_SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "",
-    ).strip()
-    service_role_key = str(
-        os.getenv("BACKTEST_SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "",
-    ).strip()
-    table_name = str(os.getenv("BACKTEST_SUPABASE_USER_SETTINGS_TABLE", "user_settings") or "").strip() or "user_settings"
-    timeout_seconds = _safe_env_float(
-        "BACKTEST_SUPABASE_USER_SETTINGS_TIMEOUT_SEC",
-        8.0,
-        min_value=1.0,
-    )
-
-    if not supabase_url or not service_role_key:
-        logger.warning(
-            "Supabase user settings store enabled but missing url/service key; falling back to local SQLite store."
-        )
-        return None
-
-    try:
-        return SupabaseUserSettingsStore(
-            supabase_url=supabase_url,
-            service_role_key=service_role_key,
-            table_name=table_name,
-            timeout_seconds=timeout_seconds,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to initialize Supabase user settings store; falling back to local SQLite store: %s",
-            exc,
-        )
-        return None
-
-
-def _build_supabase_run_reports_store() -> Optional[SupabaseRunReportsStore]:
-    config = _load_report_storage_config()
-    supabase_cfg = config.get("supabase", {}) if isinstance(config.get("supabase"), dict) else {}
-    enabled = _parse_bool_value(
-        os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_ENABLED"),
-        _parse_bool_value(supabase_cfg.get("enabled"), False),
-    )
-    if not enabled:
-        return None
-
-    supabase_url = str(
-        os.getenv("BACKTEST_SUPABASE_URL")
-        or os.getenv("VITE_SUPABASE_URL")
-        or supabase_cfg.get("url")
-        or "",
-    ).strip()
-    service_role_key = str(
-        os.getenv("BACKTEST_SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or supabase_cfg.get("service_role_key")
-        or "",
-    ).strip()
-    table_name = str(
-        os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_TABLE")
-        or supabase_cfg.get("table_name")
-        or "run_summaries",
-    ).strip() or "run_summaries"
-    default_user_id = str(
-        os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_USER_ID")
-        or supabase_cfg.get("user_id")
-        or "backtest-runner",
-    ).strip() or "backtest-runner"
-    default_tenant_id = str(
-        os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_TENANT_ID")
-        or supabase_cfg.get("tenant_id")
-        or "",
-    ).strip()
-
-    timeout_raw = os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_TIMEOUT_SEC")
-    if timeout_raw is None:
-        timeout_raw = supabase_cfg.get("timeout_seconds", 8.0)
-    try:
-        timeout_seconds = max(1.0, float(timeout_raw))
-    except Exception:
-        timeout_seconds = 8.0
-
-    if not supabase_url or not service_role_key:
-        logger.warning(
-            "Supabase run reports store enabled but missing url/service key; skipping external report persistence."
-        )
-        return None
-
-    try:
-        return SupabaseRunReportsStore(
-            supabase_url=supabase_url,
-            service_role_key=service_role_key,
-            table_name=table_name,
-            timeout_seconds=timeout_seconds,
-            default_user_id=default_user_id,
-            default_tenant_id=default_tenant_id,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to initialize Supabase run reports store; skipping external report persistence: %s",
-            exc,
-        )
-        return None
-
-
-def _resolve_run_reports_store(
-    *,
-    state_store: SaaSStateStore,
-    supabase_store: Optional[SupabaseRunReportsStore],
-) -> tuple[Optional[Any], str]:
-    if supabase_store is not None:
-        return supabase_store, "supabase_run_reports"
-
-    local_enabled = _parse_bool_value(
-        os.getenv("BACKTEST_LOCAL_RUN_REPORTS_ENABLED"),
-        True,
-    )
-    if local_enabled:
-        return state_store, "sqlite_run_reports"
-    return None, "filesystem_reports"
-
-
-_v2_worker_concurrency = _safe_env_int("BACKTEST_V2_WORKER_CONCURRENCY", 4, min_value=1)
-_v2_max_queue_backlog = _safe_env_int("BACKTEST_V2_MAX_QUEUE_BACKLOG", 200, min_value=1)
-_v2_default_job_max_attempts = _safe_env_int("BACKTEST_V2_JOB_MAX_ATTEMPTS", 2, min_value=1)
-_v2_retry_base_seconds = _safe_env_float("BACKTEST_V2_JOB_RETRY_BASE_SECONDS", 0.75, min_value=0.05)
-_v2_retry_max_delay_seconds = _safe_env_float("BACKTEST_V2_JOB_RETRY_MAX_DELAY_SECONDS", 8.0, min_value=0.10)
-_runtime_metrics_window = _safe_env_int("BACKTEST_RUNTIME_METRICS_WINDOW", 2000, min_value=100)
-_supabase_user_settings_store = _build_supabase_user_settings_store()
-_supabase_run_reports_store = _build_supabase_run_reports_store()
-_saas_state_store = SaaSStateStore(os.getenv("BACKTEST_SAAS_DB_PATH", "data/saas_state.db"))
-_run_reports_store, _run_reports_source_mode = _resolve_run_reports_store(
-    state_store=_saas_state_store,
-    supabase_store=_supabase_run_reports_store,
+_saas_bootstrap = bootstrap_saas_runtime(
+    logger=logger,
+    project_root=Path(__file__).resolve().parent,
 )
+v2_services = _saas_bootstrap.v2_services
+_run_reports_store = _saas_bootstrap.run_reports_store
+_run_reports_source_mode = _saas_bootstrap.run_reports_source_mode
+runtime_metrics = _saas_bootstrap.runtime_metrics
+_supabase_user_settings_store = _saas_bootstrap.supabase_user_settings_store
 
-v2_services = V2Services(
-    store=_saas_state_store,
-    limiter=InMemorySlidingWindowLimiter(default_window_seconds=60),
-    internal_strategy_api_url=os.getenv("BACKTEST_INTERNAL_STRATEGY_API_URL", "http://localhost:8001"),
-    ads_enabled=str(os.getenv("BACKTEST_ADS_ENABLED", "false")).strip().lower() in {"1", "true", "yes", "on"},
-    ads_provider=str(os.getenv("BACKTEST_ADS_PROVIDER", "none")).strip().lower() or "none",
-    ads_placements=[
-        item.strip()
-        for item in str(
-            os.getenv("BACKTEST_ADS_PLACEMENTS", "dashboard,diagnostics,data-manager,settings")
-        ).split(",")
-        if item.strip()
-    ],
-    user_settings_store=_supabase_user_settings_store,
-    job_semaphore=asyncio.Semaphore(_v2_worker_concurrency),
-    max_queue_backlog=_v2_max_queue_backlog,
-    default_job_max_attempts=_v2_default_job_max_attempts,
-    job_retry_base_seconds=_v2_retry_base_seconds,
-    job_retry_max_delay_seconds=max(_v2_retry_base_seconds, _v2_retry_max_delay_seconds),
-)
 if _supabase_user_settings_store is not None:
     logger.info("v2 user settings store: Supabase (external)")
 else:
     logger.info("v2 user settings store: SQLite (local)")
-app.state.v2_services = v2_services
-app.state.run_reports_store = _run_reports_store
-app.state.run_reports_source_mode = _run_reports_source_mode
+
 if _run_reports_source_mode == "supabase_run_reports":
     logger.info("run reports store: Supabase (external)")
 elif _run_reports_source_mode == "sqlite_run_reports":
     logger.info("run reports store: SQLite (local)")
 else:
     logger.info("run reports store: Filesystem only")
-runtime_metrics = RuntimeMetrics(max_samples=_runtime_metrics_window)
+
+app.state.v2_services = v2_services
+app.state.run_reports_store = _run_reports_store
+app.state.run_reports_source_mode = _run_reports_source_mode
 app.state.runtime_metrics = runtime_metrics
 app.state.connected_clients = connected_clients
 app.state.max_ws_clients = MAX_WS_CLIENTS
@@ -800,6 +570,8 @@ def _build_start_run_deps() -> StartRunDeps:
         clear_remote_strategy_sessions=_clear_remote_strategy_sessions,
         apply_strategy_overrides=_apply_strategy_overrides,
         apply_aos_optimizations=_apply_aos_optimizations,
+        apply_strategy_param_map=_apply_strategy_param_map,
+        fetch_remote_strategies=_fetch_remote_strategies,
         normalize_momentum_diversification_payload=_normalize_momentum_diversification_payload,
         apply_global_trailing=_apply_global_trailing,
         to_utc_datetime=_to_utc_datetime,
@@ -855,32 +627,33 @@ async def _run_startup_prewarm() -> None:
             logger.exception("Startup prewarm failed for ticker=%s", ticker)
 
 
-@app.on_event("startup")
-async def _on_startup() -> None:
-    global _startup_prewarm_task
-    if _startup_prewarm_task is not None and not _startup_prewarm_task.done():
-        return
-    _startup_prewarm_task = asyncio.create_task(_run_startup_prewarm())
-
-
-@app.on_event("shutdown")
-async def _on_shutdown() -> None:
-    global _startup_prewarm_task
-    task = _startup_prewarm_task
-    _startup_prewarm_task = None
-    if task is not None and not task.done():
-        task.cancel()
+@asynccontextmanager
+async def _app_lifespan(_: FastAPI):
+    async with _default_router_lifespan(_):
+        global _startup_prewarm_task
+        if _startup_prewarm_task is None or _startup_prewarm_task.done():
+            _startup_prewarm_task = asyncio.create_task(_run_startup_prewarm())
         try:
-            await task
-        except asyncio.CancelledError:
-            pass
+            yield
+        finally:
+            task = _startup_prewarm_task
+            _startup_prewarm_task = None
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+
+app.router.lifespan_context = _app_lifespan
 
 # Strategy family taxonomy - imported from src.momentum_diversification
 # Backward-compatible alias
 # STRATEGY_FAMILY_MAP is now imported from src.momentum_diversification
 
 # Positioning config keys - imported from src.aos_config
-# Backward-compatible alias  
+# Backward-compatible alias
 # POSITIONING_CONFIG_KEYS is now imported from src.aos_config
 
 # Momentum diversification keys - imported from src.momentum_diversification
@@ -897,177 +670,59 @@ def _load_strategy_overrides() -> Dict[str, Any]:
     return load_json_file(STRATEGY_OVERRIDES_PATH, default={})
 
 
-def _resolve_aos_config_path(aos_config_path: Optional[Union[str, Path]] = None) -> Path:
-    default_payload = {"version": "1.0.0", "tickers": {}}
-    if aos_config_path is not None:
-        raw = str(aos_config_path).strip()
-        if raw:
-            path = Path(raw).expanduser()
-            return path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
-
-    env_path = str(os.getenv("BACKTEST_AOS_CONFIG_PATH", "") or "").strip()
-    if env_path:
-        path = Path(env_path).expanduser()
-        resolved = path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
-        try:
-            resolved.parent.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        if not resolved.exists():
-            seed = load_json_file(AOS_CONFIG_PATH, default=default_payload)
-            save_json_file(resolved, payload=seed)
-        return resolved
-
-    try:
-        AOS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    if os.access(AOS_CONFIG_PATH.parent, os.W_OK):
-        return AOS_CONFIG_PATH
-
-    runtime_dir = str(
-        os.getenv("BACKTEST_RUNTIME_CONFIG_DIR", "/tmp/backtest-runner-config") or "/tmp/backtest-runner-config"
-    ).strip()
-    runtime_path = (Path(runtime_dir).expanduser() / "aos_config.json").resolve()
-    try:
-        runtime_path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    if not runtime_path.exists():
-        seed = load_json_file(AOS_CONFIG_PATH, default=default_payload)
-        save_json_file(runtime_path, payload=seed)
-    return runtime_path
+def _local_config_service() -> LocalConfigService:
+    return LocalConfigService(
+        default_aos_path=AOS_CONFIG_PATH,
+        default_positioning_path=POSITIONING_CONFIG_PATH,
+        load_json_file=load_json_file,
+        save_json_file=save_json_file,
+        positioning_config_keys=POSITIONING_CONFIG_KEYS,
+        logger=logger,
+    )
 
 
-def _load_aos_config(aos_config_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
-    """Load AOS optimization config from JSON file."""
-    path = _resolve_aos_config_path(aos_config_path)
-    return load_json_file(path, default={"version": "1.0.0", "tickers": {}})
-
-
-def _resolve_positioning_config_path(
-    positioning_config_path: Optional[Union[str, Path]] = None,
+def _resolve_aos_config_path(
+    aos_config_path: Optional[Union[str, Path]] = None,
 ) -> Path:
-    default_payload = {"version": "1.0.0", "tickers": {}}
-    if positioning_config_path is not None:
-        raw = str(positioning_config_path).strip()
-        if raw:
-            path = Path(raw).expanduser()
-            return path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+    return _local_config_service().resolve_aos_config_path(aos_config_path)
 
-    env_path = str(os.getenv("BACKTEST_POSITIONING_CONFIG_PATH", "") or "").strip()
-    if env_path:
-        path = Path(env_path).expanduser()
-        resolved = path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
-        try:
-            resolved.parent.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        if not resolved.exists():
-            seed = load_json_file(POSITIONING_CONFIG_PATH, default=default_payload)
-            save_json_file(resolved, payload=seed)
-        return resolved
 
-    try:
-        POSITIONING_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    if os.access(POSITIONING_CONFIG_PATH.parent, os.W_OK):
-        return POSITIONING_CONFIG_PATH
-
-    runtime_dir = str(
-        os.getenv("BACKTEST_RUNTIME_CONFIG_DIR", "/tmp/backtest-runner-config") or "/tmp/backtest-runner-config"
-    ).strip()
-    runtime_path = (Path(runtime_dir).expanduser() / "positioning_config.json").resolve()
-    try:
-        runtime_path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    if not runtime_path.exists():
-        seed = load_json_file(POSITIONING_CONFIG_PATH, default=default_payload)
-        save_json_file(runtime_path, payload=seed)
-    return runtime_path
+def _load_aos_config(
+    aos_config_path: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    return _local_config_service().load_aos_config(aos_config_path)
 
 
 def _load_positioning_config(
     positioning_config_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    path = _resolve_positioning_config_path(positioning_config_path)
-    return load_json_file(path, default={"version": "1.0.0", "tickers": {}})
+    return _local_config_service().load_positioning_config(positioning_config_path)
 
 
 def _save_positioning_config(
     config: Dict[str, Any],
     positioning_config_path: Optional[Union[str, Path]] = None,
 ) -> bool:
-    path = _resolve_positioning_config_path(positioning_config_path)
-    ok = save_json_file(path, payload=config)
-    if not ok:
-        logger.error(f"Failed to save positioning config: {path}")
-    return ok
+    return _local_config_service().save_positioning_config(
+        config, positioning_config_path
+    )
 
 
 def _get_ticker_positioning_config(
     ticker: str,
     positioning_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    cfg = positioning_config if isinstance(positioning_config, dict) else _load_positioning_config()
-    tickers = cfg.get("tickers", {}) if isinstance(cfg, dict) else {}
-    if not isinstance(tickers, dict):
-        return {}
-    raw = tickers.get(str(ticker or "").upper(), {})
-    return dict(raw) if isinstance(raw, dict) else {}
-
-
-def _merge_positioning_into_aos_snapshot(
-    aos_config: Dict[str, Any],
-    positioning_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    merged = copy.deepcopy(aos_config if isinstance(aos_config, dict) else {})
-    tickers = merged.get("tickers")
-    if not isinstance(tickers, dict):
-        tickers = {}
-        merged["tickers"] = tickers
-    pos_cfg = positioning_config if isinstance(positioning_config, dict) else _load_positioning_config()
-    pos_tickers = pos_cfg.get("tickers", {}) if isinstance(pos_cfg, dict) else {}
-    if not isinstance(pos_tickers, dict):
-        pos_tickers = {}
-    for ticker, ticker_cfg in list(tickers.items()):
-        if not isinstance(ticker_cfg, dict):
-            continue
-        legacy = {}
-        for key in POSITIONING_CONFIG_KEYS:
-            if key in ticker_cfg:
-                legacy[key] = ticker_cfg.get(key)
-        if legacy:
-            current = pos_tickers.get(ticker, {})
-            if not isinstance(current, dict):
-                current = {}
-            merged_legacy = dict(legacy)
-            merged_legacy.update(current)
-            pos_tickers[ticker] = merged_legacy
-    for ticker, p_cfg in pos_tickers.items():
-        if not isinstance(p_cfg, dict):
-            continue
-        base = tickers.get(ticker, {})
-        if not isinstance(base, dict):
-            base = {}
-        overlay = dict(base)
-        overlay["positioning"] = dict(p_cfg)
-        tickers[ticker] = overlay
-    return merged
+    return _local_config_service().get_ticker_positioning_config(
+        ticker=ticker,
+        positioning_config=positioning_config,
+    )
 
 
 def _save_aos_config(
     config: Dict[str, Any],
     aos_config_path: Optional[Union[str, Path]] = None,
 ) -> bool:
-    """Save AOS optimization config to JSON file."""
-    path = _resolve_aos_config_path(aos_config_path)
-    ok = save_json_file(path, payload=config)
-    if not ok:
-        logger.error(f"Failed to save AOS config: {path}")
-    return ok
+    return _local_config_service().save_aos_config(config, aos_config_path)
 
 
 def _create_isolated_tuner_aos_config(
@@ -1084,7 +739,9 @@ def _create_isolated_tuner_aos_config(
     return path
 
 
-def _cleanup_isolated_tuner_aos_config(aos_config_path: Optional[Union[str, Path]]) -> None:
+def _cleanup_isolated_tuner_aos_config(
+    aos_config_path: Optional[Union[str, Path]],
+) -> None:
     if aos_config_path is None:
         return
     path = _resolve_aos_config_path(aos_config_path)
@@ -1103,14 +760,6 @@ async def _create_isolated_tuner_aos_config_locked(job_id: str) -> Path:
     return _create_isolated_tuner_aos_config(job_id, snapshot=snapshot)
 
 
-def _sanitize_live_run_id(run_id: str) -> str:
-    return sanitize_live_run_id(run_id)
-
-
-def _live_artifact_file(stream: str, run_id: str) -> Path:
-    return live_artifact_file(LIVE_TRADER_ARTIFACTS_DIR, stream, run_id)
-
-
 def _read_jsonl_tail(path: Path, limit: int = 200) -> List[Dict[str, Any]]:
     return read_jsonl_tail(path, limit=limit, logger=logger)
 
@@ -1119,19 +768,9 @@ def _parse_utc_iso(value: Any) -> Optional[datetime]:
     return parse_utc_iso(value)
 
 
-def _extract_runtime_summary(run_id: str) -> Optional[Dict[str, Any]]:
-    return extract_runtime_summary(run_id, LIVE_TRADER_ARTIFACTS_DIR, logger=logger)
-
-
-def _infer_live_run_status(updated_at: Any, runtime_summary: Optional[Dict[str, Any]]) -> str:
-    return infer_live_run_status(
-        updated_at,
-        runtime_summary,
-        active_window_seconds=LIVE_RUN_ACTIVE_WINDOW_SECONDS,
-    )
-
-
-def _discover_live_trader_runs(limit: int = 20, active_only: bool = False) -> List[Dict[str, Any]]:
+def _discover_live_trader_runs(
+    limit: int = 20, active_only: bool = False
+) -> List[Dict[str, Any]]:
     return discover_live_trader_runs(
         LIVE_TRADER_ARTIFACTS_DIR,
         limit=limit,
@@ -1141,82 +780,16 @@ def _discover_live_trader_runs(limit: int = 20, active_only: bool = False) -> Li
     )
 
 
-def _normalize_strategy_selection_mode(mode: Any) -> str:
-    return service_normalize_strategy_selection_mode(mode)
-
-
-def _normalize_non_negative_int(value: Any, default: int = 0, max_value: int = 10_000) -> int:
-    return service_normalize_non_negative_int(
-        value,
-        default=default,
-        max_value=max_value,
-    )
-
-
-def _normalize_clamped_int(value: Any, default: int, min_value: int, max_value: int) -> int:
-    return service_normalize_clamped_int(
-        value,
-        default=default,
-        min_value=min_value,
-        max_value=max_value,
-    )
-
-
-def _normalize_bool_options(values: Optional[List[bool]], default: List[bool]) -> List[bool]:
-    return service_normalize_bool_options(values, default)
-
-
-def _normalize_int_options(
-    values: Optional[List[int]],
-    default: List[int],
-    *,
-    min_value: int,
-    max_value: int,
-) -> List[int]:
-    return service_normalize_int_options(
-        values,
-        default,
-        min_value=min_value,
-        max_value=max_value,
-    )
-
-
-def _normalize_mode_options(values: Optional[List[str]]) -> List[str]:
-    return service_normalize_mode_options(values)
-
-
-def _normalize_float_options(
-    values: Optional[List[float]],
-    default: List[float],
-    *,
-    min_value: float = 0.0,
-    max_value: float = 1_000_000.0,
-) -> List[float]:
-    return service_normalize_float_options(
-        values,
-        default,
-        min_value=min_value,
-        max_value=max_value,
-    )
-
-
-def _normalize_strategy_sets(
-    raw_sets: Optional[List[List[str]]],
-    enabled_strategies: List[str],
-) -> List[List[str]]:
-    return service_normalize_strategy_sets(raw_sets, enabled_strategies)
-
-
-def _normalize_regime_filter_sets(
-    raw_sets: Optional[List[List[str]]],
-) -> List[List[str]]:
-    return service_normalize_regime_filter_sets(raw_sets)
-
-
-def _normalize_time_window_sets(
-    raw_sets: Optional[List[List[int]]],
-) -> List[List[int]]:
-    return service_normalize_time_window_sets(raw_sets)
+_normalize_strategy_selection_mode = service_normalize_strategy_selection_mode
+_normalize_non_negative_int = service_normalize_non_negative_int
+_normalize_clamped_int = service_normalize_clamped_int
+_normalize_bool_options = service_normalize_bool_options
+_normalize_int_options = service_normalize_int_options
+_normalize_mode_options = service_normalize_mode_options
+_normalize_float_options = service_normalize_float_options
+_normalize_strategy_sets = service_normalize_strategy_sets
+_normalize_regime_filter_sets = service_normalize_regime_filter_sets
+_normalize_time_window_sets = service_normalize_time_window_sets
 
 
 def _normalize_regime_strategy_map_sets(
@@ -1230,12 +803,8 @@ def _normalize_regime_strategy_map_sets(
     )
 
 
-def _iter_date_strings(date_from: str, date_to: str) -> List[str]:
-    return service_iter_date_strings(date_from, date_to)
-
-
-def _as_iso_day_set(days: List[str]) -> set:
-    return service_as_iso_day_set(days)
+_iter_date_strings = service_iter_date_strings
+_as_iso_day_set = service_as_iso_day_set
 
 
 def _resolve_l2_tuning_dates(
@@ -1254,53 +823,15 @@ def _resolve_l2_tuning_dates(
     )
 
 
-def _sample_evenly_spaced_days(days: List[str], *, max_days: int) -> List[str]:
-    return service_sample_evenly_spaced_days(days, max_days=max_days)
+_sample_evenly_spaced_days = service_sample_evenly_spaced_days
+_resolve_tuner_trial_budget = service_resolve_tuner_trial_budget
 
 
-def _resolve_tuner_trial_budget(
-    *,
-    requested_trials: Any,
-    default_trials: int,
-    quick_mode: bool,
-    quick_trial_boost: Any,
-    max_trials: int = 400,
-) -> Dict[str, int]:
-    return service_resolve_tuner_trial_budget(
-        requested_trials=requested_trials,
-        default_trials=default_trials,
-        quick_mode=quick_mode,
-        quick_trial_boost=quick_trial_boost,
-        max_trials=max_trials,
-    )
-
-
-def _covered_days_for_schema(ticker: str, schema: str) -> List[str]:
-    return service_covered_days_for_schema(ticker, schema, databento_svc)
-
-
-def _range_summary_from_days(days: List[str]) -> Dict[str, Any]:
-    return service_range_summary_from_days(days)
-
-
-def _normalize_tuner_profiles(raw_profiles: Any) -> List[Dict[str, Any]]:
-    return service_normalize_tuner_profiles(raw_profiles)
-
-
-def _sanitize_strategy_params(params: Any) -> Dict[str, Any]:
-    return service_sanitize_strategy_params(params)
-
-
-def _extract_strategy_params_for_profile(strategies_payload: Any) -> Dict[str, Dict[str, Any]]:
-    return service_extract_strategy_params_for_profile(strategies_payload)
-
-
-def _normalize_strategy_combo_profiles(raw_profiles: Any) -> List[Dict[str, Any]]:
-    return service_normalize_strategy_combo_profiles(raw_profiles)
-
-
-def _normalize_unified_profiles(raw_profiles: Any) -> List[Dict[str, Any]]:
-    return normalize_unified_profiles(raw_profiles)
+_normalize_tuner_profiles = service_normalize_tuner_profiles
+_sanitize_strategy_params = service_sanitize_strategy_params
+_extract_strategy_params_for_profile = service_extract_strategy_params_for_profile
+_normalize_strategy_combo_profiles = service_normalize_strategy_combo_profiles
+_normalize_unified_profiles = normalize_unified_profiles
 
 
 def _build_strategy_combo_profile_entry(
@@ -1319,351 +850,26 @@ def _build_strategy_combo_profile_entry(
     }
 
 
-def _build_strategy_combo_options_payload(ticker: str) -> Dict[str, Any]:
-    ticker_upper = str(ticker or "").upper().strip()
-    if not ticker_upper:
-        raise HTTPException(400, "ticker is required")
-    aos_cfg = _load_aos_config()
-    ticker_cfg = aos_cfg.get("tickers", {}).get(ticker_upper, {})
-    profiles = _normalize_strategy_combo_profiles(ticker_cfg.get("strategy_combo_profiles", []))
-    active_profile_id = str(
-        ticker_cfg.get("active_strategy_combo_profile_id", "")
-    ).strip() or None
-    return {
-        "ticker": ticker_upper,
-        "profiles": profiles,
-        "active_profile_id": active_profile_id,
-    }
-
-
-def _extract_tuner_candidate(profile: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(profile, dict):
-        return {}
-    candidate = profile.get("candidate")
-    if isinstance(candidate, dict):
-        return candidate
-    best_trial = profile.get("best_trial")
-    if isinstance(best_trial, dict) and isinstance(best_trial.get("candidate"), dict):
-        return best_trial.get("candidate", {})
-    return {}
-
-
-def _profile_updated_ts(profile: Dict[str, Any]) -> float:
-    if not isinstance(profile, dict):
-        return 0.0
-    raw = str(profile.get("updated_at") or profile.get("created_at") or "").strip()
-    parsed = _parse_utc_iso(raw)
-    if parsed is None:
-        return 0.0
-    return float(parsed.timestamp())
-
-
-def _normalize_profile_ref_token(value: Any) -> str:
-    token = str(value or "").strip()
-    if not token:
-        return ""
-    if token.lower() in {"none", "null", "n/a", "na"}:
-        return ""
-    return token
-
-
-def _derived_unified_profile_id(
-    ticker_upper: str,
-    combo_profile_id: str,
-    adaptive_profile_id: str,
-) -> str:
-    combo_token = str(combo_profile_id or "").strip() or "none"
-    adaptive_token = str(adaptive_profile_id or "").strip() or "none"
-    return f"legacy-unified-{ticker_upper}-{combo_token}-{adaptive_token}"
-
-
-def _build_legacy_unified_profile_variants(
-    ticker_upper: str,
-    ticker_cfg: Dict[str, Any],
-    *,
-    max_profiles: int = 60,
-) -> List[Dict[str, Any]]:
-    combo_profiles = _normalize_strategy_combo_profiles(
-        ticker_cfg.get("strategy_combo_profiles", [])
-    )
-    adaptive_profiles = _normalize_tuner_profiles(
-        ticker_cfg.get("adaptive_tuner_profiles", [])
-    )
-    if not combo_profiles and not adaptive_profiles:
-        return []
-
-    active_combo_id = _normalize_profile_ref_token(
-        ticker_cfg.get("active_strategy_combo_profile_id", "")
-    )
-    active_adaptive_id = _normalize_profile_ref_token(
-        ticker_cfg.get("active_adaptive_tuner_profile_id", "")
-    )
-
-    def _ordered_rows(
-        rows: List[Dict[str, Any]],
-        active_id: str,
-    ) -> List[Dict[str, Any]]:
-        if not rows:
-            return []
-        active: List[Dict[str, Any]] = []
-        rest: List[Dict[str, Any]] = []
-        for row in rows:
-            row_id = str(row.get("profile_id") or "").strip()
-            if active_id and row_id == active_id:
-                active.append(row)
-            else:
-                rest.append(row)
-        rest.sort(key=_profile_updated_ts, reverse=True)
-        return active + rest
-
-    combo_candidates = _ordered_rows(combo_profiles, active_combo_id)
-    adaptive_candidates = _ordered_rows(adaptive_profiles, active_adaptive_id)
-    combo_candidates = combo_candidates[:12] if combo_candidates else [None]
-    adaptive_candidates = adaptive_candidates[:12] if adaptive_candidates else [None]
-
-    now_iso = datetime.utcnow().isoformat() + "Z"
-    positioning = _get_ticker_positioning_config(ticker_upper)
-    base_execution_profile = {
-        "positioning": positioning if isinstance(positioning, dict) else {},
-    }
-
-    rows: List[Dict[str, Any]] = []
-    for combo_profile in combo_candidates:
-        for adaptive_profile in adaptive_candidates:
-            combo_row = combo_profile if isinstance(combo_profile, dict) else {}
-            adaptive_row = adaptive_profile if isinstance(adaptive_profile, dict) else {}
-            combo_id = str(combo_row.get("profile_id") or "").strip()
-            adaptive_id = str(adaptive_row.get("profile_id") or "").strip()
-            if not combo_id and not adaptive_id:
-                continue
-
-            combo_name = str(combo_row.get("profile_name") or combo_id or "").strip()
-            adaptive_name = str(adaptive_row.get("profile_name") or adaptive_id or "").strip()
-            if combo_name and adaptive_name:
-                profile_name = f"legacy: {combo_name} + {adaptive_name}"
-            else:
-                profile_name = f"legacy: {combo_name or adaptive_name or ticker_upper}"
-
-            strategy_profile: Dict[str, Any] = {
-                "strategy_params": (
-                    combo_row.get("strategy_params")
-                    if isinstance(combo_row.get("strategy_params"), dict)
-                    else {}
-                ),
-                "strategy_selection_mode": _normalize_strategy_selection_mode(
-                    ticker_cfg.get("strategy_selection_mode")
-                ),
-                "max_active_strategies": _normalize_clamped_int(
-                    ticker_cfg.get("max_active_strategies"),
-                    default=3,
-                    min_value=1,
-                    max_value=20,
-                ),
-                "trading_hours": (
-                    ticker_cfg.get("trading_hours")
-                    if isinstance(ticker_cfg.get("trading_hours"), list)
-                    else []
-                ),
-                "time_filter_enabled": bool(ticker_cfg.get("time_filter_enabled", False)),
-                "long_only": bool(ticker_cfg.get("long_only", False)),
-            }
-            if isinstance(ticker_cfg.get("l2"), dict):
-                strategy_profile["l2"] = dict(ticker_cfg.get("l2", {}))
-            if isinstance(ticker_cfg.get("adaptive"), dict):
-                strategy_profile["adaptive"] = dict(ticker_cfg.get("adaptive", {}))
-            if combo_id:
-                strategy_profile["active_strategy_combo_profile_id"] = combo_id
-            if adaptive_id:
-                strategy_profile["active_adaptive_tuner_profile_id"] = adaptive_id
-            adaptive_candidate = _extract_tuner_candidate(adaptive_row)
-            if adaptive_candidate:
-                strategy_profile["adaptive_candidate"] = adaptive_candidate
-
-            created_at = (
-                str(combo_row.get("created_at") or "").strip()
-                or str(adaptive_row.get("created_at") or "").strip()
-                or now_iso
-            )
-            updated_at = (
-                str(combo_row.get("updated_at") or combo_row.get("created_at") or "").strip()
-                or str(adaptive_row.get("updated_at") or adaptive_row.get("created_at") or "").strip()
-                or now_iso
-            )
-
-            row: Dict[str, Any] = {
-                "profile_id": _derived_unified_profile_id(ticker_upper, combo_id, adaptive_id),
-                "profile_name": profile_name,
-                "created_at": created_at,
-                "updated_at": updated_at,
-                "strategy_profile": strategy_profile,
-                "execution_profile": base_execution_profile,
-            }
-            if combo_id:
-                row["source_strategy_combo_profile_id"] = combo_id
-            if adaptive_id:
-                row["source_adaptive_tuner_profile_id"] = adaptive_id
-            rows.append(row)
-
-    rows.sort(key=_profile_updated_ts, reverse=True)
-
-    preferred_derived_active_id = _derived_unified_profile_id(
-        ticker_upper,
-        active_combo_id,
-        active_adaptive_id,
-    )
-    if preferred_derived_active_id:
-        rows.sort(
-            key=lambda item: (
-                0
-                if str(item.get("profile_id") or "").strip() == preferred_derived_active_id
-                else 1
-            )
-        )
-    return rows[:max(1, int(max_profiles))]
-
-
 def _build_unified_profile_options_payload(ticker: str) -> Dict[str, Any]:
-    ticker_upper = str(ticker or "").upper().strip()
-    if not ticker_upper:
-        raise HTTPException(400, "ticker is required")
-    aos_cfg = _load_aos_config()
-    ticker_cfg = aos_cfg.get("tickers", {}).get(ticker_upper, {})
-    if not isinstance(ticker_cfg, dict):
-        ticker_cfg = {}
-    stored_profiles = _normalize_unified_profiles(ticker_cfg.get("unified_profiles", []))
-    derived_profiles = _build_legacy_unified_profile_variants(ticker_upper, ticker_cfg)
-
-    merged_profiles: List[Dict[str, Any]] = []
-    seen_profile_ids: set[str] = set()
-    for profile in stored_profiles + derived_profiles:
-        profile_id = str(profile.get("profile_id") or "").strip()
-        if not profile_id or profile_id in seen_profile_ids:
-            continue
-        seen_profile_ids.add(profile_id)
-        merged_profiles.append(profile)
-
-    active_profile_id = str(ticker_cfg.get("active_unified_profile_id", "")).strip() or None
-    if not active_profile_id:
-        active_combo_id = _normalize_profile_ref_token(
-            ticker_cfg.get("active_strategy_combo_profile_id", "")
-        )
-        active_adaptive_id = _normalize_profile_ref_token(
-            ticker_cfg.get("active_adaptive_tuner_profile_id", "")
-        )
-        derived_active = _derived_unified_profile_id(
-            ticker_upper,
-            active_combo_id,
-            active_adaptive_id,
-        )
-        if derived_active in seen_profile_ids:
-            active_profile_id = derived_active
-    if active_profile_id and active_profile_id not in seen_profile_ids:
-        active_profile_id = None
-
-    merged_profiles.sort(key=_profile_updated_ts, reverse=True)
-    if active_profile_id:
-        merged_profiles.sort(
-            key=lambda item: (
-                0
-                if str(item.get("profile_id") or "").strip() == active_profile_id
-                else 1
-            )
-        )
-    return {
-        "ticker": ticker_upper,
-        "profiles": merged_profiles[:60],
-        "active_profile_id": active_profile_id,
-    }
-
-
-def _build_tuner_profile_entry(
-    *,
-    ticker: str,
-    request: "AdaptiveTunerRequest",
-    method_used: str,
-    dates: List[str],
-    best_trial: Dict[str, Any],
-) -> Dict[str, Any]:
-    return service_build_tuner_profile_entry(
+    return service_build_unified_profile_options_payload(
         ticker=ticker,
-        request=request,
-        method_used=method_used,
-        dates=dates,
-        best_trial=best_trial,
+        load_aos_config=_load_aos_config,
+        normalize_unified_profiles=_normalize_unified_profiles,
+        normalize_strategy_combo_profiles=_normalize_strategy_combo_profiles,
+        normalize_tuner_profiles=_normalize_tuner_profiles,
+        normalize_strategy_selection_mode=_normalize_strategy_selection_mode,
+        normalize_clamped_int=_normalize_clamped_int,
+        get_ticker_positioning_config=_get_ticker_positioning_config,
+        parse_utc_iso=_parse_utc_iso,
     )
 
 
-def _build_adaptive_tuner_options_payload(ticker: str) -> Dict[str, Any]:
-    ticker_upper = str(ticker or "").upper().strip()
-    if not ticker_upper:
-        raise HTTPException(400, "ticker is required")
-
-    ohlcv_days = _covered_days_for_schema(ticker_upper, "ohlcv-1m")
-    l2_days = _covered_days_for_schema(ticker_upper, "mbp-10")
-    overlap_days = sorted(set(ohlcv_days).intersection(set(l2_days)))
-
-    ohlcv_range = _range_summary_from_days(ohlcv_days)
-    l2_range = _range_summary_from_days(l2_days)
-    overlap_range = _range_summary_from_days(overlap_days)
-
-    aos_cfg = _load_aos_config()
-    ticker_cfg = aos_cfg.get("tickers", {}).get(ticker_upper, {})
-    profiles = _normalize_tuner_profiles(ticker_cfg.get("adaptive_tuner_profiles", []))
-    active_profile_id = str(
-        ticker_cfg.get("active_adaptive_tuner_profile_id", "")
-    ).strip() or None
-
-    default_from = overlap_range.get("start") or ohlcv_range.get("start")
-    default_to = overlap_range.get("end") or ohlcv_range.get("end")
-
-    return {
-        "ticker": ticker_upper,
-        "ohlcv_range": ohlcv_range,
-        "l2_range": l2_range,
-        "l2_overlap_range": overlap_range,
-        "l2_overlap_days": overlap_days,
-        "default_date_from": default_from,
-        "default_date_to": default_to,
-        "has_l2_overlap": bool(overlap_days),
-        "profiles": profiles,
-        "active_profile_id": active_profile_id,
-    }
+_build_tuner_profile_entry = service_build_tuner_profile_entry
 
 
-def _build_adaptive_candidate_config(
-    ticker_config: Dict[str, Any],
-    candidate: Dict[str, Any],
-    adaptive_version: int,
-) -> Dict[str, Any]:
-    return service_build_adaptive_candidate_config(
-        ticker_config,
-        candidate,
-        adaptive_version,
-    )
-
-
-def _compute_tuner_score(
-    score_metric: str,
-    total_pnl_pct: float,
-    total_pnl_dollars: float,
-    avg_win_rate_pct: float,
-    total_trades: int,
-    valid_days: int,
-) -> float:
-    return service_compute_tuner_score(
-        score_metric,
-        total_pnl_pct,
-        total_pnl_dollars,
-        avg_win_rate_pct,
-        total_trades,
-        valid_days,
-    )
-
-
-def _compute_tuner_score_robust(
-    day_results: List[Dict[str, Any]],
-) -> float:
-    return service_compute_tuner_score_robust(day_results)
+_build_adaptive_candidate_config = service_build_adaptive_candidate_config
+_compute_tuner_score = service_compute_tuner_score
+_compute_tuner_score_robust = service_compute_tuner_score_robust
 
 
 async def _apply_strategy_overrides(strategy_api_url: str, ticker: str) -> None:
@@ -1702,15 +908,7 @@ async def _apply_active_strategy_combo(
     )
 
 
-def _normalize_strategy_key(name: Any) -> str:
-    return service_normalize_strategy_key(name)
-
-
-def _resolve_active_adaptive_tuner_candidate(ticker_config: Dict[str, Any]) -> Dict[str, Any]:
-    return service_resolve_active_adaptive_tuner_candidate(
-        ticker_config,
-        _build_strategy_api_integration_deps(),
-    )
+_normalize_strategy_key = service_normalize_strategy_key
 
 
 def _extract_profile_runtime_overrides(candidate: Dict[str, Any]) -> Dict[str, Any]:
@@ -1795,56 +993,59 @@ async def _configure_session(
     l2_min_participation_ratio: float = 0.0,
     l2_min_directional_consistency: float = 0.0,
     l2_min_signed_aggression: float = 0.0,
+    intraday_levels_enabled: bool = True,
+    intraday_levels_swing_left_bars: int = 2,
+    intraday_levels_swing_right_bars: int = 2,
+    intraday_levels_test_tolerance_pct: float = 0.08,
+    intraday_levels_break_tolerance_pct: float = 0.05,
+    intraday_levels_breakout_volume_lookback: int = 20,
+    intraday_levels_breakout_volume_multiplier: float = 1.2,
+    intraday_levels_volume_profile_bin_size_pct: float = 0.05,
+    intraday_levels_value_area_pct: float = 0.70,
+    intraday_levels_entry_quality_enabled: bool = True,
+    intraday_levels_min_levels_for_context: int = 2,
+    intraday_levels_entry_tolerance_pct: float = 0.10,
+    intraday_levels_break_cooldown_bars: int = 6,
+    intraday_levels_rotation_max_tests: int = 2,
+    intraday_levels_rotation_volume_max_ratio: float = 0.95,
+    intraday_levels_recent_bounce_lookback_bars: int = 6,
+    intraday_levels_require_recent_bounce_for_mean_reversion: bool = True,
+    intraday_levels_momentum_break_max_age_bars: int = 3,
+    intraday_levels_momentum_min_room_pct: float = 0.30,
+    intraday_levels_momentum_min_broken_ratio: float = 0.30,
+    intraday_levels_min_confluence_score: int = 2,
+    intraday_levels_memory_enabled: bool = True,
+    intraday_levels_memory_min_tests: int = 2,
+    intraday_levels_memory_max_age_days: int = 5,
+    intraday_levels_memory_decay_after_days: int = 2,
+    intraday_levels_memory_decay_weight: float = 0.50,
+    intraday_levels_memory_max_levels: int = 12,
+    intraday_levels_opening_range_enabled: bool = True,
+    intraday_levels_opening_range_minutes: int = 30,
+    intraday_levels_opening_range_break_tolerance_pct: float = 0.05,
+    intraday_levels_poc_migration_enabled: bool = True,
+    intraday_levels_poc_migration_interval_bars: int = 30,
+    intraday_levels_poc_migration_trend_threshold_pct: float = 0.20,
+    intraday_levels_poc_migration_range_threshold_pct: float = 0.10,
+    intraday_levels_composite_profile_enabled: bool = True,
+    intraday_levels_composite_profile_days: int = 3,
+    intraday_levels_composite_profile_current_day_weight: float = 1.0,
     cold_start_each_day: bool = False,
     strategy_selection_mode: str = "adaptive_top_n",
     max_active_strategies: int = 3,
     momentum_diversification_json: Optional[str] = None,
     max_daily_trades: Optional[int] = None,
     mu_choppy_hard_block_enabled: Optional[bool] = None,
+    regime_filter: Optional[list] = None,
+    **extra_session_params: Any,
 ) -> None:
-    return await service_configure_session(
-        strategy_api_url=strategy_api_url,
-        run_id=run_id,
-        ticker=ticker,
-        date=date,
-        regime_detection_minutes=regime_detection_minutes,
-        regime_refresh_bars=regime_refresh_bars,
-        account_size_usd=account_size_usd,
-        risk_per_trade_pct=risk_per_trade_pct,
-        max_position_notional_pct=max_position_notional_pct,
-        max_fill_participation_rate=max_fill_participation_rate,
-        min_fill_ratio=min_fill_ratio,
-        enable_partial_take_profit=enable_partial_take_profit,
-        partial_take_profit_rr=partial_take_profit_rr,
-        partial_take_profit_fraction=partial_take_profit_fraction,
-        trailing_activation_pct=trailing_activation_pct,
-        break_even_buffer_pct=break_even_buffer_pct,
-        break_even_min_hold_bars=break_even_min_hold_bars,
-        trailing_enabled_in_choppy=trailing_enabled_in_choppy,
-        time_exit_bars=time_exit_bars,
-        adverse_flow_exit_enabled=adverse_flow_exit_enabled,
-        adverse_flow_threshold=adverse_flow_threshold,
-        adverse_flow_min_hold_bars=adverse_flow_min_hold_bars,
-        adverse_flow_consistency_threshold=adverse_flow_consistency_threshold,
-        adverse_book_pressure_threshold=adverse_book_pressure_threshold,
-        stop_loss_mode=stop_loss_mode,
-        fixed_stop_loss_pct=fixed_stop_loss_pct,
-        l2_confirm_enabled=l2_confirm_enabled,
-        l2_min_delta=l2_min_delta,
-        l2_min_imbalance=l2_min_imbalance,
-        l2_min_iceberg_bias=l2_min_iceberg_bias,
-        l2_lookback_bars=l2_lookback_bars,
-        l2_min_participation_ratio=l2_min_participation_ratio,
-        l2_min_directional_consistency=l2_min_directional_consistency,
-        l2_min_signed_aggression=l2_min_signed_aggression,
-        cold_start_each_day=cold_start_each_day,
-        strategy_selection_mode=strategy_selection_mode,
-        max_active_strategies=max_active_strategies,
-        momentum_diversification_json=momentum_diversification_json,
-        deps=_build_strategy_api_integration_deps(),
-        max_daily_trades=max_daily_trades,
-        mu_choppy_hard_block_enabled=mu_choppy_hard_block_enabled,
-    )
+    session_kwargs = {
+        key: value for key, value in locals().items() if key != "extra_session_params"
+    }
+    if extra_session_params:
+        session_kwargs.update(extra_session_params)
+    session_kwargs["deps"] = _build_strategy_api_integration_deps()
+    return await service_configure_session(**session_kwargs)
 
 
 async def _clear_remote_strategy_sessions(
@@ -1989,7 +1190,9 @@ def _normalize_l2_feature_map_for_market_day_sessions(
             feats["l2_cumulative_delta"] = running_cumulative
             feats["l2_delta_acceleration"] = delta - prev_delta
             feats["l2_book_pressure_change"] = (
-                0.0 if prev_book_pressure is None else (book_pressure - prev_book_pressure)
+                0.0
+                if prev_book_pressure is None
+                else (book_pressure - prev_book_pressure)
             )
 
             prev_delta = delta
@@ -2005,91 +1208,19 @@ def _normalize_l2_feature_map_for_market_day_sessions(
 # ============ WebSocket Management ============
 async def broadcast(message: Dict[str, Any]):
     """Broadcast message to all connected WebSocket clients."""
-    if not connected_clients:
-        return
-    
-    message_text = json.dumps(message, default=str)
-    clients = list(connected_clients)
-    results = await asyncio.gather(
-        *(client.send_text(message_text) for client in clients),
-        return_exceptions=True,
-    )
-
-    disconnected: List[WebSocket] = []
-    for client, result in zip(clients, results):
-        if isinstance(result, Exception):
-            disconnected.append(client)
-
-    for client in disconnected:
-        if client in connected_clients:
-            connected_clients.remove(client)
+    await ws_hub.broadcast(message)
 
 
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for live updates."""
-    if len(connected_clients) >= MAX_WS_CLIENTS:
-        await websocket.close(code=1013, reason="Too many websocket clients")
-        return
-    await websocket.accept()
-    connected_clients.append(websocket)
-    logger.info(f"WebSocket client connected. Total: {len(connected_clients)}")
-    
-    try:
-        while True:
-            # Keep connection alive and handle incoming messages
-            data = await websocket.receive_text()
-            try:
-                msg = json.loads(data)
-                
-                # Handle client commands
-                if msg.get("type") == "ping":
-                    await websocket.send_json({"type": "pong"})
-                elif msg.get("type") == "subscribe":
-                    run_id = msg.get("run_id")
-                    await websocket.send_json({
-                        "type": "subscribed",
-                        "run_id": run_id
-                    })
-            except json.JSONDecodeError:
-                pass
-                
-    except WebSocketDisconnect:
-        if websocket in connected_clients:
-            connected_clients.remove(websocket)
-        logger.info(f"WebSocket client disconnected. Remaining: {len(connected_clients)}")
+    await ws_hub.handle_connection(websocket)
 
 
-def _candidate_key(candidate: Dict[str, Any]) -> tuple:
-    return service_candidate_key(candidate)
-
-
-def _build_adaptive_tuner_search_space(request: AdaptiveTunerRequest) -> Dict[str, List[Any]]:
-    return service_build_adaptive_tuner_search_space(request)
-
-
-def _build_grid_candidates(
-    search_space: Dict[str, List[Any]],
-    *,
-    max_candidates: int = 600,
-) -> List[Dict[str, Any]]:
-    return service_build_grid_candidates(
-        search_space,
-        max_candidates=max_candidates,
-    )
-
-
-def _build_random_candidates(
-    search_space: Dict[str, List[Any]],
-    *,
-    n_trials: int,
-    seed: int,
-) -> List[Dict[str, Any]]:
-    return service_build_random_candidates(
-        search_space,
-        n_trials=n_trials,
-        seed=seed,
-    )
+_candidate_key = service_candidate_key
+_build_adaptive_tuner_search_space = service_build_adaptive_tuner_search_space
+_build_grid_candidates = service_build_grid_candidates
+_build_random_candidates = service_build_random_candidates
 
 
 async def _evaluate_adaptive_tuner_candidate(
@@ -2145,15 +1276,6 @@ def _build_v2_random_candidates(
         seed=seed,
         neighborhood_search=neighborhood_search,
         deps=_build_adaptive_tuner_v2_deps(),
-    )
-
-
-def _build_v2_baseline_candidate(
-    search_space: Dict[str, Any],
-) -> Dict[str, Any]:
-    return service_build_v2_baseline_candidate(
-        search_space,
-        _build_adaptive_tuner_v2_deps(),
     )
 
 
@@ -2243,6 +1365,7 @@ async def _run_v2_adaptive_tuner_job(
         _build_adaptive_tuner_worker_deps(),
     )
 
+
 async def _run_adaptive_tuner_job(
     job_id: str,
     request: AdaptiveTunerRequest,
@@ -2268,17 +1391,8 @@ app.include_router(run_router)
 app.include_router(adaptive_tuner_router)
 app.include_router(run_start_router)
 app.include_router(v2_router)
-
-
-async def list_live_trader_runs(limit: int = 20, active_only: bool = False):
-    """Backward-compatible helper for direct test invocation."""
-    runs = _discover_live_trader_runs(limit=limit, active_only=active_only)
-    return {
-        "artifacts_dir": str(LIVE_TRADER_ARTIFACTS_DIR),
-        "count": len(runs),
-        "active_only": bool(active_only),
-        "runs": runs,
-    }
+app.include_router(tcbbo_router)
+app.include_router(chart_preview_router)
 
 
 async def get_live_trader_events(
@@ -2307,27 +1421,6 @@ async def get_live_trader_snapshot(run_id: str, tail_limit: int = 200):
     )
 
 
-async def get_strategy_overrides():
-    """Get optimized strategy parameters per ticker."""
-    return _load_strategy_overrides()
-
-
-async def get_ticker_overrides(ticker: str):
-    """Get optimized strategy parameters for a specific ticker."""
-    overrides = _load_strategy_overrides()
-    return overrides.get(ticker.upper(), {})
-
-
-async def get_strategy_combos(ticker: str):
-    """Get saved strategy-parameter combo profiles for a ticker."""
-    return _build_strategy_combo_options_payload(ticker)
-
-
-async def get_unified_profiles(ticker: str):
-    """Get saved unified strategy+execution profiles for a ticker."""
-    return _build_unified_profile_options_payload(ticker)
-
-
 async def capture_strategy_combo(request: StrategyComboCaptureRequest):
     """Capture current strategy API settings into a saved ticker combo profile."""
     return await service_capture_strategy_combo(request, _build_config_write_deps())
@@ -2348,58 +1441,9 @@ async def apply_unified_profile(request: UnifiedProfileApplyRequest):
     return await service_apply_unified_profile(request, _build_config_write_deps())
 
 
-async def get_aos_config():
-    """Get full AOS optimization config."""
-    aos_config = _load_aos_config()
-    positioning_config = _load_positioning_config()
-    return _merge_positioning_into_aos_snapshot(aos_config, positioning_config)
-
-
-async def get_ticker_aos_config(ticker: str):
-    """Get AOS config for a specific ticker."""
-    config = _load_aos_config()
-    ticker_config = config.get("tickers", {}).get(ticker.upper(), {})
-    if not isinstance(ticker_config, dict):
-        ticker_config = {}
-    positioning_cfg = _get_ticker_positioning_config(ticker)
-    legacy_positioning = {}
-    for key in POSITIONING_CONFIG_KEYS:
-        if key in ticker_config:
-            legacy_positioning[key] = ticker_config.get(key)
-    if legacy_positioning:
-        merged_positioning = dict(legacy_positioning)
-        merged_positioning.update(positioning_cfg)
-        positioning_cfg = merged_positioning
-    if positioning_cfg:
-        payload = dict(ticker_config)
-        payload["positioning"] = positioning_cfg
-        return payload
-    return ticker_config
-
-
-async def update_aos_config(request: AOSUpdateRequest):
-    """Update AOS config for a specific ticker."""
-    return service_update_aos_config(request, _build_config_write_deps())
-
-
-async def get_positioning_config():
-    """Get full positioning config file."""
-    return _load_positioning_config()
-
-
 async def get_ticker_positioning_config(ticker: str):
     """Get positioning config for one ticker."""
     return _get_ticker_positioning_config(ticker)
-
-
-async def update_positioning_config(request: PositioningUpdateRequest):
-    """Update positioning config for a specific ticker."""
-    return service_update_positioning_config(request, _build_config_write_deps())
-
-
-async def get_adaptive_tuner_options(ticker: str):
-    """Get real coverage ranges and saved tuner profiles for a ticker."""
-    return _build_adaptive_tuner_options_payload(ticker)
 
 
 async def apply_adaptive_tuner_profile(request: AdaptiveTunerProfileApplyRequest):
@@ -2410,26 +1454,20 @@ async def apply_adaptive_tuner_profile(request: AdaptiveTunerProfileApplyRequest
 async def run_adaptive_tuner(request: AdaptiveTunerRequest):
     """Start an adaptive-tuner job (v1 or v2) and return a job id for polling."""
     try:
-        request.strategy_api_url = enforce_strategy_url_allowlist_only(request.strategy_api_url)
+        request.strategy_api_url = enforce_strategy_url_allowlist_only(
+            request.strategy_api_url
+        )
     except StrategyApiPolicyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return await service_run_adaptive_tuner(request, _build_adaptive_tuner_deps())
 
 
-async def get_adaptive_tuner_job(job_id: str):
-    """Get current status and results of an adaptive tuner job."""
-    return service_get_adaptive_tuner_job(job_id, _build_adaptive_tuner_deps())
-
-
-async def list_adaptive_tuner_jobs(limit: int = 20):
-    """List recent adaptive tuner jobs."""
-    return service_list_adaptive_tuner_jobs(_build_adaptive_tuner_deps(), limit)
-
-
 async def start_run(request: StartRunRequest):
     """Start a new backtest run."""
     try:
-        request.strategy_api_url = enforce_strategy_url_allowlist_only(request.strategy_api_url)
+        request.strategy_api_url = enforce_strategy_url_allowlist_only(
+            request.strategy_api_url
+        )
     except StrategyApiPolicyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return await service_start_run(request, _build_start_run_deps())
@@ -2445,92 +1483,13 @@ async def prewarm_status(request: PrewarmRunRequest):
     return await service_prewarm_status(request, _build_start_run_deps())
 
 
-async def get_run_state(run_id: str, ticker: str, date: str):
-    """Get current state of a run."""
-    return service_get_run_state(run_id, ticker, date, _build_run_control_deps())
-
-
-async def step_run(run_id: str, ticker: str, date: str):
-    """Advance the run by one bar."""
-    return await service_step_run(run_id, ticker, date, _build_run_control_deps())
-
-
-async def play_run(
-    run_id: str,
-    ticker: str,
-    date: str,
-    request: Optional[PlayRequest] = Body(default=None),
-    speed_ms: Optional[Union[int, str]] = None,
-    raw_request: Request = None,
+async def get_markers(
+    run_id: str, ticker: str, date: str, marker_type: Optional[str] = None
 ):
-    """Start or resume auto-advancing through bars.
-    - Accepts JSON body `{ "speed_ms": ... }` but also query param `speed_ms`.
-    - Defaults to max speed when not provided.
-    - If paused, simply resumes without restarting.
-    """
-    return await service_play_run(
-        run_id,
-        ticker,
-        date,
-        _build_run_control_deps(),
-        request=request,
-        speed_ms=speed_ms,
-        raw_request=raw_request,
-    )
-
-
-async def pause_run(run_id: str, ticker: str, date: str):
-    """Pause a running backtest."""
-    return service_pause_run(run_id, ticker, date, _build_run_control_deps())
-
-
-async def resume_run(run_id: str, ticker: str, date: str):
-    """Resume a paused backtest."""
-    return service_resume_run(run_id, ticker, date, _build_run_control_deps())
-
-
-async def stop_run(run_id: str, ticker: str, date: str):
-    """Stop a running backtest."""
-    return service_stop_run(run_id, ticker, date, _build_run_control_deps())
-
-
-async def restart_run(run_id: str, ticker: str, date: str):
-    """Restart an existing run from bar zero using already loaded bars."""
-    return await service_restart_run(run_id, ticker, date, _build_run_control_deps())
-
-
-async def get_processed_bars(run_id: str, ticker: str, date: str):
-    """Get all processed bars so far."""
-    return service_get_processed_bars(run_id, ticker, date, _build_run_control_deps())
-
-
-async def get_bar_details(run_id: str, ticker: str, date: str, minute_key: int):
-    """Get 1-second intrabar frames for a specific minute bar.
-    
-    Args:
-        run_id: The backtest run ID
-        ticker: Stock ticker symbol
-        date: Date in YYYY-MM-DD format
-        minute_key: Unix timestamp of the minute bar start (in seconds)
-    
-    Returns:
-        1-second frames with book/trade features for frontend visualization
-    """
-    return service_get_bar_details(run_id, ticker, date, minute_key, _build_run_control_deps())
-
-async def get_markers(run_id: str, ticker: str, date: str, marker_type: Optional[str] = None):
     """Get all decision markers."""
-    return service_get_markers(run_id, ticker, date, marker_type, _build_run_control_deps())
-
-
-async def get_chart_annotations(run_id: str, ticker: str, date: str):
-    """Get markers formatted for chart display."""
-    return service_get_chart_annotations(run_id, ticker, date, _build_run_control_deps())
-
-
-async def get_run_summary(run_id: str, ticker: str, date: str):
-    """Get session summary."""
-    return service_get_run_summary(run_id, ticker, date, _build_run_control_deps())
+    return service_get_markers(
+        run_id, ticker, date, marker_type, _build_run_control_deps()
+    )
 
 
 async def delete_run(run_id: str, ticker: str, date: str):
@@ -2538,22 +1497,14 @@ async def delete_run(run_id: str, ticker: str, date: str):
     return await service_delete_run(run_id, ticker, date, _build_run_control_deps())
 
 
-async def list_runs():
-    """List all active runs."""
-    return service_list_runs(_build_run_control_deps())
-
-
 # ============ Static Files (Frontend) ============
 frontend_path = Path(__file__).parent / "frontend" / "dist"
 if frontend_path.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
+    app.mount(
+        "/", StaticFiles(directory=str(frontend_path), html=True), name="frontend"
+    )
 
 
 # ============ Main ============
 if __name__ == "__main__":
-    uvicorn.run(
-        "api_server:app",
-        host="0.0.0.0",
-        port=8002,
-        reload=True
-    )
+    uvicorn.run("api_server:app", host="0.0.0.0", port=8002, reload=True)

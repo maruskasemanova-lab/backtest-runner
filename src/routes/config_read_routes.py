@@ -14,14 +14,18 @@ async def get_strategy_overrides(services: ApiServices = Depends(get_api_service
 
 
 @router.get("/api/strategy-overrides/{ticker}")
-async def get_ticker_overrides(ticker: str, services: ApiServices = Depends(get_api_services)):
+async def get_ticker_overrides(
+    ticker: str, services: ApiServices = Depends(get_api_services)
+):
     """Get optimized strategy parameters for a specific ticker."""
     overrides = services.load_strategy_overrides()
     return overrides.get(ticker.upper(), {})
 
 
 @router.get("/api/strategy-combos/{ticker}")
-async def get_strategy_combos(ticker: str, services: ApiServices = Depends(get_api_services)):
+async def get_strategy_combos(
+    ticker: str, services: ApiServices = Depends(get_api_services)
+):
     """Get saved strategy-parameter combo profiles for a ticker."""
     return services.build_strategy_combo_options_payload(ticker)
 
@@ -35,7 +39,9 @@ async def get_aos_config(services: ApiServices = Depends(get_api_services)):
 
 
 @router.get("/api/aos-config/{ticker}")
-async def get_ticker_aos_config(ticker: str, services: ApiServices = Depends(get_api_services)):
+async def get_ticker_aos_config(
+    ticker: str, services: ApiServices = Depends(get_api_services)
+):
     """Get AOS config for a specific ticker."""
     config = services.load_aos_config()
     ticker_config = config.get("tickers", {}).get(ticker.upper(), {})
@@ -67,18 +73,56 @@ async def get_positioning_config(services: ApiServices = Depends(get_api_service
 
 
 @router.get("/api/positioning-config/{ticker}")
-async def get_ticker_positioning_config(ticker: str, services: ApiServices = Depends(get_api_services)):
+async def get_ticker_positioning_config(
+    ticker: str, services: ApiServices = Depends(get_api_services)
+):
     """Get positioning config for one ticker."""
     return services.get_ticker_positioning_config(ticker)
 
 
 @router.get("/api/adaptive-tuner/options/{ticker}")
-async def get_adaptive_tuner_options(ticker: str, services: ApiServices = Depends(get_api_services)):
+async def get_adaptive_tuner_options(
+    ticker: str, services: ApiServices = Depends(get_api_services)
+):
     """Get real coverage ranges and saved tuner profiles for a ticker."""
     return services.build_adaptive_tuner_options_payload(ticker)
 
 
 @router.get("/api/profiles/{ticker}")
-async def get_unified_profiles(ticker: str, services: ApiServices = Depends(get_api_services)):
+async def get_unified_profiles(
+    ticker: str, services: ApiServices = Depends(get_api_services)
+):
     """Get saved unified strategy+execution profiles for a ticker."""
     return services.build_unified_profile_options_payload(ticker)
+
+
+@router.get("/api/aos-history/{ticker}")
+async def get_aos_history(ticker: str):
+    """Get historical AOS changes for a specific ticker."""
+    import os
+    import json
+
+    history_file = "aos_optimization/aos_history.jsonl"
+
+    if not os.path.exists(history_file):
+        return []
+
+    results = []
+    ticker_upper = ticker.upper()
+
+    try:
+        with open(history_file, "r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("ticker", "").upper() == ticker_upper:
+                        results.append(entry)
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        print(f"Failed to read aos_history.jsonl: {e}")
+        return []
+
+    return results
