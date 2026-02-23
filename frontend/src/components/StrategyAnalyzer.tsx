@@ -453,28 +453,27 @@ export default function StrategyAnalyzer({
   );
   const analyzerPlaybackProgress = useMemo(() => {
     if (!isAnalyzerAttachedRun || !rangePlaybackMeta) return null;
-    const tradeStartTs = Number(rangePlaybackMeta.tradeStartTs);
-    const tradeEndTs = Number(rangePlaybackMeta.tradeEndTs);
-    const warmupStartTs = Number(rangePlaybackMeta.warmupStartTs);
-    if (!Number.isFinite(tradeStartTs) || !Number.isFinite(tradeEndTs) || !Number.isFinite(warmupStartTs)) {
-      return null;
-    }
+
     let warmupDone = 0;
     let tradeDone = 0;
     for (const runBar of Array.isArray(attachedRunBars) ? attachedRunBars : []) {
-      const t = Number(runBar?.time);
-      if (!Number.isFinite(t)) continue;
-      if (t < warmupStartTs - 1) continue;
-      if (t < tradeStartTs - 1) {
+      if ((runBar as any)?.warmup_only === true) {
         warmupDone += 1;
-        continue;
-      }
-      if (t <= tradeEndTs + 1) {
+      } else {
         tradeDone += 1;
       }
     }
-    const warmupTotal = Number(rangePlaybackMeta.warmupTotalBars || 0);
-    const tradeTotal = Number(rangePlaybackMeta.tradeTotalBars || 0);
+
+    const backendTotalBars = Number(attachedRunState?.total_bars || 0);
+    const estimatedWarmup = Number(rangePlaybackMeta.warmupTotalBars || 0);
+
+    const warmupTotal = backendTotalBars > 0
+      ? Math.min(estimatedWarmup, backendTotalBars)
+      : estimatedWarmup;
+    const tradeTotal = backendTotalBars > 0
+      ? Math.max(0, backendTotalBars - warmupTotal)
+      : Number(rangePlaybackMeta.tradeTotalBars || 0);
+
     const warmupClamped = warmupTotal > 0 ? Math.min(warmupTotal, warmupDone) : 0;
     const tradeClamped = tradeTotal > 0 ? Math.min(tradeTotal, tradeDone) : tradeDone;
     const isInitializing = warmupTotal > 0 && warmupClamped < warmupTotal;
@@ -487,7 +486,7 @@ export default function StrategyAnalyzer({
       tradeProgressPct,
       isInitializing,
     };
-  }, [isAnalyzerAttachedRun, rangePlaybackMeta, attachedRunBars]);
+  }, [isAnalyzerAttachedRun, rangePlaybackMeta, attachedRunBars, attachedRunState]);
   const analyzerDisplayPhase = analyzerPlaybackProgress?.isInitializing
     ? "INITIALIZING"
     : analyzerRunPhase;
@@ -898,6 +897,8 @@ export default function StrategyAnalyzer({
         trade_start_time: dateTimeLocalToUtcIso(effectiveTradeStartLocal),
         trade_end_time: dateTimeLocalToUtcIso(effectiveTradeEndLocal),
         strategy_api_url: strategyApiUrl || defaultStrategyApiUrl,
+        include_extended_hours: true,
+        trade_eval_mode: analyzerTradeEvalMode,
       };
       if (typeof onStartRun === "function") {
         const result = await onStartRun(payload);
@@ -926,7 +927,7 @@ export default function StrategyAnalyzer({
     } finally {
       setRunLoading(false);
     }
-  }, [selectedRangeFrom, selectedRangeTo, ticker, strategyApiUrl, onStartRun, onSwitchToBacktest, rangePlaybackMeta]);
+  }, [selectedRangeFrom, selectedRangeTo, ticker, strategyApiUrl, onStartRun, onSwitchToBacktest, rangePlaybackMeta, analyzerTradeEvalMode]);
 
   const handleClearAnalyzerRun = useCallback(async () => {
     if (!isAnalyzerAttachedRun) return;

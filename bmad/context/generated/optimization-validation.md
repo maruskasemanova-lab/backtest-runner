@@ -22,16 +22,16 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `wfo_optimizer.py` | yes | 911 | `577ee8a 2026-02-22` |
-| `walk_forward_runner.py` | yes | 526 | `577ee8a 2026-02-22` |
-| `performance_tracker.py` | yes | 876 | `577ee8a 2026-02-22` |
-| `oos_validator.py` | yes | 223 | `13f270b 2026-02-06` |
-| `monte_carlo.py` | yes | 193 | `64da33c 2026-02-10` |
-| `tuning_runner.py` | yes | 359 | `583f2bc 2026-02-06` |
-| `aos_walk_forward.py` | yes | 633 | `13f270b 2026-02-06` |
-| `aos_optimizer.py` | yes | 422 | `577ee8a 2026-02-22` |
-| `run_strategy_test.py` | yes | 622 | `97ee653 2026-02-08` |
-| `batch_runner.py` | yes | 208 | `36d343c 2026-02-03` |
+| `wfo_optimizer.py` | yes | 911 | `1273b21 2026-02-23` |
+| `walk_forward_runner.py` | yes | 526 | `1273b21 2026-02-23` |
+| `performance_tracker.py` | yes | 876 | `1273b21 2026-02-23` |
+| `oos_validator.py` | yes | 223 | `1273b21 2026-02-23` |
+| `monte_carlo.py` | yes | 193 | `1273b21 2026-02-23` |
+| `tuning_runner.py` | yes | 359 | `1273b21 2026-02-23` |
+| `aos_walk_forward.py` | yes | 633 | `1273b21 2026-02-23` |
+| `aos_optimizer.py` | yes | 422 | `1273b21 2026-02-23` |
+| `run_strategy_test.py` | yes | 622 | `1273b21 2026-02-23` |
+| `batch_runner.py` | yes | 208 | `1273b21 2026-02-23` |
 
 ## Change Checks
 

@@ -799,6 +799,9 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
             effective_intrabar_execution_recalc_1s=(
                 session_phase.effective_intrabar_execution_recalc_1s
             ),
+            effective_intrabar_eval_step_seconds=(
+                session_phase.effective_intrabar_eval_step_seconds
+            ),
             checkpoint_loaded=bootstrap.checkpoint_loaded,
             progressive_plan=load_phase.progressive_plan,
             aos_applied=bootstrap.aos_applied,
@@ -853,6 +856,10 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         "requested_l2_only": bool(load_phase.requested_l2_only),
         "requested_l2_confirm_enabled": bool(load_phase.requested_l2_confirm),
         "effective_l2_confirm_enabled": bool(session_phase.effective_l2_confirm),
+        "effective_trade_eval_mode": session_phase.effective_trade_eval_mode,
+        "effective_intrabar_eval_step_seconds": int(
+            session_phase.effective_intrabar_eval_step_seconds
+        ),
         "l2_has_data": bool(load_phase.l2_stats.get("has_l2")),
         "liquidity_sweep_detection_enabled": bool(
             bootstrap.execution_cfg.get(
@@ -884,6 +891,7 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
             momentum_diversification_source=bootstrap.momentum_diversification_source,
             effective_momentum_diversification=bootstrap.effective_momentum_diversification,
             effective_intrabar_execution_recalc_1s=session_phase.effective_intrabar_execution_recalc_1s,
+            effective_intrabar_eval_step_seconds=session_phase.effective_intrabar_eval_step_seconds,
             effective_cold_start_each_day=identity.effective_cold_start_each_day,
             comparable_mode=identity.comparable_mode,
             effective_reset_scope=bootstrap.effective_reset_scope,

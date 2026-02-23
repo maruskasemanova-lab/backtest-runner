@@ -450,6 +450,7 @@ def _build_run_control_deps() -> RunControlDeps:
         save_remote_checkpoint=_save_remote_checkpoint,
         clear_remote_strategy_sessions=_clear_remote_strategy_sessions,
         configure_session=_configure_session,
+        l2_manager=getattr(api_services, "l2_manager", None),
     )
 
 

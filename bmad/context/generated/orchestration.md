@@ -21,58 +21,58 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `api_server.py` | yes | 1510 | `577ee8a 2026-02-22` |
-| `session_runner.py` | yes | 2297 | `577ee8a 2026-02-22` |
-| `data_loader.py` | yes | 312 | `b9accc6 2026-02-18` |
-| `available_data.py` | yes | 221 | `577ee8a 2026-02-22` |
-| `decision_tracker.py` | yes | 499 | `26c3d9f 2026-02-21` |
-| `performance_tracker.py` | yes | 876 | `577ee8a 2026-02-22` |
-| `src/routes/context.py` | yes | 46 | `b9accc6 2026-02-18` |
-| `src/routes/system_routes.py` | yes | 1654 | `577ee8a 2026-02-22` |
-| `src/routes/l2_routes.py` | yes | 122 | `b9accc6 2026-02-18` |
-| `src/routes/data_loader_routes.py` | yes | 289 | `577ee8a 2026-02-22` |
+| `api_server.py` | yes | 1511 | `1273b21 2026-02-23` |
+| `session_runner.py` | yes | 2297 | `1273b21 2026-02-23` |
+| `data_loader.py` | yes | 312 | `1273b21 2026-02-23` |
+| `available_data.py` | yes | 221 | `1273b21 2026-02-23` |
+| `decision_tracker.py` | yes | 499 | `1273b21 2026-02-23` |
+| `performance_tracker.py` | yes | 876 | `1273b21 2026-02-23` |
+| `src/routes/context.py` | yes | 46 | `1273b21 2026-02-23` |
+| `src/routes/system_routes.py` | yes | 1654 | `1273b21 2026-02-23` |
+| `src/routes/l2_routes.py` | yes | 122 | `1273b21 2026-02-23` |
+| `src/routes/data_loader_routes.py` | yes | 289 | `1273b21 2026-02-23` |
 | `src/routes/live_trader_routes.py` | yes | 68 | `da07c20 2026-02-12` |
-| `src/routes/config_read_routes.py` | yes | 128 | `26c3d9f 2026-02-21` |
+| `src/routes/config_read_routes.py` | yes | 128 | `1273b21 2026-02-23` |
 | `src/routes/config_write_routes.py` | yes | 86 | `b9accc6 2026-02-18` |
-| `src/routes/run_routes.py` | yes | 192 | `0452b19 2026-02-13` |
+| `src/routes/run_routes.py` | yes | 192 | `1273b21 2026-02-23` |
 | `src/routes/adaptive_tuner_routes.py` | yes | 38 | `da07c20 2026-02-12` |
-| `src/routes/run_start_routes.py` | yes | 345 | `172e737 2026-02-16` |
-| `src/routes/v2_routes.py` | yes | 2046 | `b9accc6 2026-02-18` |
+| `src/routes/run_start_routes.py` | yes | 345 | `1273b21 2026-02-23` |
+| `src/routes/v2_routes.py` | yes | 2046 | `1273b21 2026-02-23` |
 | `src/models/config_requests.py` | yes | 47 | `b9accc6 2026-02-18` |
-| `src/models/run_requests.py` | yes | 249 | `577ee8a 2026-02-22` |
-| `src/models/tuner_requests.py` | yes | 95 | `38387c6 2026-02-13` |
-| `src/security/auth.py` | yes | 279 | `b9accc6 2026-02-18` |
-| `src/security/network_policy.py` | yes | 135 | `64555c1 2026-02-19` |
-| `src/observability/runtime_metrics.py` | yes | 74 | `b9accc6 2026-02-18` |
-| `src/services/live_trader_service.py` | yes | 272 | `da07c20 2026-02-12` |
+| `src/models/run_requests.py` | yes | 254 | `1273b21 2026-02-23` |
+| `src/models/tuner_requests.py` | yes | 95 | `1273b21 2026-02-23` |
+| `src/security/auth.py` | yes | 279 | `1273b21 2026-02-23` |
+| `src/security/network_policy.py` | yes | 135 | `1273b21 2026-02-23` |
+| `src/observability/runtime_metrics.py` | yes | 74 | `1273b21 2026-02-23` |
+| `src/services/live_trader_service.py` | yes | 272 | `1273b21 2026-02-23` |
 | `src/services/run_registry.py` | yes | 28 | `b9accc6 2026-02-18` |
-| `src/services/config_write_service.py` | yes | 707 | `b9accc6 2026-02-18` |
-| `src/services/run_control_service.py` | yes | 425 | `b9accc6 2026-02-18` |
-| `src/services/saas_service.py` | yes | 2041 | `b9accc6 2026-02-18` |
-| `src/services/adaptive_tuner_orchestration_service.py` | yes | 177 | `da07c20 2026-02-12` |
-| `src/services/adaptive_tuner_worker_service.py` | yes | 672 | `da07c20 2026-02-12` |
-| `src/services/adaptive_tuner_core_service.py` | yes | 533 | `b9accc6 2026-02-18` |
-| `src/services/adaptive_tuner_search_service.py` | yes | 280 | `0452b19 2026-02-13` |
-| `src/services/adaptive_tuner_runtime_service.py` | yes | 508 | `172e737 2026-02-16` |
-| `src/services/adaptive_tuner_v2_service.py` | yes | 1099 | `38387c6 2026-02-13` |
-| `src/services/strategy_api_types.py` | yes | 33 | `b9accc6 2026-02-18` |
-| `src/services/strategy_api_updates_service.py` | yes | 253 | `b9accc6 2026-02-18` |
-| `src/services/strategy_api_profiles_service.py` | yes | 933 | `48dafa5 2026-02-22` |
-| `src/services/strategy_api_session_service.py` | yes | 452 | `57ad9f9 2026-02-19` |
-| `src/services/start_run_service.py` | yes | 1221 | `577ee8a 2026-02-22` |
-| `src/services/start_run_data_service.py` | yes | 1584 | `26c3d9f 2026-02-21` |
-| `src/services/start_run_execution_config_service.py` | yes | 1552 | `577ee8a 2026-02-22` |
-| `src/services/start_run_local_aos_service.py` | yes | 90 | `26c3d9f 2026-02-21` |
-| `src/services/start_run_bootstrap_phase_service.py` | yes | 275 | `26c3d9f 2026-02-21` |
-| `src/services/start_run_load_phase_service.py` | yes | 206 | `577ee8a 2026-02-22` |
-| `src/services/start_run_session_phase_service.py` | yes | 116 | `26c3d9f 2026-02-21` |
-| `src/services/start_run_execution_payload_service.py` | yes | 916 | `577ee8a 2026-02-22` |
-| `src/services/start_run_runner_setup_service.py` | yes | 363 | `577ee8a 2026-02-22` |
-| `src/services/execution_config/helpers.py` | yes | 310 | `577ee8a 2026-02-22` |
-| `src/services/execution_config/intraday_context.py` | yes | 466 | `26c3d9f 2026-02-21` |
-| `src/config_io.py` | yes | 29 | `64da33c 2026-02-10` |
-| `src/system_settings.py` | yes | 179 | `baf7110 2026-02-07` |
-| `src/databento_service.py` | yes | 1848 | `577ee8a 2026-02-22` |
+| `src/services/config_write_service.py` | yes | 707 | `1273b21 2026-02-23` |
+| `src/services/run_control_service.py` | yes | 403 | `1273b21 2026-02-23` |
+| `src/services/saas_service.py` | yes | 2041 | `1273b21 2026-02-23` |
+| `src/services/adaptive_tuner_orchestration_service.py` | yes | 177 | `1273b21 2026-02-23` |
+| `src/services/adaptive_tuner_worker_service.py` | yes | 672 | `1273b21 2026-02-23` |
+| `src/services/adaptive_tuner_core_service.py` | yes | 533 | `1273b21 2026-02-23` |
+| `src/services/adaptive_tuner_search_service.py` | yes | 280 | `1273b21 2026-02-23` |
+| `src/services/adaptive_tuner_runtime_service.py` | yes | 508 | `1273b21 2026-02-23` |
+| `src/services/adaptive_tuner_v2_service.py` | yes | 1099 | `1273b21 2026-02-23` |
+| `src/services/strategy_api_types.py` | yes | 33 | `1273b21 2026-02-23` |
+| `src/services/strategy_api_updates_service.py` | yes | 253 | `1273b21 2026-02-23` |
+| `src/services/strategy_api_profiles_service.py` | yes | 933 | `1273b21 2026-02-23` |
+| `src/services/strategy_api_session_service.py` | yes | 452 | `1273b21 2026-02-23` |
+| `src/services/start_run_service.py` | yes | 1229 | `1273b21 2026-02-23` |
+| `src/services/start_run_data_service.py` | yes | 1584 | `1273b21 2026-02-23` |
+| `src/services/start_run_execution_config_service.py` | yes | 1552 | `1273b21 2026-02-23` |
+| `src/services/start_run_local_aos_service.py` | yes | 90 | `1273b21 2026-02-23` |
+| `src/services/start_run_bootstrap_phase_service.py` | yes | 275 | `1273b21 2026-02-23` |
+| `src/services/start_run_load_phase_service.py` | yes | 206 | `1273b21 2026-02-23` |
+| `src/services/start_run_session_phase_service.py` | yes | 131 | `1273b21 2026-02-23` |
+| `src/services/start_run_execution_payload_service.py` | yes | 924 | `1273b21 2026-02-23` |
+| `src/services/start_run_runner_setup_service.py` | yes | 365 | `1273b21 2026-02-23` |
+| `src/services/execution_config/helpers.py` | yes | 310 | `1273b21 2026-02-23` |
+| `src/services/execution_config/intraday_context.py` | yes | 466 | `1273b21 2026-02-23` |
+| `src/config_io.py` | yes | 29 | `1273b21 2026-02-23` |
+| `src/system_settings.py` | yes | 179 | `1273b21 2026-02-23` |
+| `src/databento_service.py` | yes | 1848 | `1273b21 2026-02-23` |
 
 ## Change Checks
 
@@ -104,13 +104,13 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `async_function` `_collect_http_runtime_metrics` (line 404)
 - `function` `_build_config_write_deps` (line 419)
 - `function` `_build_run_control_deps` (line 442)
-- `function` `_build_adaptive_tuner_deps` (line 456)
-- `function` `_build_adaptive_tuner_worker_deps` (line 472)
-- `function` `_build_adaptive_tuner_runtime_deps` (line 498)
-- `function` `_build_adaptive_tuner_v2_deps` (line 519)
-- `function` `_build_strategy_api_integration_deps` (line 537)
-- `function` `_build_start_run_deps` (line 559)
-- `async_function` `_run_startup_prewarm` (line 590)
+- `function` `_build_adaptive_tuner_deps` (line 457)
+- `function` `_build_adaptive_tuner_worker_deps` (line 473)
+- `function` `_build_adaptive_tuner_runtime_deps` (line 499)
+- `function` `_build_adaptive_tuner_v2_deps` (line 520)
+- `function` `_build_strategy_api_integration_deps` (line 538)
+- `function` `_build_start_run_deps` (line 560)
+- `async_function` `_run_startup_prewarm` (line 591)
 - ... 65 more symbols
 
 ### `session_runner.py`
@@ -261,8 +261,8 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 ### `src/models/run_requests.py`
 - `class` `StartRunRequest` (line 6)
-- `class` `PrewarmRunRequest` (line 215)
-- `class` `PlayRequest` (line 242)
+- `class` `PrewarmRunRequest` (line 220)
+- `class` `PlayRequest` (line 247)
 
 ### `src/models/tuner_requests.py`
 - `class` `AdaptiveTunerRequest` (line 6)
@@ -329,18 +329,18 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - ... 1 more symbols
 
 ### `src/services/run_control_service.py`
-- `class` `RunControlDeps` (line 13)
-- `function` `_runner_date_label` (line 25)
-- `function` `_runner_run_key` (line 36)
-- `async_function` `_persist_runner_summary_to_store` (line 48)
-- `function` `get_run_state` (line 67)
-- `async_function` `step_run` (line 72)
-- `async_function` `play_run` (line 77)
-- `function` `pause_run` (line 248)
-- `function` `resume_run` (line 254)
-- `function` `stop_run` (line 260)
-- `async_function` `restart_run` (line 266)
-- `function` `get_processed_bars` (line 316)
+- `class` `RunControlDeps` (line 19)
+- `function` `_runner_date_label` (line 32)
+- `function` `_runner_run_key` (line 43)
+- `async_function` `_persist_runner_summary_to_store` (line 55)
+- `function` `get_run_state` (line 74)
+- `async_function` `step_run` (line 79)
+- `async_function` `play_run` (line 84)
+- `function` `pause_run` (line 226)
+- `function` `resume_run` (line 232)
+- `function` `stop_run` (line 238)
+- `async_function` `restart_run` (line 244)
+- `function` `get_processed_bars` (line 294)
 - ... 6 more symbols
 
 ### `src/services/saas_service.py`
@@ -517,34 +517,34 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `async_function` `run_start_load_phase` (line 60)
 
 ### `src/services/start_run_session_phase_service.py`
-- `class` `SessionPhaseInputs` (line 9)
-- `class` `SessionPhaseDeps` (line 24)
-- `class` `SessionPhaseResult` (line 31)
-- `async_function` `run_start_session_phase` (line 40)
+- `class` `SessionPhaseInputs` (line 11)
+- `class` `SessionPhaseDeps` (line 26)
+- `class` `SessionPhaseResult` (line 33)
+- `async_function` `run_start_session_phase` (line 44)
 
 ### `src/services/start_run_execution_payload_service.py`
-- `class` `ExecutionPayloadInputs` (line 8)
-- `class` `ExecutionPayloadResult` (line 33)
-- `function` `_build_l2_thresholds` (line 38)
-- `function` `_build_core_execution_payload` (line 54)
-- `function` `_build_runtime_execution_payload` (line 402)
-- `function` `_build_intraday_levels_payload` (line 441)
-- `function` `_build_context_risk_payload` (line 722)
-- `function` `_resolve_include_extended_hours` (line 760)
-- `function` `_apply_optional_execution_limits` (line 774)
-- `function` `_apply_effective_profile_metadata` (line 802)
-- `function` `_build_l2_applied_payload` (line 850)
-- `function` `build_execution_payload` (line 869)
+- `class` `ExecutionPayloadInputs` (line 10)
+- `class` `ExecutionPayloadResult` (line 36)
+- `function` `_build_l2_thresholds` (line 41)
+- `function` `_build_core_execution_payload` (line 57)
+- `function` `_build_runtime_execution_payload` (line 405)
+- `function` `_build_intraday_levels_payload` (line 449)
+- `function` `_build_context_risk_payload` (line 730)
+- `function` `_resolve_include_extended_hours` (line 768)
+- `function` `_apply_optional_execution_limits` (line 782)
+- `function` `_apply_effective_profile_metadata` (line 810)
+- `function` `_build_l2_applied_payload` (line 858)
+- `function` `build_execution_payload` (line 877)
 
 ### `src/services/start_run_runner_setup_service.py`
 - `class` `RunnerSetupInputs` (line 14)
-- `class` `RunnerSetupDeps` (line 38)
-- `function` `_register_runner_callbacks` (line 57)
-- `function` `_apply_runner_runtime_metadata` (line 94)
-- `function` `_load_chunk_payload` (line 138)
-- `function` `_append_deduped_chunk_bars` (line 201)
-- `async_function` `_append_remaining_chunks` (line 230)
-- `function` `setup_runner_with_progressive_loading` (line 313)
+- `class` `RunnerSetupDeps` (line 39)
+- `function` `_register_runner_callbacks` (line 58)
+- `function` `_apply_runner_runtime_metadata` (line 95)
+- `function` `_load_chunk_payload` (line 139)
+- `function` `_append_deduped_chunk_bars` (line 202)
+- `async_function` `_append_remaining_chunks` (line 231)
+- `function` `setup_runner_with_progressive_loading` (line 314)
 
 ### `src/services/execution_config/helpers.py`
 - `function` `coerce_bool` (line 6)

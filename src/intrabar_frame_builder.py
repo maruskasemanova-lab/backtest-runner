@@ -73,23 +73,29 @@ class IntrabarFrameBuilder:
                 df[col] = np.nan
         return df
 
+    def _ensure_polars_columns(self, lf: pl.LazyFrame) -> pl.LazyFrame:
+        """Ensure all required columns exist in the LazyFrame."""
+        schema = lf.collect_schema()
+        new_cols = []
+        for col in self.BID_SIZE_COLS + self.ASK_SIZE_COLS:
+            if col not in schema:
+                new_cols.append(pl.lit(0.0).alias(col))
+        for col in self.BID_PRICE_COLS + self.ASK_PRICE_COLS:
+            if col not in schema:
+                new_cols.append(pl.lit(None).cast(pl.Float64).alias(col))
+        if new_cols:
+            lf = lf.with_columns(new_cols)
+        return lf
+
     def _build_book_features(
         self,
         df: pd.DataFrame,
         second_grid: pd.DatetimeIndex,
     ) -> pd.DataFrame:
-        """Build book features using LOCF (last observation carried forward).
+        """Build book features using LOCF (last observation carried forward) via Polars."""
+        import polars as pl
 
-        For each second, use the last known book state.
-        """
-        # Filter non-trade events (book updates)
-        if "action" in df.columns:
-            book_events = df[df["action"].astype(str).str.upper() != "T"].copy()
-        else:
-            book_events = df.copy()
-
-        if book_events.empty:
-            # Return empty frame with correct columns
+        if df.empty:
             return pd.DataFrame(
                 index=second_grid,
                 columns=[
@@ -106,92 +112,97 @@ class IntrabarFrameBuilder:
                     "has_book_coverage",
                 ],
             )
+            
+        pdf = pl.from_pandas(df.reset_index())
+        pdf = pdf.lazy()
+        
+        # Ensure 'ts_event' is the time column (from df.index)
+        if df.index.name and df.index.name in pdf.collect_schema():
+            time_col = df.index.name
+        else:
+            time_col = "index"
 
-        book_events = self._ensure_columns(book_events)
+        if "action" in pdf.collect_schema():
+            books = pdf.filter(pl.col("action").cast(pl.Utf8).str.to_uppercase() != "T")
+        else:
+            books = pdf
 
-        # Floor to seconds
-        book_events = book_events.copy()
-        book_events["ts_sec"] = book_events.index.floor("1s")
+        books = self._ensure_polars_columns(books)
 
-        # Compute features per row (before aggregation)
-        bid_totals = (
-            book_events[self.BID_SIZE_COLS].astype(float).clip(lower=0).sum(axis=1)
-        )
-        ask_totals = (
-            book_events[self.ASK_SIZE_COLS].astype(float).clip(lower=0).sum(axis=1)
-        )
+        # Compute depth and top of book features
+        books = books.with_columns([
+            pl.sum_horizontal([pl.col(c).cast(pl.Float64).fill_null(0.0).clip(lower_bound=0.0) for c in self.BID_SIZE_COLS]).alias("depth_bid_total"),
+            pl.sum_horizontal([pl.col(c).cast(pl.Float64).fill_null(0.0).clip(lower_bound=0.0) for c in self.ASK_SIZE_COLS]).alias("depth_ask_total"),
+            pl.col("bid_px_00").cast(pl.Float64).alias("top_bid_px"),
+            pl.col("ask_px_00").cast(pl.Float64).alias("top_ask_px"),
+            pl.col("bid_sz_00").cast(pl.Float64).alias("top_bid_sz"),
+            pl.col("ask_sz_00").cast(pl.Float64).alias("top_ask_sz"),
+        ])
 
-        book_events["depth_bid_total"] = bid_totals
-        book_events["depth_ask_total"] = ask_totals
+        # Compute imbalance and spread
+        books = books.with_columns([
+            pl.when((pl.col("depth_bid_total") + pl.col("depth_ask_total")) > 0)
+              .then((pl.col("depth_bid_total") - pl.col("depth_ask_total")) / (pl.col("depth_bid_total") + pl.col("depth_ask_total")))
+              .otherwise(0.0).alias("imbalance_sec"),
+            pl.when((pl.col("top_bid_px") + pl.col("top_ask_px")) > 0)
+              .then((pl.col("top_ask_px") - pl.col("top_bid_px")) / ((pl.col("top_bid_px") + pl.col("top_ask_px")) / 2.0) * 10000)
+              .otherwise(None).alias("spread_bps")
+        ])
+        
+        books = books.with_columns([
+            pl.col("imbalance_sec").alias("book_pressure_sec")
+        ])
 
-        total_depth = bid_totals + ask_totals
-        book_events["imbalance_sec"] = np.where(
-            total_depth > 0, (bid_totals - ask_totals) / total_depth, 0.0
-        )
-        book_events["book_pressure_sec"] = book_events["imbalance_sec"]
+        # Group by 1 second intervals and aggregate
+        # Using group_by_dynamic to resample
+        book_sec = books.sort(time_col).group_by_dynamic(
+            time_col,
+            every="1s"
+        ).agg([
+            pl.col("depth_bid_total").last(),
+            pl.col("depth_ask_total").last(),
+            pl.col("imbalance_sec").last(),
+            pl.col("book_pressure_sec").last(),
+            pl.col("spread_bps").last(),
+            pl.col("top_bid_sz").last(),
+            pl.col("top_ask_sz").last(),
+            pl.col("top_bid_px").last(),
+            pl.col("top_ask_px").last(),
+            pl.len().alias("book_updates_sec") # count of rows
+        ]).collect()
 
-        # Spread in basis points
-        top_bid = book_events["bid_px_00"].astype(float)
-        top_ask = book_events["ask_px_00"].astype(float)
-        mid = (top_bid + top_ask) / 2.0
-        book_events["spread_bps"] = np.where(
-            mid > 0, (top_ask - top_bid) / mid * 10000, np.nan
-        )
+        # Convert back to pandas
+        book_pd = book_sec.to_pandas()
+        if book_pd.empty:
+            book_pd = pd.DataFrame(index=second_grid)
+        else:
+            book_pd.set_index(time_col, inplace=True)
+            book_pd.index = book_pd.index.tz_localize("UTC") if book_pd.index.tz is None else book_pd.index.tz_convert("UTC")
 
-        book_events["top_bid_sz"] = book_events["bid_sz_00"].astype(float)
-        book_events["top_ask_sz"] = book_events["ask_sz_00"].astype(float)
-        book_events["top_bid_px"] = top_bid
-        book_events["top_ask_px"] = top_ask
+        book_pd["has_book_coverage"] = book_pd["depth_bid_total"].notna()
 
-        # Group by second, take last observation
+        # Reindex to full second grid and Forward fill
+        book_pd = book_pd.reindex(second_grid)
+        
         feature_cols = [
-            "depth_bid_total",
-            "depth_ask_total",
-            "imbalance_sec",
-            "book_pressure_sec",
-            "spread_bps",
-            "top_bid_sz",
-            "top_ask_sz",
-            "top_bid_px",
-            "top_ask_px",
+            "depth_bid_total", "depth_ask_total", "imbalance_sec", "book_pressure_sec",
+            "spread_bps", "top_bid_sz", "top_ask_sz", "top_bid_px", "top_ask_px"
         ]
+        book_pd[feature_cols] = book_pd[feature_cols].ffill()
+        
+        book_pd["book_updates_sec"] = book_pd["book_updates_sec"].fillna(0).astype(int)
 
-        # Count updates per second
-        update_counts = book_events.groupby("ts_sec").size().rename("book_updates_sec")
-
-        # Last observation per second
-        book_sec = book_events.groupby("ts_sec")[feature_cols].last()
-        book_sec = book_sec.join(update_counts)
-
-        # Reindex to grid with forward fill (LOCF)
-        book_sec = book_sec.reindex(second_grid)
-
-        # Track coverage before ffill
-        book_sec["has_book_coverage"] = book_sec["depth_bid_total"].notna()
-
-        # Forward fill for LOCF
-        book_sec[feature_cols] = book_sec[feature_cols].ffill()
-
-        # Fill update counts with 0 for seconds without updates
-        book_sec["book_updates_sec"] = (
-            book_sec["book_updates_sec"].fillna(0).astype(int)
-        )
-
-        return book_sec
+        return book_pd
 
     def _build_trade_features(
         self,
         df: pd.DataFrame,
         second_grid: pd.DatetimeIndex,
     ) -> pd.DataFrame:
-        """Build trade features by aggregating per second."""
-        # Filter for trades only
-        if "action" in df.columns:
-            trades = df[df["action"].astype(str).str.upper() == "T"].copy()
-        else:
-            trades = df.copy()
-
-        if trades.empty:
+        """Build trade features by aggregating per second using Polars."""
+        import polars as pl
+        
+        if df.empty:
             return pd.DataFrame(
                 index=second_grid,
                 columns=[
@@ -201,55 +212,71 @@ class IntrabarFrameBuilder:
                     "trade_ticks_sec",
                 ],
             ).fillna(0)
+            
+        pdf = pl.from_pandas(df.reset_index())
+        pdf = pdf.lazy()
+        
+        # Ensure 'ts_event' is the time column (from df.index)
+        if df.index.name and df.index.name in pdf.collect_schema():
+            time_col = df.index.name
+        else:
+            time_col = "index"
 
-        trades = self._ensure_columns(trades)
+        if "action" in pdf.collect_schema():
+            trades = pdf.filter(pl.col("action").cast(pl.Utf8).str.to_uppercase() == "T")
+        else:
+            trades = pdf
 
-        # Floor to seconds
-        trades["ts_sec"] = trades.index.floor("1s")
+        trades = self._ensure_polars_columns(trades)
+        schema = trades.collect_schema()
 
-        # Classify each trade
-        def classify_row(row):
-            size = max(0.0, float(row.get("size", 0.0) or 0.0))
-            sign = self._infer_trade_sign(row)
-            return pd.Series(
-                {
-                    "buy_volume": size if sign > 0 else 0.0,
-                    "sell_volume": size if sign < 0 else 0.0,
-                }
-            )
+        # Infer trade sign natively in polars
+        # Need to handle missing optional side/price columns gracefully
+        side_expr = pl.col("side").cast(pl.Utf8).str.to_uppercase() if "side" in schema else pl.lit("N")
+        price_expr = pl.col("price").cast(pl.Float64).fill_null(0.0) if "price" in schema else pl.lit(0.0)
+        ask_px_expr = pl.col("ask_px_00").cast(pl.Float64).fill_null(0.0) if "ask_px_00" in schema else pl.lit(0.0)
+        bid_px_expr = pl.col("bid_px_00").cast(pl.Float64).fill_null(0.0) if "bid_px_00" in schema else pl.lit(0.0)
 
-        classified = trades.apply(classify_row, axis=1)
-        trades["buy_volume"] = classified["buy_volume"]
-        trades["sell_volume"] = classified["sell_volume"]
+        trades = trades.with_columns([
+            pl.when(side_expr == "B").then(1.0)
+            .when(side_expr == "A").then(-1.0)
+            .when((ask_px_expr > 0) & (price_expr >= ask_px_expr)).then(1.0)
+            .when((bid_px_expr > 0) & (price_expr <= bid_px_expr)).then(-1.0)
+            .when((ask_px_expr > 0) & (bid_px_expr > 0)).then(
+                pl.when(price_expr >= (ask_px_expr + bid_px_expr) / 2.0).then(1.0).otherwise(-1.0)
+            ).otherwise(0.0).alias("sign")
+        ])
 
-        # Aggregate per second
-        trade_sec = (
-            trades.groupby("ts_sec")
-            .agg(
-                {
-                    "buy_volume": "sum",
-                    "sell_volume": "sum",
-                    "size": "count",  # trade ticks
-                }
-            )
-            .rename(
-                columns={
-                    "buy_volume": "buy_volume_sec",
-                    "sell_volume": "sell_volume_sec",
-                    "size": "trade_ticks_sec",
-                }
-            )
-        )
+        size_expr = pl.col("size").cast(pl.Float64).fill_null(0.0).clip(lower_bound=0.0) if "size" in schema else pl.lit(0.0)
 
-        trade_sec["delta_sec"] = (
-            trade_sec["buy_volume_sec"] - trade_sec["sell_volume_sec"]
-        )
+        trades = trades.with_columns([
+            pl.when(pl.col("sign") > 0).then(size_expr).otherwise(0.0).alias("buy_volume"),
+            pl.when(pl.col("sign") < 0).then(size_expr).otherwise(0.0).alias("sell_volume"),
+        ])
 
+        trade_sec = trades.sort(time_col).group_by_dynamic(
+            time_col,
+            every="1s"
+        ).agg([
+            pl.col("buy_volume").sum().alias("buy_volume_sec"),
+            pl.col("sell_volume").sum().alias("sell_volume_sec"),
+            pl.len().alias("trade_ticks_sec")
+        ]).collect()
+
+        trade_pd = trade_sec.to_pandas()
+        if trade_pd.empty:
+            trade_pd = pd.DataFrame(index=second_grid, columns=["buy_volume_sec", "sell_volume_sec", "trade_ticks_sec"])
+        else:
+            trade_pd.set_index(time_col, inplace=True)
+            trade_pd.index = trade_pd.index.tz_localize("UTC") if trade_pd.index.tz is None else trade_pd.index.tz_convert("UTC")
+
+        trade_pd["delta_sec"] = trade_pd["buy_volume_sec"] - trade_pd["sell_volume_sec"]
+        
         # Reindex to grid (no ffill for trades, use 0)
-        trade_sec = trade_sec.reindex(second_grid).fillna(0)
-        trade_sec["trade_ticks_sec"] = trade_sec["trade_ticks_sec"].astype(int)
+        trade_pd = trade_pd.reindex(second_grid).fillna(0)
+        trade_pd["trade_ticks_sec"] = trade_pd["trade_ticks_sec"].astype(int)
 
-        return trade_sec
+        return trade_pd
 
     def build_frames(
         self,

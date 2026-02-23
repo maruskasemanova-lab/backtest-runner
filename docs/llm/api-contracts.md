@@ -136,7 +136,9 @@ Important request fields:
 - context-aware risk controls: `context_aware_risk_enabled`, `context_risk_sl_buffer_pct`, `context_risk_min_sl_pct`, `context_risk_min_room_pct`, `context_risk_min_effective_rr`, `context_risk_trailing_tighten_zone`, `context_risk_trailing_tighten_factor`, `context_risk_level_trail_enabled`, `context_risk_max_anchor_search_pct`, `context_risk_min_level_tests_for_sl`, `sweep_atr_buffer_multiplier`
 - strategy selection: `strategy_selection_mode` (`adaptive_top_n|all_enabled`), `max_active_strategies`
 - optional momentum nesting override: `momentum_diversification_override` (object, merged into strategy `adaptive.momentum_diversification` for this run only; supports single config and optional `sleeves[]` multi-sleeve layout)
-- intrabar execution realism: optional `intrabar_execution_recalc_1s` (defaults to auto-on when L2 is available)
+- intrabar execution realism:
+  - optional `trade_eval_mode` (`standard|intrabar_1s|intrabar_5s`) to select start-time trade evaluation path explicitly
+  - optional legacy `intrabar_execution_recalc_1s` (when `trade_eval_mode` is omitted, defaults to auto-on when L2 is available)
 - reset semantics: `comparable_mode`, `cold_start_each_day`, `checkpoint_path`, `auto_save_checkpoint`
 - strategy defaults behavior: `apply_ticker_overrides_on_start` (`true` keeps legacy runner-side override apply; `false` preserves manual FE strategy edits)
 - AOS sync behavior: `apply_aos_optimizations_on_start` (`true` applies remote strategy/AOS sync during start; `false` keeps local effective config only and skips slower remote fanout)
@@ -160,6 +162,7 @@ Important response fields:
 - `checkpoint_loaded`
 - `l2_applied` (effective L2 parameters and coverage stats)
 - `execution_config` (effective execution defaults)
+  - includes effective trade evaluation mode (`trade_eval_mode`) and intrabar checkpoint step (`intrabar_eval_step_seconds`)
   - includes effective `strategy_selection_mode` and `max_active_strategies`
   - includes `all_enabled_remote_sync` diagnostic payload when `strategy_selection_mode=all_enabled` (attempt/applied/strategy_count and sync status details)
   - includes `apply_aos_optimizations_on_start` (whether remote AOS sync was executed during start)
@@ -257,7 +260,7 @@ Purpose: Control progression of an initialized run.
 Compatibility notes:
 
 - playback contract assumes the same backend process retains active run state across requests.
-- `play` accepts body or query speed format (`max`, `10hz`, integer ms) and optional `trade_eval_mode` (`standard|intrabar_1s`) to switch execution evaluation path without restarting run.
+- `play` accepts body or query speed format (`max`, `10hz`, integer ms) and optional `trade_eval_mode` (`standard|intrabar_1s|intrabar_5s`) to switch execution evaluation path without restarting run.
 - `restart` rewinds the existing in-memory run to bar zero (no re-load of source bars), clears remote strategy session state for that run+ticker, and reapplies stored session config before replay.
 - marker/event ordering must remain stable for frontend playback.
 - `POST /api/run/cache/flush?include_disk=true|false` clears run-start caches (bars/reference/L2 enrichment); use when reclaiming memory or forcing re-read from source files.

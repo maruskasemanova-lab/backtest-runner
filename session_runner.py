@@ -1121,6 +1121,25 @@ class SessionRunner:
                 intrabar_eval_trace = api_response.get("intrabar_eval_trace")
                 if isinstance(intrabar_eval_trace, dict):
                     bar["intrabar_eval_trace"] = intrabar_eval_trace
+                if processed_bar_index <= 3:
+                    _has_quotes = bool(
+                        isinstance(api_response, dict)
+                        and isinstance(api_response.get("intrabar_eval_trace"), dict)
+                    )
+                    _cp_count = (
+                        len(intrabar_eval_trace.get("checkpoints", []))
+                        if isinstance(intrabar_eval_trace, dict)
+                        else 0
+                    )
+                    logger.warning(
+                        "[INTRABAR-DEBUG] bar=%s has_trace=%s checkpoints=%s "
+                        "has_layer_scores=%s warmup=%s",
+                        processed_bar_index,
+                        _has_quotes,
+                        _cp_count,
+                        isinstance(ls, dict),
+                        bool(result.get("warmup_only", False)),
+                    )
                 cd = None
                 pos = api_response.get("position_opened")
                 if isinstance(pos, dict):
@@ -1240,12 +1259,27 @@ class SessionRunner:
             if tcbbo_key in bar:
                 payload[tcbbo_key] = bar.get(tcbbo_key)
 
-        if self._should_attach_intrabar_quotes(
+        _should_attach = self._should_attach_intrabar_quotes(
             include_pending_entry=consume_pending_entry
-        ):
+        )
+        if not _should_attach and self.current_bar_index <= 3:
+            logger.warning(
+                "[INTRABAR-DEBUG] bar=%s should_attach=False "
+                "intrabar_recalc=%s l2_manager=%s",
+                self.current_bar_index,
+                getattr(self.config, "intrabar_execution_recalc_1s", "?"),
+                type(self.l2_manager).__name__ if self.l2_manager else None,
+            )
+        if _should_attach:
             intrabar_quotes = self._load_intrabar_quotes(timestamp)
             if intrabar_quotes:
                 payload["intrabar_quotes_1s"] = intrabar_quotes
+            elif self.current_bar_index <= 3:
+                logger.warning(
+                    "[INTRABAR-DEBUG] bar=%s quotes=None for %s",
+                    self.current_bar_index,
+                    timestamp,
+                )
 
         # Attach cross-asset reference bar if available
         ts_key = (

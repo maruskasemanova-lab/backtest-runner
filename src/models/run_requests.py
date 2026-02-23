@@ -187,6 +187,11 @@ class StartRunRequest(BaseModel):
     strategy_selection_mode: Optional[str] = None
     max_active_strategies: Optional[int] = None
     momentum_diversification_override: Optional[Dict[str, Any]] = None
+    # Optional start-time playback evaluation path:
+    # - "standard" => minute bars only
+    # - "intrabar_1s" => intrabar quotes at 1-second checkpoints
+    # - "intrabar_5s" => intrabar quotes at 5-second checkpoints
+    trade_eval_mode: Optional[str] = None
     intrabar_execution_recalc_1s: Optional[bool] = None
     cold_start_each_day: bool = False
     comparable_mode: bool = False

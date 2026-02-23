@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-23T07:46:03.052599+00:00",
+  "generated_at": "2026-02-23T15:47:44.006334+00:00",
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -61,8 +61,8 @@
           "path": "api_server.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/api_server.py",
           "exists": true,
-          "lines": 1510,
-          "last_commit": "577ee8a 2026-02-22",
+          "lines": 1511,
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -92,362 +92,362 @@
             {
               "kind": "function",
               "name": "_build_adaptive_tuner_deps",
-              "line": 456
+              "line": 457
             },
             {
               "kind": "function",
               "name": "_build_adaptive_tuner_worker_deps",
-              "line": 472
+              "line": 473
             },
             {
               "kind": "function",
               "name": "_build_adaptive_tuner_runtime_deps",
-              "line": 498
+              "line": 499
             },
             {
               "kind": "function",
               "name": "_build_adaptive_tuner_v2_deps",
-              "line": 519
+              "line": 520
             },
             {
               "kind": "function",
               "name": "_build_strategy_api_integration_deps",
-              "line": 537
+              "line": 538
             },
             {
               "kind": "function",
               "name": "_build_start_run_deps",
-              "line": 559
+              "line": 560
             },
             {
               "kind": "async_function",
               "name": "_run_startup_prewarm",
-              "line": 590
+              "line": 591
             },
             {
               "kind": "async_function",
               "name": "_app_lifespan",
-              "line": 631
+              "line": 632
             },
             {
               "kind": "function",
               "name": "_load_strategy_overrides",
-              "line": 669
+              "line": 670
             },
             {
               "kind": "function",
               "name": "_local_config_service",
-              "line": 673
+              "line": 674
             },
             {
               "kind": "function",
               "name": "_resolve_aos_config_path",
-              "line": 684
+              "line": 685
             },
             {
               "kind": "function",
               "name": "_load_aos_config",
-              "line": 690
+              "line": 691
             },
             {
               "kind": "function",
               "name": "_load_positioning_config",
-              "line": 696
+              "line": 697
             },
             {
               "kind": "function",
               "name": "_save_positioning_config",
-              "line": 702
+              "line": 703
             },
             {
               "kind": "function",
               "name": "_get_ticker_positioning_config",
-              "line": 711
+              "line": 712
             },
             {
               "kind": "function",
               "name": "_save_aos_config",
-              "line": 721
+              "line": 722
             },
             {
               "kind": "function",
               "name": "_create_isolated_tuner_aos_config",
-              "line": 728
+              "line": 729
             },
             {
               "kind": "function",
               "name": "_cleanup_isolated_tuner_aos_config",
-              "line": 742
+              "line": 743
             },
             {
               "kind": "async_function",
               "name": "_create_isolated_tuner_aos_config_locked",
-              "line": 756
+              "line": 757
             },
             {
               "kind": "function",
               "name": "_read_jsonl_tail",
-              "line": 763
+              "line": 764
             },
             {
               "kind": "function",
               "name": "_parse_utc_iso",
-              "line": 767
+              "line": 768
             },
             {
               "kind": "function",
               "name": "_discover_live_trader_runs",
-              "line": 771
+              "line": 772
             },
             {
               "kind": "function",
               "name": "_normalize_regime_strategy_map_sets",
-              "line": 795
+              "line": 796
             },
             {
               "kind": "function",
               "name": "_resolve_l2_tuning_dates",
-              "line": 810
+              "line": 811
             },
             {
               "kind": "function",
               "name": "_build_strategy_combo_profile_entry",
-              "line": 837
+              "line": 838
             },
             {
               "kind": "function",
               "name": "_build_unified_profile_options_payload",
-              "line": 853
+              "line": 854
             },
             {
               "kind": "async_function",
               "name": "_apply_strategy_overrides",
-              "line": 875
+              "line": 876
             },
             {
               "kind": "async_function",
               "name": "_fetch_remote_strategies",
-              "line": 883
+              "line": 884
             },
             {
               "kind": "async_function",
               "name": "_apply_strategy_param_map",
-              "line": 890
+              "line": 891
             },
             {
               "kind": "async_function",
               "name": "_apply_active_strategy_combo",
-              "line": 900
+              "line": 901
             },
             {
               "kind": "function",
               "name": "_extract_profile_runtime_overrides",
-              "line": 914
+              "line": 915
             },
             {
               "kind": "async_function",
               "name": "_apply_active_adaptive_tuner_profile",
-              "line": 921
+              "line": 922
             },
             {
               "kind": "async_function",
               "name": "_apply_global_trailing",
-              "line": 932
+              "line": 933
             },
             {
               "kind": "async_function",
               "name": "_apply_aos_optimizations",
-              "line": 945
+              "line": 946
             },
             {
               "kind": "async_function",
               "name": "_configure_session",
-              "line": 961
+              "line": 962
             },
             {
               "kind": "async_function",
               "name": "_clear_remote_strategy_sessions",
-              "line": 1051
+              "line": 1052
             },
             {
               "kind": "async_function",
               "name": "_reset_remote_orchestrator_state",
-              "line": 1064
+              "line": 1065
             },
             {
               "kind": "async_function",
               "name": "_reset_remote_orchestrator_state_scoped",
-              "line": 1071
+              "line": 1072
             },
             {
               "kind": "async_function",
               "name": "_apply_orchestrator_config",
-              "line": 1081
+              "line": 1082
             },
             {
               "kind": "async_function",
               "name": "_load_remote_checkpoint",
-              "line": 1092
+              "line": 1093
             },
             {
               "kind": "async_function",
               "name": "_save_remote_checkpoint",
-              "line": 1102
+              "line": 1103
             },
             {
               "kind": "function",
               "name": "_to_utc_datetime",
-              "line": 1119
+              "line": 1120
             },
             {
               "kind": "function",
               "name": "_build_l2_feature_map",
-              "line": 1123
+              "line": 1124
             },
             {
               "kind": "function",
               "name": "_attach_l2_features",
-              "line": 1135
+              "line": 1136
             },
             {
               "kind": "function",
               "name": "_normalize_l2_feature_map_for_market_day_sessions",
-              "line": 1147
+              "line": 1148
             },
             {
               "kind": "async_function",
               "name": "broadcast",
-              "line": 1209
+              "line": 1210
             },
             {
               "kind": "async_function",
               "name": "websocket_endpoint",
-              "line": 1215
+              "line": 1216
             },
             {
               "kind": "async_function",
               "name": "_evaluate_adaptive_tuner_candidate",
-              "line": 1226
+              "line": 1227
             },
             {
               "kind": "function",
               "name": "_build_v2_search_space",
-              "line": 1251
+              "line": 1252
             },
             {
               "kind": "function",
               "name": "_v2_candidate_key",
-              "line": 1262
+              "line": 1263
             },
             {
               "kind": "function",
               "name": "_build_v2_random_candidates",
-              "line": 1266
+              "line": 1267
             },
             {
               "kind": "function",
               "name": "_build_v2_candidate_config",
-              "line": 1282
+              "line": 1283
             },
             {
               "kind": "function",
               "name": "_prepare_tuner_trial_ticker_config",
-              "line": 1295
+              "line": 1296
             },
             {
               "kind": "async_function",
               "name": "_evaluate_v2_candidate",
-              "line": 1302
+              "line": 1303
             },
             {
               "kind": "function",
               "name": "_analyze_vectors",
-              "line": 1324
+              "line": 1325
             },
             {
               "kind": "async_function",
               "name": "_persist_tuner_result_to_primary_aos",
-              "line": 1336
+              "line": 1337
             },
             {
               "kind": "async_function",
               "name": "_run_v2_adaptive_tuner_job",
-              "line": 1356
+              "line": 1357
             },
             {
               "kind": "async_function",
               "name": "_run_adaptive_tuner_job",
-              "line": 1369
+              "line": 1370
             },
             {
               "kind": "async_function",
               "name": "get_live_trader_events",
-              "line": 1398
+              "line": 1399
             },
             {
               "kind": "async_function",
               "name": "get_live_trader_snapshot",
-              "line": 1413
+              "line": 1414
             },
             {
               "kind": "async_function",
               "name": "capture_strategy_combo",
-              "line": 1424
+              "line": 1425
             },
             {
               "kind": "async_function",
               "name": "capture_unified_profile",
-              "line": 1429
+              "line": 1430
             },
             {
               "kind": "async_function",
               "name": "apply_strategy_combo",
-              "line": 1434
+              "line": 1435
             },
             {
               "kind": "async_function",
               "name": "apply_unified_profile",
-              "line": 1439
+              "line": 1440
             },
             {
               "kind": "async_function",
               "name": "get_ticker_positioning_config",
-              "line": 1444
+              "line": 1445
             },
             {
               "kind": "async_function",
               "name": "apply_adaptive_tuner_profile",
-              "line": 1449
+              "line": 1450
             },
             {
               "kind": "async_function",
               "name": "run_adaptive_tuner",
-              "line": 1454
+              "line": 1455
             },
             {
               "kind": "async_function",
               "name": "start_run",
-              "line": 1465
+              "line": 1466
             },
             {
               "kind": "async_function",
               "name": "prewarm_run",
-              "line": 1476
+              "line": 1477
             },
             {
               "kind": "async_function",
               "name": "prewarm_status",
-              "line": 1481
+              "line": 1482
             },
             {
               "kind": "async_function",
               "name": "get_markers",
-              "line": 1486
+              "line": 1487
             },
             {
               "kind": "async_function",
               "name": "delete_run",
-              "line": 1495
+              "line": 1496
             }
           ],
           "routes": [
@@ -455,7 +455,7 @@
               "method": "WEBSOCKET",
               "path": "/ws/live",
               "handler": "websocket_endpoint",
-              "line": 1215
+              "line": 1216
             }
           ],
           "parse_error": null
@@ -465,7 +465,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/session_runner.py",
           "exists": true,
           "lines": 2297,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -491,7 +491,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/data_loader.py",
           "exists": true,
           "lines": 312,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -507,7 +507,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/available_data.py",
           "exists": true,
           "lines": 221,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -538,7 +538,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/decision_tracker.py",
           "exists": true,
           "lines": 499,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -564,7 +564,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/performance_tracker.py",
           "exists": true,
           "lines": 876,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -595,7 +595,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/context.py",
           "exists": true,
           "lines": 46,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -616,7 +616,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/system_routes.py",
           "exists": true,
           "lines": 1654,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -916,7 +916,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/l2_routes.py",
           "exists": true,
           "lines": 122,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "async_function",
@@ -955,7 +955,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/data_loader_routes.py",
           "exists": true,
           "lines": 289,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -1174,7 +1174,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/config_read_routes.py",
           "exists": true,
           "lines": 128,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "async_function",
@@ -1385,7 +1385,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/run_routes.py",
           "exists": true,
           "lines": 192,
-          "last_commit": "0452b19 2026-02-13",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "async_function",
@@ -1596,7 +1596,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/run_start_routes.py",
           "exists": true,
           "lines": 345,
-          "last_commit": "172e737 2026-02-16",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -1688,7 +1688,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/v2_routes.py",
           "exists": true,
           "lines": 2046,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -2221,8 +2221,8 @@
           "path": "src/models/run_requests.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/models/run_requests.py",
           "exists": true,
-          "lines": 249,
-          "last_commit": "577ee8a 2026-02-22",
+          "lines": 254,
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -2232,12 +2232,12 @@
             {
               "kind": "class",
               "name": "PrewarmRunRequest",
-              "line": 215
+              "line": 220
             },
             {
               "kind": "class",
               "name": "PlayRequest",
-              "line": 242
+              "line": 247
             }
           ],
           "routes": [],
@@ -2248,7 +2248,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/models/tuner_requests.py",
           "exists": true,
           "lines": 95,
-          "last_commit": "38387c6 2026-02-13",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -2264,7 +2264,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/security/auth.py",
           "exists": true,
           "lines": 279,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -2360,7 +2360,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/security/network_policy.py",
           "exists": true,
           "lines": 135,
-          "last_commit": "64555c1 2026-02-19",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -2426,7 +2426,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/observability/runtime_metrics.py",
           "exists": true,
           "lines": 74,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -2447,7 +2447,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/live_trader_service.py",
           "exists": true,
           "lines": 272,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -2519,7 +2519,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/config_write_service.py",
           "exists": true,
           "lines": 707,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -2594,98 +2594,98 @@
           "path": "src/services/run_control_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/run_control_service.py",
           "exists": true,
-          "lines": 425,
-          "last_commit": "b9accc6 2026-02-18",
+          "lines": 403,
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
               "name": "RunControlDeps",
-              "line": 13
+              "line": 19
             },
             {
               "kind": "function",
               "name": "_runner_date_label",
-              "line": 25
+              "line": 32
             },
             {
               "kind": "function",
               "name": "_runner_run_key",
-              "line": 36
+              "line": 43
             },
             {
               "kind": "async_function",
               "name": "_persist_runner_summary_to_store",
-              "line": 48
+              "line": 55
             },
             {
               "kind": "function",
               "name": "get_run_state",
-              "line": 67
+              "line": 74
             },
             {
               "kind": "async_function",
               "name": "step_run",
-              "line": 72
+              "line": 79
             },
             {
               "kind": "async_function",
               "name": "play_run",
-              "line": 77
+              "line": 84
             },
             {
               "kind": "function",
               "name": "pause_run",
-              "line": 248
+              "line": 226
             },
             {
               "kind": "function",
               "name": "resume_run",
-              "line": 254
+              "line": 232
             },
             {
               "kind": "function",
               "name": "stop_run",
-              "line": 260
+              "line": 238
             },
             {
               "kind": "async_function",
               "name": "restart_run",
-              "line": 266
+              "line": 244
             },
             {
               "kind": "function",
               "name": "get_processed_bars",
-              "line": 316
+              "line": 294
             },
             {
               "kind": "function",
               "name": "get_bar_details",
-              "line": 325
+              "line": 303
             },
             {
               "kind": "function",
               "name": "get_markers",
-              "line": 379
+              "line": 357
             },
             {
               "kind": "function",
               "name": "get_chart_annotations",
-              "line": 396
+              "line": 374
             },
             {
               "kind": "function",
               "name": "get_run_summary",
-              "line": 401
+              "line": 379
             },
             {
               "kind": "async_function",
               "name": "delete_run",
-              "line": 406
+              "line": 384
             },
             {
               "kind": "function",
               "name": "list_runs",
-              "line": 424
+              "line": 402
             }
           ],
           "routes": [],
@@ -2696,7 +2696,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/saas_service.py",
           "exists": true,
           "lines": 2041,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -2782,7 +2782,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_orchestration_service.py",
           "exists": true,
           "lines": 177,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -2813,7 +2813,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_worker_service.py",
           "exists": true,
           "lines": 672,
-          "last_commit": "da07c20 2026-02-12",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -2839,7 +2839,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_core_service.py",
           "exists": true,
           "lines": 533,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -2960,7 +2960,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_search_service.py",
           "exists": true,
           "lines": 280,
-          "last_commit": "0452b19 2026-02-13",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -3011,7 +3011,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_runtime_service.py",
           "exists": true,
           "lines": 508,
-          "last_commit": "172e737 2026-02-16",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -3042,7 +3042,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_v2_service.py",
           "exists": true,
           "lines": 1099,
-          "last_commit": "38387c6 2026-02-13",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -3088,7 +3088,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_types.py",
           "exists": true,
           "lines": 33,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -3104,7 +3104,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_updates_service.py",
           "exists": true,
           "lines": 253,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -3160,7 +3160,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_profiles_service.py",
           "exists": true,
           "lines": 933,
-          "last_commit": "48dafa5 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -3231,7 +3231,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_session_service.py",
           "exists": true,
           "lines": 452,
-          "last_commit": "57ad9f9 2026-02-19",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -3286,8 +3286,8 @@
           "path": "src/services/start_run_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_service.py",
           "exists": true,
-          "lines": 1221,
-          "last_commit": "577ee8a 2026-02-22",
+          "lines": 1229,
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -3427,12 +3427,12 @@
             {
               "kind": "async_function",
               "name": "prewarm_run_data",
-              "line": 966
+              "line": 974
             },
             {
               "kind": "async_function",
               "name": "get_prewarm_status",
-              "line": 1132
+              "line": 1140
             }
           ],
           "routes": [],
@@ -3443,7 +3443,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_data_service.py",
           "exists": true,
           "lines": 1584,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -3744,7 +3744,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_execution_config_service.py",
           "exists": true,
           "lines": 1552,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -3845,7 +3845,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_local_aos_service.py",
           "exists": true,
           "lines": 90,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -3876,7 +3876,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_bootstrap_phase_service.py",
           "exists": true,
           "lines": 275,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -3932,7 +3932,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_load_phase_service.py",
           "exists": true,
           "lines": 206,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -3962,28 +3962,28 @@
           "path": "src/services/start_run_session_phase_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_session_phase_service.py",
           "exists": true,
-          "lines": 116,
-          "last_commit": "26c3d9f 2026-02-21",
+          "lines": 131,
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
               "name": "SessionPhaseInputs",
-              "line": 9
+              "line": 11
             },
             {
               "kind": "class",
               "name": "SessionPhaseDeps",
-              "line": 24
+              "line": 26
             },
             {
               "kind": "class",
               "name": "SessionPhaseResult",
-              "line": 31
+              "line": 33
             },
             {
               "kind": "async_function",
               "name": "run_start_session_phase",
-              "line": 40
+              "line": 44
             }
           ],
           "routes": [],
@@ -3993,68 +3993,68 @@
           "path": "src/services/start_run_execution_payload_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_execution_payload_service.py",
           "exists": true,
-          "lines": 916,
-          "last_commit": "577ee8a 2026-02-22",
+          "lines": 924,
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
               "name": "ExecutionPayloadInputs",
-              "line": 8
+              "line": 10
             },
             {
               "kind": "class",
               "name": "ExecutionPayloadResult",
-              "line": 33
+              "line": 36
             },
             {
               "kind": "function",
               "name": "_build_l2_thresholds",
-              "line": 38
+              "line": 41
             },
             {
               "kind": "function",
               "name": "_build_core_execution_payload",
-              "line": 54
+              "line": 57
             },
             {
               "kind": "function",
               "name": "_build_runtime_execution_payload",
-              "line": 402
+              "line": 405
             },
             {
               "kind": "function",
               "name": "_build_intraday_levels_payload",
-              "line": 441
+              "line": 449
             },
             {
               "kind": "function",
               "name": "_build_context_risk_payload",
-              "line": 722
+              "line": 730
             },
             {
               "kind": "function",
               "name": "_resolve_include_extended_hours",
-              "line": 760
+              "line": 768
             },
             {
               "kind": "function",
               "name": "_apply_optional_execution_limits",
-              "line": 774
+              "line": 782
             },
             {
               "kind": "function",
               "name": "_apply_effective_profile_metadata",
-              "line": 802
+              "line": 810
             },
             {
               "kind": "function",
               "name": "_build_l2_applied_payload",
-              "line": 850
+              "line": 858
             },
             {
               "kind": "function",
               "name": "build_execution_payload",
-              "line": 869
+              "line": 877
             }
           ],
           "routes": [],
@@ -4064,8 +4064,8 @@
           "path": "src/services/start_run_runner_setup_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_runner_setup_service.py",
           "exists": true,
-          "lines": 363,
-          "last_commit": "577ee8a 2026-02-22",
+          "lines": 365,
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -4075,37 +4075,37 @@
             {
               "kind": "class",
               "name": "RunnerSetupDeps",
-              "line": 38
+              "line": 39
             },
             {
               "kind": "function",
               "name": "_register_runner_callbacks",
-              "line": 57
+              "line": 58
             },
             {
               "kind": "function",
               "name": "_apply_runner_runtime_metadata",
-              "line": 94
+              "line": 95
             },
             {
               "kind": "function",
               "name": "_load_chunk_payload",
-              "line": 138
+              "line": 139
             },
             {
               "kind": "function",
               "name": "_append_deduped_chunk_bars",
-              "line": 201
+              "line": 202
             },
             {
               "kind": "async_function",
               "name": "_append_remaining_chunks",
-              "line": 230
+              "line": 231
             },
             {
               "kind": "function",
               "name": "setup_runner_with_progressive_loading",
-              "line": 313
+              "line": 314
             }
           ],
           "routes": [],
@@ -4116,7 +4116,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/execution_config/helpers.py",
           "exists": true,
           "lines": 310,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -4177,7 +4177,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/execution_config/intraday_context.py",
           "exists": true,
           "lines": 466,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -4218,7 +4218,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/config_io.py",
           "exists": true,
           "lines": 29,
-          "last_commit": "64da33c 2026-02-10",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -4239,7 +4239,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/system_settings.py",
           "exists": true,
           "lines": 179,
-          "last_commit": "baf7110 2026-02-07",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -4265,7 +4265,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/databento_service.py",
           "exists": true,
           "lines": 1848,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -4331,7 +4331,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/api_server.py",
           "exists": true,
           "lines": 1632,
-          "last_commit": "19dba61 2026-02-22",
+          "last_commit": "1afd61e 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -4800,13 +4800,13 @@
           "path": "../market_regime_detection/src/day_trading_manager.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/day_trading_manager.py",
           "exists": true,
-          "lines": 1718,
-          "last_commit": "19dba61 2026-02-22",
+          "lines": 1646,
+          "last_commit": "1afd61e 2026-02-23",
           "symbols": [
             {
               "kind": "class",
               "name": "DayTradingManager",
-              "line": 68
+              "line": 70
             }
           ],
           "routes": [],
@@ -4984,8 +4984,8 @@
           "path": "../market_regime_detection/src/feature_store.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/feature_store.py",
           "exists": true,
-          "lines": 900,
-          "last_commit": "caaa48e 2026-02-16",
+          "lines": 911,
+          "last_commit": "1afd61e 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5011,7 +5011,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/ensemble_combiner.py",
           "exists": true,
           "lines": 461,
-          "last_commit": "19dba61 2026-02-22",
+          "last_commit": "1afd61e 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5163,8 +5163,8 @@
           "path": "../market_regime_detection/src/adaptive_regime.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/adaptive_regime.py",
           "exists": true,
-          "lines": 417,
-          "last_commit": "cf2281d 2026-02-08",
+          "lines": 409,
+          "last_commit": "1afd61e 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5221,7 +5221,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/evidence_decision.py",
           "exists": true,
           "lines": 529,
-          "last_commit": "19dba61 2026-02-22",
+          "last_commit": "1afd61e 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5404,7 +5404,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/l2_data_manager.py",
           "exists": true,
           "lines": 1114,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5420,7 +5420,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/l2_feature_service.py",
           "exists": true,
           "lines": 227,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5436,7 +5436,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/order_flow_engine.py",
           "exists": true,
           "lines": 449,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5456,8 +5456,8 @@
           "path": "src/intrabar_frame_builder.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/intrabar_frame_builder.py",
           "exists": true,
-          "lines": 331,
-          "last_commit": "577ee8a 2026-02-22",
+          "lines": 358,
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5473,7 +5473,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/l2_feature_aggregator.py",
           "exists": true,
           "lines": 254,
-          "last_commit": "172e737 2026-02-16",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5494,7 +5494,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/databento_service.py",
           "exists": true,
           "lines": 1848,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5520,7 +5520,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/scripts/download_l2_data.py",
           "exists": true,
           "lines": 63,
-          "last_commit": "583f2bc 2026-02-06",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -5530,7 +5530,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/scripts/convert_l2_to_parquet.py",
           "exists": true,
           "lines": 45,
-          "last_commit": "583f2bc 2026-02-06",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -5546,7 +5546,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/scripts/verify_l2_data.py",
           "exists": true,
           "lines": 31,
-          "last_commit": "583f2bc 2026-02-06",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -5599,7 +5599,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/wfo_optimizer.py",
           "exists": true,
           "lines": 911,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -5690,7 +5690,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/walk_forward_runner.py",
           "exists": true,
           "lines": 526,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5721,7 +5721,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/performance_tracker.py",
           "exists": true,
           "lines": 876,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5752,7 +5752,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/oos_validator.py",
           "exists": true,
           "lines": 223,
-          "last_commit": "13f270b 2026-02-06",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5793,7 +5793,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/monte_carlo.py",
           "exists": true,
           "lines": 193,
-          "last_commit": "64da33c 2026-02-10",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -5839,7 +5839,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/tuning_runner.py",
           "exists": true,
           "lines": 359,
-          "last_commit": "583f2bc 2026-02-06",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "function",
@@ -5915,7 +5915,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/aos_walk_forward.py",
           "exists": true,
           "lines": 633,
-          "last_commit": "13f270b 2026-02-06",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5946,7 +5946,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/aos_optimizer.py",
           "exists": true,
           "lines": 422,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -5972,7 +5972,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/run_strategy_test.py",
           "exists": true,
           "lines": 622,
-          "last_commit": "97ee653 2026-02-08",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -6003,7 +6003,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/batch_runner.py",
           "exists": true,
           "lines": 208,
-          "last_commit": "36d343c 2026-02-03",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
               "kind": "class",
@@ -6068,8 +6068,8 @@
           "path": "frontend/src/App.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/App.tsx",
           "exists": true,
-          "lines": 2358,
-          "last_commit": "577ee8a 2026-02-22",
+          "lines": 2387,
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6089,7 +6089,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/CandlestickChart.tsx",
           "exists": true,
           "lines": 839,
-          "last_commit": "577ee8a 2026-02-22",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6099,7 +6099,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/DecisionPanel.tsx",
           "exists": true,
           "lines": 3055,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6109,7 +6109,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/SessionSummary.tsx",
           "exists": true,
           "lines": 165,
-          "last_commit": "64555c1 2026-02-19",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6119,7 +6119,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/RunConfig.tsx",
           "exists": true,
           "lines": 299,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6159,7 +6159,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/DiagnosticCalendar.tsx",
           "exists": true,
           "lines": 1262,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6169,7 +6169,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/StrategySettings.tsx",
           "exists": true,
           "lines": 928,
-          "last_commit": "26c3d9f 2026-02-21",
+          "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6844,7 +6844,7 @@
       "method": "WEBSOCKET",
       "path": "/ws/live",
       "handler": "websocket_endpoint",
-      "line": 1215
+      "line": 1216
     },
     {
       "domain": "strategy-engine",

@@ -1,10 +1,19 @@
 {
   "mcpServers": {
     "axon": {
-      "command": "/Users/hotovo/.local/bin/axon",
+      "command": "/Users/hotovo/.local/bin/axon-backtest",
       "args": [
         "serve",
         "--watch"
+      ]
+    },
+    "python-refactoring": {
+      "command": "/Users/hotovo/.local/bin/uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/slamer59/mcp-python-refactoring.git",
+        "python-refactor",
+        "server"
       ]
     }
   }

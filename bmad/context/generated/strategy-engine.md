@@ -21,19 +21,19 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 1632 | `19dba61 2026-02-22` |
+| `../market_regime_detection/api_server.py` | yes | 1632 | `1afd61e 2026-02-23` |
 | `../market_regime_detection/src/api_models.py` | yes | 229 | `19dba61 2026-02-22` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 1718 | `19dba61 2026-02-22` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 1646 | `1afd61e 2026-02-23` |
 | `../market_regime_detection/src/intraday_levels.py` | yes | 1342 | `a415569 2026-02-19` |
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 41 | `19dba61 2026-02-22` |
 | `../market_regime_detection/src/trading_orchestrator.py` | yes | 462 | `19dba61 2026-02-22` |
-| `../market_regime_detection/src/feature_store.py` | yes | 900 | `caaa48e 2026-02-16` |
-| `../market_regime_detection/src/ensemble_combiner.py` | yes | 461 | `19dba61 2026-02-22` |
+| `../market_regime_detection/src/feature_store.py` | yes | 911 | `1afd61e 2026-02-23` |
+| `../market_regime_detection/src/ensemble_combiner.py` | yes | 461 | `1afd61e 2026-02-23` |
 | `../market_regime_detection/src/edge_monitor.py` | yes | 364 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/checkpoint.py` | yes | 284 | `d33cc78 2026-02-07` |
-| `../market_regime_detection/src/adaptive_regime.py` | yes | 417 | `cf2281d 2026-02-08` |
+| `../market_regime_detection/src/adaptive_regime.py` | yes | 409 | `1afd61e 2026-02-23` |
 | `../market_regime_detection/src/position_sizing.py` | yes | 145 | `d33cc78 2026-02-07` |
-| `../market_regime_detection/src/evidence_decision.py` | yes | 529 | `19dba61 2026-02-22` |
+| `../market_regime_detection/src/evidence_decision.py` | yes | 529 | `1afd61e 2026-02-23` |
 | `../market_regime_detection/src/strategy_factory.py` | yes | 38 | `caaa48e 2026-02-16` |
 | `../market_regime_detection/src/strategies/base_strategy.py` | yes | 561 | `f7e8133 2026-02-19` |
 | `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 176 | `a415569 2026-02-19` |
@@ -94,7 +94,7 @@ Own regime detection, signal generation, position management, learning component
 - `class` `TradingConfig` (line 87)
 
 ### `../market_regime_detection/src/day_trading_manager.py`
-- `class` `DayTradingManager` (line 68)
+- `class` `DayTradingManager` (line 70)
 
 ### `../market_regime_detection/src/intraday_levels.py`
 - `function` `_to_float` (line 8)

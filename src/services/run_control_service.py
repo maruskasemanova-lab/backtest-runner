@@ -8,6 +8,12 @@ from typing import Any, Awaitable, Dict, Optional, Union
 
 from fastapi import HTTPException, Request
 
+from src.services.trade_eval_mode_service import (
+    normalize_trade_eval_mode,
+    resolve_trade_eval_mode_from_settings,
+    resolve_trade_eval_settings,
+)
+
 
 @dataclass
 class RunControlDeps:
@@ -20,6 +26,7 @@ class RunControlDeps:
     clear_remote_strategy_sessions: Any
     configure_session: Any
     run_reports_store: Optional[Any] = None
+    l2_manager: Optional[Any] = None
 
 
 def _runner_date_label(runner: Any) -> str:
@@ -87,24 +94,33 @@ async def play_run(
     _, runner = deps.run_registry.require(run_id, ticker, date)
 
     def _set_trade_eval_mode(mode: str) -> None:
-        normalized = str(mode or "").strip().lower()
-        if normalized == "standard":
-            runner.config.intrabar_execution_recalc_1s = False
-            runner.config.intrabar_eval_step_seconds = 1
-            return
-        runner.config.intrabar_execution_recalc_1s = True
-        runner.config.intrabar_eval_step_seconds = (
-            5 if normalized == "intrabar_5s" else 1
+        _, intrabar_enabled, step_seconds = resolve_trade_eval_settings(
+            requested_mode=mode,
+            fallback_intrabar_enabled=bool(
+                getattr(runner.config, "intrabar_execution_recalc_1s", False)
+            ),
+            fallback_intrabar_eval_step_seconds=getattr(
+                runner.config, "intrabar_eval_step_seconds", 1
+            ),
         )
+        runner.config.intrabar_execution_recalc_1s = intrabar_enabled
+        runner.config.intrabar_eval_step_seconds = step_seconds
+        # Ensure L2 manager is attached when switching to intrabar mode at
+        # play-time (the runner may have been created without it if the
+        # original start request did not request intrabar evaluation).
+        if intrabar_enabled and getattr(runner, "l2_manager", None) is None:
+            if deps.l2_manager is not None:
+                runner.l2_manager = deps.l2_manager
 
     def _effective_trade_eval_mode() -> str:
-        if not bool(getattr(runner.config, "intrabar_execution_recalc_1s", False)):
-            return "standard"
-        try:
-            step = int(getattr(runner.config, "intrabar_eval_step_seconds", 1))
-        except (TypeError, ValueError):
-            step = 1
-        return "intrabar_5s" if step >= 5 else "intrabar_1s"
+        return resolve_trade_eval_mode_from_settings(
+            intrabar_enabled=bool(
+                getattr(runner.config, "intrabar_execution_recalc_1s", False)
+            ),
+            intrabar_eval_step_seconds=getattr(
+                runner.config, "intrabar_eval_step_seconds", 1
+            ),
+        )
 
     payload: Optional[Dict[str, Any]] = None
     if raw_request is not None:
@@ -132,45 +148,7 @@ async def play_run(
     if raw_trade_mode is None and payload is not None:
         raw_trade_mode = payload.get("trade_eval_mode")
 
-    normalized_trade_mode: Optional[str] = None
-    if isinstance(raw_trade_mode, bool):
-        normalized_trade_mode = "intrabar_1s" if raw_trade_mode else "standard"
-    elif isinstance(raw_trade_mode, str):
-        normalized = raw_trade_mode.strip().lower()
-        if normalized in {
-            "standard",
-            "bar",
-            "bars",
-            "fast",
-            "default",
-            "minute",
-            "false",
-            "0",
-            "off",
-        }:
-            normalized_trade_mode = "standard"
-        elif normalized in {
-            "intrabar_5s",
-            "intrabar-5s",
-            "intrabar5s",
-            "5s",
-            "5sec",
-            "5secs",
-            "5second",
-            "5seconds",
-        }:
-            normalized_trade_mode = "intrabar_5s"
-        elif normalized in {
-            "intrabar_1s",
-            "intrabar",
-            "1s",
-            "second",
-            "seconds",
-            "true",
-            "1",
-            "on",
-        }:
-            normalized_trade_mode = "intrabar_1s"
+    normalized_trade_mode = normalize_trade_eval_mode(raw_trade_mode)
 
     if normalized_trade_mode is not None:
         _set_trade_eval_mode(normalized_trade_mode)

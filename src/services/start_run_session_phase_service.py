@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from src.services.trade_eval_mode_service import resolve_trade_eval_settings
+
 
 @dataclass(frozen=True)
 class SessionPhaseInputs:
@@ -33,7 +35,9 @@ class SessionPhaseResult:
     effective_max_active_strategies: int
     all_enabled_remote_sync: Optional[Dict[str, Any]]
     effective_l2_confirm: bool
+    effective_trade_eval_mode: str
     effective_intrabar_execution_recalc_1s: bool
+    effective_intrabar_eval_step_seconds: int
     session_config_snapshot: Dict[str, Any]
 
 
@@ -71,10 +75,19 @@ async def run_start_session_phase(
     effective_l2_confirm = bool(
         inputs.requested_l2_confirm and inputs.l2_stats.get("has_l2")
     )
-    effective_intrabar_execution_recalc_1s = (
+    fallback_intrabar_execution = (
         bool(inputs.request.intrabar_execution_recalc_1s)
         if inputs.request.intrabar_execution_recalc_1s is not None
         else bool(inputs.use_l2 and inputs.l2_stats.get("has_l2"))
+    )
+    (
+        effective_trade_eval_mode,
+        effective_intrabar_execution_recalc_1s,
+        effective_intrabar_eval_step_seconds,
+    ) = resolve_trade_eval_settings(
+        requested_mode=getattr(inputs.request, "trade_eval_mode", None),
+        fallback_intrabar_enabled=fallback_intrabar_execution,
+        fallback_intrabar_eval_step_seconds=1,
     )
 
     session_config_snapshot = dict(inputs.execution_cfg.get("trading_config", {}))
@@ -111,6 +124,8 @@ async def run_start_session_phase(
         effective_max_active_strategies=effective_max_active_strategies,
         all_enabled_remote_sync=all_enabled_remote_sync,
         effective_l2_confirm=effective_l2_confirm,
+        effective_trade_eval_mode=effective_trade_eval_mode,
         effective_intrabar_execution_recalc_1s=effective_intrabar_execution_recalc_1s,
+        effective_intrabar_eval_step_seconds=effective_intrabar_eval_step_seconds,
         session_config_snapshot=session_config_snapshot,
     )

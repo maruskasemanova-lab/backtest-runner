@@ -27,6 +27,7 @@ class RunnerSetupInputs:
     ref_bars_map: Dict[str, Any]
     session_config_snapshot: Dict[str, Any]
     effective_intrabar_execution_recalc_1s: bool
+    effective_intrabar_eval_step_seconds: int
     checkpoint_loaded: Any
     progressive_plan: Optional[Dict[str, Any]]
     aos_applied: Dict[str, Any]
@@ -329,6 +330,7 @@ def setup_runner_with_progressive_loading(
         account_size_usd=inputs.request.account_size_usd,
         regime_detection_minutes=inputs.request.regime_detection_minutes,
         intrabar_execution_recalc_1s=inputs.effective_intrabar_execution_recalc_1s,
+        intrabar_eval_step_seconds=inputs.effective_intrabar_eval_step_seconds,
     )
 
     runner = deps.session_runner_cls(config)

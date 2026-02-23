@@ -3,7 +3,9 @@ import {
   START_MODE_FAST_RESTART,
   START_MODE_RESUME_WARM_START,
   START_MODE_OPTIONS,
+  TRADE_EVAL_MODE_OPTIONS,
   normalizeStartMode,
+  normalizeTradeEvalMode,
   formatStartTimingMs,
   formatStartTimingPhaseLabel,
 } from "./runConfigHelpers";
@@ -98,6 +100,34 @@ export function StartModeSettings({
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="trade_eval_mode">Trade Evaluation Mode</label>
+          <select
+            id="trade_eval_mode"
+            value={normalizeTradeEvalMode(config.trade_eval_mode)}
+            onChange={(e) =>
+              handleChange(
+                "trade_eval_mode",
+                normalizeTradeEvalMode(e.target.value),
+              )
+            }
+          >
+            {TRADE_EVAL_MODE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <div className="preset-copy">
+            {
+              TRADE_EVAL_MODE_OPTIONS.find(
+                (option) =>
+                  option.value === normalizeTradeEvalMode(config.trade_eval_mode),
+              )?.hint
+            }
+          </div>
         </div>
 
         <div className="preset-copy">

@@ -11,6 +11,7 @@ import {
   resolveFixedStopLossPct,
   buildNormalizedIntradayLevels,
   buildNormalizedContextRisk,
+  normalizeTradeEvalMode,
   ACTIVE_UNIFIED_PROFILE_SENTINEL,
   MU_SCALP_PROFILE_ID,
   RUN_ID_COLLISION_PATTERN,
@@ -83,6 +84,7 @@ export const useRunConfigStartHandler = ({
         const fixedStopLossPct = resolveFixedStopLossPct(stopLossMode, config.fixed_stop_loss_pct);
         const normalizedIntradayLevels = buildNormalizedIntradayLevels(config);
         const normalizedContextRisk = buildNormalizedContextRisk(config);
+        const tradeEvalMode = normalizeTradeEvalMode(config.trade_eval_mode);
         let unifiedProfileChanged = false;
         let unifiedAppliedProfileId = "";
         if (config.ticker) {
@@ -159,6 +161,7 @@ export const useRunConfigStartHandler = ({
           l2_min_directional_consistency: Number(config.l2_min_directional_consistency),
           l2_min_signed_aggression: Number(config.l2_min_signed_aggression),
           l2_lookback_bars: Number(config.l2_lookback_bars),
+          trade_eval_mode: tradeEvalMode,
           ...normalizedIntradayLevels,
           ...normalizedContextRisk,
           comparable_mode: runtimeStartMode.comparableMode,
@@ -183,7 +186,7 @@ export const useRunConfigStartHandler = ({
         if (unifiedAppliedProfileId === MU_SCALP_PROFILE_ID) {
           payload.strategy_selection_mode = "all_enabled";
           payload.max_active_strategies = 1;
-          payload.intrabar_execution_recalc_1s = true;
+          payload.trade_eval_mode = "intrabar_1s";
         }
         if (startMode === START_MODE_RESUME_WARM_START && !payload.checkpoint_path) {
           console.info("Resume mode selected but no checkpoint specified, proceeding without load.");

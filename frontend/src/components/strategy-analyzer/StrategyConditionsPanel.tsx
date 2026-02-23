@@ -332,6 +332,73 @@ function RejectionDetail({ d }: { d: any }) {
     );
   }
 
+  if (gate === "threshold" || gate === "cross_asset_headwind") {
+    const score = safeNum(d.combined_score) ?? safeNum(d.combined_norm_0_100);
+    const thr = safeNum(d.threshold_used) ?? safeNum(d.trade_gate_threshold);
+    const stratScore = safeNum(d.strategy_score);
+    const reasoning = typeof d.reasoning === "string" ? d.reasoning : null;
+    const todBoost = safeNum(d.tod_threshold_boost);
+    const hwBoost = safeNum(d.headwind_threshold_boost);
+    const thrReason = typeof d.threshold_used_reason === "string" ? d.threshold_used_reason : null;
+    const isHeadwind = gate === "cross_asset_headwind";
+
+    const scorePct = (score != null && thr != null && thr > 0) ? Math.min(100, (score / thr) * 100) : null;
+    const gap = (score != null && thr != null) ? thr - score : null;
+
+    return (
+      <div style={{ marginTop: 3 }}>
+        {/* score vs threshold bar */}
+        {score != null && thr != null && (
+          <div style={{ marginBottom: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.55rem", marginBottom: 1 }}>
+              <span style={{ color: "var(--text-secondary)" }}>
+                {isHeadwind ? "Score (headwind adjusted)" : "Combined score"}
+              </span>
+              <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: "var(--accent-red, #ef4444)" }}>
+                {score.toFixed(1)} / {thr.toFixed(0)} req
+                {gap != null && gap > 0 && <span style={{ opacity: 0.7 }}> ({gap.toFixed(1)} short)</span>}
+              </span>
+            </div>
+            <div style={{ position: "relative", height: 5, borderRadius: 3, background: "var(--bg-tertiary, rgba(255,255,255,0.06))", overflow: "visible" }}>
+              <div style={{
+                height: "100%",
+                width: `${scorePct ?? 0}%`,
+                borderRadius: 3,
+                background: "var(--accent-red, #ef4444)",
+                opacity: 0.8,
+                transition: "width 0.08s ease-out",
+              }} />
+              <div style={{ position: "absolute", top: -1, bottom: -1, left: "100%", width: 1.5, background: "var(--text-muted, #888)", borderRadius: 1, opacity: 0.5 }} title={`Threshold: ${thr}`} />
+            </div>
+          </div>
+        )}
+        {/* threshold breakdown */}
+        <div style={{ display: "flex", gap: 3, flexWrap: "wrap", fontSize: "0.52rem", color: "var(--text-muted)", marginBottom: 2 }}>
+          {stratScore != null && (
+            <span>Strategy: {stratScore.toFixed(1)}</span>
+          )}
+          {todBoost != null && todBoost !== 0 && (
+            <span style={{ color: todBoost > 0 ? "var(--accent-red, #ef4444)" : "var(--accent-green, #22c55e)" }}>
+              ToD {todBoost > 0 ? "+" : ""}{todBoost.toFixed(0)}
+            </span>
+          )}
+          {hwBoost != null && hwBoost !== 0 && (
+            <span style={{ color: "var(--accent-red, #ef4444)" }}>
+              HW +{hwBoost.toFixed(1)}
+            </span>
+          )}
+          {thrReason && <span style={{ fontStyle: "italic" }}>{thrReason}</span>}
+        </div>
+        {/* reasoning */}
+        {reasoning && (
+          <div style={{ fontSize: "0.52rem", color: "var(--text-muted)", fontStyle: "italic", lineHeight: 1.4, marginTop: 2 }}>
+            {reasoning}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const fallbackParts: string[] = [];
   if (strategy) fallbackParts.push(strategy);
   if (typeof d.reason === "string") fallbackParts.push(d.reason);

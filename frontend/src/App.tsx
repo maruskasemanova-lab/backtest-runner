@@ -274,6 +274,38 @@ const buildEffectiveExecutionConfigSnapshot = (payload) => {
   return Object.keys(executionConfig).length ? executionConfig : null;
 };
 
+const resolveTradeModeFromExecutionConfig = (
+  executionConfig,
+  fallbackMode = 'standard',
+) => {
+  const fallback =
+    fallbackMode === 'intrabar_5s' ||
+    fallbackMode === 'intrabar_1s' ||
+    fallbackMode === 'standard'
+      ? fallbackMode
+      : 'standard';
+  if (!executionConfig || typeof executionConfig !== 'object') return fallback;
+
+  const explicitMode = String(executionConfig.trade_eval_mode || '')
+    .trim()
+    .toLowerCase();
+  if (
+    explicitMode === 'intrabar_5s' ||
+    explicitMode === 'intrabar_1s' ||
+    explicitMode === 'standard'
+  ) {
+    return explicitMode;
+  }
+
+  if (typeof executionConfig.intrabar_execution_recalc_1s === 'boolean') {
+    if (!executionConfig.intrabar_execution_recalc_1s) return 'standard';
+    const step = Number(executionConfig.intrabar_eval_step_seconds || 1);
+    return Number.isFinite(step) && step >= 5 ? 'intrabar_5s' : 'intrabar_1s';
+  }
+
+  return fallback;
+};
+
 const toChartBar = (bar) => {
   if (!bar || typeof bar !== 'object') return null;
   const time = toUnixSeconds(bar.timestamp ?? bar.time);
@@ -320,6 +352,15 @@ const toChartBar = (bar) => {
     typeof nestedAnalysis?.warmup_only === 'boolean' ? nestedAnalysis.warmup_only : undefined;
   const nestedBarIndex = nestedAnalysis?.bar_index;
 
+  const resolvedWarmupOnly =
+    typeof bar.warmup_only === 'boolean'
+      ? bar.warmup_only
+      : nestedWarmupOnly;
+  const resolvedBarIndex =
+    Number.isFinite(Number(bar.bar_index))
+      ? Number(bar.bar_index)
+      : (Number.isFinite(Number(nestedBarIndex)) ? Number(nestedBarIndex) : undefined);
+
   return {
     time,
     open,
@@ -327,6 +368,8 @@ const toChartBar = (bar) => {
     low,
     close,
     volume: Number.isFinite(volume) ? volume : 0,
+    ...(typeof resolvedWarmupOnly === 'boolean' ? { warmup_only: resolvedWarmupOnly } : {}),
+    ...(resolvedBarIndex !== undefined ? { bar_index: resolvedBarIndex } : {}),
     // Preserve runtime analysis payload on streamed bars so analyzer can scrub
     // historical conditions bar-by-bar without changing chart rendering logic.
     ...(layerScores
@@ -335,14 +378,6 @@ const toChartBar = (bar) => {
           signal_rejected: signalRejected,
           candidate_diagnostics: candidateDiagnostics,
           intrabar_eval_trace: intrabarEvalTrace || undefined,
-          warmup_only:
-            typeof bar.warmup_only === 'boolean'
-              ? bar.warmup_only
-              : nestedWarmupOnly,
-          bar_index:
-            Number.isFinite(Number(bar.bar_index))
-              ? Number(bar.bar_index)
-              : (Number.isFinite(Number(nestedBarIndex)) ? Number(nestedBarIndex) : undefined),
           timestamp: typeof bar.timestamp === 'string' ? bar.timestamp : undefined,
           ...(nestedAnalysis ? { analysis: nestedAnalysis } : {}),
         }
@@ -707,12 +742,9 @@ function App() {
       });
       setSelectedTicker(parsed.ticker || null);
       setIsPlaying(Boolean(statePayload?.is_running && !statePayload?.is_paused));
-      if (typeof nextExecutionConfig?.intrabar_execution_recalc_1s === 'boolean') {
-        setTradeEvaluationMode((prev) => {
-          if (!nextExecutionConfig.intrabar_execution_recalc_1s) return 'standard';
-          return prev === 'intrabar_5s' ? 'intrabar_5s' : 'intrabar_1s';
-        });
-      }
+      setTradeEvaluationMode((prev) =>
+        resolveTradeModeFromExecutionConfig(nextExecutionConfig, prev),
+      );
       return true;
     } catch (error) {
       console.error('Snapshot reload failed:', error);
@@ -1293,12 +1325,9 @@ function App() {
       fetchActiveRuns().catch(() => null);
       const nextExecutionConfig = buildEffectiveExecutionConfigSnapshot(data);
       setEffectiveExecutionConfig(nextExecutionConfig);
-      if (typeof nextExecutionConfig?.intrabar_execution_recalc_1s === 'boolean') {
-        setTradeEvaluationMode((prev) => {
-          if (!nextExecutionConfig.intrabar_execution_recalc_1s) return 'standard';
-          return prev === 'intrabar_5s' ? 'intrabar_5s' : 'intrabar_1s';
-        });
-      }
+      setTradeEvaluationMode((prev) =>
+        resolveTradeModeFromExecutionConfig(nextExecutionConfig, prev),
+      );
       
       // Reset state
       setChartState(null);

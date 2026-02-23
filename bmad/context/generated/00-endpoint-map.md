@@ -84,7 +84,7 @@ Generated from mapped Python files in `component-map.json`.
 | `orchestration` | `PUT` | `/api/data-loader/api-key` | `set_databento_api_key` | `src/routes/data_loader_routes.py` | 150 |
 | `orchestration` | `PUT` | `/api/data-loader/settings` | `update_data_loader_settings` | `src/routes/data_loader_routes.py` | 132 |
 | `orchestration` | `PUT` | `/user/settings` | `v2_upsert_user_settings` | `src/routes/v2_routes.py` | 1133 |
-| `orchestration` | `WEBSOCKET` | `/ws/live` | `websocket_endpoint` | `api_server.py` | 1215 |
+| `orchestration` | `WEBSOCKET` | `/ws/live` | `websocket_endpoint` | `api_server.py` | 1216 |
 | `strategy-engine` | `DELETE` | `/api/session` | `clear_session` | `../market_regime_detection/api_server.py` | 642 |
 | `strategy-engine` | `DELETE` | `/api/session/run` | `clear_run_sessions` | `../market_regime_detection/api_server.py` | 653 |
 | `strategy-engine` | `GET` | `/` | `root` | `../market_regime_detection/api_server.py` | 169 |

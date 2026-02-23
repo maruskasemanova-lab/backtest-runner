@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "axon": {
+      "command": "/Users/hotovo/.local/bin/axon-backtest",
+      "args": [
+        "serve",
+        "--watch"
+      ]
+    }
+  }
+}

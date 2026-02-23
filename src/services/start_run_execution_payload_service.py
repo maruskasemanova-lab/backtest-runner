@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
+from src.services.trade_eval_mode_service import resolve_trade_eval_mode_from_settings
+
 
 @dataclass(frozen=True)
 class ExecutionPayloadInputs:
@@ -12,6 +14,7 @@ class ExecutionPayloadInputs:
     momentum_diversification_source: str
     effective_momentum_diversification: Optional[Dict[str, Any]]
     effective_intrabar_execution_recalc_1s: bool
+    effective_intrabar_eval_step_seconds: int
     effective_cold_start_each_day: bool
     comparable_mode: bool
     effective_reset_scope: str
@@ -420,6 +423,11 @@ def _build_runtime_execution_payload(inputs: ExecutionPayloadInputs) -> Dict[str
             inputs.execution_cfg.get("regime_refresh_bars_source", "default")
         ),
         "intrabar_execution_recalc_1s": inputs.effective_intrabar_execution_recalc_1s,
+        "intrabar_eval_step_seconds": int(inputs.effective_intrabar_eval_step_seconds),
+        "trade_eval_mode": resolve_trade_eval_mode_from_settings(
+            intrabar_enabled=inputs.effective_intrabar_execution_recalc_1s,
+            intrabar_eval_step_seconds=inputs.effective_intrabar_eval_step_seconds,
+        ),
         "cold_start_each_day": inputs.effective_cold_start_each_day,
         "comparable_mode": inputs.comparable_mode,
         "orchestrator_reset_scope": inputs.effective_reset_scope,

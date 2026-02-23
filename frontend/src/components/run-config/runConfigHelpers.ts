@@ -84,9 +84,43 @@ export const START_MODE_LABELS = {
   [START_MODE_DAY_ISOLATED_AUDIT]: "Day-Isolated Audit",
 };
 
+export const TRADE_EVAL_MODE_STANDARD = "standard";
+export const TRADE_EVAL_MODE_INTRABAR_1S = "intrabar_1s";
+export const TRADE_EVAL_MODE_INTRABAR_5S = "intrabar_5s";
+export const TRADE_EVAL_MODE_VALUES = new Set([
+  TRADE_EVAL_MODE_STANDARD,
+  TRADE_EVAL_MODE_INTRABAR_1S,
+  TRADE_EVAL_MODE_INTRABAR_5S,
+]);
+export const TRADE_EVAL_MODE_OPTIONS = [
+  {
+    value: TRADE_EVAL_MODE_STANDARD,
+    label: "Fast (bar)",
+    hint: "Minute-bar evaluation only.",
+  },
+  {
+    value: TRADE_EVAL_MODE_INTRABAR_5S,
+    label: "Intrabar 5s",
+    hint: "Intrabar evaluation sampled each 5 seconds.",
+  },
+  {
+    value: TRADE_EVAL_MODE_INTRABAR_1S,
+    label: "Intrabar 1s",
+    hint: "Full 1-second intrabar evaluation.",
+  },
+];
+
 export const normalizeStartMode = (value, fallback = START_MODE_FAST_RESTART) => {
   const normalized = String(value || "").trim().toLowerCase();
   return START_MODE_VALUES.has(normalized) ? normalized : fallback;
+};
+
+export const normalizeTradeEvalMode = (
+  value,
+  fallback = TRADE_EVAL_MODE_STANDARD,
+) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return TRADE_EVAL_MODE_VALUES.has(normalized) ? normalized : fallback;
 };
 
 export const deriveStartModeFromLegacyFlags = (draftConfig, fallback = START_MODE_FAST_RESTART) => {
@@ -695,6 +729,7 @@ export const buildDefaultRunConfig = () => ({
   date: "",
   date_from: "",
   date_to: "",
+  trade_eval_mode: TRADE_EVAL_MODE_STANDARD,
   include_extended_hours: false,
   data_file: null,
   strategy_api_url: defaultStrategyApiUrl,
