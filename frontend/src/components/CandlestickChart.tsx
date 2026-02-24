@@ -4,6 +4,22 @@ import ChartTooltip from "./ChartTooltip";
 import { toUnixSeconds, toIsoTimestamp } from "../utils";
 
 const MAX_SNAP_SECONDS = 120;
+const RANGE_EPSILON = 0.001;
+
+const normalizeVisibleRange = (range: any) => {
+  const from = Number(range?.from);
+  const to = Number(range?.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  if (from <= to) return { from, to };
+  return { from: to, to: from };
+};
+
+const rangesEqual = (left: any, right: any) => {
+  const a = normalizeVisibleRange(left);
+  const b = normalizeVisibleRange(right);
+  if (!a || !b) return false;
+  return Math.abs(a.from - b.from) < RANGE_EPSILON && Math.abs(a.to - b.to) < RANGE_EPSILON;
+};
 
 
 const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, selectedMarker, chartState, onChartStateChange, l2Data, priceRange, onPriceRangeChange }: any, ref) {
@@ -28,6 +44,17 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
     x: 0,
     y: 0
   });
+  // Sync guards for external range state vs chart events.
+  const isSyncingRef = useRef(false);
+  const lastAppliedRangeRef = useRef(null);
+  const lastBroadcastRangeRef = useRef(null);
+  const isUserInteracting = useRef(false);
+  const interactionTimeoutRef = useRef(null);
+  const onChartStateChangeRef = useRef(onChartStateChange);
+
+  useEffect(() => {
+    onChartStateChangeRef.current = onChartStateChange;
+  }, [onChartStateChange]);
 
   // Initialize chart
   useEffect(() => {
@@ -91,15 +118,18 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
         },
       });
 
-      // Subscribe to range changes
-      if (onChartStateChange) {
-          chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-              if (range && !isSyncingRef.current) {
-                  lastEmittedRangeRef.current = range;
-                  onChartStateChange(range);
-              }
-          });
-      }
+      // Subscribe to range changes with deduplicated bridge to parent state.
+      chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+        const normalizedRange = normalizeVisibleRange(range);
+        if (!normalizedRange) return;
+
+        lastAppliedRangeRef.current = normalizedRange;
+        if (isSyncingRef.current) return;
+        if (rangesEqual(lastBroadcastRangeRef.current, normalizedRange)) return;
+
+        lastBroadcastRangeRef.current = normalizedRange;
+        onChartStateChangeRef.current?.(normalizedRange);
+      });
 
       // Candlestick series
       const candleSeries = chart.addCandlestickSeries({
@@ -200,6 +230,8 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
           chartRef.current = null;
         }
         appliedBarsMetaRef.current = { length: 0, lastTime: null };
+        lastAppliedRangeRef.current = null;
+        lastBroadcastRangeRef.current = null;
       };
 
     } catch (err) {
@@ -207,14 +239,6 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
       setError(err.message);
     }
   }, []);
-
-    // Use a ref to track if we are currently syncing from props to prevent loop
-    const isSyncingRef = useRef(false);
-    // Use a ref to track the last range we emitted to avoid processing our own echo
-    const lastEmittedRangeRef = useRef(null);
-    // Track if user is interacting to decouple state
-    const isUserInteracting = useRef(false);
-    const interactionTimeoutRef = useRef(null);
 
   const avgVolume = useMemo(
     () => bars.reduce((acc, bar) => acc + (bar?.volume || 0), 0) / (bars.length || 1),
@@ -354,42 +378,30 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
 
   // Sync external chart state
   useEffect(() => {
-      if (chartRef.current && chartState) {
+    if (!chartRef.current) return;
+    const nextRange = normalizeVisibleRange(chartState);
+    if (!nextRange) return;
 
-          // If user is interacting, we are the LEADER. Ignore updates from followers.
-          if (isUserInteracting.current) return;
+    // If user is interacting, this chart is the leader. Ignore follower updates.
+    if (isUserInteracting.current) return;
+    if (rangesEqual(lastAppliedRangeRef.current, nextRange)) return;
 
-          // Check if this update is just an echo of what we just sent
-          if (lastEmittedRangeRef.current) {
-               const emitted = lastEmittedRangeRef.current;
-               const isEcho = Math.abs(chartState.from - emitted.from) < 0.001 && 
-                              Math.abs(chartState.to - emitted.to) < 0.001;
-               if (isEcho) return;
-          }
+    const api = chartRef.current.timeScale();
+    const current = normalizeVisibleRange(api.getVisibleRange());
+    if (rangesEqual(current, nextRange)) {
+      lastAppliedRangeRef.current = nextRange;
+      return;
+    }
 
-          const api = chartRef.current.timeScale();
-          const current = api.getVisibleRange();
-          
-          // Basic equality check to avoid redundant sets
-          const isSame = current && 
-                         Math.abs(current.from - chartState.from) < 0.001 && 
-                         Math.abs(current.to - chartState.to) < 0.001;
-
-          if (!isSame) {
-              isSyncingRef.current = true;
-              try {
-                  api.setVisibleRange(chartState);
-                  // Update our last known state to match what we just set
-                  // This prevents us from thinking the next user action is a jump if we just moved it
-                  lastEmittedRangeRef.current = chartState;
-              } catch(e) { 
-                  // ignore errors if data not ready
-              } finally {
-                  // Reset flag immediately after
-                  isSyncingRef.current = false;
-              }
-          }
-      }
+    isSyncingRef.current = true;
+    try {
+      api.setVisibleRange(nextRange);
+      lastAppliedRangeRef.current = nextRange;
+    } catch (e) {
+      // Ignore errors if data is not ready yet.
+    } finally {
+      isSyncingRef.current = false;
+    }
   }, [chartState]);
 
   const toCandleDataPoint = useCallback((bar) => {

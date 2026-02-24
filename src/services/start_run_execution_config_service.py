@@ -129,6 +129,14 @@ _FLOAT_POSITIONING_SPECS: tuple[FloatPositioningSpec, ...] = (
         min_value=0.0,
     ),
     FloatPositioningSpec(
+        effective_key="effective_partial_protect_min_mfe_r",
+        source_key="partial_protect_min_mfe_r_source",
+        request_attr="partial_protect_min_mfe_r",
+        request_default=0.0,
+        positioning_key="partial_protect_min_mfe_r",
+        min_value=0.0,
+    ),
+    FloatPositioningSpec(
         effective_key="effective_trailing_stop_pct",
         source_key="trailing_stop_pct_source",
         request_attr="trailing_stop_pct",
@@ -198,7 +206,7 @@ _FLOAT_POSITIONING_SPECS: tuple[FloatPositioningSpec, ...] = (
         effective_key="effective_break_even_activation_min_mfe_pct",
         source_key="break_even_activation_min_mfe_source",
         request_attr="break_even_activation_min_mfe_pct",
-        request_default=0.35,
+        request_default=0.0,
         positioning_key="break_even_activation_min_mfe_pct",
         min_value=0.0,
     ),
@@ -206,7 +214,7 @@ _FLOAT_POSITIONING_SPECS: tuple[FloatPositioningSpec, ...] = (
         effective_key="effective_break_even_activation_min_r",
         source_key="break_even_activation_min_r_source",
         request_attr="break_even_activation_min_r",
-        request_default=0.80,
+        request_default=0.0,
         positioning_key="break_even_activation_min_r",
         min_value=0.0,
     ),
@@ -214,7 +222,7 @@ _FLOAT_POSITIONING_SPECS: tuple[FloatPositioningSpec, ...] = (
         effective_key="effective_break_even_activation_min_r_trending_5m",
         source_key="break_even_activation_min_r_trending_source",
         request_attr="break_even_activation_min_r_trending_5m",
-        request_default=0.90,
+        request_default=0.0,
         positioning_key="break_even_activation_min_r_trending_5m",
         min_value=0.0,
     ),
@@ -222,7 +230,7 @@ _FLOAT_POSITIONING_SPECS: tuple[FloatPositioningSpec, ...] = (
         effective_key="effective_break_even_activation_min_r_choppy_5m",
         source_key="break_even_activation_min_r_choppy_source",
         request_attr="break_even_activation_min_r_choppy_5m",
-        request_default=0.60,
+        request_default=0.0,
         positioning_key="break_even_activation_min_r_choppy_5m",
         min_value=0.0,
     ),
@@ -1269,6 +1277,9 @@ def _build_trading_config_payload(
         ],
         "partial_flow_deterioration_min_r": positioning_values[
             "effective_partial_flow_deterioration_min_r"
+        ],
+        "partial_protect_min_mfe_r": positioning_values[
+            "effective_partial_protect_min_mfe_r"
         ],
         "partial_flow_deterioration_skip_be": bool(
             positioning_values["effective_partial_flow_deterioration_skip_be"]

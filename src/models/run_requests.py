@@ -43,10 +43,10 @@ class StartRunRequest(BaseModel):
     trailing_activation_pct: float = 0.20
     break_even_buffer_pct: float = 0.03
     break_even_min_hold_bars: int = 3
-    break_even_activation_min_mfe_pct: float = 0.25
-    break_even_activation_min_r: float = 0.60
-    break_even_activation_min_r_trending_5m: float = 0.90
-    break_even_activation_min_r_choppy_5m: float = 0.60
+    break_even_activation_min_mfe_pct: Optional[float] = None
+    break_even_activation_min_r: Optional[float] = None
+    break_even_activation_min_r_trending_5m: Optional[float] = None
+    break_even_activation_min_r_choppy_5m: Optional[float] = None
     break_even_activation_use_levels: bool = True
     break_even_activation_use_l2: bool = True
     break_even_level_buffer_pct: float = 0.02
@@ -196,6 +196,7 @@ class StartRunRequest(BaseModel):
     cold_start_each_day: bool = False
     comparable_mode: bool = False
     apply_positioning_config_on_start: bool = True
+    partial_protect_min_mfe_r: Optional[float] = None
     # Whether runner should re-apply ticker defaults from strategy_overrides.json
     # during run start. Keep enabled by default for backward compatibility.
     apply_ticker_overrides_on_start: bool = True

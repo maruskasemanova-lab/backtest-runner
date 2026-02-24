@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, ReactNode } from "react";
+import { Activity, BarChart2, Target, Layers, Crosshair, Zap, AlertTriangle } from "lucide-react";
 
 /* ── helpers ──────────────────────────────────────────────────────── */
 
@@ -19,6 +20,27 @@ const barColor = (value: number, max: number, threshold?: number | null): string
   if (ratio >= 0.7) return "var(--accent-green, #22c55e)";
   if (ratio >= 0.4) return "var(--accent-yellow, #eab308)";
   return "var(--accent-red, #ef4444)";
+};
+
+const CHECK_EXPLANATIONS: Record<string, string> = {
+  "rvol_minimum": "Relatívny objem (RVOL) presahuje minimálnu hranicu pre vstup",
+  "near_tested_level": "Cena je optimálne blízko testovanej úrovne (level)",
+  "minimum_confluence_score": "Dostatočná súhra viacerých indikátorov (confluence)",
+  "rotation_level_tests_range": "Počet otestovaní rotačnej úrovne je v norme",
+  "rotation_level_unbroken": "Rotačná úroveň nebola trvalo prelomená",
+  "tracker_enabled": "Sledovanie úrovní (Level tracker) je aktívne",
+  "entry_quality_enabled": "Filtrovanie kvality vstupu je zapnuté",
+  "valid_direction": "Smer signálu je v súlade s celkovým trendom",
+  "minimum_levels_context": "Dostatok kontextových údajov z okolitých úrovní",
+  "rvol_filter_enabled": "RVOL filter je zapnutý a aktívny",
+  "rvol_available": "Dáta o relatívnom objeme sú dostupné",
+  "adaptive_window_enabled": "Adaptívne časové okno je aktívne",
+  "adaptive_window_ready": "Adaptívne okno nazbieralo dostatok údajov",
+  "rotation_volume_ratio_available": "Pomer objemov pre rotáciu je dostupný",
+  "rotation_volume_exhaustion": "Vyčerpanie objemu ukazuje na možný obrat",
+  "no_recent_volume_break": "Žiadne nedávne silné prelomenia s vysokým objemom",
+  "rotation_prefers_non_trending_poc_migration": "Presun POC (Point of Control) nenaznačuje silný trend proti rotácii",
+  "gap_fill_bias_aligned": "Smerovanie k vyplneniu gapu súhlasí so signálom",
 };
 
 /* ── compact progress bar ────────────────────────────────────────── */
@@ -111,10 +133,13 @@ function GateBadge({ label, passed }: { label: string; passed: boolean | null })
 
 /* ── tiny section label (inline) ─────────────────────────────────── */
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: ReactNode }) {
   return (
     <div
       style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
         fontSize: "0.6rem",
         fontWeight: 700,
         textTransform: "uppercase",
@@ -337,90 +362,95 @@ function RejectionDetail({ d }: { d: any }) {
     const stats = (lc.stats && typeof lc.stats === "object") ? lc.stats : {};
     const cfg = (lc.config && typeof lc.config === "object") ? lc.config : {};
     const checks = (lc.checks && typeof lc.checks === "object") ? lc.checks : {};
-    const reasons: string[] = Array.isArray(lc.reasons) ? lc.reasons : (lc.reason ? [String(lc.reason)] : []);
-    const softReasons: string[] = Array.isArray(lc.soft_reasons) ? lc.soft_reasons : [];
     const softFailedSet = new Set<string>(Array.isArray(lc.soft_failed_checks) ? lc.soft_failed_checks : []);
-    const hasSoftWarnings = Boolean(lc.has_soft_warnings);
 
     const confluence = safeNum(stats.near_confluence_score);
     const minConfluence = safeNum(cfg.min_confluence_score ?? lc.min_confluence_score);
-    const pct = (confluence != null && minConfluence != null && minConfluence > 0)
-      ? Math.min(100, (confluence / minConfluence) * 100) : null;
 
-    const hardFailedChecks = Object.entries(checks).filter(([k, v]) => v === false && !softFailedSet.has(k)).map(([k]) => k);
-    const softFailedChecks = Object.entries(checks).filter(([k, v]) => v === false && softFailedSet.has(k)).map(([k]) => k);
-    const passedChecks = Object.entries(checks).filter(([, v]) => v === true).map(([k]) => k);
-
-    const isHardReject = hardFailedChecks.length > 0;
-    const headerColor = isHardReject ? "var(--accent-red, #ef4444)" : hasSoftWarnings ? "var(--accent-yellow, #eab308)" : "var(--accent-green, #22c55e)";
+    const checkItems = Object.entries(checks).map(([k, v]) => ({
+      key: k,
+      label: k.replace(/_/g, " "),
+      passed: v === true,
+      warning: v === false && softFailedSet.has(k),
+      tooltip: CHECK_EXPLANATIONS[k] || "No detailed description available",
+    }));
+    checkItems.sort((a, b) => {
+      // Failed (hard) -> Warning -> Passed
+      const sortOrder = (item: any) => !item.passed && !item.warning ? 0 : (!item.passed && item.warning ? 1 : 2);
+      if (sortOrder(a) !== sortOrder(b)) return sortOrder(a) - sortOrder(b);
+      return a.label.localeCompare(b.label);
+    });
 
     return (
-      <div style={{ marginTop: 3 }}>
-        {/* header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: "0.6rem", lineHeight: 1.2, marginBottom: 2 }}>
-          <span style={{ color: "var(--text-secondary)" }}>
-            {strategy && <span style={{ fontWeight: 600 }}>{strategy}</span>}
-          </span>
-          {confluence != null && minConfluence != null && (
-            <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: headerColor }}>
-              confluence {confluence}/{minConfluence} ({pct != null ? pct.toFixed(0) : "?"}%)
-            </span>
+      <div style={{ marginTop: 4 }}>
+        <SectionLabel icon={<Layers size={10} />}>Kontext & Úrovne</SectionLabel>
+        
+        {/* Strategy Context Label */}
+        {strategy && (
+          <div style={{ fontSize: "0.6rem", color: "var(--text-secondary)", marginBottom: 4, fontWeight: 600 }}>
+            {strategy}
+          </div>
+        )}
+
+        {/* Dynamic Progress Bars for Stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "2px 0", marginBottom: 6 }}>
+          {confluence != null && (
+            <MiniBar 
+              label="Confluence Score" 
+              value={confluence} 
+              max={Math.max(confluence, minConfluence || 1, 2)} 
+              threshold={minConfluence} 
+              suffix="" 
+              showThresholdLine 
+            />
+          )}
+          {stats.volume_ratio != null && (
+            <MiniBar 
+              label="Volume Ratio" 
+              value={safeNum(stats.volume_ratio)} 
+              max={Math.max(safeNum(stats.volume_ratio) || 0, 1.5)} 
+              threshold={safeNum(cfg.min_volume_ratio)} 
+              suffix="x" 
+              showThresholdLine 
+            />
+          )}
+          {stats.recent_touches != null && (
+            <MiniBar 
+              label="Recent Touches" 
+              value={safeNum(stats.recent_touches)} 
+              max={10} 
+              suffix="" 
+            />
           )}
         </div>
-        {/* confluence bar */}
-        {pct != null && (
-          <div style={{ position: "relative", height: 5, borderRadius: 3, background: "var(--bg-tertiary, rgba(255,255,255,0.06))", overflow: "visible", marginBottom: 4 }}>
-            <div style={{ height: "100%", width: `${pct}%`, borderRadius: 3, background: pct >= 100 ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)", opacity: 0.8 }} />
-            <div style={{ position: "absolute", top: -1, bottom: -1, left: "100%", width: 1.5, background: "var(--text-muted, #888)", borderRadius: 1, opacity: 0.5 }} />
-          </div>
-        )}
-        {/* hard failed checks -- these directly block entry */}
-        {hardFailedChecks.length > 0 && (
-          <div style={{ display: "flex", gap: 3, flexWrap: "wrap", marginBottom: 3 }}>
-            {hardFailedChecks.map((k) => (
-              <span key={k} style={{
-                display: "inline-flex", alignItems: "center", gap: 2,
-                padding: "1px 5px", borderRadius: 2, fontSize: "0.55rem", lineHeight: 1.5, fontWeight: 600,
-                background: "rgba(239, 68, 68, 0.1)", color: "var(--accent-red, #ef4444)",
-                border: "1px solid rgba(239, 68, 68, 0.25)",
-              }}>
-                <span>{"\u2717"}</span>
-                {k.replace(/_/g, " ")}
-              </span>
-            ))}
-          </div>
-        )}
-        {/* soft failed checks -- warnings, don't block entry */}
-        {softFailedChecks.length > 0 && (
-          <div style={{ display: "flex", gap: 3, flexWrap: "wrap", marginBottom: 3 }}>
-            {softFailedChecks.map((k) => (
-              <span key={k} style={{
-                display: "inline-flex", alignItems: "center", gap: 2,
-                padding: "1px 5px", borderRadius: 2, fontSize: "0.52rem", lineHeight: 1.5,
-                background: "rgba(234, 179, 8, 0.1)", color: "var(--accent-yellow, #eab308)",
-                border: "1px solid rgba(234, 179, 8, 0.25)",
-              }}>
-                <span>{"\u26A0"}</span>
-                {k.replace(/_/g, " ")}
-              </span>
-            ))}
-          </div>
-        )}
-        {/* passed strategy checks -- context only, shown smaller */}
-        {passedChecks.length > 0 && (
-          <div style={{ display: "flex", gap: 2, flexWrap: "wrap", opacity: 0.6 }}>
-            {passedChecks.map((k) => (
-              <span key={k} style={{
-                display: "inline-flex", alignItems: "center", gap: 2,
-                padding: "0px 3px", borderRadius: 2, fontSize: "0.48rem", lineHeight: 1.5,
-                color: "var(--accent-green, #22c55e)",
-              }}>
-                <span>{"\u2713"}</span>
-                {k.replace(/_/g, " ")}
-              </span>
-            ))}
-          </div>
-        )}
+
+        {/* Expandable/Grid Checklist */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px 6px" }}>
+          {checkItems.map((item) => {
+            const color = item.passed ? "var(--accent-green, #22c55e)" : (item.warning ? "var(--accent-yellow, #eab308)" : "var(--accent-red, #ef4444)");
+            const bg = item.passed ? "rgba(34, 197, 94, 0.08)" : (item.warning ? "rgba(234, 179, 8, 0.08)" : "rgba(239, 68, 68, 0.08)");
+            const border = item.passed ? "rgba(34, 197, 94, 0.18)" : (item.warning ? "rgba(234, 179, 8, 0.18)" : "rgba(239, 68, 68, 0.18)");
+            const icon = item.passed ? "\u2713" : (item.warning ? "\u26A0" : "\u2717");
+            
+            return (
+              <div
+                key={item.key}
+                title={item.tooltip}
+                style={{
+                  display: "flex", alignItems: "center", gap: 3,
+                  padding: "3px 5px", borderRadius: 3, fontSize: "0.52rem", lineHeight: 1.2,
+                  background: bg, color: color, border: `1px solid ${border}`,
+                  cursor: "help",
+                }}
+              >
+                <span style={{ fontSize: "0.55rem", fontWeight: 700 }}>{icon}</span>
+                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: item.passed ? 500 : 600 }}>
+                  {item.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }
@@ -429,6 +459,7 @@ function RejectionDetail({ d }: { d: any }) {
     const score = safeNum(d.combined_score) ?? safeNum(d.combined_norm_0_100);
     const thr = safeNum(d.threshold_used) ?? safeNum(d.trade_gate_threshold);
     const stratScore = safeNum(d.strategy_score);
+    const flowScore = safeNum(d.flow_score);
     const reasoning = typeof d.reasoning === "string" ? d.reasoning : null;
     const todBoost = safeNum(d.tod_threshold_boost);
     const hwBoost = safeNum(d.headwind_threshold_boost);
@@ -437,56 +468,58 @@ function RejectionDetail({ d }: { d: any }) {
 
     const scorePassed = score != null && thr != null && score >= thr;
     const scoreColor = scorePassed ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)";
-    const scorePct = (score != null && thr != null && thr > 0) ? Math.min(100, (score / thr) * 100) : null;
-    const gap = (score != null && thr != null) ? thr - score : null;
 
     return (
-      <div style={{ marginTop: 3 }}>
-        {/* score vs threshold bar */}
-        {score != null && thr != null && (
-          <div style={{ marginBottom: 4 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.55rem", marginBottom: 1 }}>
-              <span style={{ color: "var(--text-secondary)" }}>
-                {isHeadwind ? "Score (headwind adjusted)" : "Combined score"}
+      <div style={{ marginTop: 4 }}>
+        <SectionLabel icon={<BarChart2 size={10} />}>Bodové Hodnotenie (Score)</SectionLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "2px 0", marginBottom: 6 }}>
+          {score != null && thr != null && (
+            <MiniBar 
+              label={isHeadwind ? "Skóre po korekcii" : "Celkové skóre (Combined)"} 
+              value={score} 
+              max={Math.max(score, thr, 100)} 
+              threshold={thr} 
+              suffix="" 
+              showThresholdLine 
+            />
+          )}
+          {stratScore != null && (
+            <MiniBar 
+              label="Stratégia (Strategy Score)" 
+              value={stratScore} 
+              max={100} 
+              suffix="" 
+            />
+          )}
+          {flowScore != null && (
+            <MiniBar 
+              label="Order Flow Score" 
+              value={flowScore} 
+              max={100} 
+              suffix="" 
+            />
+          )}
+        </div>
+
+        {/* Adjustments & Boosts */}
+        {(todBoost != null || hwBoost != null || thrReason) && (
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", fontSize: "0.52rem", color: "var(--text-muted)", marginBottom: 4, background: "rgba(0,0,0,0.1)", padding: "4px 6px", borderRadius: 4 }}>
+            <span style={{ fontWeight: 600 }}>Úpravy Tresholdov:</span>
+            {todBoost != null && todBoost !== 0 && (
+              <span title="Úprava kvôli času obchodovania (Time of Day)" style={{ color: todBoost > 0 ? "var(--accent-red, #ef4444)" : "var(--accent-green, #22c55e)", cursor: "help" }}>
+                ToD {todBoost > 0 ? "+" : ""}{todBoost.toFixed(0)}
               </span>
-              <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: scoreColor }}>
-                {score.toFixed(1)} / {thr.toFixed(0)} req
-                {gap != null && gap > 0
-                  ? <span style={{ opacity: 0.7 }}> ({gap.toFixed(1)} short)</span>
-                  : <span style={{ opacity: 0.7 }}> ✓</span>}
+            )}
+            {hwBoost != null && hwBoost !== 0 && (
+              <span title="Korekcia kvôli protivetru (Headwind)" style={{ color: "var(--accent-red, #ef4444)", cursor: "help" }}>
+                Headwind +{hwBoost.toFixed(1)}
               </span>
-            </div>
-            <div style={{ position: "relative", height: 5, borderRadius: 3, background: "var(--bg-tertiary, rgba(255,255,255,0.06))", overflow: "visible" }}>
-              <div style={{
-                height: "100%",
-                width: `${scorePct ?? 0}%`,
-                borderRadius: 3,
-                background: scoreColor,
-                opacity: 0.8,
-                transition: "width 0.08s ease-out",
-              }} />
-              <div style={{ position: "absolute", top: -1, bottom: -1, left: "100%", width: 1.5, background: "var(--text-muted, #888)", borderRadius: 1, opacity: 0.5 }} title={`Threshold: ${thr}`} />
-            </div>
+            )}
+            {thrReason && <span style={{ fontStyle: "italic" }}>({thrReason})</span>}
           </div>
         )}
-        {/* threshold breakdown */}
-        <div style={{ display: "flex", gap: 3, flexWrap: "wrap", fontSize: "0.52rem", color: "var(--text-muted)", marginBottom: 2 }}>
-          {stratScore != null && (
-            <span>Strategy: {stratScore.toFixed(1)}</span>
-          )}
-          {todBoost != null && todBoost !== 0 && (
-            <span style={{ color: todBoost > 0 ? "var(--accent-red, #ef4444)" : "var(--accent-green, #22c55e)" }}>
-              ToD {todBoost > 0 ? "+" : ""}{todBoost.toFixed(0)}
-            </span>
-          )}
-          {hwBoost != null && hwBoost !== 0 && (
-            <span style={{ color: "var(--accent-red, #ef4444)" }}>
-              HW +{hwBoost.toFixed(1)}
-            </span>
-          )}
-          {thrReason && <span style={{ fontStyle: "italic" }}>{thrReason}</span>}
-        </div>
-        {/* reasoning — parsed into readable evidence badges */}
+
+        {/* Reasonings rendered explicitly */}
         {reasoning && <FormattedReasoning reasoning={reasoning} />}
       </div>
     );
@@ -743,7 +776,7 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
       {/* ── Scores: 2-column grid ── */}
       {hasLayerScores && (
         <>
-          <SectionLabel>Entry Scores</SectionLabel>
+          <SectionLabel icon={<BarChart2 size={10} />}>Entry Scores</SectionLabel>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 8px" }}>
             <MiniBar label="Combined" value={data.combinedScore} threshold={data.threshold} showThresholdLine />
             <MiniBar label="Strategy" value={data.strategyScore} />
@@ -815,7 +848,7 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
             const maxContrib = Math.max(...entries.map(([, v]) => v), 0.01);
             return (
               <>
-                <SectionLabel>Evidence Breakdown</SectionLabel>
+                <SectionLabel icon={<Activity size={10} />}>Evidence Breakdown</SectionLabel>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 8px" }}>
                   {entries.map(([key, value]) => {
                     const [type, ...nameParts] = key.split(":");
@@ -843,7 +876,7 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
       {/* ── Gates + rejection: inline badges row ── */}
       {hasGates && (
         <>
-          <SectionLabel>Entry Gates</SectionLabel>
+          <SectionLabel icon={<AlertTriangle size={10} />}>Entry Gates</SectionLabel>
           <div style={{ display: "flex", gap: 3, flexWrap: "wrap", marginBottom: 3 }}>
             <GateBadge label="Pass" passed={data.passed} />
             <GateBadge label="L2" passed={data.l2HasCoverage} />
@@ -963,7 +996,7 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
           <div>
             {data.confirmingSources != null && (
               <>
-                <SectionLabel>Evidence</SectionLabel>
+                <SectionLabel icon={<Layers size={10} />}>Evidence</SectionLabel>
                 <MiniBar
                   label="Sources"
                   value={data.confirmingSources}
@@ -979,7 +1012,7 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
           <div>
       {hasL2 && (
         <>
-                <SectionLabel>L2 Flow</SectionLabel>
+                <SectionLabel icon={<Zap size={10} />}>L2 Flow</SectionLabel>
                 {data.signedAggression != null && (
                   <MiniBar label="Aggr" value={data.signedAggression} max={1} suffix="" />
                 )}
@@ -1019,72 +1052,62 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
 
       {/* ── Candidates: compact list ── */}
       {data.top3.length > 0 && (
-        <>
-          <SectionLabel>Candidates</SectionLabel>
-          {data.top3.map((s: any, i: number) => {
-            const name = String(s?.name || `#${i + 1}`);
-            const score = safeNum(s?.score);
-            const isWinner = i === 0;
-            return (
-              <div key={name} style={{ marginBottom: 2 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.6rem", lineHeight: 1.2, marginBottom: 1 }}>
-                  <span style={{
-                    color: isWinner ? "var(--accent-green, #22c55e)" : "var(--text-secondary)",
-                    fontWeight: isWinner ? 700 : 500,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    maxWidth: "65%",
-                  }}>
-                    {isWinner ? "\u2605 " : ""}{name.replace(/_/g, " ")}
-                  </span>
-                  <span style={{ color: "var(--text-primary)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-                    {score != null ? score.toFixed(0) : "—"}
-                  </span>
-                </div>
-                <div style={{ height: 3, borderRadius: 1.5, background: "var(--bg-tertiary, rgba(255,255,255,0.06))", overflow: "hidden" }}>
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${score != null ? Math.min(100, Math.max(0, score)) : 0}%`,
-                      borderRadius: 1.5,
-                      background: isWinner ? "var(--accent-green, #22c55e)" : "var(--accent-blue, #3b82f6)",
-                      opacity: isWinner ? 1 : 0.6,
-                      transition: "width 0.08s ease-out",
-                    }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </>
+        <div style={{ marginTop: 4 }}>
+          <SectionLabel icon={<Target size={10} />}>Candidates</SectionLabel>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "2px 0", marginBottom: 4 }}>
+            {data.top3.map((s: any, i: number) => {
+              const name = String(s?.name || `#${i + 1}`);
+              const score = safeNum(s?.score);
+              const isWinner = i === 0;
+              return (
+                <MiniBar 
+                  key={name}
+                  label={isWinner ? `★ ${name.replace(/_/g, " ")}` : name.replace(/_/g, " ")} 
+                  value={score} 
+                  max={Math.max(100, score || 100)} 
+                  suffix="" 
+                />
+              );
+            })}
+          </div>
+          {data.calibratedProbability != null && (
+            <div style={{ marginTop: 2, marginBottom: 4 }}>
+              <MiniBar 
+                label="Win Probability (Calibrated)" 
+                value={data.calibratedProbability * 100} 
+                max={100} 
+                threshold={50}
+                suffix="%" 
+                showThresholdLine
+              />
+            </div>
+          )}
+        </div>
       )}
 
       {hasIntrabar && (
-        <>
-          <SectionLabel>Intrabar (Checkpoint)</SectionLabel>
+        <div style={{ marginTop: 4 }}>
+          <SectionLabel icon={<Crosshair size={10} />}>Intrabar (Checkpoint)</SectionLabel>
           {intrabarOnlyCheckpoint && (
             <div style={{ fontSize: "0.58rem", color: "var(--text-muted)", marginBottom: 3 }}>
               5s checkpoint view shows real intrabar metrics only (minute decision scores hidden).
             </div>
           )}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "0 8px",
-              fontSize: "0.62rem",
-              color: "var(--text-secondary)",
-              lineHeight: 1.4,
-              marginBottom: 4,
-            }}
-          >
-            <div>Coverage: {data.intrabarCoverage != null ? Math.round(data.intrabarCoverage) : "-"}</div>
-            <div>Spread: {data.intrabarSpreadBps != null ? `${data.intrabarSpreadBps.toFixed(1)} bps` : "-"}</div>
-            <div>Move: {data.intrabarMovePct != null ? `${data.intrabarMovePct.toFixed(3)}%` : "-"}</div>
-            <div>Push: {data.intrabarPushRatio != null ? data.intrabarPushRatio.toFixed(2) : "-"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "2px 0", marginBottom: 4 }}>
+            {data.intrabarCoverage != null && (
+              <MiniBar label="Coverage" value={data.intrabarCoverage} max={100} suffix="" />
+            )}
+            {data.intrabarMovePct != null && (
+              <MiniBar label="Move %" value={data.intrabarMovePct} max={0.5} threshold={0.1} suffix="%" showThresholdLine />
+            )}
+            {data.intrabarPushRatio != null && (
+              <MiniBar label="Push Ratio" value={data.intrabarPushRatio} max={1} threshold={0.5} suffix="" showThresholdLine />
+            )}
+            {data.intrabarSpreadBps != null && (
+              <MiniBar label="Spread (bps)" value={data.intrabarSpreadBps} max={10} suffix=" bps" />
+            )}
           </div>
-        </>
+        </div>
       )}
     </div>
   );

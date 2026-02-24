@@ -252,6 +252,34 @@ export default function StrategyAnalyzer({
   const scrubEvalSeqRef = useRef(0);
   const lastStableScrubAnalysisRef = useRef<any>(null);
 
+  // ── incremental caching refs for performance ─────────────────────
+  // These refs hold pre-computed data structures that are incrementally
+  // updated when new bars arrive, avoiding O(n) recomputation each time.
+  const timelineCacheRef = useRef<{
+    processedRunBarCount: number;
+    runBarsByTime: Map<number, any>;
+    progressedTradeBars: any[];
+    timelinePoints: any[];
+    observedCheckpointCounts: number[];
+    warmupDone: number;
+    tradeDone: number;
+    // Track the range boundaries used to build this cache
+    startTime: number | null;
+    endTime: number | null;
+    rangeKey: string | null; // composite key to detect range changes
+  }>({
+    processedRunBarCount: 0,
+    runBarsByTime: new Map(),
+    progressedTradeBars: [],
+    timelinePoints: [],
+    observedCheckpointCounts: [],
+    warmupDone: 0,
+    tradeDone: 0,
+    startTime: null,
+    endTime: null,
+    rangeKey: null,
+  });
+
   // strategy editor modal
   const [showStrategyEditor, setShowStrategyEditor] = useState(false);
   const [isConditionsDetached, setIsConditionsDetached] = useState(false);
@@ -374,86 +402,134 @@ export default function StrategyAnalyzer({
       return { from: nextFrom, to: nextTo };
     });
   }, [selectedRangeWindow?.from, selectedRangeWindow?.to]);
-  const rangeScrubMeta = useMemo(() => {
-    if (!isAnalyzerAttachedRun || !rangePlaybackMeta) {
-      return null;
+  // ── Invalidate timeline cache when range/run changes ──────────
+  const rangeKey = useMemo(() => {
+    if (!isAnalyzerAttachedRun || !rangePlaybackMeta) return null;
+    return `${rangePlaybackMeta.tradeStartTs}|${rangePlaybackMeta.tradeEndTs}|${analyzerRunKey}`;
+  }, [isAnalyzerAttachedRun, rangePlaybackMeta, analyzerRunKey]);
+
+  useEffect(() => {
+    const cache = timelineCacheRef.current;
+    if (cache.rangeKey !== rangeKey) {
+      cache.processedRunBarCount = 0;
+      cache.runBarsByTime = new Map();
+      cache.progressedTradeBars = [];
+      cache.timelinePoints = [];
+      cache.observedCheckpointCounts = [];
+      cache.warmupDone = 0;
+      cache.tradeDone = 0;
+      cache.startTime = null;
+      cache.endTime = null;
+      cache.rangeKey = rangeKey;
     }
+  }, [rangeKey]);
+
+  // ── Incrementally process new bars into timeline cache ────────
+  const timelineCacheVersion = useMemo(() => {
+    if (!isAnalyzerAttachedRun || !rangePlaybackMeta) return 0;
     const startTime = Number(rangePlaybackMeta.tradeStartTs);
     const endTime = Number(rangePlaybackMeta.tradeEndTs);
-    if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null;
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return 0;
+
+    const cache = timelineCacheRef.current;
+    const runBars = Array.isArray(attachedRunBars) ? attachedRunBars : [];
+    const prevCount = cache.processedRunBarCount;
+
+    // Process only newly arrived bars
+    if (runBars.length > prevCount) {
+      cache.startTime = startTime;
+      cache.endTime = endTime;
+
+      for (let i = prevCount; i < runBars.length; i++) {
+        const runBar = runBars[i];
+        const t = Number(runBar?.time);
+        if (!Number.isFinite(t)) continue;
+
+        // Incremental warmup/trade counting
+        if ((runBar as any)?.warmup_only === true) {
+          cache.warmupDone += 1;
+        } else {
+          cache.tradeDone += 1;
+        }
+
+        if (t < startTime - 1 || t > endTime + 1) continue;
+        cache.runBarsByTime.set(t, runBar);
+
+        // Maintain sorted insertion for progressedTradeBars
+        // (bars arrive in order, so push is correct)
+        cache.progressedTradeBars.push(runBar);
+
+        // Build timeline points for this new bar
+        const barTime = t;
+        const trace =
+          (runBar?.intrabar_eval_trace && typeof runBar.intrabar_eval_trace === "object"
+            ? runBar.intrabar_eval_trace
+            : runBar?.analysis?.intrabar_eval_trace && typeof runBar.analysis.intrabar_eval_trace === "object"
+              ? runBar.analysis.intrabar_eval_trace
+              : runBar?.strategy_analysis?.intrabar_eval_trace &&
+                  typeof runBar.strategy_analysis.intrabar_eval_trace === "object"
+                ? runBar.strategy_analysis.intrabar_eval_trace
+                : null) || null;
+        const checkpoints = Array.isArray(trace?.checkpoints) ? trace.checkpoints : [];
+        const normalizedCheckpoints = checkpoints
+          .map((checkpoint: any, checkpointIndex: number) => {
+            const checkpointTime =
+              toUnixSeconds(checkpoint?.timestamp) ??
+              (Number.isFinite(Number(checkpoint?.offset_sec))
+                ? barTime + Number(checkpoint.offset_sec)
+                : barTime);
+            if (!Number.isFinite(Number(checkpointTime))) return null;
+            return {
+              kind: "checkpoint",
+              time: Number(checkpointTime),
+              barTime,
+              checkpoint,
+              checkpointIndex,
+              runBar,
+            };
+          })
+          .filter(Boolean)
+          .sort((left: any, right: any) => Number(left.time || 0) - Number(right.time || 0));
+
+        if (normalizedCheckpoints.length > 0) {
+          cache.observedCheckpointCounts.push(normalizedCheckpoints.length);
+          // Append in order (bars arrive chronologically)
+          cache.timelinePoints.push(...normalizedCheckpoints);
+        } else {
+          cache.timelinePoints.push({
+            kind: "bar",
+            time: barTime,
+            barTime,
+            checkpoint: null,
+            checkpointIndex: -1,
+            runBar,
+          });
+        }
+      }
+
+      cache.processedRunBarCount = runBars.length;
+    }
+
+    // Return a version counter to trigger downstream useMemo recompute
+    return cache.processedRunBarCount;
+  }, [isAnalyzerAttachedRun, rangePlaybackMeta, attachedRunBars]);
+
+  // ── rangeScrubMeta: derives from cached timeline (cheap read) ─
+  // Split into two useMemo calls to break the circular dependency:
+  // rangeScrubBase does NOT depend on rangeScrubOffset → no re-render loop.
+  // rangeScrubMeta merges base + offset-derived values.
+  const rangeScrubBase = useMemo(() => {
+    if (!isAnalyzerAttachedRun || !rangePlaybackMeta || timelineCacheVersion === 0) {
+      return null;
+    }
+    const cache = timelineCacheRef.current;
+    const startTime = cache.startTime!;
+    const endTime = cache.endTime!;
     const tradeStartIdx = Number(rangePlaybackMeta.tradeStartIdx);
     const tradeEndIdx = Number(rangePlaybackMeta.tradeEndIdx);
 
-    const runBarsByTime = new Map<number, any>();
-    for (const runBar of Array.isArray(attachedRunBars) ? attachedRunBars : []) {
-      const t = Number(runBar?.time);
-      if (!Number.isFinite(t)) continue;
-      if (t < startTime - 1 || t > endTime + 1) continue;
-      runBarsByTime.set(t, runBar);
-    }
-
-    const progressedTradeBars = Array.from(runBarsByTime.values()).sort(
-      (left, right) => Number(left?.time || 0) - Number(right?.time || 0)
-    );
+    const { progressedTradeBars, timelinePoints, observedCheckpointCounts } = cache;
     const progressedBars = progressedTradeBars.length;
-
-    const timelinePoints: any[] = [];
-    const observedCheckpointCounts: number[] = [];
-
-    for (const runBar of progressedTradeBars) {
-      const barTime = Number(runBar?.time);
-      if (!Number.isFinite(barTime)) continue;
-      const trace =
-        (runBar?.intrabar_eval_trace && typeof runBar.intrabar_eval_trace === "object"
-          ? runBar.intrabar_eval_trace
-          : runBar?.analysis?.intrabar_eval_trace && typeof runBar.analysis.intrabar_eval_trace === "object"
-            ? runBar.analysis.intrabar_eval_trace
-            : runBar?.strategy_analysis?.intrabar_eval_trace &&
-                typeof runBar.strategy_analysis.intrabar_eval_trace === "object"
-              ? runBar.strategy_analysis.intrabar_eval_trace
-              : null) || null;
-      const checkpoints = Array.isArray(trace?.checkpoints) ? trace.checkpoints : [];
-      const normalizedCheckpoints = checkpoints
-        .map((checkpoint: any, checkpointIndex: number) => {
-          const checkpointTime =
-            toUnixSeconds(checkpoint?.timestamp) ??
-            (Number.isFinite(Number(checkpoint?.offset_sec))
-              ? barTime + Number(checkpoint.offset_sec)
-              : barTime);
-          if (!Number.isFinite(Number(checkpointTime))) return null;
-          return {
-            kind: "checkpoint",
-            time: Number(checkpointTime),
-            barTime,
-            checkpoint,
-            checkpointIndex,
-            runBar,
-          };
-        })
-        .filter(Boolean)
-        .sort((left: any, right: any) => Number(left.time || 0) - Number(right.time || 0));
-
-      if (normalizedCheckpoints.length > 0) {
-        observedCheckpointCounts.push(normalizedCheckpoints.length);
-        timelinePoints.push(...normalizedCheckpoints);
-      } else {
-        timelinePoints.push({
-          kind: "bar",
-          time: barTime,
-          barTime,
-          checkpoint: null,
-          checkpointIndex: -1,
-          runBar,
-        });
-      }
-    }
-
-    timelinePoints.sort((left, right) => {
-      const td = Number(left?.time || 0) - Number(right?.time || 0);
-      if (Math.abs(td) > 0.0001) return td;
-      return Number(left?.checkpointIndex || 0) - Number(right?.checkpointIndex || 0);
-    });
-
     const progressedPoints = timelinePoints.length;
     const progressedMaxOffset = Math.max(0, progressedPoints - 1);
 
@@ -475,13 +551,6 @@ export default function StrategyAnalyzer({
         : progressedPoints;
     const fullMaxOffset = Math.max(0, fullEstimatedPoints - 1);
 
-    const clampedOffset =
-      progressedPoints > 0 ? Math.max(0, Math.min(rangeScrubOffset, progressedMaxOffset)) : 0;
-    const targetPoint = progressedPoints > 0 ? timelinePoints[clampedOffset] : null;
-    const targetBar = targetPoint?.runBar || null;
-    const targetCheckpoint = targetPoint?.checkpoint || null;
-    const targetTime = Number(targetPoint?.time);
-
     const progressPct =
       tradeTotalBars > 0 ? (Math.min(tradeTotalBars, progressedBars) / tradeTotalBars) * 100 : 0;
     const enabledTrackPct =
@@ -494,7 +563,8 @@ export default function StrategyAnalyzer({
     let medianSpacingSec: number | null = null;
     if (timelinePoints.length >= 2) {
       const diffs: number[] = [];
-      for (let i = 1; i < timelinePoints.length; i += 1) {
+      const sampleStart = Math.max(0, timelinePoints.length - 200);
+      for (let i = Math.max(1, sampleStart); i < timelinePoints.length; i += 1) {
         const prevT = Number(timelinePoints[i - 1]?.time);
         const nextT = Number(timelinePoints[i]?.time);
         const diff = nextT - prevT;
@@ -531,32 +601,55 @@ export default function StrategyAnalyzer({
       estimatedPointsPerBar,
       sliderStepBars,
       sliderStepSeconds,
+      startLocal: unixSecondsToDateTimeLocal(startTime),
+      endLocal: unixSecondsToDateTimeLocal(endTime),
+    };
+  }, [isAnalyzerAttachedRun, rangePlaybackMeta, timelineCacheVersion]);
+
+  // Offset-dependent values: depends on rangeScrubOffset but does NOT
+  // trigger any useEffect that sets rangeScrubOffset → no loop.
+  const rangeScrubMeta = useMemo(() => {
+    if (!rangeScrubBase) return null;
+    const { progressedPoints, timelinePoints, progressedMaxOffset } = rangeScrubBase;
+    const clampedOffset =
+      progressedPoints > 0 ? Math.max(0, Math.min(rangeScrubOffset, progressedMaxOffset)) : 0;
+    const targetPoint = progressedPoints > 0 ? timelinePoints[clampedOffset] : null;
+    const targetBar = targetPoint?.runBar || null;
+    const targetCheckpoint = targetPoint?.checkpoint || null;
+    const targetTime = Number(targetPoint?.time);
+    return {
+      ...rangeScrubBase,
       clampedOffset,
       targetPoint,
       targetBar,
       targetCheckpoint,
       targetTime: Number.isFinite(targetTime) ? targetTime : null,
       targetLocal: Number.isFinite(targetTime) ? unixSecondsToLabel(targetTime, true) : null,
-      startLocal: unixSecondsToDateTimeLocal(startTime),
-      endLocal: unixSecondsToDateTimeLocal(endTime),
     };
-  }, [isAnalyzerAttachedRun, rangePlaybackMeta, attachedRunBars, rangeScrubOffset]);
+  }, [rangeScrubBase, rangeScrubOffset]);
 
+  // Clamp offset when progressedMaxOffset shrinks (e.g. range change).
+  // Depends on primitives from rangeScrubBase → no object-identity loop.
+  const _progressedMaxOffset = rangeScrubBase?.progressedMaxOffset ?? 0;
   useEffect(() => {
-    if (!rangeScrubMeta) {
+    if (!rangeScrubBase) {
       setRangeScrubOffset(0);
       return;
     }
-    setRangeScrubOffset((prev) => (prev === rangeScrubMeta.clampedOffset ? prev : rangeScrubMeta.clampedOffset));
-  }, [rangeScrubMeta]);
+    setRangeScrubOffset((prev) => {
+      const clamped = Math.max(0, Math.min(prev, _progressedMaxOffset));
+      return clamped === prev ? prev : clamped;
+    });
+  }, [rangeScrubBase, _progressedMaxOffset]);
 
+  // Auto-follow latest bar during playback.
   useEffect(() => {
-    if (!isAnalyzerAttachedRun || !isPlayingRun || !rangeScrubMeta) return;
-    if (rangeScrubMeta.progressedBars <= 0) return;
+    if (!isAnalyzerAttachedRun || !isPlayingRun || !rangeScrubBase) return;
+    if (rangeScrubBase.progressedBars <= 0) return;
     setRangeScrubOffset((prev) =>
-      prev === rangeScrubMeta.progressedMaxOffset ? prev : rangeScrubMeta.progressedMaxOffset
+      prev === _progressedMaxOffset ? prev : _progressedMaxOffset
     );
-  }, [isAnalyzerAttachedRun, isPlayingRun, rangeScrubMeta]);
+  }, [isAnalyzerAttachedRun, isPlayingRun, rangeScrubBase, _progressedMaxOffset]);
 
   const focusSelectedRangeOffset = useCallback(
     (nextOffset: number) => {
@@ -574,18 +667,14 @@ export default function StrategyAnalyzer({
     },
     [rangeScrubMeta, focusSelectedRangeOffset]
   );
+
+  // ── analyzerPlaybackProgress: reads from incremental cache ────
   const analyzerPlaybackProgress = useMemo(() => {
     if (!isAnalyzerAttachedRun || !rangePlaybackMeta) return null;
 
-    let warmupDone = 0;
-    let tradeDone = 0;
-    for (const runBar of Array.isArray(attachedRunBars) ? attachedRunBars : []) {
-      if ((runBar as any)?.warmup_only === true) {
-        warmupDone += 1;
-      } else {
-        tradeDone += 1;
-      }
-    }
+    const cache = timelineCacheRef.current;
+    const warmupDone = cache.warmupDone;
+    const tradeDone = cache.tradeDone;
 
     const backendTotalBars = Number(attachedRunState?.total_bars || 0);
     const estimatedWarmup = Number(rangePlaybackMeta.warmupTotalBars || 0);
@@ -609,10 +698,54 @@ export default function StrategyAnalyzer({
       tradeProgressPct,
       isInitializing,
     };
-  }, [isAnalyzerAttachedRun, rangePlaybackMeta, attachedRunBars, attachedRunState]);
+  }, [isAnalyzerAttachedRun, rangePlaybackMeta, timelineCacheVersion, attachedRunState]);
   const analyzerDisplayPhase = analyzerPlaybackProgress?.isInitializing
     ? "INITIALIZING"
     : analyzerRunPhase;
+  const analyzerChartMarkers = useMemo(() => {
+    const sourceMarkers = Array.isArray(analyzerDecisionEvents) ? analyzerDecisionEvents : [];
+    if (!sourceMarkers.length) return [];
+
+    const minTime = Number(selectedRangeWindow?.from);
+    const maxTime = Number(selectedRangeWindow?.to);
+    const scrubCutoffTime = Number(rangeScrubMeta?.targetTime);
+    const hasScrubCutoff = Number.isFinite(scrubCutoffTime);
+    const scrubCutoffBarIndex = Number(rangeScrubMeta?.targetBar?.bar_index);
+    const dedupeKeys = new Set<string>();
+
+    return sourceMarkers.filter((marker: any) => {
+      const markerTime = toUnixSeconds(marker?.time ?? marker?.timestamp);
+      if (Number.isFinite(markerTime)) {
+        if (Number.isFinite(minTime) && markerTime < minTime - 1) return false;
+        if (Number.isFinite(maxTime) && markerTime > maxTime + 1) return false;
+        if (hasScrubCutoff && markerTime > scrubCutoffTime + 1) return false;
+      } else if (hasScrubCutoff && Number.isFinite(scrubCutoffBarIndex)) {
+        const markerBarIndex = Number(marker?.bar_index);
+        if (Number.isFinite(markerBarIndex) && markerBarIndex > scrubCutoffBarIndex) {
+          return false;
+        }
+      }
+
+      const markerType = String(marker?.marker_type || "").trim();
+      if (markerType === "regime_detected" || markerType === "strategy_selected") {
+        const timeKey = Number.isFinite(markerTime)
+          ? `ts:${Math.floor(markerTime)}`
+          : Number.isFinite(Number(marker?.bar_index))
+            ? `bar:${Number(marker.bar_index)}`
+            : "";
+        const valueKey =
+          markerType === "regime_detected"
+            ? String(marker?.regime || "").trim().toUpperCase()
+            : String(marker?.strategy || "").trim().toUpperCase();
+        const dedupeKey = `${markerType}|${timeKey}|${valueKey}`;
+        if (dedupeKeys.has(dedupeKey)) return false;
+        dedupeKeys.add(dedupeKey);
+      }
+
+      return true;
+    });
+  }, [analyzerDecisionEvents, selectedRangeWindow, rangeScrubMeta]);
+  // ── chartBars: uses cached runBarsByTime Map from timeline cache ─
   const chartBars = useMemo(() => {
     const previewBars = Array.isArray(bars) ? bars : [];
     if (!previewBars.length) return previewBars;
@@ -622,12 +755,8 @@ export default function StrategyAnalyzer({
     const maxTime = selectedRangeWindow.to + 1;
     const scrubCutoffTime = Number(rangeScrubMeta?.targetTime);
     const hasScrubCutoff = Number.isFinite(scrubCutoffTime);
-    const runBarsByTime = new Map<number, any>();
-    for (const runBar of Array.isArray(attachedRunBars) ? attachedRunBars : []) {
-      const t = Number(runBar?.time);
-      if (!Number.isFinite(t) || t < minTime || t > maxTime) continue;
-      runBarsByTime.set(t, runBar);
-    }
+    // Reuse the incrementally-built Map from the timeline cache
+    const runBarsByTime = timelineCacheRef.current.runBarsByTime;
 
     let touchedSegment = false;
     const composedBars = previewBars.map((previewBar: any) => {
@@ -642,7 +771,7 @@ export default function StrategyAnalyzer({
       return { time: t, __wfPlaceholder: true };
     });
     return touchedSegment ? composedBars : previewBars;
-  }, [bars, isAnalyzerAttachedRun, selectedRangeWindow, attachedRunBars, rangeScrubMeta]);
+  }, [bars, isAnalyzerAttachedRun, selectedRangeWindow, timelineCacheVersion, rangeScrubMeta]);
 
   const extractRunBarAnalysis = useCallback((bar: any) => {
     if (!bar || typeof bar !== "object") return null;
@@ -1186,7 +1315,19 @@ export default function StrategyAnalyzer({
     const from = Number(nextRange.from);
     const to = Number(nextRange.to);
     if (!Number.isFinite(from) || !Number.isFinite(to)) return;
-    setAnalyzerChartState({ from, to });
+    setAnalyzerChartState((prev) => {
+      const prevFrom = Number(prev?.from);
+      const prevTo = Number(prev?.to);
+      if (
+        Number.isFinite(prevFrom) &&
+        Number.isFinite(prevTo) &&
+        Math.abs(prevFrom - from) < 0.001 &&
+        Math.abs(prevTo - to) < 0.001
+      ) {
+        return prev;
+      }
+      return { from, to };
+    });
   }, []);
 
   const detachedToggleButtonStyle = {
@@ -1454,7 +1595,7 @@ export default function StrategyAnalyzer({
                   <CandlestickChart
                     ref={chartRef}
                     bars={chartBars}
-                    markers={analyzerDecisionEvents}
+                    markers={analyzerChartMarkers}
                     icebergs={[]}
                     onMarkerClick={onChartMarkerClick}
                     onBarClick={handleAnalyzerBarClick}

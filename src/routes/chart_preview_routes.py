@@ -5,7 +5,6 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from available_data import get_discovery
 from src.routes.context import ApiServices, get_api_services
 
 router = APIRouter()
@@ -36,13 +35,21 @@ async def get_preview_bars(
     if start > end:
         raise HTTPException(status_code=400, detail="date_from must be <= date_to")
 
-    discovery = get_discovery()
-    files = discovery.get_files_for_range(ticker, date_from, date_to)
+    files = services.databento_svc.get_files_for_range(
+        ticker=ticker,
+        start_date=date_from,
+        end_date=date_to,
+        schema_prefix="ohlcv-",
+    )
     if not files:
-        # Retry once with a fresh discovery instance to avoid stale in-process cache/state.
-        services.reset_discovery()
-        discovery = get_discovery()
-        files = discovery.get_files_for_range(ticker, date_from, date_to)
+        # Manual file drops are not always cataloged yet; rescan once and retry.
+        services.databento_svc.scan_existing_files()
+        files = services.databento_svc.get_files_for_range(
+            ticker=ticker,
+            start_date=date_from,
+            end_date=date_to,
+            schema_prefix="ohlcv-",
+        )
     if not files:
         raise HTTPException(
             status_code=404,

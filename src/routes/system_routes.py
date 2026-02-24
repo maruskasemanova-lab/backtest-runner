@@ -36,6 +36,14 @@ def _run_reports_store(request: Request):
     return getattr(state, "run_reports_store", None)
 
 
+def _active_runners(request: Request) -> Dict[str, Any]:
+    app = getattr(request, "app", None)
+    state = getattr(app, "state", None)
+    services = getattr(state, "api_services", None) if state is not None else None
+    active = getattr(services, "active_runners", None) if services is not None else None
+    return active if isinstance(active, dict) else {}
+
+
 def _run_reports_source_mode(request: Request) -> str:
     app = getattr(request, "app", None)
     state = getattr(app, "state", None)
@@ -68,6 +76,24 @@ def _external_report_dir_name(
             pass
 
     return f"{timestamp_prefix}_supabase_{normalized_run_key}"
+
+
+def _active_report_dir_name(*, run_key: str) -> str:
+    normalized_run_key = re.sub(
+        r"[^A-Za-z0-9_-]+", "_", str(run_key or "").strip()
+    ).strip("_")
+    if not normalized_run_key:
+        normalized_run_key = "run"
+    return f"active_{normalized_run_key}"
+
+
+def _history_identity_key(payload: Dict[str, Any]) -> str:
+    run_id = str(payload.get("run_id") or "").strip()
+    ticker = str(payload.get("ticker") or "").strip().upper()
+    date_label = str(payload.get("date") or "").strip()
+    if not run_id or not ticker or not date_label:
+        return ""
+    return f"{run_id}:{ticker}:{date_label}"
 
 
 def _build_diagnostic_summary(
@@ -1441,6 +1467,7 @@ async def get_saved_run_history(
     skipped_invalid = 0
     run_latest_saved_at: Dict[str, Optional[str]] = {}
     history_profile_names: Dict[str, Set[str]] = {}
+    seen_run_identity_keys: Set[str] = set()
 
     def _process_history_payload(
         *,
@@ -1506,8 +1533,43 @@ async def get_saved_run_history(
         )
         if not run_day_rows:
             return
+        identity_key = _history_identity_key(payload)
+        if identity_key:
+            if identity_key in seen_run_identity_keys:
+                return
+            seen_run_identity_keys.add(identity_key)
         day_rows.extend(run_day_rows)
         matched_reports += 1
+
+    # Include currently active in-memory runs so diagnostics can surface
+    # Strategy Analyzer sessions before they are explicitly cleared/saved.
+    active_runner_items = sorted(
+        _active_runners(request).items(),
+        key=lambda item: str(item[0] or ""),
+        reverse=True,
+    )
+    active_seen_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    for run_key, runner in active_runner_items:
+        if matched_reports >= limit:
+            break
+        scanned_reports += 1
+        get_summary = getattr(runner, "get_summary", None)
+        if not callable(get_summary):
+            skipped_invalid += 1
+            continue
+        try:
+            payload = get_summary()
+        except Exception:
+            skipped_invalid += 1
+            continue
+        if not isinstance(payload, dict):
+            skipped_invalid += 1
+            continue
+        _process_history_payload(
+            payload=payload,
+            report_dir_name=_active_report_dir_name(run_key=str(run_key or "")),
+            report_saved_at=active_seen_at,
+        )
 
     source_mode = _run_reports_source_mode(request)
     source_path_hint = "run_reports_store"

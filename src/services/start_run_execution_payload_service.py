@@ -93,6 +93,12 @@ def _build_core_execution_payload(execution_cfg: Dict[str, Any]) -> Dict[str, An
         "partial_take_profit_fraction_source": str(
             execution_cfg["partial_take_profit_fraction_source"]
         ),
+        "partial_protect_min_mfe_r": float(
+            execution_cfg["effective_partial_protect_min_mfe_r"]
+        ),
+        "partial_protect_min_mfe_r_source": str(
+            execution_cfg["partial_protect_min_mfe_r_source"]
+        ),
         "trailing_stop_pct": float(execution_cfg["effective_trailing_stop_pct"]),
         "trailing_stop_pct_source": str(execution_cfg["trailing_stop_pct_source"]),
         "global_exit_rr_ratio": float(execution_cfg["effective_global_exit_rr_ratio"]),

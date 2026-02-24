@@ -22,19 +22,19 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
 | `api_server.py` | yes | 1511 | `8f49f06 2026-02-23` |
-| `session_runner.py` | yes | 2349 | `8f49f06 2026-02-23` |
+| `session_runner.py` | yes | 2349 | `c70aa9e 2026-02-24` |
 | `data_loader.py` | yes | 312 | `1273b21 2026-02-23` |
 | `available_data.py` | yes | 221 | `1273b21 2026-02-23` |
 | `decision_tracker.py` | yes | 499 | `1273b21 2026-02-23` |
 | `performance_tracker.py` | yes | 876 | `1273b21 2026-02-23` |
 | `src/routes/context.py` | yes | 46 | `1273b21 2026-02-23` |
-| `src/routes/system_routes.py` | yes | 1654 | `1273b21 2026-02-23` |
+| `src/routes/system_routes.py` | yes | 1716 | `1273b21 2026-02-23` |
 | `src/routes/l2_routes.py` | yes | 122 | `1273b21 2026-02-23` |
 | `src/routes/data_loader_routes.py` | yes | 289 | `1273b21 2026-02-23` |
 | `src/routes/live_trader_routes.py` | yes | 68 | `da07c20 2026-02-12` |
 | `src/routes/config_read_routes.py` | yes | 128 | `1273b21 2026-02-23` |
 | `src/routes/config_write_routes.py` | yes | 86 | `b9accc6 2026-02-18` |
-| `src/routes/run_routes.py` | yes | 216 | `1273b21 2026-02-23` |
+| `src/routes/run_routes.py` | yes | 216 | `c70aa9e 2026-02-24` |
 | `src/routes/adaptive_tuner_routes.py` | yes | 38 | `da07c20 2026-02-12` |
 | `src/routes/run_start_routes.py` | yes | 345 | `1273b21 2026-02-23` |
 | `src/routes/v2_routes.py` | yes | 2046 | `1273b21 2026-02-23` |
@@ -47,7 +47,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/services/live_trader_service.py` | yes | 272 | `1273b21 2026-02-23` |
 | `src/services/run_registry.py` | yes | 28 | `b9accc6 2026-02-18` |
 | `src/services/config_write_service.py` | yes | 707 | `1273b21 2026-02-23` |
-| `src/services/run_control_service.py` | yes | 523 | `8f49f06 2026-02-23` |
+| `src/services/run_control_service.py` | yes | 523 | `c70aa9e 2026-02-24` |
 | `src/services/saas_service.py` | yes | 2041 | `1273b21 2026-02-23` |
 | `src/services/adaptive_tuner_orchestration_service.py` | yes | 177 | `1273b21 2026-02-23` |
 | `src/services/adaptive_tuner_worker_service.py` | yes | 672 | `1273b21 2026-02-23` |
@@ -146,16 +146,16 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `function` `_project_root` (line 21)
 - `function` `_diagnostic_cache_store` (line 25)
 - `function` `_run_reports_store` (line 33)
-- `function` `_run_reports_source_mode` (line 39)
-- `function` `_external_report_dir_name` (line 51)
-- `function` `_build_diagnostic_summary` (line 73)
-- `function` `_sanitize_segment` (line 105)
-- `function` `_coerce_non_negative_int` (line 115)
-- `function` `_normalize_iso_date` (line 127)
-- `function` `_parse_report_saved_at` (line 134)
-- `function` `_parse_run_day_from_label` (line 147)
-- `function` `_collect_strategy_names_from_trades` (line 157)
-- ... 36 more symbols
+- `function` `_active_runners` (line 39)
+- `function` `_run_reports_source_mode` (line 47)
+- `function` `_external_report_dir_name` (line 59)
+- `function` `_active_report_dir_name` (line 81)
+- `function` `_history_identity_key` (line 90)
+- `function` `_build_diagnostic_summary` (line 99)
+- `function` `_sanitize_segment` (line 131)
+- `function` `_coerce_non_negative_int` (line 141)
+- `function` `_normalize_iso_date` (line 153)
+- ... 39 more symbols
 
 ### `src/routes/l2_routes.py`
 - `async_function` `get_footprint_data` (line 12)

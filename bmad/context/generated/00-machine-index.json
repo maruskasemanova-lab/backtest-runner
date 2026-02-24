@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-24T12:55:18.844407+00:00",
+  "generated_at": "2026-02-24T20:06:45.640690+00:00",
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -465,7 +465,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/session_runner.py",
           "exists": true,
           "lines": 2349,
-          "last_commit": "8f49f06 2026-02-23",
+          "last_commit": "c70aa9e 2026-02-24",
           "symbols": [
             {
               "kind": "function",
@@ -615,7 +615,7 @@
           "path": "src/routes/system_routes.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/system_routes.py",
           "exists": true,
-          "lines": 1654,
+          "lines": 1716,
           "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
@@ -635,228 +635,243 @@
             },
             {
               "kind": "function",
-              "name": "_run_reports_source_mode",
+              "name": "_active_runners",
               "line": 39
             },
             {
               "kind": "function",
+              "name": "_run_reports_source_mode",
+              "line": 47
+            },
+            {
+              "kind": "function",
               "name": "_external_report_dir_name",
-              "line": 51
+              "line": 59
+            },
+            {
+              "kind": "function",
+              "name": "_active_report_dir_name",
+              "line": 81
+            },
+            {
+              "kind": "function",
+              "name": "_history_identity_key",
+              "line": 90
             },
             {
               "kind": "function",
               "name": "_build_diagnostic_summary",
-              "line": 73
+              "line": 99
             },
             {
               "kind": "function",
               "name": "_sanitize_segment",
-              "line": 105
+              "line": 131
             },
             {
               "kind": "function",
               "name": "_coerce_non_negative_int",
-              "line": 115
+              "line": 141
             },
             {
               "kind": "function",
               "name": "_normalize_iso_date",
-              "line": 127
+              "line": 153
             },
             {
               "kind": "function",
               "name": "_parse_report_saved_at",
-              "line": 134
+              "line": 160
             },
             {
               "kind": "function",
               "name": "_parse_run_day_from_label",
-              "line": 147
+              "line": 173
             },
             {
               "kind": "function",
               "name": "_collect_strategy_names_from_trades",
-              "line": 157
+              "line": 183
             },
             {
               "kind": "function",
               "name": "_normalize_profile_token",
-              "line": 170
+              "line": 196
             },
             {
               "kind": "function",
               "name": "_first_profile_token",
-              "line": 179
+              "line": 205
             },
             {
               "kind": "function",
               "name": "_extract_profile_metadata",
-              "line": 187
+              "line": 213
             },
             {
               "kind": "function",
               "name": "_match_profile_filter",
-              "line": 272
+              "line": 298
             },
             {
               "kind": "function",
               "name": "_safe_float",
-              "line": 297
+              "line": 323
             },
             {
               "kind": "function",
               "name": "_safe_optional_float",
-              "line": 305
+              "line": 331
             },
             {
               "kind": "function",
               "name": "_safe_int",
-              "line": 313
+              "line": 339
             },
             {
               "kind": "function",
               "name": "_safe_optional_int",
-              "line": 321
+              "line": 347
             },
             {
               "kind": "function",
               "name": "_normalize_iso_timestamp",
-              "line": 329
+              "line": 355
             },
             {
               "kind": "function",
               "name": "_timestamp_lookup_keys",
-              "line": 341
+              "line": 367
             },
             {
               "kind": "function",
               "name": "_day_from_timestamp",
-              "line": 356
+              "line": 382
             },
             {
               "kind": "function",
               "name": "_parse_range_label",
-              "line": 370
+              "line": 396
             },
             {
               "kind": "function",
               "name": "_expand_day_range",
-              "line": 386
+              "line": 412
             },
             {
               "kind": "function",
               "name": "_extract_entry_reason",
-              "line": 397
+              "line": 423
             },
             {
               "kind": "function",
               "name": "_extract_exit_reason",
-              "line": 420
+              "line": 446
             },
             {
               "kind": "function",
               "name": "_build_entry_reason_map",
-              "line": 434
+              "line": 460
             },
             {
               "kind": "function",
               "name": "_build_exit_reason_map",
-              "line": 451
+              "line": 477
             },
             {
               "kind": "function",
               "name": "_build_marker_strategy_names_by_day",
-              "line": 474
+              "line": 500
             },
             {
               "kind": "function",
               "name": "_count_markers_by_day",
-              "line": 491
+              "line": 517
             },
             {
               "kind": "function",
               "name": "_resolve_profile_values",
-              "line": 512
+              "line": 538
             },
             {
               "kind": "function",
               "name": "_build_history_day_rows",
-              "line": 520
+              "line": 546
             },
             {
               "kind": "function",
               "name": "_aggregate_history_day_rows",
-              "line": 693
+              "line": 719
             },
             {
               "kind": "function",
               "name": "_compute_calendar_metrics",
-              "line": 934
+              "line": 960
             },
             {
               "kind": "function",
               "name": "_report_has_closed_trades",
-              "line": 959
+              "line": 985
             },
             {
               "kind": "function",
               "name": "_load_aos_adaptive_profile_options",
-              "line": 970
+              "line": 996
             },
             {
               "kind": "function",
               "name": "_load_aos_unified_profile_options",
-              "line": 1048
+              "line": 1074
             },
             {
               "kind": "function",
               "name": "_merge_profile_options",
-              "line": 1125
+              "line": 1151
             },
             {
               "kind": "function",
               "name": "_merge_adaptive_profile_options",
-              "line": 1188
-            },
-            {
-              "kind": "async_function",
-              "name": "root",
-              "line": 1196
-            },
-            {
-              "kind": "async_function",
-              "name": "health",
-              "line": 1205
-            },
-            {
-              "kind": "async_function",
-              "name": "get_l2_runtime",
               "line": 1214
             },
             {
               "kind": "async_function",
+              "name": "root",
+              "line": 1222
+            },
+            {
+              "kind": "async_function",
+              "name": "health",
+              "line": 1231
+            },
+            {
+              "kind": "async_function",
+              "name": "get_l2_runtime",
+              "line": 1240
+            },
+            {
+              "kind": "async_function",
               "name": "update_l2_runtime",
-              "line": 1230
+              "line": 1256
             },
             {
               "kind": "async_function",
               "name": "get_available_data",
-              "line": 1272
+              "line": 1298
             },
             {
               "kind": "async_function",
               "name": "list_data_files",
-              "line": 1284
+              "line": 1310
             },
             {
               "kind": "async_function",
               "name": "get_diagnostic_report",
-              "line": 1290
+              "line": 1316
             },
             {
               "kind": "async_function",
               "name": "get_saved_run_history",
-              "line": 1412
+              "line": 1438
             }
           ],
           "routes": [
@@ -864,49 +879,49 @@
               "method": "GET",
               "path": "/",
               "handler": "root",
-              "line": 1196
+              "line": 1222
             },
             {
               "method": "GET",
               "path": "/api/health",
               "handler": "health",
-              "line": 1205
+              "line": 1231
             },
             {
               "method": "GET",
               "path": "/api/system/l2/runtime",
               "handler": "get_l2_runtime",
-              "line": 1214
+              "line": 1240
             },
             {
               "method": "POST",
               "path": "/api/system/l2/runtime",
               "handler": "update_l2_runtime",
-              "line": 1230
+              "line": 1256
             },
             {
               "method": "GET",
               "path": "/api/available-data",
               "handler": "get_available_data",
-              "line": 1272
+              "line": 1298
             },
             {
               "method": "GET",
               "path": "/api/data/files",
               "handler": "list_data_files",
-              "line": 1284
+              "line": 1310
             },
             {
               "method": "GET",
               "path": "/api/reports/diagnostic/{ticker}",
               "handler": "get_diagnostic_report",
-              "line": 1290
+              "line": 1316
             },
             {
               "method": "GET",
               "path": "/api/reports/history/{ticker}",
               "handler": "get_saved_run_history",
-              "line": 1412
+              "line": 1438
             }
           ],
           "parse_error": null
@@ -1385,7 +1400,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/run_routes.py",
           "exists": true,
           "lines": 216,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "c70aa9e 2026-02-24",
           "symbols": [
             {
               "kind": "async_function",
@@ -2606,7 +2621,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/run_control_service.py",
           "exists": true,
           "lines": 523,
-          "last_commit": "8f49f06 2026-02-23",
+          "last_commit": "c70aa9e 2026-02-24",
           "symbols": [
             {
               "kind": "class",
@@ -4959,8 +4974,8 @@
           "path": "../market_regime_detection/src/trading_orchestrator.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/trading_orchestrator.py",
           "exists": true,
-          "lines": 470,
-          "last_commit": "a0fc856 2026-02-23",
+          "lines": 473,
+          "last_commit": "018eb2b 2026-02-24",
           "symbols": [
             {
               "kind": "class",
@@ -4980,8 +4995,8 @@
           "path": "../market_regime_detection/src/feature_store.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/feature_store.py",
           "exists": true,
-          "lines": 683,
-          "last_commit": "a0fc856 2026-02-23",
+          "lines": 691,
+          "last_commit": "018eb2b 2026-02-24",
           "symbols": [
             {
               "kind": "class",
@@ -5181,7 +5196,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/evidence_decision.py",
           "exists": true,
           "lines": 530,
-          "last_commit": "a0fc856 2026-02-23",
+          "last_commit": "018eb2b 2026-02-24",
           "symbols": [
             {
               "kind": "class",
@@ -5417,7 +5432,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/intrabar_frame_builder.py",
           "exists": true,
           "lines": 365,
-          "last_commit": "8f49f06 2026-02-23",
+          "last_commit": "c70aa9e 2026-02-24",
           "symbols": [
             {
               "kind": "class",
@@ -6029,7 +6044,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/App.tsx",
           "exists": true,
           "lines": 2704,
-          "last_commit": "8f49f06 2026-02-23",
+          "last_commit": "c70aa9e 2026-02-24",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6048,7 +6063,7 @@
           "path": "frontend/src/components/CandlestickChart.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/CandlestickChart.tsx",
           "exists": true,
-          "lines": 839,
+          "lines": 851,
           "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
@@ -6059,7 +6074,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/DecisionPanel.tsx",
           "exists": true,
           "lines": 3085,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "c70aa9e 2026-02-24",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6188,7 +6203,7 @@
       "method": "GET",
       "path": "/",
       "handler": "root",
-      "line": 1196
+      "line": 1222
     },
     {
       "domain": "orchestration",
@@ -6244,7 +6259,7 @@
       "method": "GET",
       "path": "/api/available-data",
       "handler": "get_available_data",
-      "line": 1272
+      "line": 1298
     },
     {
       "domain": "orchestration",
@@ -6292,7 +6307,7 @@
       "method": "GET",
       "path": "/api/data/files",
       "handler": "list_data_files",
-      "line": 1284
+      "line": 1310
     },
     {
       "domain": "orchestration",
@@ -6300,7 +6315,7 @@
       "method": "GET",
       "path": "/api/health",
       "handler": "health",
-      "line": 1205
+      "line": 1231
     },
     {
       "domain": "orchestration",
@@ -6372,7 +6387,7 @@
       "method": "GET",
       "path": "/api/reports/diagnostic/{ticker}",
       "handler": "get_diagnostic_report",
-      "line": 1290
+      "line": 1316
     },
     {
       "domain": "orchestration",
@@ -6380,7 +6395,7 @@
       "method": "GET",
       "path": "/api/reports/history/{ticker}",
       "handler": "get_saved_run_history",
-      "line": 1412
+      "line": 1438
     },
     {
       "domain": "orchestration",
@@ -6468,7 +6483,7 @@
       "method": "GET",
       "path": "/api/system/l2/runtime",
       "handler": "get_l2_runtime",
-      "line": 1214
+      "line": 1240
     },
     {
       "domain": "orchestration",
@@ -6732,7 +6747,7 @@
       "method": "POST",
       "path": "/api/system/l2/runtime",
       "handler": "update_l2_runtime",
-      "line": 1230
+      "line": 1256
     },
     {
       "domain": "orchestration",

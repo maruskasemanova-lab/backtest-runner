@@ -417,6 +417,7 @@ Response notes:
   - `source_path_hint` (`run_reports_store` or `reports/*/session_summary.json`)
 - malformed historical artifacts are skipped and counted under `skipped_invalid_reports`.
 - source resolution:
+  - endpoint also merges currently active in-memory runs (`active_runners`) so Diagnostics can surface Strategy Analyzer sessions before explicit delete/final save.
   - when run report store is configured (`app.state.run_reports_store`), endpoint reads that store as the authoritative source (Supabase in prod, SQLite in local-by-default runtime).
   - local filesystem artifacts are read only when no run report store is configured.
   - if no source data exists, endpoint returns `200` with empty `day_results` (no hard `404` for missing local `reports/` directory).

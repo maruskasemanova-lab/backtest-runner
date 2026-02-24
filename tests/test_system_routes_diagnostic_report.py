@@ -791,6 +791,101 @@ def test_get_saved_run_history_store_mode_does_not_fallback_to_filesystem(
     assert payload["day_results"] == []
 
 
+def test_get_saved_run_history_includes_active_runner_summary(monkeypatch, tmp_path):
+    active_summary = {
+        "run_id": "analyzer-live",
+        "ticker": "MU",
+        "date": "2026-02-13_to_2026-02-13",
+        "processed_bars": 12,
+        "total_bars": 300,
+        "session_summary": {
+            "total_trades": 0,
+            "trades": [],
+        },
+        "markers": [],
+    }
+
+    class _ActiveRunner:
+        def get_summary(self):
+            return dict(active_summary)
+
+    def _state_setup(app):
+        app.state.api_services = SimpleNamespace(
+            active_runners={
+                "analyzer-live:MU:2026-02-13_to_2026-02-13": _ActiveRunner()
+            }
+        )
+
+    client = _build_client(monkeypatch, tmp_path, state_setup=_state_setup)
+    response = client.get("/api/reports/history/MU?include_zero_trade_runs=true")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["matched_reports"] == 1
+    assert [item["date"] for item in payload["day_results"]] == ["2026-02-13"]
+    assert payload["day_results"][0]["runs"][0]["run_id"] == "analyzer-live"
+    assert payload["filter_options"]["run_ids"][0]["run_id"] == "analyzer-live"
+
+
+def test_get_saved_run_history_dedupes_active_runner_when_store_has_same_run(
+    monkeypatch, tmp_path
+):
+    shared_summary = {
+        "run_id": "analyzer-live",
+        "ticker": "MU",
+        "date": "2026-02-11",
+        "processed_bars": 25,
+        "total_bars": 25,
+        "session_summary": {
+            "total_trades": 1,
+            "trades": [
+                {
+                    "trade_id": 1,
+                    "strategy": "AdaptiveCore",
+                    "side": "long",
+                    "entry_time": "2026-02-11T14:30:00+00:00",
+                    "exit_time": "2026-02-11T14:35:00+00:00",
+                    "pnl_pct": 0.2,
+                    "pnl_dollars": 2.0,
+                    "bars_held": 5,
+                }
+            ],
+        },
+        "markers": [],
+    }
+
+    class _StoreWithRun:
+        def list_run_summaries(self, *, limit=300):
+            _ = limit
+            return [
+                {
+                    "run_key": "analyzer-live:MU:2026-02-11",
+                    "updated_at": "2026-02-14T10:00:00Z",
+                    "summary": dict(shared_summary),
+                }
+            ]
+
+    class _ActiveRunner:
+        def get_summary(self):
+            return dict(shared_summary)
+
+    def _state_setup(app):
+        app.state.run_reports_store = _StoreWithRun()
+        app.state.api_services = SimpleNamespace(
+            active_runners={"analyzer-live:MU:2026-02-11": _ActiveRunner()}
+        )
+
+    client = _build_client(monkeypatch, tmp_path, state_setup=_state_setup)
+    response = client.get("/api/reports/history/MU")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["matched_reports"] == 1
+    assert [item["date"] for item in payload["day_results"]] == ["2026-02-11"]
+    assert payload["day_results"][0]["report_count"] == 1
+    assert len(payload["day_results"][0]["runs"]) == 1
+
+
 def test_get_saved_run_history_rejects_invalid_ticker(monkeypatch, tmp_path):
     client = _build_client(monkeypatch, tmp_path)
     response = client.get("/api/reports/history/MU..")
