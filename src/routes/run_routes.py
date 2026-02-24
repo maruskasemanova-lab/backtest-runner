@@ -6,6 +6,7 @@ from src.models.run_requests import PlayRequest
 from src.routes.context import ApiServices, get_api_services
 from src.services.run_control_service import (
     delete_run,
+    evaluate_intrabar_slice,
     get_bar_details,
     get_chart_annotations,
     get_markers,
@@ -40,10 +41,19 @@ async def step_run_endpoint(
     run_id: str,
     ticker: str,
     date: str,
+    request: Optional[PlayRequest] = Body(default=None),
+    raw_request: Request = None,
     services: ApiServices = Depends(get_api_services),
 ):
     """Advance the run by one bar."""
-    return await step_run(run_id, ticker, date, services.build_run_control_deps())
+    return await step_run(
+        run_id,
+        ticker,
+        date,
+        services.build_run_control_deps(),
+        request=request,
+        raw_request=raw_request,
+    )
 
 
 @router.post("/api/run/{run_id}/{ticker}/{date}/play")
@@ -134,6 +144,20 @@ async def get_bar_details_endpoint(
     """Get 1-second intrabar frames for a specific minute bar."""
     return get_bar_details(
         run_id, ticker, date, minute_key, services.build_run_control_deps()
+    )
+
+
+@router.post("/api/run/{run_id}/{ticker}/{date}/intrabar_eval")
+async def evaluate_intrabar_slice_endpoint(
+    run_id: str,
+    ticker: str,
+    date: str,
+    payload: dict = Body(default_factory=dict),
+    services: ApiServices = Depends(get_api_services),
+):
+    """Evaluate intrabar slice using active run session context."""
+    return await evaluate_intrabar_slice(
+        run_id, ticker, date, payload, services.build_run_control_deps()
     )
 
 

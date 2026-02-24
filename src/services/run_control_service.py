@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Dict, Optional, Union
 
+import aiohttp
 from fastapi import HTTPException, Request
 
+from src.services.strategy_api_auth_headers import build_strategy_api_headers
 from src.services.trade_eval_mode_service import (
     normalize_trade_eval_mode,
     resolve_trade_eval_mode_from_settings,
@@ -52,6 +54,61 @@ def _runner_run_key(runner: Any) -> Optional[str]:
     return f"{run_id}:{ticker}:{date_label}"
 
 
+async def _read_raw_request_payload(
+    raw_request: Optional[Request],
+) -> Optional[Dict[str, Any]]:
+    if raw_request is None:
+        return None
+    try:
+        parsed_payload = await raw_request.json()
+    except Exception:
+        return None
+    return parsed_payload if isinstance(parsed_payload, dict) else None
+
+
+def _set_runner_trade_eval_mode(
+    runner: Any, deps: RunControlDeps, normalized_mode: str
+) -> None:
+    _, intrabar_enabled, step_seconds = resolve_trade_eval_settings(
+        requested_mode=normalized_mode,
+        fallback_intrabar_enabled=bool(
+            getattr(runner.config, "intrabar_execution_recalc_1s", False)
+        ),
+        fallback_intrabar_eval_step_seconds=getattr(
+            runner.config, "intrabar_eval_step_seconds", 1
+        ),
+    )
+    runner.config.intrabar_execution_recalc_1s = intrabar_enabled
+    runner.config.intrabar_eval_step_seconds = step_seconds
+    # Ensure L2 manager is attached when switching to intrabar mode at
+    # runtime (the runner may have been created without it).
+    if intrabar_enabled and getattr(runner, "l2_manager", None) is None:
+        if deps.l2_manager is not None:
+            runner.l2_manager = deps.l2_manager
+
+
+def _effective_runner_trade_eval_mode(runner: Any) -> str:
+    return resolve_trade_eval_mode_from_settings(
+        intrabar_enabled=bool(
+            getattr(runner.config, "intrabar_execution_recalc_1s", False)
+        ),
+        intrabar_eval_step_seconds=getattr(
+            runner.config, "intrabar_eval_step_seconds", 1
+        ),
+    )
+
+
+def _resolve_requested_trade_eval_mode(
+    *, request: Optional[Any], payload: Optional[Dict[str, Any]]
+) -> Optional[str]:
+    raw_trade_mode = (
+        getattr(request, "trade_eval_mode", None) if request is not None else None
+    )
+    if raw_trade_mode is None and payload is not None:
+        raw_trade_mode = payload.get("trade_eval_mode")
+    return normalize_trade_eval_mode(raw_trade_mode)
+
+
 async def _persist_runner_summary_to_store(runner: Any, deps: RunControlDeps) -> bool:
     report_store = getattr(deps, "run_reports_store", None)
     upsert = getattr(report_store, "upsert_run_summary", None)
@@ -76,9 +133,34 @@ def get_run_state(run_id: str, ticker: str, date: str, deps: RunControlDeps):
     return runner.get_state()
 
 
-async def step_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
+async def step_run(
+    run_id: str,
+    ticker: str,
+    date: str,
+    deps: RunControlDeps,
+    *,
+    request: Optional[Any] = None,
+    raw_request: Optional[Request] = None,
+):
     _, runner = deps.run_registry.require(run_id, ticker, date)
-    return await runner.step()
+
+    payload = await _read_raw_request_payload(raw_request)
+    normalized_trade_mode = _resolve_requested_trade_eval_mode(
+        request=request,
+        payload=payload,
+    )
+    if normalized_trade_mode is not None:
+        _set_runner_trade_eval_mode(runner, deps, normalized_trade_mode)
+
+    result = await runner.step()
+    if isinstance(result, dict):
+        out = dict(result)
+        out["trade_eval_mode"] = _effective_runner_trade_eval_mode(runner)
+        return out
+    return {
+        "success": bool(result),
+        "trade_eval_mode": _effective_runner_trade_eval_mode(runner),
+    }
 
 
 async def play_run(
@@ -92,44 +174,7 @@ async def play_run(
     raw_request: Optional[Request] = None,
 ):
     _, runner = deps.run_registry.require(run_id, ticker, date)
-
-    def _set_trade_eval_mode(mode: str) -> None:
-        _, intrabar_enabled, step_seconds = resolve_trade_eval_settings(
-            requested_mode=mode,
-            fallback_intrabar_enabled=bool(
-                getattr(runner.config, "intrabar_execution_recalc_1s", False)
-            ),
-            fallback_intrabar_eval_step_seconds=getattr(
-                runner.config, "intrabar_eval_step_seconds", 1
-            ),
-        )
-        runner.config.intrabar_execution_recalc_1s = intrabar_enabled
-        runner.config.intrabar_eval_step_seconds = step_seconds
-        # Ensure L2 manager is attached when switching to intrabar mode at
-        # play-time (the runner may have been created without it if the
-        # original start request did not request intrabar evaluation).
-        if intrabar_enabled and getattr(runner, "l2_manager", None) is None:
-            if deps.l2_manager is not None:
-                runner.l2_manager = deps.l2_manager
-
-    def _effective_trade_eval_mode() -> str:
-        return resolve_trade_eval_mode_from_settings(
-            intrabar_enabled=bool(
-                getattr(runner.config, "intrabar_execution_recalc_1s", False)
-            ),
-            intrabar_eval_step_seconds=getattr(
-                runner.config, "intrabar_eval_step_seconds", 1
-            ),
-        )
-
-    payload: Optional[Dict[str, Any]] = None
-    if raw_request is not None:
-        try:
-            parsed_payload = await raw_request.json()
-            if isinstance(parsed_payload, dict):
-                payload = parsed_payload
-        except Exception:
-            payload = None
+    payload = await _read_raw_request_payload(raw_request)
 
     raw_speed = None
     request_speed = getattr(request, "speed_ms", None) if request is not None else None
@@ -142,18 +187,15 @@ async def play_run(
     if raw_speed is None:
         raw_speed = "max"
 
-    raw_trade_mode = (
-        getattr(request, "trade_eval_mode", None) if request is not None else None
+    normalized_trade_mode = _resolve_requested_trade_eval_mode(
+        request=request,
+        payload=payload,
     )
-    if raw_trade_mode is None and payload is not None:
-        raw_trade_mode = payload.get("trade_eval_mode")
-
-    normalized_trade_mode = normalize_trade_eval_mode(raw_trade_mode)
 
     if normalized_trade_mode is not None:
-        _set_trade_eval_mode(normalized_trade_mode)
+        _set_runner_trade_eval_mode(runner, deps, normalized_trade_mode)
 
-    effective_trade_mode = _effective_trade_eval_mode()
+    effective_trade_mode = _effective_runner_trade_eval_mode(runner)
 
     if runner.is_running and runner.is_paused:
         runner.resume()
@@ -352,6 +394,84 @@ def get_bar_details(
         }
     except Exception as exc:
         raise HTTPException(500, f"Failed to load bar details: {str(exc)}")
+
+
+async def evaluate_intrabar_slice(
+    run_id: str,
+    ticker: str,
+    date: str,
+    payload: Dict[str, Any],
+    deps: RunControlDeps,
+):
+    _, runner = deps.run_registry.require(run_id, ticker, date)
+
+    body = payload if isinstance(payload, dict) else {}
+    required_fields = ("timestamp", "open", "high", "low", "close", "volume")
+    missing_fields = [field for field in required_fields if body.get(field) is None]
+    if missing_fields:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing intrabar payload fields: {', '.join(missing_fields)}",
+        )
+
+    strategy_api_url = str(
+        getattr(getattr(runner, "config", None), "strategy_api_url", "") or ""
+    ).strip()
+    if not strategy_api_url:
+        raise HTTPException(
+            status_code=500, detail="Run has no strategy_api_url configured."
+        )
+
+    proxy_payload = dict(body)
+    proxy_payload["run_id"] = str(getattr(runner.config, "run_id", run_id) or run_id)
+    proxy_payload["ticker"] = str(getattr(runner.config, "ticker", ticker) or ticker)
+
+    headers = build_strategy_api_headers(strategy_api_url)
+    session: Any = None
+    owns_session = False
+
+    try:
+        get_runner_session = getattr(runner, "_get_strategy_http_session", None)
+        if callable(get_runner_session):
+            maybe_session = get_runner_session()
+            session = (
+                await maybe_session
+                if asyncio.iscoroutine(maybe_session)
+                else maybe_session
+            )
+        if session is None:
+            timeout = aiohttp.ClientTimeout(
+                total=8.0, connect=2.0, sock_connect=2.0, sock_read=6.0
+            )
+            session = aiohttp.ClientSession(timeout=timeout)
+            owns_session = True
+
+        post_kwargs: Dict[str, Any] = {"json": proxy_payload}
+        if headers:
+            post_kwargs["headers"] = headers
+
+        async with session.post(
+            f"{strategy_api_url}/api/session/intrabar_eval", **post_kwargs
+        ) as resp:
+            if resp.status != 200:
+                error_text = str(await resp.text() or "").strip()
+                detail = error_text or f"Strategy intrabar eval failed (HTTP {resp.status})"
+                raise HTTPException(status_code=resp.status, detail=detail)
+            try:
+                return await resp.json()
+            except Exception as exc:  # pragma: no cover - defensive path
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Invalid strategy intrabar response: {str(exc)}",
+                ) from exc
+    except aiohttp.ClientError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Strategy intrabar eval request failed: {str(exc)}",
+        ) from exc
+    finally:
+        if owns_session and session is not None and not session.closed:
+            await session.close()
 
 
 def get_markers(

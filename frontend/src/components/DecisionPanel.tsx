@@ -1012,13 +1012,26 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
   const [isDetailFullscreen, setIsDetailFullscreen] = useState(false);
   const [uiLanguage, setUiLanguage] = useState(resolveDecisionLanguage);
   const [activeHelpTooltip, setActiveHelpTooltip] = useState(null);
+  const [portalDocument, setPortalDocument] = useState(
+    typeof document !== "undefined" ? document : null,
+  );
+  const panelRootRef = useRef(null);
   const itemRefs = useRef(new Map());
   const autoScrollStateRef = useRef({ markerIdentity: '', listTab: '', done: false });
+  const portalWindow = portalDocument?.defaultView || (typeof window !== "undefined" ? window : null);
+  const portalBody = portalDocument?.body || (typeof document !== "undefined" ? document.body : null);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(DECISION_PANEL_LANGUAGE_STORAGE_KEY, uiLanguage);
-  }, [uiLanguage]);
+    const nextDoc = panelRootRef.current?.ownerDocument || null;
+    if (nextDoc && nextDoc !== portalDocument) {
+      setPortalDocument(nextDoc);
+    }
+  }, [portalDocument]);
+
+  useEffect(() => {
+    if (!portalWindow?.localStorage) return;
+    portalWindow.localStorage.setItem(DECISION_PANEL_LANGUAGE_STORAGE_KEY, uiLanguage);
+  }, [portalWindow, uiLanguage]);
 
   useEffect(() => {
     if (!selectedMarker) {
@@ -1051,21 +1064,25 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
 
   useEffect(() => {
     if (!activeHelpTooltip) return undefined;
+    if (!portalWindow) return undefined;
     const clearTooltip = () => setActiveHelpTooltip(null);
-    window.addEventListener("scroll", clearTooltip, true);
-    window.addEventListener("resize", clearTooltip);
+    portalWindow.addEventListener("scroll", clearTooltip, true);
+    portalWindow.addEventListener("resize", clearTooltip);
     return () => {
-      window.removeEventListener("scroll", clearTooltip, true);
-      window.removeEventListener("resize", clearTooltip);
+      portalWindow.removeEventListener("scroll", clearTooltip, true);
+      portalWindow.removeEventListener("resize", clearTooltip);
     };
-  }, [activeHelpTooltip]);
+  }, [activeHelpTooltip, portalWindow]);
 
   useEffect(() => {
     if (!activeHelpTooltip?.pinned) return undefined;
+    if (!portalWindow) return undefined;
     const handlePointerDown = (event) => {
       const target = event.target;
+      const ElementCtor = portalWindow?.Element;
       if (
-        target instanceof Element &&
+        ElementCtor &&
+        target instanceof ElementCtor &&
         (
           target.closest(".detail-label-help") ||
           target.closest(".detail-label-trigger") ||
@@ -1076,25 +1093,26 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
       }
       setActiveHelpTooltip(null);
     };
-    window.addEventListener("pointerdown", handlePointerDown, true);
-    return () => window.removeEventListener("pointerdown", handlePointerDown, true);
-  }, [activeHelpTooltip?.pinned]);
+    portalWindow.addEventListener("pointerdown", handlePointerDown, true);
+    return () => portalWindow.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [activeHelpTooltip?.pinned, portalWindow]);
 
   useEffect(() => {
     if (!isDetailFullscreen) return undefined;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    if (!portalDocument || !portalWindow) return undefined;
+    const previousOverflow = portalDocument.body.style.overflow;
+    portalDocument.body.style.overflow = 'hidden';
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
         setIsDetailFullscreen(false);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
+    portalWindow.addEventListener('keydown', handleKeyDown);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousOverflow;
+      portalWindow.removeEventListener('keydown', handleKeyDown);
+      portalDocument.body.style.overflow = previousOverflow;
     };
-  }, [isDetailFullscreen]);
+  }, [isDetailFullscreen, portalDocument, portalWindow]);
 
   useEffect(() => {
     if (!selectedMarker) return;
@@ -2149,8 +2167,8 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
     const runtime = runtimeTooltipFor(label);
     return [base, runtime].filter((part) => String(part || "").trim()).join("\n\n");
   };
-  const resolveHelpTooltipPosition = (anchorRect) => {
-    if (typeof window === "undefined") {
+  const resolveHelpTooltipPosition = (anchorRect, viewportWindow = portalWindow) => {
+    if (!viewportWindow) {
       return {
         top: anchorRect.bottom + 10,
         left: anchorRect.left,
@@ -2158,8 +2176,8 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
         placeAbove: false,
       };
     }
-    const viewportWidth = Math.max(window.innerWidth || 0, 320);
-    const viewportHeight = Math.max(window.innerHeight || 0, 320);
+    const viewportWidth = Math.max(viewportWindow.innerWidth || 0, 320);
+    const viewportHeight = Math.max(viewportWindow.innerHeight || 0, 320);
     const maxWidth = Math.min(520, Math.max(280, viewportWidth - 24));
     const horizontalPadding = 12;
     const idealLeft = anchorRect.left + (anchorRect.width / 2) - (maxWidth / 2);
@@ -2175,8 +2193,9 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
     const text = String(tooltipText || "").trim();
     if (!text) return;
     const anchorRect = event.currentTarget.getBoundingClientRect();
+    const anchorWindow = event.currentTarget?.ownerDocument?.defaultView || portalWindow;
     setActiveHelpTooltip({
-      ...resolveHelpTooltipPosition(anchorRect),
+      ...resolveHelpTooltipPosition(anchorRect, anchorWindow),
       text,
       pinned,
     });
@@ -2189,10 +2208,12 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
     event.stopPropagation();
     const text = String(tooltipText || "").trim();
     if (!text) return;
+    const ElementCtor = portalWindow?.Element || (typeof Element !== "undefined" ? Element : null);
     const anchorElement =
-      event.currentTarget instanceof Element ? event.currentTarget : null;
+      ElementCtor && event.currentTarget instanceof ElementCtor ? event.currentTarget : null;
+    const anchorWindow = anchorElement?.ownerDocument?.defaultView || portalWindow;
     const nextPosition = anchorElement
-      ? resolveHelpTooltipPosition(anchorElement.getBoundingClientRect())
+      ? resolveHelpTooltipPosition(anchorElement.getBoundingClientRect(), anchorWindow)
       : { top: 12, left: 12, maxWidth: 420, placeAbove: false };
     setActiveHelpTooltip((previous) => {
       if (previous?.pinned && previous?.text === text) {
@@ -2890,7 +2911,16 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
   );
 
   return (
-    <>
+    <div
+      ref={(node) => {
+        panelRootRef.current = node;
+        const nextDoc = node?.ownerDocument || null;
+        if (nextDoc && nextDoc !== portalDocument) {
+          setPortalDocument(nextDoc);
+        }
+      }}
+      style={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}
+    >
       <div className="decision-list-tabs">
         <button
           className={`decision-list-tab ${listTab === 'decisions' ? 'active' : ''}`}
@@ -3014,7 +3044,7 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
         </div>
       )}
 
-      {activeHelpTooltip && !activeHelpTooltip.pinned &&
+      {activeHelpTooltip && !activeHelpTooltip.pinned && portalBody &&
         createPortal(
           <div
             className={`decision-help-tooltip ${activeHelpTooltip.placeAbove ? "above" : ""}`}
@@ -3028,14 +3058,14 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
           >
             {activeHelpTooltip.text}
           </div>,
-          document.body,
+          portalBody,
         )}
       
       {/* Detail Panel */}
       {selectedMarker && (
         <>
           {!isDetailFullscreen && renderDecisionDetail(false)}
-          {isDetailFullscreen &&
+          {isDetailFullscreen && portalBody &&
             createPortal(
               <>
                 <div
@@ -3044,11 +3074,11 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
                 />
                 {renderDecisionDetail(true)}
               </>,
-              document.body,
+              portalBody,
             )}
         </>
       )}
-    </>
+    </div>
   );
 }
 

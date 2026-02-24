@@ -25,7 +25,7 @@ Own L2 acquisition, conversion, minute alignment, intrabar frames, and flow-feat
 | `src/l2_data_manager.py` | yes | 1114 | `1273b21 2026-02-23` |
 | `src/l2_feature_service.py` | yes | 227 | `1273b21 2026-02-23` |
 | `src/order_flow_engine.py` | yes | 449 | `1273b21 2026-02-23` |
-| `src/intrabar_frame_builder.py` | yes | 358 | `1273b21 2026-02-23` |
+| `src/intrabar_frame_builder.py` | yes | 365 | `8f49f06 2026-02-23` |
 | `src/l2_feature_aggregator.py` | yes | 254 | `1273b21 2026-02-23` |
 | `src/databento_service.py` | yes | 1848 | `1273b21 2026-02-23` |
 | `scripts/download_l2_data.py` | yes | 63 | `1273b21 2026-02-23` |
@@ -68,7 +68,7 @@ Own L2 acquisition, conversion, minute alignment, intrabar frames, and flow-feat
 - `class` `OrderFlowEngine` (line 64)
 
 ### `src/intrabar_frame_builder.py`
-- `class` `IntrabarFrameBuilder` (line 27)
+- `class` `IntrabarFrameBuilder` (line 28)
 
 ### `src/l2_feature_aggregator.py`
 - `class` `AggregationResult` (line 18)

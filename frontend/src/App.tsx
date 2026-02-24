@@ -18,6 +18,7 @@ import StrategyModuleToggles from './components/StrategyModuleToggles';
 import ExecutionModuleToggles from './components/ExecutionModuleToggles';
 import DataManager from './components/DataManager';
 import IntrabarPanel from './components/IntrabarPanel';
+import IntradayLevelsDialog from './components/IntradayLevelsDialog';
 import AdaptiveStrategyStudio from './components/AdaptiveStrategyStudio';
 import AdaptiveTuner from './components/AdaptiveTuner';
 import LiveTraderMonitor from './components/LiveTraderMonitor';
@@ -308,6 +309,8 @@ const resolveTradeModeFromExecutionConfig = (
 
 const toChartBar = (bar) => {
   if (!bar || typeof bar !== 'object') return null;
+  const asObjectRecord = (value) =>
+    value && typeof value === 'object' && !Array.isArray(value) ? value : null;
   const time = toUnixSeconds(bar.timestamp ?? bar.time);
   const open = Number(bar.open);
   const high = Number(bar.high);
@@ -320,10 +323,9 @@ const toChartBar = (bar) => {
     return null;
   }
 
-  const nestedAnalysis =
-    (bar.analysis && typeof bar.analysis === 'object' ? bar.analysis : null) ||
-    (bar.strategy_analysis && typeof bar.strategy_analysis === 'object' ? bar.strategy_analysis : null) ||
-    null;
+  const analysisPayload = asObjectRecord(bar.analysis);
+  const strategyAnalysisPayload = asObjectRecord(bar.strategy_analysis);
+  const nestedAnalysis = analysisPayload || strategyAnalysisPayload || null;
   const layerScores =
     (bar.layer_scores && typeof bar.layer_scores === 'object' ? bar.layer_scores : null) ||
     (nestedAnalysis?.layer_scores && typeof nestedAnalysis.layer_scores === 'object'
@@ -348,6 +350,33 @@ const toChartBar = (bar) => {
     (nestedAnalysis?.intrabar_eval_trace && typeof nestedAnalysis.intrabar_eval_trace === 'object'
       ? nestedAnalysis.intrabar_eval_trace
       : null);
+  const intradayLevelsSnapshot =
+    asObjectRecord(bar.intraday_levels) ||
+    asObjectRecord(analysisPayload?.intraday_levels) ||
+    asObjectRecord(analysisPayload?.metadata?.intraday_levels) ||
+    asObjectRecord(analysisPayload?.indicators?.intraday_levels) ||
+    asObjectRecord(analysisPayload?.signal_metadata?.intraday_levels) ||
+    asObjectRecord(analysisPayload?.signal?.intraday_levels) ||
+    asObjectRecord(analysisPayload?.signal?.metadata?.intraday_levels) ||
+    asObjectRecord(strategyAnalysisPayload?.intraday_levels) ||
+    asObjectRecord(strategyAnalysisPayload?.metadata?.intraday_levels) ||
+    asObjectRecord(strategyAnalysisPayload?.indicators?.intraday_levels) ||
+    asObjectRecord(strategyAnalysisPayload?.signal_metadata?.intraday_levels) ||
+    asObjectRecord(strategyAnalysisPayload?.signal?.intraday_levels) ||
+    asObjectRecord(strategyAnalysisPayload?.signal?.metadata?.intraday_levels) ||
+    null;
+  const levelContextSnapshot =
+    asObjectRecord(bar.level_context) ||
+    asObjectRecord(analysisPayload?.level_context) ||
+    asObjectRecord(analysisPayload?.signal_metadata?.level_context) ||
+    asObjectRecord(strategyAnalysisPayload?.level_context) ||
+    asObjectRecord(strategyAnalysisPayload?.signal_metadata?.level_context) ||
+    null;
+  const entryQualityDiagnosticsSnapshot =
+    asObjectRecord(bar.entry_quality_diagnostics) ||
+    asObjectRecord(analysisPayload?.entry_quality_diagnostics) ||
+    asObjectRecord(strategyAnalysisPayload?.entry_quality_diagnostics) ||
+    null;
   const nestedWarmupOnly =
     typeof nestedAnalysis?.warmup_only === 'boolean' ? nestedAnalysis.warmup_only : undefined;
   const nestedBarIndex = nestedAnalysis?.bar_index;
@@ -360,6 +389,17 @@ const toChartBar = (bar) => {
     Number.isFinite(Number(bar.bar_index))
       ? Number(bar.bar_index)
       : (Number.isFinite(Number(nestedBarIndex)) ? Number(nestedBarIndex) : undefined);
+  const shouldAttachAnalysisPayload = Boolean(
+    nestedAnalysis &&
+      (layerScores ||
+        signalRejected ||
+        candidateDiagnostics ||
+        intrabarEvalTrace ||
+        intradayLevelsSnapshot ||
+        levelContextSnapshot ||
+        entryQualityDiagnosticsSnapshot ||
+        nestedAnalysis?.intrabar_1s),
+  );
 
   return {
     time,
@@ -370,19 +410,157 @@ const toChartBar = (bar) => {
     volume: Number.isFinite(volume) ? volume : 0,
     ...(typeof resolvedWarmupOnly === 'boolean' ? { warmup_only: resolvedWarmupOnly } : {}),
     ...(resolvedBarIndex !== undefined ? { bar_index: resolvedBarIndex } : {}),
+    ...(intradayLevelsSnapshot ? { intraday_levels: intradayLevelsSnapshot } : {}),
+    ...(levelContextSnapshot ? { level_context: levelContextSnapshot } : {}),
+    ...(entryQualityDiagnosticsSnapshot
+      ? { entry_quality_diagnostics: entryQualityDiagnosticsSnapshot }
+      : {}),
     // Preserve runtime analysis payload on streamed bars so analyzer can scrub
     // historical conditions bar-by-bar without changing chart rendering logic.
-    ...(layerScores
+    ...(layerScores ||
+    signalRejected ||
+    candidateDiagnostics ||
+    intrabarEvalTrace ||
+    intradayLevelsSnapshot ||
+    levelContextSnapshot ||
+    entryQualityDiagnosticsSnapshot
       ? {
-          layer_scores: layerScores,
-          signal_rejected: signalRejected,
-          candidate_diagnostics: candidateDiagnostics,
+          layer_scores: layerScores || undefined,
+          signal_rejected: signalRejected || undefined,
+          candidate_diagnostics: candidateDiagnostics || undefined,
           intrabar_eval_trace: intrabarEvalTrace || undefined,
           timestamp: typeof bar.timestamp === 'string' ? bar.timestamp : undefined,
-          ...(nestedAnalysis ? { analysis: nestedAnalysis } : {}),
+          ...(shouldAttachAnalysisPayload ? { analysis: nestedAnalysis } : {}),
         }
       : {}),
   };
+};
+
+const isObjectRecord = (value) =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const resolveChartTimeframeSeconds = (timeframe) => {
+  const normalized = String(timeframe || '').trim().toLowerCase();
+  if (normalized === '1h') return 3600;
+  const minutes = Number.parseInt(normalized, 10);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 : 60;
+};
+
+const pickIntradayLevelsPayload = (sources) => {
+  if (!Array.isArray(sources)) return { payload: null, sourcePath: null };
+  for (const source of sources) {
+    if (!source || !isObjectRecord(source.payload)) continue;
+    const sourcePath = String(source.sourcePath || '').trim();
+    return {
+      payload: source.payload,
+      sourcePath: sourcePath || null,
+    };
+  }
+  return { payload: null, sourcePath: null };
+};
+
+const extractIntradayLevelsFromAnalysisObject = (analysis, sourcePrefix) => {
+  if (!isObjectRecord(analysis)) return { payload: null, sourcePath: null };
+  return pickIntradayLevelsPayload([
+    { sourcePath: `${sourcePrefix}.intraday_levels`, payload: analysis.intraday_levels },
+    {
+      sourcePath: `${sourcePrefix}.metadata.intraday_levels`,
+      payload: analysis.metadata?.intraday_levels,
+    },
+    {
+      sourcePath: `${sourcePrefix}.indicators.intraday_levels`,
+      payload: analysis.indicators?.intraday_levels,
+    },
+    {
+      sourcePath: `${sourcePrefix}.signal_metadata.intraday_levels`,
+      payload: analysis.signal_metadata?.intraday_levels,
+    },
+    {
+      sourcePath: `${sourcePrefix}.signal.intraday_levels`,
+      payload: analysis.signal?.intraday_levels,
+    },
+    {
+      sourcePath: `${sourcePrefix}.signal.metadata.intraday_levels`,
+      payload: analysis.signal?.metadata?.intraday_levels,
+    },
+  ]);
+};
+
+const extractIntradayLevelsFromBarPayload = (bar) => {
+  if (!isObjectRecord(bar)) return { payload: null, sourcePath: null };
+  const barAnalysis = extractIntradayLevelsFromAnalysisObject(bar.analysis, 'bar.analysis');
+  const strategyAnalysis = extractIntradayLevelsFromAnalysisObject(
+    bar.strategy_analysis,
+    'bar.strategy_analysis',
+  );
+  return pickIntradayLevelsPayload([
+    { sourcePath: 'bar.intraday_levels', payload: bar.intraday_levels },
+    barAnalysis,
+    strategyAnalysis,
+  ]);
+};
+
+const extractIntradayLevelsFromMarkerPayload = (marker) => {
+  if (!isObjectRecord(marker)) return { payload: null, sourcePath: null };
+  const details = isObjectRecord(marker.details) ? marker.details : {};
+  const detailMetadata = isObjectRecord(details.metadata) ? details.metadata : {};
+  return pickIntradayLevelsPayload([
+    { sourcePath: 'marker.details.intraday_levels', payload: details.intraday_levels },
+    {
+      sourcePath: 'marker.details.metadata.intraday_levels',
+      payload: details.metadata?.intraday_levels,
+    },
+    {
+      sourcePath: 'marker.details.indicators.intraday_levels',
+      payload: details.indicators?.intraday_levels,
+    },
+    {
+      sourcePath: 'marker.details.signal_metadata.intraday_levels',
+      payload: details.signal_metadata?.intraday_levels,
+    },
+    { sourcePath: 'marker.metadata.intraday_levels', payload: detailMetadata.intraday_levels },
+    { sourcePath: 'marker.intraday_levels', payload: marker.intraday_levels },
+  ]);
+};
+
+const resolveNearestMarkerWithIntradayLevels = (allMarkers, barTime) => {
+  if (!Array.isArray(allMarkers) || !Number.isFinite(barTime)) return null;
+  let nearest = null;
+  allMarkers.forEach((marker) => {
+    const markerTime = toUnixSeconds(marker?.time ?? marker?.timestamp);
+    if (!Number.isFinite(markerTime)) return;
+    const markerLevels = extractIntradayLevelsFromMarkerPayload(marker);
+    if (!markerLevels.payload) return;
+    const diff = Math.abs(markerTime - barTime);
+    if (!nearest || diff < nearest.diff) {
+      nearest = { marker, levels: markerLevels, diff, markerTime };
+      return;
+    }
+    if (diff === nearest.diff) {
+      const nearestIsFuture = nearest.markerTime > barTime;
+      const currentIsPastOrNow = markerTime <= barTime;
+      if (nearestIsFuture && currentIsPastOrNow) {
+        nearest = { marker, levels: markerLevels, diff, markerTime };
+      }
+    }
+  });
+  return nearest;
+};
+
+const resolveMarkersInBarWindow = (allMarkers, barTime, timeframeSeconds) => {
+  if (!Array.isArray(allMarkers) || !Number.isFinite(barTime)) return [];
+  const windowSize = Number.isFinite(timeframeSeconds) && timeframeSeconds > 0 ? timeframeSeconds : 60;
+  const startTime = Math.floor(barTime);
+  const endTime = startTime + windowSize;
+  return allMarkers
+    .map((marker) => {
+      const markerTime = toUnixSeconds(marker?.time ?? marker?.timestamp);
+      return Number.isFinite(markerTime) ? { marker, markerTime } : null;
+    })
+    .filter(Boolean)
+    .filter(({ markerTime }) => markerTime >= startTime && markerTime < endTime)
+    .sort((left, right) => left.markerTime - right.markerTime)
+    .map(({ marker }) => marker);
 };
 
 const VIEW_TABS = [
@@ -463,6 +641,7 @@ function App() {
   const [currentBar, setCurrentBar] = useState(null);
   const [latestBarAnalysis, setLatestBarAnalysis] = useState<any>(null);
   const [selectedIntrabar, setSelectedIntrabar] = useState(null);
+  const [selectedIntradayLevels, setSelectedIntradayLevels] = useState(null);
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [strategyApiUrl, setStrategyApiUrl] = useState(defaultStrategyApiUrl);
   
@@ -562,6 +741,7 @@ function App() {
     setCurrentBar(null);
     setLatestBarAnalysis(null);
     setSelectedIntrabar(null);
+    setSelectedIntradayLevels(null);
     setIsPlaying(false);
     pendingVisibilitySyncRef.current = false;
     if (notice) {
@@ -736,6 +916,7 @@ function App() {
       setMarkers(nextMarkers);
       setCurrentBar(rawBars.length ? rawBars[rawBars.length - 1] : null);
       setSelectedIntrabar(null);
+      setSelectedIntradayLevels(null);
       setSelectedMarker((prevSelected) => {
         if (!prevSelected?.id) return null;
         return nextMarkers.find((candidate) => candidate?.id === prevSelected.id) || null;
@@ -1004,12 +1185,60 @@ function App() {
       (nestedAnalysis?.intrabar_eval_trace && typeof nestedAnalysis.intrabar_eval_trace === 'object'
         ? nestedAnalysis.intrabar_eval_trace
         : null);
+    const liveIntradayLevels =
+      (bar?.intraday_levels && typeof bar.intraday_levels === 'object' ? bar.intraday_levels : null) ||
+      (nestedAnalysis?.intraday_levels && typeof nestedAnalysis.intraday_levels === 'object'
+        ? nestedAnalysis.intraday_levels
+        : null) ||
+      (nestedAnalysis?.metadata?.intraday_levels &&
+      typeof nestedAnalysis.metadata.intraday_levels === 'object'
+        ? nestedAnalysis.metadata.intraday_levels
+        : null) ||
+      (nestedAnalysis?.indicators?.intraday_levels &&
+      typeof nestedAnalysis.indicators.intraday_levels === 'object'
+        ? nestedAnalysis.indicators.intraday_levels
+        : null) ||
+      (nestedAnalysis?.signal_metadata?.intraday_levels &&
+      typeof nestedAnalysis.signal_metadata.intraday_levels === 'object'
+        ? nestedAnalysis.signal_metadata.intraday_levels
+        : null) ||
+      (nestedAnalysis?.signal?.intraday_levels &&
+      typeof nestedAnalysis.signal.intraday_levels === 'object'
+        ? nestedAnalysis.signal.intraday_levels
+        : null) ||
+      (nestedAnalysis?.signal?.metadata?.intraday_levels &&
+      typeof nestedAnalysis.signal.metadata.intraday_levels === 'object'
+        ? nestedAnalysis.signal.metadata.intraday_levels
+        : null);
+    const liveLevelContext =
+      (bar?.level_context && typeof bar.level_context === 'object' ? bar.level_context : null) ||
+      (nestedAnalysis?.level_context && typeof nestedAnalysis.level_context === 'object'
+        ? nestedAnalysis.level_context
+        : null) ||
+      (nestedAnalysis?.signal_metadata?.level_context &&
+      typeof nestedAnalysis.signal_metadata.level_context === 'object'
+        ? nestedAnalysis.signal_metadata.level_context
+        : null);
+    const liveEntryQualityDiagnostics =
+      (bar?.entry_quality_diagnostics && typeof bar.entry_quality_diagnostics === 'object'
+        ? bar.entry_quality_diagnostics
+        : null) ||
+      (nestedAnalysis?.entry_quality_diagnostics &&
+      typeof nestedAnalysis.entry_quality_diagnostics === 'object'
+        ? nestedAnalysis.entry_quality_diagnostics
+        : null);
     const liveTraceCheckpoints = Array.isArray(liveIntrabarEvalTrace?.checkpoints) ? liveIntrabarEvalTrace.checkpoints : [];
     const liveLatestCheckpoint =
       liveTraceCheckpoints.length > 0 ? liveTraceCheckpoints[liveTraceCheckpoints.length - 1] : null;
-    if (liveLayerScores) {
+    if (
+      liveLayerScores ||
+      liveIntrabarEvalTrace ||
+      liveIntradayLevels ||
+      liveLevelContext ||
+      liveEntryQualityDiagnostics
+    ) {
       setLatestBarAnalysis({
-        layer_scores: liveLayerScores,
+        layer_scores: liveLayerScores || null,
         signal_rejected:
           (bar?.signal_rejected && typeof bar.signal_rejected === 'object' ? bar.signal_rejected : null) ||
           (nestedAnalysis?.signal_rejected && typeof nestedAnalysis.signal_rejected === 'object'
@@ -1028,6 +1257,9 @@ function App() {
           (liveLatestCheckpoint?.intrabar_1s && typeof liveLatestCheckpoint.intrabar_1s === 'object'
             ? liveLatestCheckpoint.intrabar_1s
             : null),
+        intraday_levels: liveIntradayLevels || null,
+        level_context: liveLevelContext || null,
+        entry_quality_diagnostics: liveEntryQualityDiagnostics || null,
         bar_index:
           Number.isFinite(Number(bar?.bar_index))
             ? Number(bar.bar_index)
@@ -1337,6 +1569,7 @@ function App() {
       setSelectedMarker(null);
       setCurrentBar(null);
       setSelectedIntrabar(null);
+      setSelectedIntradayLevels(null);
       setIsPlaying(false);
       pendingVisibilitySyncRef.current = false;
       
@@ -1388,12 +1621,24 @@ function App() {
   
   // Step forward one bar
   // Step forward one bar
-  const handleStep = useCallback(async () => {
+  const handleStep = useCallback(async (stepOptions = null) => {
     if (!activeRunApiBase) return;
     
     try {
+      const overrideTradeEvalMode = String(stepOptions?.trade_eval_mode || '').trim().toLowerCase();
+      const requestedTradeEvalMode =
+        overrideTradeEvalMode === 'intrabar_5s' ||
+        overrideTradeEvalMode === 'intrabar_1s' ||
+        overrideTradeEvalMode === 'standard'
+          ? overrideTradeEvalMode
+          : tradeEvaluationMode;
+
       const resp = await fetch(`${activeRunApiBase}/step`, {
-        method: 'POST'
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trade_eval_mode: requestedTradeEvalMode,
+        }),
       });
       const data = await resp.json();
       
@@ -1419,12 +1664,17 @@ function App() {
           };
         });
       }
+
+      const effectiveTradeMode = String(data?.trade_eval_mode || '').trim().toLowerCase();
+      if (effectiveTradeMode === 'intrabar_5s' || effectiveTradeMode === 'intrabar_1s' || effectiveTradeMode === 'standard') {
+        setTradeEvaluationMode(effectiveTradeMode);
+      }
       
       return data;
     } catch (error) {
       console.error('Step error:', error);
     }
-  }, [activeRunApiBase, handleNewBar]);
+  }, [activeRunApiBase, handleNewBar, tradeEvaluationMode]);
   
   // Play/auto-advance
   const handlePlay = useCallback(async (playOptions = null) => {
@@ -1721,6 +1971,62 @@ function App() {
       __selectionSource: "chart",
     });
   }, [decisionEvents]);
+
+  const closeIntradayLevelsDialog = useCallback(() => {
+    setSelectedIntradayLevels(null);
+  }, []);
+
+  const handleBarClick = useCallback((bar) => {
+    if (!bar || typeof bar !== 'object') return;
+
+    setSelectedIntrabar(bar);
+
+    const barTime = Number(bar.time);
+    const timeframeSeconds = resolveChartTimeframeSeconds(timeframe);
+    const markersInWindow = resolveMarkersInBarWindow(markers, barTime, timeframeSeconds);
+
+    let resolved = extractIntradayLevelsFromBarPayload(bar);
+    let sourceMarker = null;
+
+    if (!resolved.payload) {
+      const currentBarTime = toUnixSeconds(currentBar?.timestamp ?? currentBar?.time);
+      if (Number.isFinite(currentBarTime) && Number.isFinite(barTime) && Math.floor(currentBarTime) === Math.floor(barTime)) {
+        resolved = extractIntradayLevelsFromAnalysisObject(latestBarAnalysis, 'latest_bar_analysis');
+      }
+    }
+
+    if (!resolved.payload) {
+      for (const marker of markersInWindow) {
+        const markerLevels = extractIntradayLevelsFromMarkerPayload(marker);
+        if (!markerLevels.payload) continue;
+        resolved = markerLevels;
+        sourceMarker = marker;
+        break;
+      }
+    }
+
+    if (!resolved.payload) {
+      const nearestMarkerMatch = resolveNearestMarkerWithIntradayLevels(markers, barTime);
+      if (nearestMarkerMatch) {
+        resolved = nearestMarkerMatch.levels;
+        sourceMarker = nearestMarkerMatch.marker;
+      }
+    }
+
+    const relatedMarkers =
+      sourceMarker && !markersInWindow.some((candidate) => candidate?.id === sourceMarker?.id)
+        ? [...markersInWindow, sourceMarker]
+        : markersInWindow;
+
+    setSelectedIntradayLevels({
+      bar,
+      payload: resolved.payload,
+      sourcePath: resolved.sourcePath,
+      sourceMarker,
+      relatedMarkers,
+      timeframeSeconds,
+    });
+  }, [currentBar, latestBarAnalysis, markers, timeframe]);
 
   const activeRunConfigSidebarMode = useMemo<'all' | 'dates' | 'profiles' | 'start'>(() => {
     const activeItem = SIDEBAR_NAV_ITEMS.find((item) => item.id === activeSidebarNavItem);
@@ -2303,7 +2609,7 @@ function App() {
                   markers={filteredMarkers}
                   icebergs={filteredIcebergs}
                   onMarkerClick={handleMarkerClick}
-                  onBarClick={setSelectedIntrabar}
+                  onBarClick={handleBarClick}
                   selectedMarker={selectedMarker}
                   chartState={chartState}
                   onChartStateChange={handleChartStateChange}
@@ -2356,6 +2662,17 @@ function App() {
               date={activeRun.date}
               selectedBar={selectedIntrabar}
               onClose={() => setSelectedIntrabar(null)}
+            />
+          )}
+          {selectedIntradayLevels && (
+            <IntradayLevelsDialog
+              bar={selectedIntradayLevels.bar}
+              payload={selectedIntradayLevels.payload}
+              sourcePath={selectedIntradayLevels.sourcePath}
+              sourceMarker={selectedIntradayLevels.sourceMarker}
+              relatedMarkers={selectedIntradayLevels.relatedMarkers}
+              timeframeSeconds={selectedIntradayLevels.timeframeSeconds}
+              onClose={closeIntradayLevelsDialog}
             />
           )}
         </section>

@@ -800,14 +800,20 @@ class SessionRunner:
                 start_time=minute_start,
                 end_time=minute_end,
             )
+            # Add debug printing
+            logger.warning(f"[INTRABAR-DEEP-DEBUG] get_intrabar_frames returned {len(frames) if frames is not None else 'None'} frames. type={type(frames)}")
+            if frames is not None and not frames.empty:
+                logger.warning(f"[INTRABAR-DEEP-DEBUG] first row has_book_coverage={frames['has_book_coverage'].iloc[0]}")
         except Exception as exc:
-            logger.debug(
-                f"Intrabar quote load failed for {self.config.ticker} @ {minute_start}: {exc}"
+            import traceback
+            logger.warning(
+                f"[INTRABAR-DEEP-DEBUG] Intrabar quote load exc for {self.config.ticker} @ {minute_start}: {exc}\n{traceback.format_exc()}"
             )
             self._intrabar_quote_cache[minute_key] = None
             return None
 
         if frames is None or len(frames) == 0:
+            logger.warning("[INTRABAR-DEEP-DEBUG] Frames empty or None!")
             self._intrabar_quote_cache[minute_key] = None
             return None
 
@@ -842,6 +848,12 @@ class SessionRunner:
 
         quote_rows.sort(key=lambda item: item["s"])
         cached = quote_rows if quote_rows else None
+        
+        logger.warning(f"[INTRABAR-DEEP-DEBUG] quote_rows built: {len(quote_rows)} quotes.")
+        if not quote_rows and frames is not None and not frames.empty:
+            sample_row = frames.iloc[0].to_dict()
+            logger.warning(f"[INTRABAR-DEEP-DEBUG] Why empty? Sample row: {sample_row}")
+
         self._intrabar_quote_cache[minute_key] = cached
         return self._apply_intrabar_eval_step(cached)
 
@@ -1118,6 +1130,9 @@ class SessionRunner:
                 sr = api_response.get("signal_rejected")
                 if isinstance(sr, dict):
                     bar["signal_rejected"] = sr
+                gs = api_response.get("golden_setup")
+                if isinstance(gs, dict):
+                    bar["golden_setup"] = gs
                 intrabar_eval_trace = api_response.get("intrabar_eval_trace")
                 if isinstance(intrabar_eval_trace, dict):
                     bar["intrabar_eval_trace"] = intrabar_eval_trace
@@ -1174,6 +1189,9 @@ class SessionRunner:
                 sr = api_response.get("signal_rejected")
                 if isinstance(sr, dict):
                     bar_payload["signal_rejected"] = sr
+                gs = api_response.get("golden_setup")
+                if isinstance(gs, dict):
+                    bar_payload["golden_setup"] = gs
                 intrabar_eval_trace = api_response.get("intrabar_eval_trace")
                 if isinstance(intrabar_eval_trace, dict):
                     bar_payload["intrabar_eval_trace"] = intrabar_eval_trace

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.services.run_control_service import RunControlDeps, play_run
+from src.services.run_control_service import RunControlDeps, play_run, step_run
 
 
 @dataclass
@@ -25,9 +25,14 @@ class _DummyRunner:
         self.is_running = True
         self.is_paused = True
         self.last_run_speed = "10hz"
+        self.current_step = 0
 
     def resume(self):
         self.is_paused = False
+
+    async def step(self):
+        self.current_step += 1
+        return {"success": True, "bar_index": self.current_step}
 
 
 class _DummyRegistry:
@@ -105,3 +110,45 @@ def test_play_resume_sets_intrabar_5s_trade_eval_mode():
     assert result["trade_eval_mode"] == "intrabar_5s"
     assert runner.config.intrabar_execution_recalc_1s is True
     assert runner.config.intrabar_eval_step_seconds == 5
+
+
+def test_step_switches_trade_eval_mode_to_intrabar_5s():
+    runner = _DummyRunner()
+    runner.config.intrabar_execution_recalc_1s = False
+    runner.config.intrabar_eval_step_seconds = 1
+    deps = _build_deps(runner)
+    request = SimpleNamespace(trade_eval_mode="intrabar_5s")
+
+    result = asyncio.run(step_run("r1", "MU", "2026-02-03", deps, request=request))
+
+    assert result["success"] is True
+    assert result["trade_eval_mode"] == "intrabar_5s"
+    assert runner.config.intrabar_execution_recalc_1s is True
+    assert runner.config.intrabar_eval_step_seconds == 5
+
+
+def test_step_switches_trade_eval_mode_from_raw_payload_bool():
+    runner = _DummyRunner()
+    runner.config.intrabar_execution_recalc_1s = False
+    runner.config.intrabar_eval_step_seconds = 1
+    deps = _build_deps(runner)
+
+    class _RawRequest:
+        async def json(self):
+            return {"trade_eval_mode": True}
+
+    result = asyncio.run(
+        step_run(
+            "r1",
+            "MU",
+            "2026-02-03",
+            deps,
+            request=None,
+            raw_request=_RawRequest(),
+        )
+    )
+
+    assert result["success"] is True
+    assert result["trade_eval_mode"] == "intrabar_1s"
+    assert runner.config.intrabar_execution_recalc_1s is True
+    assert runner.config.intrabar_eval_step_seconds == 1

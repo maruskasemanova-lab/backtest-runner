@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import CandlestickChart from "./CandlestickChart";
 import DecisionPanel from "./DecisionPanel";
+import IntradayLevelsDialog from "./IntradayLevelsDialog";
 import ChartRangeSelector from "./strategy-analyzer/ChartRangeSelector";
 import StrategyEditorModal from "./strategy-analyzer/StrategyEditorModal";
 import StrategyConditionsPanel from "./strategy-analyzer/StrategyConditionsPanel";
+import ExternalWindowPortal from "./ExternalWindowPortal";
 import { toUnixSeconds, defaultStrategyApiUrl } from "../utils";
 
 /* ── bar conversion (mirrors App.tsx toChartBar) ─────────────────── */
@@ -55,6 +57,122 @@ const unixSecondsToLabel = (ts: number, includeSeconds = false): string => {
   return includeSeconds ? `${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}` : `${yyyy}-${mm}-${dd}T${hh}:${min}`;
 };
 
+const isObjectRecord = (value: any) =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const pickIntradayLevelsPayload = (sources: Array<{ payload: any; sourcePath: string } | null>) => {
+  if (!Array.isArray(sources)) return { payload: null, sourcePath: null };
+  for (const source of sources) {
+    if (!source || !isObjectRecord(source.payload)) continue;
+    const sourcePath = String(source.sourcePath || "").trim();
+    return { payload: source.payload, sourcePath: sourcePath || null };
+  }
+  return { payload: null, sourcePath: null };
+};
+
+const extractIntradayLevelsFromAnalysisObject = (analysis: any, sourcePrefix: string) => {
+  if (!isObjectRecord(analysis)) return { payload: null, sourcePath: null };
+  return pickIntradayLevelsPayload([
+    { sourcePath: `${sourcePrefix}.intraday_levels`, payload: analysis.intraday_levels },
+    {
+      sourcePath: `${sourcePrefix}.metadata.intraday_levels`,
+      payload: analysis.metadata?.intraday_levels,
+    },
+    {
+      sourcePath: `${sourcePrefix}.indicators.intraday_levels`,
+      payload: analysis.indicators?.intraday_levels,
+    },
+    {
+      sourcePath: `${sourcePrefix}.signal_metadata.intraday_levels`,
+      payload: analysis.signal_metadata?.intraday_levels,
+    },
+    {
+      sourcePath: `${sourcePrefix}.signal.intraday_levels`,
+      payload: analysis.signal?.intraday_levels,
+    },
+    {
+      sourcePath: `${sourcePrefix}.signal.metadata.intraday_levels`,
+      payload: analysis.signal?.metadata?.intraday_levels,
+    },
+  ]);
+};
+
+const extractIntradayLevelsFromBarPayload = (bar: any) => {
+  if (!isObjectRecord(bar)) return { payload: null, sourcePath: null };
+  const barAnalysis = extractIntradayLevelsFromAnalysisObject(bar.analysis, "bar.analysis");
+  const strategyAnalysis = extractIntradayLevelsFromAnalysisObject(
+    bar.strategy_analysis,
+    "bar.strategy_analysis"
+  );
+  return pickIntradayLevelsPayload([
+    { sourcePath: "bar.intraday_levels", payload: bar.intraday_levels },
+    barAnalysis,
+    strategyAnalysis,
+  ]);
+};
+
+const extractIntradayLevelsFromMarkerPayload = (marker: any) => {
+  if (!isObjectRecord(marker)) return { payload: null, sourcePath: null };
+  const details = isObjectRecord(marker.details) ? marker.details : {};
+  const detailMetadata = isObjectRecord(details.metadata) ? details.metadata : {};
+  return pickIntradayLevelsPayload([
+    { sourcePath: "marker.details.intraday_levels", payload: details.intraday_levels },
+    {
+      sourcePath: "marker.details.metadata.intraday_levels",
+      payload: details.metadata?.intraday_levels,
+    },
+    {
+      sourcePath: "marker.details.indicators.intraday_levels",
+      payload: details.indicators?.intraday_levels,
+    },
+    {
+      sourcePath: "marker.details.signal_metadata.intraday_levels",
+      payload: details.signal_metadata?.intraday_levels,
+    },
+    { sourcePath: "marker.metadata.intraday_levels", payload: detailMetadata.intraday_levels },
+    { sourcePath: "marker.intraday_levels", payload: marker.intraday_levels },
+  ]);
+};
+
+const resolveMarkersInBarWindow = (allMarkers: any[], barTime: number, windowSeconds = 60) => {
+  if (!Array.isArray(allMarkers) || !Number.isFinite(barTime)) return [];
+  const startTime = Math.floor(barTime);
+  const endTime = startTime + Math.max(1, Math.trunc(windowSeconds));
+  return allMarkers
+    .map((marker) => {
+      const markerTime = toUnixSeconds(marker?.time ?? marker?.timestamp);
+      return Number.isFinite(markerTime) ? { marker, markerTime } : null;
+    })
+    .filter(Boolean)
+    .filter((row: any) => row.markerTime >= startTime && row.markerTime < endTime)
+    .sort((left: any, right: any) => left.markerTime - right.markerTime)
+    .map((row: any) => row.marker);
+};
+
+const resolveNearestMarkerWithIntradayLevels = (allMarkers: any[], barTime: number) => {
+  if (!Array.isArray(allMarkers) || !Number.isFinite(barTime)) return null;
+  let nearest: any = null;
+  allMarkers.forEach((marker) => {
+    const markerTime = toUnixSeconds(marker?.time ?? marker?.timestamp);
+    if (!Number.isFinite(markerTime)) return;
+    const markerLevels = extractIntradayLevelsFromMarkerPayload(marker);
+    if (!markerLevels.payload) return;
+    const diff = Math.abs(markerTime - barTime);
+    if (!nearest || diff < nearest.diff) {
+      nearest = { marker, levels: markerLevels, diff, markerTime };
+      return;
+    }
+    if (diff === nearest.diff) {
+      const nearestIsFuture = nearest.markerTime > barTime;
+      const currentIsPastOrNow = markerTime <= barTime;
+      if (nearestIsFuture && currentIsPastOrNow) {
+        nearest = { marker, levels: markerLevels, diff, markerTime };
+      }
+    }
+  });
+  return nearest;
+};
+
 /* ── types ───────────────────────────────────────────────────────── */
 interface StrategyAnalyzerProps {
   selectedTicker: string | null;
@@ -63,7 +181,7 @@ interface StrategyAnalyzerProps {
   onStartRun?: (config: any) => Promise<any>;
   onPlayRun?: (options?: { trade_eval_mode?: string }) => Promise<any> | void;
   onPauseRun?: () => Promise<any> | void;
-  onStepRun?: () => Promise<any> | void;
+  onStepRun?: (options?: { trade_eval_mode?: string }) => Promise<any> | void;
   onEvaluateIntrabarSlice?: (ts: number) => Promise<any>;
   onClearRun?: () => Promise<any> | void;
   isPlayingRun?: boolean;
@@ -130,9 +248,14 @@ export default function StrategyAnalyzer({
   const [analyzerTradeEvalMode, setAnalyzerTradeEvalMode] = useState<"standard" | "intrabar_1s" | "intrabar_5s">("intrabar_5s");
   const [isScrubbingLiveEval, setIsScrubbingLiveEval] = useState(false);
   const [scrubLiveAnalysis, setScrubLiveAnalysis] = useState<any>(null);
+  const [selectedIntradayLevels, setSelectedIntradayLevels] = useState<any>(null);
+  const scrubEvalSeqRef = useRef(0);
+  const lastStableScrubAnalysisRef = useRef<any>(null);
 
   // strategy editor modal
   const [showStrategyEditor, setShowStrategyEditor] = useState(false);
+  const [isConditionsDetached, setIsConditionsDetached] = useState(false);
+  const [isDecisionsDetached, setIsDecisionsDetached] = useState(false);
 
   // run state
   const [runLoading, setRunLoading] = useState(false);
@@ -521,38 +644,6 @@ export default function StrategyAnalyzer({
     return touchedSegment ? composedBars : previewBars;
   }, [bars, isAnalyzerAttachedRun, selectedRangeWindow, attachedRunBars, rangeScrubMeta]);
 
-  const scrubbedConditionsMarker = useMemo(() => {
-    const targetTime = Number(rangeScrubMeta?.targetTime);
-    if (!Number.isFinite(targetTime)) return null;
-
-    const hasConditionsPayload = (marker: any) =>
-      Boolean(
-        marker?.details?.layer_scores ||
-          marker?.details?.metadata?.layer_scores ||
-          marker?.details?.signal_metadata?.layer_scores
-      );
-
-    const candidates = (Array.isArray(analyzerDecisionEvents) ? analyzerDecisionEvents : [])
-      .map((marker: any) => {
-        const t = Number(marker?.time);
-        if (!Number.isFinite(t)) return null;
-        const diff = Math.abs(t - targetTime);
-        if (diff > 1) return null;
-        return {
-          marker,
-          diff,
-          weight: hasConditionsPayload(marker) ? 10 : 0,
-        };
-      })
-      .filter(Boolean)
-      .sort((left: any, right: any) => {
-        if (right.weight !== left.weight) return right.weight - left.weight;
-        return left.diff - right.diff;
-      });
-
-    return candidates[0]?.marker || null;
-  }, [rangeScrubMeta, analyzerDecisionEvents]);
-
   const extractRunBarAnalysis = useCallback((bar: any) => {
     if (!bar || typeof bar !== "object") return null;
     const hasLayerScoresOnBar = Boolean(
@@ -562,14 +653,21 @@ export default function StrategyAnalyzer({
     );
     const checkpointIntrabar =
       bar.intrabar_1s && typeof bar.intrabar_1s === "object" ? bar.intrabar_1s : null;
+    const checkpointLayerScores =
+      bar.layer_scores && typeof bar.layer_scores === "object" ? bar.layer_scores : null;
+    const checkpointSignalRejected =
+      bar.signal_rejected && typeof bar.signal_rejected === "object" ? bar.signal_rejected : null;
+    const checkpointCandidateDiagnostics =
+      bar.candidate_diagnostics && typeof bar.candidate_diagnostics === "object" ? bar.candidate_diagnostics : null;
     const checkpointLike =
       !hasLayerScoresOnBar &&
       (checkpointIntrabar || Number.isFinite(Number(bar?.offset_sec)) || typeof bar?.provisional === "boolean");
     if (checkpointLike) {
+      const hasCheckpointScores = Boolean(checkpointLayerScores);
       return {
-        layer_scores: null,
-        signal_rejected: null,
-        candidate_diagnostics: null,
+        layer_scores: checkpointLayerScores,
+        signal_rejected: checkpointSignalRejected,
+        candidate_diagnostics: checkpointCandidateDiagnostics,
         intrabar_1s: checkpointIntrabar,
         intrabar_confirmation:
           bar.intrabar_confirmation && typeof bar.intrabar_confirmation === "object"
@@ -586,7 +684,7 @@ export default function StrategyAnalyzer({
         warmup_only: false,
         bar_index: null,
         checkpoint_mode: true,
-        intrabar_only_checkpoint: true,
+        intrabar_only_checkpoint: !hasCheckpointScores,
         checkpoint_offset_sec: Number.isFinite(Number(bar?.offset_sec)) ? Number(bar.offset_sec) : null,
         provisional: typeof bar?.provisional === "boolean" ? Boolean(bar.provisional) : null,
         timestamp: typeof bar?.timestamp === "string" ? bar.timestamp : null,
@@ -600,7 +698,35 @@ export default function StrategyAnalyzer({
         typeof bar.strategy_analysis.layer_scores === "object" &&
         bar.strategy_analysis.layer_scores) ||
       null;
-    if (!layerScores) return null;
+    const intradayLevels =
+      (bar.intraday_levels && typeof bar.intraday_levels === "object" ? bar.intraday_levels : null) ||
+      (bar.analysis?.intraday_levels && typeof bar.analysis.intraday_levels === "object"
+        ? bar.analysis.intraday_levels
+        : null) ||
+      (bar.analysis?.metadata?.intraday_levels && typeof bar.analysis.metadata.intraday_levels === "object"
+        ? bar.analysis.metadata.intraday_levels
+        : null) ||
+      (bar.analysis?.signal_metadata?.intraday_levels &&
+      typeof bar.analysis.signal_metadata.intraday_levels === "object"
+        ? bar.analysis.signal_metadata.intraday_levels
+        : null) ||
+      (bar.analysis?.signal?.metadata?.intraday_levels &&
+      typeof bar.analysis.signal.metadata.intraday_levels === "object"
+        ? bar.analysis.signal.metadata.intraday_levels
+        : null) ||
+      (bar.strategy_analysis?.intraday_levels && typeof bar.strategy_analysis.intraday_levels === "object"
+        ? bar.strategy_analysis.intraday_levels
+        : null) ||
+      (bar.strategy_analysis?.metadata?.intraday_levels &&
+      typeof bar.strategy_analysis.metadata.intraday_levels === "object"
+        ? bar.strategy_analysis.metadata.intraday_levels
+        : null) ||
+      (bar.strategy_analysis?.signal_metadata?.intraday_levels &&
+      typeof bar.strategy_analysis.signal_metadata.intraday_levels === "object"
+        ? bar.strategy_analysis.signal_metadata.intraday_levels
+        : null) ||
+      null;
+    if (!layerScores && !intradayLevels) return null;
 
     const signalRejected =
       bar.signal_rejected ??
@@ -647,6 +773,7 @@ export default function StrategyAnalyzer({
         typeof bar.strategy_analysis.intrabar_eval_trace === "object"
           ? bar.strategy_analysis.intrabar_eval_trace
           : null),
+      intraday_levels: intradayLevels,
       bar_index: Number.isFinite(Number(barIndexCandidate)) ? Number(barIndexCandidate) : null,
       warmup_only: warmupOnly,
       timestamp: bar.timestamp || bar.analysis?.timestamp || bar.strategy_analysis?.timestamp || null,
@@ -658,15 +785,16 @@ export default function StrategyAnalyzer({
     const targetBar = rangeScrubMeta?.targetBar;
     const direct = extractRunBarAnalysis(targetBar);
     if (checkpointSnapshot && direct) {
+      const hasCheckpointScores = Boolean(checkpointSnapshot.layer_scores);
       const hasParentScores = Boolean(direct.layer_scores);
       return {
         ...direct,
         ...checkpointSnapshot,
-        layer_scores: direct.layer_scores,
-        signal_rejected: direct.signal_rejected,
-        candidate_diagnostics: direct.candidate_diagnostics,
-        intrabar_only_checkpoint: hasParentScores ? false : checkpointSnapshot.intrabar_only_checkpoint,
-        checkpoint_mode: hasParentScores ? false : checkpointSnapshot.checkpoint_mode,
+        layer_scores: hasCheckpointScores ? checkpointSnapshot.layer_scores : direct.layer_scores,
+        signal_rejected: hasCheckpointScores ? (checkpointSnapshot.signal_rejected ?? direct.signal_rejected) : direct.signal_rejected,
+        candidate_diagnostics: hasCheckpointScores ? (checkpointSnapshot.candidate_diagnostics ?? direct.candidate_diagnostics) : direct.candidate_diagnostics,
+        intrabar_only_checkpoint: (hasCheckpointScores || hasParentScores) ? false : checkpointSnapshot.intrabar_only_checkpoint,
+        checkpoint_mode: hasCheckpointScores ? true : (hasParentScores ? false : checkpointSnapshot.checkpoint_mode),
       };
     }
     if (checkpointSnapshot) return checkpointSnapshot;
@@ -698,40 +826,73 @@ export default function StrategyAnalyzer({
 
     return null;
   }, [rangeScrubMeta, extractRunBarAnalysis]);
+  const scrubbedCheckpointHasDecisionPayload = useMemo(() => {
+    if (!scrubbedLiveAnalysis || typeof scrubbedLiveAnalysis !== "object") return false;
+    return Boolean(
+      (scrubbedLiveAnalysis.layer_scores &&
+        typeof scrubbedLiveAnalysis.layer_scores === "object") ||
+        (scrubbedLiveAnalysis.signal_rejected &&
+          typeof scrubbedLiveAnalysis.signal_rejected === "object") ||
+        (scrubbedLiveAnalysis.candidate_diagnostics &&
+          typeof scrubbedLiveAnalysis.candidate_diagnostics === "object")
+    );
+  }, [scrubbedLiveAnalysis]);
 
   const scrubbedConditionsActive = Boolean(rangeScrubMeta && Number(rangeScrubMeta.progressedPoints || 0) > 0);
-  const effectiveConditionsMarker = scrubbedConditionsActive ? scrubbedConditionsMarker : selectedMarker;
+  // During slider scrub, always drive Entry Conditions from scrubbed checkpoint snapshots.
+  const effectiveConditionsMarker = scrubbedConditionsActive ? null : selectedMarker;
   const effectiveConditionsLiveAnalysis = effectiveConditionsMarker
     ? null
     : scrubbedConditionsActive
-      ? (
-          scrubLiveAnalysis
-            ? { 
-                ...scrubbedLiveAnalysis, 
-                ...scrubLiveAnalysis, 
-                candidate_diagnostics: scrubLiveAnalysis.candidate_diagnostics || scrubLiveAnalysis.signal?.metadata?.candidate_diagnostics || scrubbedLiveAnalysis?.candidate_diagnostics,
-                signal_rejected: scrubLiveAnalysis.signal_rejected || scrubbedLiveAnalysis?.signal_rejected,
-                checkpoint_mode: false, 
-                intrabar_only_checkpoint: false 
-              }
-            : scrubbedLiveAnalysis ||
-          ((rangeScrubMeta?.clampedOffset ?? -1) === (rangeScrubMeta?.progressedMaxOffset ?? -2)
-            ? latestBarAnalysis
-            : null)
-        )
+      ? (() => {
+          const base = scrubbedCheckpointHasDecisionPayload
+            ? scrubbedLiveAnalysis
+            : (
+                scrubLiveAnalysis
+                  ? {
+                      ...scrubbedLiveAnalysis,
+                      ...scrubLiveAnalysis,
+                      candidate_diagnostics:
+                        scrubLiveAnalysis.candidate_diagnostics ||
+                        scrubLiveAnalysis.signal?.metadata?.candidate_diagnostics ||
+                        scrubbedLiveAnalysis?.candidate_diagnostics,
+                      signal_rejected:
+                        scrubLiveAnalysis.signal_rejected || scrubbedLiveAnalysis?.signal_rejected,
+                      checkpoint_mode: false,
+                      intrabar_only_checkpoint: false,
+                    }
+                  : scrubbedLiveAnalysis ||
+                    ((rangeScrubMeta?.clampedOffset ?? -1) ===
+                    (rangeScrubMeta?.progressedMaxOffset ?? -2)
+                      ? latestBarAnalysis
+                      : null)
+              );
+          // Ensure timestamp is present for panel header display during scrubbing
+          if (base && !base.timestamp && rangeScrubMeta?.targetTime) {
+            return { ...base, timestamp: rangeScrubMeta.targetTime };
+          }
+          return base;
+        })()
       : (!selectedMarker ? latestBarAnalysis : null);
+  useEffect(() => {
+    if (!scrubbedConditionsActive) {
+      lastStableScrubAnalysisRef.current = null;
+      return;
+    }
+    if (effectiveConditionsLiveAnalysis && typeof effectiveConditionsLiveAnalysis === "object") {
+      lastStableScrubAnalysisRef.current = effectiveConditionsLiveAnalysis;
+    }
+  }, [scrubbedConditionsActive, effectiveConditionsLiveAnalysis]);
+  const stableConditionsLiveAnalysis =
+    scrubbedConditionsActive
+      ? (effectiveConditionsLiveAnalysis || lastStableScrubAnalysisRef.current)
+      : effectiveConditionsLiveAnalysis;
+  const hasConditionsPanelData = Boolean(
+    effectiveConditionsMarker || stableConditionsLiveAnalysis || scrubbedConditionsActive
+  );
 
   const conditionsPanelBadge = useMemo(() => {
     if (scrubbedConditionsActive) {
-      if (scrubbedConditionsMarker) {
-        return {
-          label:
-            scrubbedConditionsMarker.strategy ||
-            scrubbedConditionsMarker.marker_type?.replace(/_/g, " ") ||
-            "scrub",
-          tone: "accent" as const,
-        };
-      }
       if (rangeScrubMeta?.targetLocal) {
         return {
           label: `scrub ${rangeScrubMeta.targetLocal.replace("T", " ")}`,
@@ -750,7 +911,70 @@ export default function StrategyAnalyzer({
       return { label: "live", tone: "muted" as const };
     }
     return null;
-  }, [scrubbedConditionsActive, scrubbedConditionsMarker, rangeScrubMeta, selectedMarker, latestBarAnalysis]);
+  }, [scrubbedConditionsActive, rangeScrubMeta, selectedMarker, latestBarAnalysis]);
+
+  const handleAnalyzerBarClick = useCallback((bar: any) => {
+    if (!bar || typeof bar !== "object" || bar.__wfPlaceholder) return;
+
+    const barTime = Number(bar.time);
+    const markersInWindow = resolveMarkersInBarWindow(analyzerDecisionEvents, barTime, 60);
+
+    let resolved = extractIntradayLevelsFromBarPayload(bar);
+    let sourceMarker = null;
+
+    if (!resolved.payload) {
+      resolved = extractIntradayLevelsFromAnalysisObject(
+        stableConditionsLiveAnalysis,
+        "effective_conditions_live_analysis"
+      );
+    }
+
+    if (!resolved.payload) {
+      for (const marker of markersInWindow) {
+        const markerLevels = extractIntradayLevelsFromMarkerPayload(marker);
+        if (!markerLevels.payload) continue;
+        resolved = markerLevels;
+        sourceMarker = marker;
+        break;
+      }
+    }
+
+    if (!resolved.payload) {
+      const nearestMarkerMatch = resolveNearestMarkerWithIntradayLevels(analyzerDecisionEvents, barTime);
+      if (nearestMarkerMatch) {
+        resolved = nearestMarkerMatch.levels;
+        sourceMarker = nearestMarkerMatch.marker;
+      }
+    }
+
+    const relatedMarkers =
+      sourceMarker && !markersInWindow.some((candidate) => candidate?.id === sourceMarker?.id)
+        ? [...markersInWindow, sourceMarker]
+        : markersInWindow;
+
+    setSelectedIntradayLevels({
+      bar,
+      payload: resolved.payload,
+      sourcePath: resolved.sourcePath,
+      sourceMarker,
+      relatedMarkers,
+      timeframeSeconds: 60,
+    });
+  }, [analyzerDecisionEvents, stableConditionsLiveAnalysis]);
+
+  const closeIntradayLevelsDialog = useCallback(() => {
+    setSelectedIntradayLevels(null);
+  }, []);
+
+  useEffect(() => {
+    setSelectedIntradayLevels(null);
+  }, [analyzerRunKey, selectedRangeFrom, selectedRangeTo]);
+
+  useEffect(() => {
+    if (isAnalyzerAttachedRun) return;
+    setIsConditionsDetached(false);
+    setIsDecisionsDetached(false);
+  }, [isAnalyzerAttachedRun]);
 
   /* ── fetch available tickers on mount ──────────────────────────── */
   useEffect(() => {
@@ -851,29 +1075,46 @@ export default function StrategyAnalyzer({
 
   const handleEvaluateIntrabarSlice = useCallback(async (ts: number) => {
     if (typeof onEvaluateIntrabarSlice === "function") {
+      const requestSeq = ++scrubEvalSeqRef.current;
       setIsScrubbingLiveEval(true);
       try {
         const result = await onEvaluateIntrabarSlice(ts);
+        if (scrubEvalSeqRef.current !== requestSeq) return;
         setScrubLiveAnalysis(result);
       } catch (err) {
+        if (scrubEvalSeqRef.current !== requestSeq) return;
         console.error("Intrabar slice evaluation failed:", err);
         setScrubLiveAnalysis(null);
       } finally {
-        setIsScrubbingLiveEval(false);
+        if (scrubEvalSeqRef.current === requestSeq) {
+          setIsScrubbingLiveEval(false);
+        }
       }
     }
   }, [onEvaluateIntrabarSlice]);
 
   useEffect(() => {
-    // Attempt to evaluate live analysis when scrub offset changes
-    if (rangeScrubMeta?.targetTime && typeof onEvaluateIntrabarSlice === "function") {
+    // Attempt to evaluate only when scrubbed checkpoint itself has no decision payload.
+    if (
+      rangeScrubMeta?.targetTime &&
+      !scrubbedCheckpointHasDecisionPayload &&
+      typeof onEvaluateIntrabarSlice === "function"
+    ) {
       const delay = setTimeout(() => {
         handleEvaluateIntrabarSlice(rangeScrubMeta.targetTime!);
       }, 300); // debounce
       return () => clearTimeout(delay);
     }
+    // Invalidate stale async eval responses when checkpoint payload is available.
+    scrubEvalSeqRef.current += 1;
+    setIsScrubbingLiveEval(false);
     setScrubLiveAnalysis(null);
-  }, [rangeScrubMeta?.targetTime, handleEvaluateIntrabarSlice, onEvaluateIntrabarSlice]);
+  }, [
+    rangeScrubMeta?.targetTime,
+    scrubbedCheckpointHasDecisionPayload,
+    handleEvaluateIntrabarSlice,
+    onEvaluateIntrabarSlice,
+  ]);
 
   /* ── start test ────────────────────────────────────────────────── */
   const handleStartTest = useCallback(async () => {
@@ -947,6 +1188,52 @@ export default function StrategyAnalyzer({
     if (!Number.isFinite(from) || !Number.isFinite(to)) return;
     setAnalyzerChartState({ from, to });
   }, []);
+
+  const detachedToggleButtonStyle = {
+    padding: "2px 8px",
+    borderRadius: "var(--radius-sm)",
+    border: "1px solid var(--border-color)",
+    background: "var(--bg-secondary)",
+    color: "var(--text-secondary)",
+    fontSize: "0.72rem",
+    fontWeight: 600,
+    cursor: "pointer",
+  };
+
+  const decisionSelectHandler = onDecisionSelectMarker || (() => {});
+
+  const entryConditionsContent = (
+    <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", position: "relative" }}>
+      <StrategyConditionsPanel
+        marker={effectiveConditionsMarker}
+        liveAnalysis={stableConditionsLiveAnalysis}
+      />
+      {isScrubbingLiveEval && (
+        <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>evaluating...</span>
+        </div>
+      )}
+    </div>
+  );
+
+  const decisionsContent = (
+    <div
+      className="card-body"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <DecisionPanel
+        markers={analyzerDecisionEvents}
+        selectedMarker={selectedMarker}
+        onSelectMarker={decisionSelectHandler}
+      />
+    </div>
+  );
 
   /* ── render ────────────────────────────────────────────────────── */
   return (
@@ -1062,7 +1349,7 @@ export default function StrategyAnalyzer({
               </button>
               <button
                 className="btn btn-secondary"
-                onClick={() => void onStepRun?.()}
+                onClick={() => void onStepRun?.({ trade_eval_mode: analyzerTradeEvalMode })}
                 disabled={runLoading || isPlayingRun || analyzerRunFinished}
                 style={{ padding: "6px 12px", fontSize: "0.8rem", fontWeight: 700 }}
                 title="Step one bar"
@@ -1170,6 +1457,7 @@ export default function StrategyAnalyzer({
                     markers={analyzerDecisionEvents}
                     icebergs={[]}
                     onMarkerClick={onChartMarkerClick}
+                    onBarClick={handleAnalyzerBarClick}
                     selectedMarker={selectedMarker}
                     chartState={analyzerChartState || selectedRangeWindow || null}
                     onChartStateChange={handleAnalyzerChartStateChange}
@@ -1376,8 +1664,8 @@ export default function StrategyAnalyzer({
             <div
               className="card"
               style={{
-                flex: (effectiveConditionsMarker || effectiveConditionsLiveAnalysis) ? "1 1 0" : "0 0 auto",
-                minHeight: (effectiveConditionsMarker || effectiveConditionsLiveAnalysis) ? 120 : 0,
+                flex: hasConditionsPanelData ? "1 1 0" : "0 0 auto",
+                minHeight: hasConditionsPanelData ? 120 : 0,
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
@@ -1386,34 +1674,39 @@ export default function StrategyAnalyzer({
             >
               <div className="card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span className="card-title">Entry Conditions</span>
-                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                  {conditionsPanelBadge ? (
-                    <span
-                      style={{
-                        color:
-                          conditionsPanelBadge.tone === "accent"
-                            ? "var(--accent-blue, #3b82f6)"
-                            : "var(--text-muted)",
-                        fontWeight: conditionsPanelBadge.tone === "accent" ? 600 : 500,
-                        fontSize: "0.78rem",
-                      }}
-                    >
-                      {conditionsPanelBadge.label}
-                    </span>
-                  ) : null}
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                    {conditionsPanelBadge ? (
+                      <span
+                        style={{
+                          color:
+                            conditionsPanelBadge.tone === "accent"
+                              ? "var(--accent-blue, #3b82f6)"
+                              : "var(--text-muted)",
+                          fontWeight: conditionsPanelBadge.tone === "accent" ? 600 : 500,
+                          fontSize: "0.78rem",
+                        }}
+                      >
+                        {conditionsPanelBadge.label}
+                      </span>
+                    ) : null}
+                  </span>
+                  <button
+                    type="button"
+                    style={detachedToggleButtonStyle}
+                    onClick={() => setIsConditionsDetached((previous) => !previous)}
+                  >
+                    {isConditionsDetached ? "Dock" : "Open window"}
+                  </button>
+                </div>
               </div>
-              <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
-                  <StrategyConditionsPanel
-                    marker={effectiveConditionsMarker}
-                    liveAnalysis={effectiveConditionsLiveAnalysis}
-                  />
-                  {isScrubbingLiveEval && (
-                    <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>evaluating...</span>
-                    </div>
-                  )}
-              </div>
+              {isConditionsDetached ? (
+                <div style={{ padding: "0.75rem 1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                  Opened in separate window.
+                </div>
+              ) : (
+                entryConditionsContent
+              )}
             </div>
 
             {/* ── Decision List ── */}
@@ -1429,30 +1722,94 @@ export default function StrategyAnalyzer({
             >
               <div className="card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span className="card-title">Decisions</span>
-                <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
-                  {analyzerDecisionEvents.length} total
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                    {analyzerDecisionEvents.length} total
+                  </span>
+                  <button
+                    type="button"
+                    style={detachedToggleButtonStyle}
+                    onClick={() => setIsDecisionsDetached((previous) => !previous)}
+                  >
+                    {isDecisionsDetached ? "Dock" : "Open window"}
+                  </button>
+                </div>
               </div>
-              <div
-                className="card-body"
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  overflow: "hidden",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                <DecisionPanel
-                  markers={analyzerDecisionEvents}
-                  selectedMarker={selectedMarker}
-                  onSelectMarker={onDecisionSelectMarker || (() => {})}
-                />
-              </div>
+              {isDecisionsDetached ? (
+                <div style={{ padding: "0.75rem 1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                  Opened in separate window.
+                </div>
+              ) : (
+                decisionsContent
+              )}
             </div>
           </aside>
         ) : null}
       </div>
+
+      <ExternalWindowPortal
+        isOpen={Boolean(isAnalyzerAttachedRun && isConditionsDetached)}
+        title={`Entry Conditions - ${ticker}`}
+        windowName="strategy-analyzer-conditions"
+        width={560}
+        height={780}
+        onClose={() => setIsConditionsDetached(false)}
+      >
+        <div
+          className="card"
+          style={{
+            margin: 0,
+            borderRadius: 0,
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            position: "relative",
+          }}
+        >
+          <div className="card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span className="card-title">Entry Conditions</span>
+            <button type="button" style={detachedToggleButtonStyle} onClick={() => setIsConditionsDetached(false)}>
+              Dock
+            </button>
+          </div>
+          {entryConditionsContent}
+        </div>
+      </ExternalWindowPortal>
+
+      <ExternalWindowPortal
+        isOpen={Boolean(isAnalyzerAttachedRun && isDecisionsDetached)}
+        title={`Decisions - ${ticker}`}
+        windowName="strategy-analyzer-decisions"
+        width={760}
+        height={860}
+        onClose={() => setIsDecisionsDetached(false)}
+      >
+        <div
+          className="card decision-panel"
+          style={{
+            margin: 0,
+            borderRadius: 0,
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <div className="card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span className="card-title">Decisions</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                {analyzerDecisionEvents.length} total
+              </span>
+              <button type="button" style={detachedToggleButtonStyle} onClick={() => setIsDecisionsDetached(false)}>
+                Dock
+              </button>
+            </div>
+          </div>
+          {decisionsContent}
+        </div>
+      </ExternalWindowPortal>
 
       {/* ── Strategy Editor Modal ──────────────────────────────── */}
       {showStrategyEditor && (
@@ -1460,6 +1817,17 @@ export default function StrategyAnalyzer({
           ticker={ticker}
           strategyApiUrl={strategyApiUrl}
           onClose={() => setShowStrategyEditor(false)}
+        />
+      )}
+      {selectedIntradayLevels && (
+        <IntradayLevelsDialog
+          bar={selectedIntradayLevels.bar}
+          payload={selectedIntradayLevels.payload}
+          sourcePath={selectedIntradayLevels.sourcePath}
+          sourceMarker={selectedIntradayLevels.sourceMarker}
+          relatedMarkers={selectedIntradayLevels.relatedMarkers}
+          timeframeSeconds={selectedIntradayLevels.timeframeSeconds}
+          onClose={closeIntradayLevelsDialog}
         />
       )}
     </div>

@@ -261,9 +261,21 @@ Compatibility notes:
 
 - playback contract assumes the same backend process retains active run state across requests.
 - `play` accepts body or query speed format (`max`, `10hz`, integer ms) and optional `trade_eval_mode` (`standard|intrabar_1s|intrabar_5s`) to switch execution evaluation path without restarting run.
+- `step` accepts optional body `trade_eval_mode` (`standard|intrabar_1s|intrabar_5s`) so single-step evaluation can switch checkpoint granularity without restarting run.
 - `restart` rewinds the existing in-memory run to bar zero (no re-load of source bars), clears remote strategy session state for that run+ticker, and reapplies stored session config before replay.
 - marker/event ordering must remain stable for frontend playback.
 - `POST /api/run/cache/flush?include_disk=true|false` clears run-start caches (bars/reference/L2 enrichment); use when reclaiming memory or forcing re-read from source files.
+
+### `POST /api/run/{run_id}/{ticker}/{date}/intrabar_eval`
+
+Purpose: side-effect-free intrabar slice evaluation for analyzer scrub mode.
+
+Compatibility notes:
+
+- route proxies request payload to strategy API `POST /api/session/intrabar_eval` using the active run session context.
+- active runner identity is authoritative: `run_id` and `ticker` are overwritten from the in-memory run config before proxy.
+- requires bar core fields in body (`timestamp`, `open`, `high`, `low`, `close`, `volume`).
+- non-200 strategy responses are surfaced with the upstream HTTP status and detail.
 
 ### `GET /api/run/{run_id}/{ticker}/{date}/markers|summary|bars|state`
 

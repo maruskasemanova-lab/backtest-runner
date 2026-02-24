@@ -15,6 +15,7 @@ from typing import Dict, Optional, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+import polars as pl
 
 if TYPE_CHECKING:
     from .l2_data_manager import L2DataManager
@@ -113,7 +114,10 @@ class IntrabarFrameBuilder:
                 ],
             )
             
-        pdf = pl.from_pandas(df.reset_index())
+        reset_df = df.copy()
+        if reset_df.index.name in reset_df.columns:
+            reset_df.index.name = "index_time_" + str(reset_df.index.name)
+        pdf = pl.from_pandas(reset_df.reset_index())
         pdf = pdf.lazy()
         
         # Ensure 'ts_event' is the time column (from df.index)
@@ -213,7 +217,10 @@ class IntrabarFrameBuilder:
                 ],
             ).fillna(0)
             
-        pdf = pl.from_pandas(df.reset_index())
+        reset_df = df.copy()
+        if reset_df.index.name in reset_df.columns:
+            reset_df.index.name = "index_time_" + str(reset_df.index.name)
+        pdf = pl.from_pandas(reset_df.reset_index())
         pdf = pdf.lazy()
         
         # Ensure 'ts_event' is the time column (from df.index)

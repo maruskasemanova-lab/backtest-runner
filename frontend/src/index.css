@@ -5381,6 +5381,227 @@ body {
   font-weight: 500;
 }
 
+/* ============ Intraday Levels Dialog ============ */
+.intraday-levels-dialog-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+}
+
+.intraday-levels-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.intraday-levels-dialog {
+  position: absolute;
+  inset: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.intraday-levels-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 250, 242, 0.9);
+}
+
+.intraday-levels-dialog__heading h3 {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  color: var(--text-primary);
+}
+
+.intraday-levels-dialog__heading p {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.intraday-levels-dialog__close {
+  border: 1px solid var(--border-color);
+  background: #fff;
+  color: var(--text-secondary);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.intraday-levels-dialog__close:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.intraday-levels-dialog__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(248, 250, 252, 0.8);
+}
+
+.intraday-levels-dialog__meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.intraday-levels-dialog__meta-item span {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+}
+
+.intraday-levels-dialog__meta-item strong {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.intraday-levels-dialog__body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.intraday-levels-dialog__empty {
+  border: 1px dashed var(--border-color);
+  background: rgba(248, 250, 252, 0.7);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-lg);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.intraday-levels-dialog__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.intraday-levels-dialog__summary-card {
+  border: 1px solid var(--border-color);
+  background: rgba(248, 250, 252, 0.85);
+  border-radius: var(--border-radius-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.intraday-levels-dialog__summary-card span {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+}
+
+.intraday-levels-dialog__summary-card strong {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+}
+
+.intraday-levels-dialog__levels h4,
+.intraday-levels-dialog__raw h4 {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-md);
+}
+
+.intraday-levels-dialog__table-wrap {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  overflow: auto;
+  max-height: 260px;
+}
+
+.intraday-levels-dialog__table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.intraday-levels-dialog__table-wrap th,
+.intraday-levels-dialog__table-wrap td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.intraday-levels-dialog__table-wrap th {
+  position: sticky;
+  top: 0;
+  background: rgba(241, 245, 249, 0.95);
+  color: var(--text-secondary);
+  font-weight: 700;
+  z-index: 1;
+}
+
+.intraday-levels-dialog__table-wrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.intraday-levels-dialog__raw pre {
+  margin: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: var(--spacing-md);
+  max-height: 320px;
+  overflow: auto;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 900px) {
+  .intraday-levels-dialog {
+    inset: 8px;
+  }
+
+  .intraday-levels-dialog__header {
+    padding: var(--spacing-sm) var(--spacing-md);
+  }
+
+  .intraday-levels-dialog__body {
+    padding: var(--spacing-md);
+  }
+}
+
+@media (max-width: 640px) {
+  .intraday-levels-dialog__summary {
+    grid-template-columns: 1fr;
+  }
+
+  .intraday-levels-dialog__meta {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ============ V2 Vector Analysis ============ */
 
 .v2-badge {

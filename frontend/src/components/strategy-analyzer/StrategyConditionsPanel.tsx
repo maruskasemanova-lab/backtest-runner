@@ -129,6 +129,99 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/* ── formatted reasoning renderer ────────────────────────────────── */
+
+function FormattedReasoning({ reasoning }: { reasoning: string }) {
+  // Parse backend reasoning format:
+  // "Evidence: [type:name(dir,str→cal), ...] | Ensemble: score=X thresh=Y confirming=A/B | EXECUTE/SKIP"
+  const parts = reasoning.split(" | ");
+  const evidencePart = parts.find(p => p.startsWith("Evidence:"));
+  const ensemblePart = parts.find(p => p.startsWith("Ensemble:"));
+  const verdict = parts.find(p => p === "EXECUTE" || p === "SKIP" || p.startsWith("SKIP") || p.startsWith("EXECUTE"));
+
+  // Parse evidence sources from "[type:name(dir,str→cal), ...]"
+  const evidenceItems: Array<{ type: string; name: string; dir: string; strength: string; cal: string }> = [];
+  if (evidencePart) {
+    const bracketContent = evidencePart.match(/\[(.+)\]/)?.[1];
+    if (bracketContent) {
+      // Match patterns like: feature:rsi_oversold(b,70→0.57)
+      const itemRegex = /(\w+):(\w+)\(([^,]+),([^→]+)→([^)]+)\)/g;
+      let m: RegExpExecArray | null;
+      while ((m = itemRegex.exec(bracketContent)) !== null) {
+        evidenceItems.push({
+          type: m[1],
+          name: m[2].replace(/_/g, " "),
+          dir: m[3],
+          strength: m[4],
+          cal: m[5],
+        });
+      }
+    }
+  }
+
+  const dirLabel = (d: string) => {
+    if (d === "b" || d === "bullish") return { arrow: "▲", color: "var(--accent-green, #22c55e)", label: "BUY" };
+    if (d === "s" || d === "bearish") return { arrow: "▼", color: "var(--accent-red, #ef4444)", label: "SELL" };
+    return { arrow: "●", color: "var(--text-muted)", label: "—" };
+  };
+
+  const isExecute = verdict?.startsWith("EXECUTE");
+
+  return (
+    <div style={{ marginTop: 3 }}>
+      {/* Verdict badge */}
+      {verdict && (
+        <div style={{
+          display: "inline-flex", alignItems: "center", gap: 3,
+          padding: "1px 6px", borderRadius: 3, fontSize: "0.58rem", fontWeight: 700,
+          background: isExecute ? "rgba(34, 197, 94, 0.12)" : "rgba(239, 68, 68, 0.08)",
+          color: isExecute ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)",
+          border: `1px solid ${isExecute ? "rgba(34, 197, 94, 0.25)" : "rgba(239, 68, 68, 0.2)"}`,
+          marginBottom: 3,
+        }}>
+          {isExecute ? "✓ EXECUTE" : "✗ SKIP"}
+          {verdict.includes("no aligned strategy signal") && (
+            <span style={{ fontWeight: 500, opacity: 0.8 }}> (no aligned signal)</span>
+          )}
+        </div>
+      )}
+
+      {/* Evidence source badges */}
+      {evidenceItems.length > 0 && (
+        <div style={{ display: "flex", gap: 3, flexWrap: "wrap", marginBottom: 2 }}>
+          {evidenceItems.map((ev, i) => {
+            const d = dirLabel(ev.dir);
+            return (
+              <span
+                key={`${ev.type}-${ev.name}-${i}`}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 2,
+                  padding: "1px 4px", borderRadius: 2, fontSize: "0.50rem", lineHeight: 1.5,
+                  background: "rgba(148, 163, 184, 0.06)",
+                  border: "1px solid rgba(148, 163, 184, 0.12)",
+                  color: "var(--text-secondary)",
+                }}
+                title={`${ev.type}: ${ev.name} | dir: ${ev.dir} | strength: ${ev.strength} | calibrated: ${ev.cal}`}
+              >
+                <span style={{ color: d.color, fontSize: "0.48rem" }}>{d.arrow}</span>
+                <span style={{ fontWeight: 600 }}>{ev.name}</span>
+                <span style={{ opacity: 0.6 }}>{ev.strength}→{ev.cal}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Ensemble summary */}
+      {ensemblePart && (
+        <div style={{ fontSize: "0.50rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
+          {ensemblePart}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── rejection detail renderer ────────────────────────────────────── */
 
 function RejectionDetail({ d }: { d: any }) {
@@ -342,6 +435,8 @@ function RejectionDetail({ d }: { d: any }) {
     const thrReason = typeof d.threshold_used_reason === "string" ? d.threshold_used_reason : null;
     const isHeadwind = gate === "cross_asset_headwind";
 
+    const scorePassed = score != null && thr != null && score >= thr;
+    const scoreColor = scorePassed ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)";
     const scorePct = (score != null && thr != null && thr > 0) ? Math.min(100, (score / thr) * 100) : null;
     const gap = (score != null && thr != null) ? thr - score : null;
 
@@ -354,9 +449,11 @@ function RejectionDetail({ d }: { d: any }) {
               <span style={{ color: "var(--text-secondary)" }}>
                 {isHeadwind ? "Score (headwind adjusted)" : "Combined score"}
               </span>
-              <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: "var(--accent-red, #ef4444)" }}>
+              <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: scoreColor }}>
                 {score.toFixed(1)} / {thr.toFixed(0)} req
-                {gap != null && gap > 0 && <span style={{ opacity: 0.7 }}> ({gap.toFixed(1)} short)</span>}
+                {gap != null && gap > 0
+                  ? <span style={{ opacity: 0.7 }}> ({gap.toFixed(1)} short)</span>
+                  : <span style={{ opacity: 0.7 }}> ✓</span>}
               </span>
             </div>
             <div style={{ position: "relative", height: 5, borderRadius: 3, background: "var(--bg-tertiary, rgba(255,255,255,0.06))", overflow: "visible" }}>
@@ -364,7 +461,7 @@ function RejectionDetail({ d }: { d: any }) {
                 height: "100%",
                 width: `${scorePct ?? 0}%`,
                 borderRadius: 3,
-                background: "var(--accent-red, #ef4444)",
+                background: scoreColor,
                 opacity: 0.8,
                 transition: "width 0.08s ease-out",
               }} />
@@ -389,12 +486,8 @@ function RejectionDetail({ d }: { d: any }) {
           )}
           {thrReason && <span style={{ fontStyle: "italic" }}>{thrReason}</span>}
         </div>
-        {/* reasoning */}
-        {reasoning && (
-          <div style={{ fontSize: "0.52rem", color: "var(--text-muted)", fontStyle: "italic", lineHeight: 1.4, marginTop: 2 }}>
-            {reasoning}
-          </div>
-        )}
+        {/* reasoning — parsed into readable evidence badges */}
+        {reasoning && <FormattedReasoning reasoning={reasoning} />}
       </div>
     );
   }
@@ -495,6 +588,10 @@ function extractData(marker: any, liveAnalysis: any) {
           ? intrabarSnapshot.has_intrabar_coverage
           : null,
       markerType: String(marker?.marker_type || "").trim(),
+      barTimestamp: marker?.timestamp || marker?.time || null,
+      sourceContributions: (ls.source_contributions && typeof ls.source_contributions === "object") ? ls.source_contributions : null,
+      sourceWeights: (ls.source_weights && typeof ls.source_weights === "object") ? ls.source_weights : null,
+      calibratedProbability: safeNum(ls.calibrated_probability),
     };
   }
 
@@ -549,6 +646,10 @@ function extractData(marker: any, liveAnalysis: any) {
       markerType: intrabarOnlyCheckpoint ? "5s checkpoint" : (liveAnalysis?.warmup_only ? "warmup" : "live bar"),
       intrabarOnlyCheckpoint,
       liveAnalysisSource: liveAnalysis,
+      barTimestamp: liveAnalysis?.timestamp || null,
+      sourceContributions: (ls.source_contributions && typeof ls.source_contributions === "object") ? ls.source_contributions : null,
+      sourceWeights: (ls.source_weights && typeof ls.source_weights === "object") ? ls.source_weights : null,
+      calibratedProbability: safeNum(ls.calibrated_probability),
     };
   }
 
@@ -585,7 +686,7 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
 
   return (
     <div style={{ padding: "4px 8px", fontSize: "0.72rem" }}>
-      {/* ── Header: type + strategy + regime (single compact line) ── */}
+      {/* ── Header: type + strategy + regime + timestamp ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4, flexWrap: "wrap" }}>
         <span
           style={{
@@ -626,6 +727,17 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
             {data.microRegime && data.microRegime !== data.regime ? ` / ${data.microRegime}` : ""}
           </span>
         )}
+        {/* Timestamp: shows current bar time — helps user see data updates when scrubbing */}
+        {(data as any).barTimestamp && (() => {
+          const raw = (data as any).barTimestamp;
+          const ts = typeof raw === "number" ? new Date(raw * 1000) : new Date(raw);
+          if (isNaN(ts.getTime())) return null;
+          return (
+            <span style={{ fontSize: "0.55rem", color: "var(--text-muted)", marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>
+              {ts.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
+            </span>
+          );
+        })()}
       </div>
 
       {/* ── Scores: 2-column grid ── */}
@@ -645,7 +757,7 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
             )}
           </div>
 
-          {/* Threshold info - single compact line */}
+          {/* Threshold info - cleaned up */}
           {data.threshold != null && (
             <div style={{ fontSize: "0.58rem", color: "var(--text-muted)", marginTop: 1, marginBottom: 2, lineHeight: 1.3 }}>
               Thr: {data.threshold.toFixed(0)}
@@ -655,11 +767,76 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
               {data.headwindBoost != null && data.headwindBoost !== 0 && (
                 <span> HW{data.headwindBoost > 0 ? "+" : ""}{data.headwindBoost.toFixed(0)}</span>
               )}
-              {data.thresholdReason && (
-                <span style={{ fontStyle: "italic" }}> {data.thresholdReason}</span>
-              )}
+              {data.thresholdReason && (() => {
+                // Parse dynamic(...) into readable components
+                const raw = data.thresholdReason;
+                const m = raw.match(/regime_conf=([\d.]+)/);
+                const regConf = m ? parseFloat(m[1]) : null;
+                const trans = raw.includes("is_trans=True");
+                const parts: string[] = [];
+                if (regConf != null && regConf < 0.6) parts.push(`regime weak (${(regConf * 100).toFixed(0)}%)`);
+                if (trans) parts.push("transition");
+                return parts.length > 0 ? (
+                  <span style={{ fontStyle: "italic" }}> · {parts.join(", ")}</span>
+                ) : null;
+              })()}
             </div>
           )}
+
+          {/* ── Evidence Source Breakdown ── */}
+          {(data as any).sourceContributions && (() => {
+            const contributions: Record<string, number> = (data as any).sourceContributions;
+            const weights: Record<string, number> = (data as any).sourceWeights || {};
+            const sourceLabels: Record<string, string> = {
+              "strategy": "Strategy",
+              "feature": "Feature",
+              "l2_flow": "L2 Flow",
+              "cross_asset": "Cross-Asset",
+              "regime": "Regime",
+            };
+            const nameLabels: Record<string, string> = {
+              "rsi_oversold": "RSI Oversold",
+              "rsi_overbought": "RSI Overbought",
+              "momentum_strong": "Momentum",
+              "vwap_below": "VWAP Below",
+              "vwap_above": "VWAP Above",
+              "volume_spike": "Volume Spike",
+              "aggression": "Aggression",
+              "delta_divergence": "Delta Div",
+              "absorption": "Absorption",
+              "index_context": "Index",
+              "regime_direction": "Regime Dir",
+            };
+            const entries = Object.entries(contributions)
+              .filter(([, v]) => v != null && v > 0)
+              .sort((a, b) => b[1] - a[1]);
+            if (entries.length === 0) return null;
+            // Max contribution for normalization
+            const maxContrib = Math.max(...entries.map(([, v]) => v), 0.01);
+            return (
+              <>
+                <SectionLabel>Evidence Breakdown</SectionLabel>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 8px" }}>
+                  {entries.map(([key, value]) => {
+                    const [type, ...nameParts] = key.split(":");
+                    const name = nameParts.join(":");
+                    const label = nameLabels[name] || sourceLabels[type] || name.replace(/_/g, " ");
+                    const weight = weights[key];
+                    const weightPct = weight != null ? (weight * 100).toFixed(0) : null;
+                    return (
+                      <MiniBar
+                        key={key}
+                        label={`${label}${weightPct ? ` (${weightPct}%)` : ""}`}
+                        value={value * 100}
+                        max={maxContrib * 100}
+                        suffix=""
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            );
+          })()}
         </>
       )}
 
@@ -674,22 +851,36 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
             <GateBadge label="TCBBO" passed={data.tcbboPassed} />
             {data.sweepDetected === true && <GateBadge label="Sweep" passed={true} />}
           </div>
-          {data.rejectionGate && (
-            <div style={{
-              fontSize: "0.58rem",
-              color: "var(--accent-red, #ef4444)",
-              background: "rgba(239, 68, 68, 0.06)",
-              padding: "3px 6px",
-              borderRadius: 3,
-              marginBottom: 2,
-              lineHeight: 1.4,
-            }}>
-              <div style={{ fontWeight: 600, fontSize: "0.6rem" }}>
-                Rejected: {data.rejectionGate.replace(/_/g, " ")}
+          {data.rejectionGate && (() => {
+            const gateLabels: Record<string, string> = {
+              threshold: "Score príliš nízky na vstup",
+              confirming_sources: "Málo potvrdzujúcich zdrojov",
+              l2_confirmation: "L2 flow nepotvrdil smer",
+              tcbbo_confirmation: "Options flow nepodporuje",
+              mu_choppy_filter: "Trh je príliš volatilný (choppy)",
+              cost_aware_sweep: "Riziko príliš nízke pre sweep",
+              intraday_levels_entry_quality: "Kvalita vstupu pri úrovniach nízka",
+              level_quality: "Kvalita okolitých úrovní nízka",
+              cross_asset_headwind: "Protivietor z indexu",
+            };
+            const readableGate = gateLabels[data.rejectionGate] || data.rejectionGate.replace(/_/g, " ");
+            return (
+              <div style={{
+                fontSize: "0.58rem",
+                color: "var(--accent-red, #ef4444)",
+                background: "rgba(239, 68, 68, 0.06)",
+                padding: "3px 6px",
+                borderRadius: 3,
+                marginBottom: 2,
+                lineHeight: 1.4,
+              }}>
+                <div style={{ fontWeight: 600, fontSize: "0.6rem" }}>
+                  ✗ {readableGate}
+                </div>
+                <RejectionDetail d={data.rejectionDetails} />
               </div>
-              <RejectionDetail d={data.rejectionDetails} />
-            </div>
-          )}
+            );
+          })()}
         </>
       )}
 
