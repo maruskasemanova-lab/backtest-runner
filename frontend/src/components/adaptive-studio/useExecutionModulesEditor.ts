@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { buildExpandedExecutionModuleDefaults } from "./executionModulesUtils";
 
 interface ExecutionModuleRow {
   key: string;
@@ -8,21 +9,28 @@ interface ExecutionParamField {
   key: string;
 }
 
+type ExecutionConfigSnapshot = Record<string, unknown>;
+type UpdateExecutionConfigFieldOptions = { raw?: boolean };
+
 interface UseExecutionModulesEditorArgs {
   modules: ExecutionModuleRow[];
   normalizeExecutionParamValue: (value: unknown, field: ExecutionParamField) => unknown;
-  readExecutionConfigSnapshot: () => Record<string, any>;
+  readExecutionConfigSnapshot: () => ExecutionConfigSnapshot;
 }
 
 interface UseExecutionModulesEditorResult {
-  executionConfigSnapshot: Record<string, any>;
+  executionConfigSnapshot: ExecutionConfigSnapshot;
   expandedExecutionModules: Record<string, boolean>;
   toggleExecutionModuleExpanded: (moduleKey: string) => void;
   expandAllExecutionModules: () => void;
   collapseAllExecutionModules: () => void;
   refreshExecutionConfigSnapshot: () => void;
-  updateExecutionConfigField: (configKey: string, value: unknown, options?: Record<string, any>) => void;
-  mergeExecutionConfigSnapshot: (snapshot: Record<string, any>) => void;
+  updateExecutionConfigField: (
+    configKey: string,
+    value: unknown,
+    options?: UpdateExecutionConfigFieldOptions,
+  ) => void;
+  mergeExecutionConfigSnapshot: (snapshot: ExecutionConfigSnapshot) => void;
   getExecutionParamValue: (field: ExecutionParamField) => unknown;
 }
 
@@ -30,23 +38,13 @@ const EXEC_CONFIG_SNAPSHOT_EVENT = "execution-config-snapshot";
 const EXEC_CONFIG_SNAPSHOT_REQUEST_EVENT = "execution-config-snapshot-request";
 const EXEC_MODULE_TOGGLE_EVENT = "execution-module-toggle";
 
-const buildExpandedDefaults = (modules: ExecutionModuleRow[]) => {
-  const defaults: Record<string, boolean> = {};
-  modules.forEach((module) => {
-    const moduleKey = String(module?.key || "").trim();
-    if (!moduleKey) return;
-    defaults[moduleKey] = true;
-  });
-  return defaults;
-};
-
 export const useExecutionModulesEditor = ({
   modules,
   normalizeExecutionParamValue,
   readExecutionConfigSnapshot,
 }: UseExecutionModulesEditorArgs): UseExecutionModulesEditorResult => {
-  const expandedDefaults = useMemo(() => buildExpandedDefaults(modules), [modules]);
-  const [executionConfigSnapshot, setExecutionConfigSnapshot] = useState<Record<string, any>>(
+  const expandedDefaults = useMemo(() => buildExpandedExecutionModuleDefaults(modules), [modules]);
+  const [executionConfigSnapshot, setExecutionConfigSnapshot] = useState<ExecutionConfigSnapshot>(
     () => readExecutionConfigSnapshot(),
   );
   const [expandedExecutionModules, setExpandedExecutionModules] = useState<Record<string, boolean>>(
@@ -62,9 +60,9 @@ export const useExecutionModulesEditor = ({
 
   useEffect(() => {
     const handleExecutionSnapshot = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
+      const detail = (event as CustomEvent<unknown>).detail;
       if (!detail || typeof detail !== "object" || Array.isArray(detail)) return;
-      setExecutionConfigSnapshot(detail as Record<string, any>);
+      setExecutionConfigSnapshot(detail as ExecutionConfigSnapshot);
     };
 
     window.addEventListener(EXEC_CONFIG_SNAPSHOT_EVENT, handleExecutionSnapshot);
@@ -106,7 +104,7 @@ export const useExecutionModulesEditor = ({
   }, [readExecutionConfigSnapshot]);
 
   const updateExecutionConfigField = useCallback(
-    (configKey: string, value: unknown, options: Record<string, any> = {}) => {
+    (configKey: string, value: unknown, options: UpdateExecutionConfigFieldOptions = {}) => {
       const nextValue = options?.raw === true ? value : Number(value);
       setExecutionConfigSnapshot((prev) => ({
         ...(prev && typeof prev === "object" ? prev : {}),
@@ -121,7 +119,7 @@ export const useExecutionModulesEditor = ({
     [],
   );
 
-  const mergeExecutionConfigSnapshot = useCallback((snapshot: Record<string, any>) => {
+  const mergeExecutionConfigSnapshot = useCallback((snapshot: ExecutionConfigSnapshot) => {
     setExecutionConfigSnapshot((prev) => ({
       ...(prev && typeof prev === "object" ? prev : {}),
       ...(snapshot && typeof snapshot === "object" ? snapshot : {}),

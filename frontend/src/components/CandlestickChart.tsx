@@ -1,56 +1,105 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle } from "react";
-import { createChart, ColorType } from "lightweight-charts";
+import { memo, useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import ChartTooltip from "./ChartTooltip";
-import { toUnixSeconds, toIsoTimestamp } from "../utils";
-
-const MAX_SNAP_SECONDS = 120;
-const RANGE_EPSILON = 0.001;
+import useCandlestickChartBarSeriesData from "./candlestick-chart/useCandlestickChartBarSeriesData";
+import useCandlestickChartClickSelection from "./candlestick-chart/useCandlestickChartClickSelection";
+import useCandlestickChartExternalRangeSync from "./candlestick-chart/useCandlestickChartExternalRangeSync";
+import useCandlestickChartLifecycle from "./candlestick-chart/useCandlestickChartLifecycle";
+import useCandlestickChartMarkers from "./candlestick-chart/useCandlestickChartMarkers";
+import useCandlestickChartSeriesMarkers from "./candlestick-chart/useCandlestickChartSeriesMarkers";
+import useCandlestickChartSelectedMarkerFocus from "./candlestick-chart/useCandlestickChartSelectedMarkerFocus";
 
 export type CandlestickChartVisibleRange = {
   from: number;
   to: number;
 };
 
+export type CandlestickChartVisibleRangeChangeHandler = (
+  range: CandlestickChartVisibleRange | null | undefined
+) => void;
+
+export type CandlestickChartScaleMargins = {
+  top?: number;
+  bottom?: number;
+};
+
 export type CandlestickChartTimeScaleLike = {
   timeToCoordinate: (time: number) => number | null | undefined;
-  subscribeVisibleTimeRangeChange: (
-    cb: (range: CandlestickChartVisibleRange | null | undefined) => void
-  ) => void | (() => void);
-  unsubscribeVisibleTimeRangeChange?: (
-    cb: (range: CandlestickChartVisibleRange | null | undefined) => void
-  ) => void;
+  subscribeVisibleTimeRangeChange: (cb: CandlestickChartVisibleRangeChangeHandler) => void | (() => void);
+  unsubscribeVisibleTimeRangeChange?: (cb: CandlestickChartVisibleRangeChangeHandler) => void;
   getVisibleRange: () => CandlestickChartVisibleRange | null | undefined;
   setVisibleRange: (range: CandlestickChartVisibleRange) => void;
   scrollToPosition: (position: number, animated: boolean) => void;
 };
 
-type CandlestickChartPriceScaleLike = {
-  options: () => { scaleMargins?: { top?: number; bottom?: number } };
-  applyOptions: (options: { scaleMargins?: { top?: number; bottom?: number }; borderVisible?: boolean }) => void;
+export type CandlestickChartPriceScaleApplyOptions = {
+  scaleMargins?: CandlestickChartScaleMargins;
+  borderVisible?: boolean;
 };
 
-type CandlestickChartCandleSeriesLike = {
+export type CandlestickChartPriceScaleLike = {
+  options: () => { scaleMargins?: CandlestickChartScaleMargins };
+  applyOptions: (options: CandlestickChartPriceScaleApplyOptions) => void;
+};
+
+export type CandlestickChartSeriesMarkerPosition = "aboveBar" | "belowBar" | "inBar";
+export type CandlestickChartSeriesMarkerShape = "circle" | "square" | "arrowUp" | "arrowDown";
+
+export type CandlestickChartSeriesMarkerLike = {
+  time: number;
+  position: CandlestickChartSeriesMarkerPosition;
+  color: string;
+  shape: CandlestickChartSeriesMarkerShape;
+  text?: string;
+  id?: string | number;
+  size?: number;
+};
+
+export type CandlestickChartCandleSeriesLike = {
   setData: (data: CandlestickChartCandlePoint[]) => void;
   update: (data: CandlestickChartCandlePoint) => void;
-  setMarkers: (markers: Array<Record<string, unknown>>) => void;
+  setMarkers: (markers: CandlestickChartSeriesMarkerLike[]) => void;
   priceToCoordinate?: (price: number) => number | null | undefined;
   coordinateToPrice?: (y: number) => number | null | undefined;
 };
 
-type CandlestickChartHistogramSeriesLike = {
+export type CandlestickChartHistogramSeriesLike = {
   setData: (data: CandlestickChartVolumePoint[]) => void;
   update: (data: CandlestickChartVolumePoint) => void;
 };
 
+type CandlestickChartApplyOptionsLike = {
+  width?: number;
+  height?: number;
+};
+
+type CandlestickChartCandlestickSeriesOptionsLike = {
+  upColor?: string;
+  downColor?: string;
+  borderUpColor?: string;
+  borderDownColor?: string;
+  wickUpColor?: string;
+  wickDownColor?: string;
+};
+
+type CandlestickChartHistogramSeriesOptionsLike = {
+  color?: string;
+  priceFormat?: { type?: string };
+  priceScaleId?: string;
+};
+
 export type CandlestickChartApiLike = {
   timeScale: () => CandlestickChartTimeScaleLike;
-  applyOptions: (options: { width?: number; height?: number }) => void;
+  applyOptions: (options: CandlestickChartApplyOptionsLike) => void;
   remove: () => void;
   priceScale: (id: string) => CandlestickChartPriceScaleLike;
-  addCandlestickSeries: (options: Record<string, unknown>) => CandlestickChartCandleSeriesLike;
-  addHistogramSeries: (options: Record<string, unknown>) => CandlestickChartHistogramSeriesLike;
-  subscribeClick: (handler: (param: CandlestickChartClickParam) => void) => void;
-  unsubscribeClick: (handler: (param: CandlestickChartClickParam) => void) => void;
+  addCandlestickSeries: (
+    options: CandlestickChartCandlestickSeriesOptionsLike,
+  ) => CandlestickChartCandleSeriesLike;
+  addHistogramSeries: (
+    options: CandlestickChartHistogramSeriesOptionsLike,
+  ) => CandlestickChartHistogramSeriesLike;
+  subscribeClick: (handler: CandlestickChartClickHandler) => void;
+  unsubscribeClick: (handler: CandlestickChartClickHandler) => void;
 };
 
 export type CandlestickChartPriceRange = {
@@ -110,49 +159,34 @@ export type CandlestickChartProps = {
   onPriceRangeChange?: (range: CandlestickChartPriceRange) => void;
 };
 
-type CandlestickChartTooltipState = {
+export type CandlestickChartTooltipState = {
   visible: boolean;
   marker: CandlestickChartMarker | null;
   x: number;
   y: number;
 };
 
-type CandlestickChartClickParam = {
+export type CandlestickChartClickPoint = { x: number; y: number };
+
+export type CandlestickChartClickParam = {
   time?: unknown;
-  point?: { x: number; y: number } | null;
+  point?: CandlestickChartClickPoint | null;
 };
 
-type CandlestickChartNormalizedMarker = CandlestickChartMarker & {
-  id: string | number;
-  time: number;
-  timestamp?: string | number | null;
-};
+export type CandlestickChartClickHandler = (param: CandlestickChartClickParam) => void;
 
-type CandlestickChartCandlePoint =
+export type CandlestickChartCandlePoint =
   | { time: number }
   | { time: number; open: number; high: number; low: number; close: number };
 
-type CandlestickChartVolumePoint =
+export type CandlestickChartVolumePoint =
   | { time: number }
   | { time: number; value: number; color: string };
 
-const normalizeVisibleRange = (range: unknown): CandlestickChartVisibleRange | null => {
-  const value =
-    range && typeof range === "object" ? (range as { from?: unknown; to?: unknown }) : null;
-  const from = Number(value?.from);
-  const to = Number(value?.to);
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
-  if (from <= to) return { from, to };
-  return { from: to, to: from };
+export type CandlestickChartAppliedBarsMeta = {
+  length: number;
+  lastTime: number | null;
 };
-
-const rangesEqual = (left: unknown, right: unknown): boolean => {
-  const a = normalizeVisibleRange(left);
-  const b = normalizeVisibleRange(right);
-  if (!a || !b) return false;
-  return Math.abs(a.from - b.from) < RANGE_EPSILON && Math.abs(a.to - b.to) < RANGE_EPSILON;
-};
-
 
 const CandlestickChart = forwardRef<CandlestickChartHandle, CandlestickChartProps>(function CandlestickChart(
   {
@@ -174,7 +208,7 @@ const CandlestickChart = forwardRef<CandlestickChartHandle, CandlestickChartProp
   const chartRef = useRef<CandlestickChartApiLike | null>(null);
   const candleSeriesRef = useRef<CandlestickChartCandleSeriesLike | null>(null);
   const volumeSeriesRef = useRef<CandlestickChartHistogramSeriesLike | null>(null);
-  const appliedBarsMetaRef = useRef<{ length: number; lastTime: number | null }>({
+  const appliedBarsMetaRef = useRef<CandlestickChartAppliedBarsMeta>({
     length: 0,
     lastTime: null,
   });
@@ -206,771 +240,73 @@ const CandlestickChart = forwardRef<CandlestickChartHandle, CandlestickChartProp
     onChartStateChangeRef.current = onChartStateChange;
   }, [onChartStateChange]);
 
-  // Initialize chart
-  useEffect(() => {
-    if (!chartContainerRef.current) return;
-
-    try {
-      const getCssVar = (name, fallback) => {
-        const value = getComputedStyle(document.documentElement)
-          .getPropertyValue(name)
-          .trim();
-        return value || fallback;
-      };
-
-      const colors = {
-        bg: getCssVar("--bg-card", "#ffffff"),
-        grid: getCssVar("--border-color", "#e5e7eb"),
-        text: getCssVar("--text-secondary", "#6b7280"),
-        up: getCssVar("--candle-up", "#0f766e"),
-        down: getCssVar("--candle-down", "#dc2626"),
-        wick: getCssVar("--candle-wick", "#7c756b"),
-        accent: getCssVar("--accent-blue", "#1d4ed8"),
-      };
-
-      const chart = createChart(chartContainerRef.current, {
-        width: chartContainerRef.current.clientWidth,
-        height: chartContainerRef.current.clientHeight,
-        layout: {
-          background: { type: ColorType.Solid, color: colors.bg },
-          textColor: colors.text,
-        },
-        grid: {
-          vertLines: { color: colors.grid },
-          horzLines: { color: colors.grid },
-        },
-        crosshair: {
-          mode: 1,
-          vertLine: {
-            color: colors.text,
-            width: 1,
-            style: 2,
-            labelBackgroundColor: colors.accent,
-          },
-          horzLine: {
-            color: colors.text,
-            width: 1,
-            style: 2,
-            labelBackgroundColor: colors.accent,
-          },
-        },
-        rightPriceScale: {
-          borderColor: colors.grid,
-          scaleMargins: {
-            top: 0.1,
-            bottom: 0.2,
-          },
-        },
-        timeScale: {
-          borderColor: colors.grid,
-          timeVisible: true,
-          secondsVisible: false,
-        },
-      });
-
-      // Subscribe to range changes with deduplicated bridge to parent state.
-      chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-        const normalizedRange = normalizeVisibleRange(range);
-        if (!normalizedRange) return;
-
-        lastAppliedRangeRef.current = normalizedRange;
-        if (isSyncingRef.current) return;
-        if (rangesEqual(lastBroadcastRangeRef.current, normalizedRange)) return;
-
-        lastBroadcastRangeRef.current = normalizedRange;
-        onChartStateChangeRef.current?.(normalizedRange);
-      });
-
-      // Candlestick series
-      const candleSeries = chart.addCandlestickSeries({
-        upColor: colors.up,
-        downColor: colors.down,
-        borderUpColor: colors.up,
-        borderDownColor: colors.down,
-        wickUpColor: colors.up,
-        wickDownColor: colors.down,
-      });
-
-      // Volume series
-      const volumeSeries = chart.addHistogramSeries({
-        color: colors.accent,
-        priceFormat: {
-          type: "volume",
-        },
-        priceScaleId: "volume",
-      });
-
-      // Configure volume price scale
-      chart.priceScale("volume").applyOptions({
-        scaleMargins: {
-          top: 0.85,
-          bottom: 0,
-        },
-        borderVisible: false,
-      });
-
-      chartRef.current = chart;
-      candleSeriesRef.current = candleSeries;
-      volumeSeriesRef.current = volumeSeries;
-
-      // Handle resize
-      const handleResize = () => {
-        if (chartContainerRef.current && chartRef.current) {
-          chartRef.current.applyOptions({
-            width: chartContainerRef.current.clientWidth,
-            height: chartContainerRef.current.clientHeight,
-          });
-        }
-      };
-
-      window.addEventListener("resize", handleResize);
-
-      // Cmd+Scroll for vertical price scale zoom
-      const handleWheel = (e: WheelEvent) => {
-          // Track wheel interaction for leader/follower sync
-          // We don't have a clean 'wheel end' event, so we use a timeout
-          isUserInteracting.current = true;
-          if (interactionTimeoutRef.current) clearTimeout(interactionTimeoutRef.current);
-          interactionTimeoutRef.current = setTimeout(() => {
-               isUserInteracting.current = false;
-          }, 200);
-
-          if (e.metaKey || e.ctrlKey) {
-              e.preventDefault();
-              const priceScale = chart.priceScale('right');
-              const currentMargins = priceScale.options().scaleMargins || { top: 0.1, bottom: 0.2 };
-              const delta = e.deltaY > 0 ? 0.02 : -0.02; // Zoom out / in
-              const newTop = Math.max(0.02, Math.min(0.45, currentMargins.top + delta));
-              const newBottom = Math.max(0.02, Math.min(0.45, currentMargins.bottom + delta));
-              priceScale.applyOptions({
-                  scaleMargins: { top: newTop, bottom: newBottom }
-              });
-              if (onPriceRangeChange) {
-                  onPriceRangeChange({ top: newTop, bottom: newBottom });
-              }
-          }
-      };
-
-
-      // Interaction handlers to detect when we are the "Leader"
-      const handleMouseDown = () => { isUserInteracting.current = true; };
-      const handleMouseUp = () => { isUserInteracting.current = false; };
-      const handleTouchStart = () => { isUserInteracting.current = true; };
-      const handleTouchEnd = () => { isUserInteracting.current = false; };
-
-      chartContainerRef.current.addEventListener('mousedown', handleMouseDown);
-      chartContainerRef.current.addEventListener('mouseup', handleMouseUp);
-      chartContainerRef.current.addEventListener('mouseleave', handleMouseUp);
-      chartContainerRef.current.addEventListener('touchstart', handleTouchStart, { passive: true });
-      chartContainerRef.current.addEventListener('touchend', handleTouchEnd);
-      chartContainerRef.current.addEventListener('wheel', handleWheel, { passive: false });
-
-      return () => {
-        window.removeEventListener("resize", handleResize);
-        if (chartContainerRef.current) {
-             chartContainerRef.current.removeEventListener('wheel', handleWheel);
-             chartContainerRef.current.removeEventListener('mousedown', handleMouseDown);
-             chartContainerRef.current.removeEventListener('mouseup', handleMouseUp);
-             chartContainerRef.current.removeEventListener('mouseleave', handleMouseUp);
-             chartContainerRef.current.removeEventListener('touchstart', handleTouchStart);
-             chartContainerRef.current.removeEventListener('touchend', handleTouchEnd);
-        }
-        if (chartRef.current) {
-          chartRef.current.remove();
-          chartRef.current = null;
-        }
-        appliedBarsMetaRef.current = { length: 0, lastTime: null };
-        lastAppliedRangeRef.current = null;
-        lastBroadcastRangeRef.current = null;
-      };
-
-    } catch (err: unknown) {
-      console.error("Chart initialization error:", err);
-      setError(err instanceof Error ? err.message : "Chart initialization error");
-    }
-  }, []);
-
-  const avgVolume = useMemo(
-    () => bars.reduce((acc, bar) => acc + (bar?.volume || 0), 0) / (bars.length || 1),
-    [bars]
-  );
-
-  const sortedBarTimes = useMemo<number[]>(() => {
-    if (!bars || bars.length === 0) return [];
-    return bars
-      .map((bar) => bar?.time)
-      .filter((time): time is number | string => Number.isFinite(Number(time)))
-      .map((time) => Number(time))
-      .sort((a, b) => a - b);
-  }, [bars]);
-
-  const snapToleranceSeconds = useMemo(() => {
-    if (sortedBarTimes.length < 2) return MAX_SNAP_SECONDS;
-    let minSpacing = Number.POSITIVE_INFINITY;
-    for (let i = 1; i < sortedBarTimes.length; i += 1) {
-      const spacing = sortedBarTimes[i] - sortedBarTimes[i - 1];
-      if (spacing > 0 && spacing < minSpacing) {
-        minSpacing = spacing;
-      }
-    }
-    if (!Number.isFinite(minSpacing)) return MAX_SNAP_SECONDS;
-    return Math.max(MAX_SNAP_SECONDS, minSpacing);
-  }, [sortedBarTimes]);
-
-  const findClosestBarTime = useCallback((targetTime: number): number | null => {
-    if (!Number.isFinite(targetTime)) return null;
-    if (!sortedBarTimes.length) return targetTime;
-
-    let left = 0;
-    let right = sortedBarTimes.length - 1;
-    let closest = sortedBarTimes[0];
-    let minDiff = Math.abs(targetTime - closest);
-
-    while (left <= right) {
-      const middle = Math.floor((left + right) / 2);
-      const value = sortedBarTimes[middle];
-      const diff = Math.abs(targetTime - value);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closest = value;
-      }
-      if (value < targetTime) {
-        left = middle + 1;
-      } else if (value > targetTime) {
-        right = middle - 1;
-      } else {
-        return value;
-      }
-    }
-
-    if (minDiff > snapToleranceSeconds) return null;
-    return closest;
-  }, [sortedBarTimes, snapToleranceSeconds]);
-
-  const normalizeDecisionMarker = useCallback(
-    (
-      marker: CandlestickChartMarker | null | undefined,
-      index: number
-    ): CandlestickChartNormalizedMarker | null => {
-      if (!marker) return null;
-
-      const rawTime = toUnixSeconds(marker.time ?? marker.timestamp);
-      if (!Number.isFinite(rawTime)) return null;
-
-      const snappedTime = findClosestBarTime(rawTime);
-      if (!Number.isFinite(snappedTime)) return null;
-
-      return {
-        ...marker,
-        id: marker.id || `${marker.marker_type || "marker"}-${snappedTime}-${index}`,
-        time: snappedTime,
-        timestamp: marker.timestamp || toIsoTimestamp(rawTime) || toIsoTimestamp(snappedTime),
-      };
-    },
-    [findClosestBarTime]
-  );
-
-  const normalizedIcebergs = useMemo<CandlestickChartNormalizedMarker[]>(() => {
-    return (icebergs || [])
-      .map((iceberg, index) => {
-        const rawTime = toUnixSeconds(iceberg.time ?? iceberg.timestamp);
-        if (!Number.isFinite(rawTime)) return null;
-
-        const snappedTime = findClosestBarTime(rawTime);
-        if (!Number.isFinite(snappedTime)) return null;
-
-        const tradeSize = Number(iceberg.trade_size ?? 0);
-        const hiddenSize = Number(iceberg.hidden_size ?? 0);
-        const totalSize = tradeSize + hiddenSize;
-        const price = Number(iceberg.price);
-        const side = typeof iceberg.side === "string" ? iceberg.side.toLowerCase() : null;
-
-        return {
-          ...iceberg,
-          id: iceberg.id || `iceberg-${snappedTime}-${index}`,
-          marker_type: "iceberg_detected",
-          time: snappedTime,
-          timestamp: iceberg.timestamp || toIsoTimestamp(rawTime) || toIsoTimestamp(snappedTime),
-          side,
-          price: Number.isFinite(price) ? price : null,
-          total_size: Number.isFinite(totalSize) ? totalSize : 0,
-          title: iceberg.title || `Iceberg ${side ? side.toUpperCase() : "UNKNOWN"}`,
-          description: iceberg.description || `Detected ${side || "unknown"} iceberg`,
-          details: {
-            ...(iceberg.details || {}),
-            iceberg_side: side,
-            iceberg_price: Number.isFinite(price) ? price : null,
-            trade_size: tradeSize,
-            hidden_size: hiddenSize,
-            total_size: Number.isFinite(totalSize) ? totalSize : 0,
-          },
-        };
-      })
-      .filter((marker): marker is CandlestickChartNormalizedMarker => Boolean(marker));
-  }, [icebergs, findClosestBarTime]);
-
-  const filteredIcebergMarkers = useMemo<CandlestickChartNormalizedMarker[]>(() => {
-    if (!normalizedIcebergs.length) return [];
-    const minSize = avgVolume * 0.05;
-    const byTime = new Map<number, CandlestickChartNormalizedMarker>();
-
-    normalizedIcebergs
-      .filter((iceberg) => Number(iceberg.total_size || 0) > minSize)
-      .forEach((iceberg) => {
-        const current = byTime.get(iceberg.time);
-        if (!current || Number(iceberg.total_size || 0) > Number(current.total_size || 0)) {
-          byTime.set(iceberg.time, iceberg);
-        }
-      });
-
-    return Array.from(byTime.values());
-  }, [normalizedIcebergs, avgVolume]);
-
-  const clickableMarkers = useMemo<CandlestickChartNormalizedMarker[]>(() => {
-    const decisions = (markers || [])
-      .map((marker, index) => normalizeDecisionMarker(marker, index))
-      .filter((marker): marker is CandlestickChartNormalizedMarker => Boolean(marker));
-    return [...decisions, ...filteredIcebergMarkers];
-  }, [markers, normalizeDecisionMarker, filteredIcebergMarkers]);
-
-  // Sync external chart state
-  useEffect(() => {
-    if (!chartRef.current) return;
-    const nextRange = normalizeVisibleRange(chartState);
-    if (!nextRange) return;
-
-    // If user is interacting, this chart is the leader. Ignore follower updates.
-    if (isUserInteracting.current) return;
-    if (rangesEqual(lastAppliedRangeRef.current, nextRange)) return;
-
-    const api = chartRef.current.timeScale();
-    const current = normalizeVisibleRange(api.getVisibleRange());
-    if (rangesEqual(current, nextRange)) {
-      lastAppliedRangeRef.current = nextRange;
-      return;
-    }
-
-    isSyncingRef.current = true;
-    try {
-      api.setVisibleRange(nextRange);
-      lastAppliedRangeRef.current = nextRange;
-    } catch (e) {
-      // Ignore errors if data is not ready yet.
-    } finally {
-      isSyncingRef.current = false;
-    }
-  }, [chartState]);
-
-  const toCandleDataPoint = useCallback((bar: CandlestickChartBar): CandlestickChartCandlePoint => {
-    const time = Number(bar?.time) || 0;
-    const open = Number(bar?.open);
-    const high = Number(bar?.high);
-    const low = Number(bar?.low);
-    const close = Number(bar?.close);
-    if (
-      bar?.__wfPlaceholder ||
-      !Number.isFinite(open) ||
-      !Number.isFinite(high) ||
-      !Number.isFinite(low) ||
-      !Number.isFinite(close)
-    ) {
-      return { time };
-    }
-    return { time, open, high, low, close };
-  }, []);
-
-  const toVolumeDataPoint = useCallback((bar: CandlestickChartBar): CandlestickChartVolumePoint => {
-    const time = Number(bar?.time) || 0;
-    const open = Number(bar?.open);
-    const close = Number(bar?.close);
-    const volume = Number(bar?.volume);
-    if (
-      bar?.__wfPlaceholder ||
-      !Number.isFinite(open) ||
-      !Number.isFinite(close) ||
-      !Number.isFinite(volume)
-    ) {
-      return { time };
-    }
-    return {
-      time,
-      value: volume,
-      color:
-        close >= open
-          ? "rgba(34, 197, 94, 0.5)"
-          : "rgba(239, 68, 68, 0.5)",
-    };
-  }, []);
-
-  const applyFullBarDataset = useCallback((sourceBars: CandlestickChartBar[]) => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
-
-    const seenTimes = new Set<number>();
-    const validBars = (sourceBars || []).filter((bar) => {
-      const time = Number(bar?.time);
-      if (!Number.isFinite(time)) return false;
-      if (seenTimes.has(time)) return false;
-      seenTimes.add(time);
-      return true;
-    });
-
-    validBars.sort((a, b) => Number(a.time) - Number(b.time));
-
-    if (!validBars.length) {
-      candleSeriesRef.current.setData([]);
-      volumeSeriesRef.current.setData([]);
-      appliedBarsMetaRef.current = { length: 0, lastTime: null };
-      return;
-    }
-
-    candleSeriesRef.current.setData(validBars.map(toCandleDataPoint));
-    volumeSeriesRef.current.setData(validBars.map(toVolumeDataPoint));
-    appliedBarsMetaRef.current = {
-      length: validBars.length,
-      lastTime: Number(validBars[validBars.length - 1]?.time) || null,
-    };
-  }, [toCandleDataPoint, toVolumeDataPoint]);
-
-  // Update bar series incrementally to avoid full chart reflows on every tick.
-  useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
-
-    try {
-      if (!Array.isArray(bars) || bars.length === 0) {
-        applyFullBarDataset([]);
-        return;
-      }
-      const containsWhitespaceBars = bars.some((bar) => Boolean(bar?.__wfPlaceholder));
-      if (containsWhitespaceBars) {
-        applyFullBarDataset(bars);
-        return;
-      }
-
-      const nextLastBar = bars[bars.length - 1];
-      const nextLastTime = Number(nextLastBar?.time);
-      const prevMeta = appliedBarsMetaRef.current;
-
-      const isAppend = prevMeta.length > 0 && bars.length === prevMeta.length + 1;
-      const isInPlaceLastBarUpdate =
-        prevMeta.length > 0 &&
-        bars.length === prevMeta.length &&
-        Number.isFinite(nextLastTime) &&
-        nextLastTime === prevMeta.lastTime;
-      const shouldFullRefresh =
-        prevMeta.length === 0 ||
-        bars.length < prevMeta.length ||
-        bars.length > prevMeta.length + 1 ||
-        !Number.isFinite(nextLastTime);
-
-      if (shouldFullRefresh) {
-        applyFullBarDataset(bars);
-      } else if (isAppend || isInPlaceLastBarUpdate) {
-        candleSeriesRef.current.update(toCandleDataPoint(nextLastBar));
-        volumeSeriesRef.current.update(toVolumeDataPoint(nextLastBar));
-        appliedBarsMetaRef.current = { length: bars.length, lastTime: nextLastTime };
-      } else {
-        applyFullBarDataset(bars);
-      }
-
-      if (chartRef.current && !chartState) {
-        chartRef.current.timeScale().scrollToPosition(0, false);
-      }
-    } catch (err: unknown) {
-      console.error("Chart data update error:", err);
-      setError(err instanceof Error ? err.message : "Chart data update error");
-      applyFullBarDataset(bars);
-    }
-  }, [applyFullBarDataset, bars, chartState, toCandleDataPoint, toVolumeDataPoint]);
-
-  // Focus chart when a marker is selected from the decision list
-  useEffect(() => {
-    if (!chartRef.current || !selectedMarker || !bars || bars.length === 0) {
-      if (!selectedMarker) {
-        lastFocusedMarkerKeyRef.current = null;
-        setTooltip((prev) => ({ ...prev, visible: false }));
-      }
-      return;
-    }
-    const selectedFromDecisionPanel =
-      String(selectedMarker?.__selectionSource || "") === "decision_panel";
-
-    const markerFocusKey = String(
-      selectedMarker.id ||
-      selectedMarker.time ||
-      selectedMarker.timestamp ||
-      ""
-    );
-    if (markerFocusKey && lastFocusedMarkerKeyRef.current === markerFocusKey) {
-      return;
-    }
-
-    const targetTime = toUnixSeconds(selectedMarker.time ?? selectedMarker.timestamp);
-    if (!Number.isFinite(targetTime)) return;
-
-    // Find closest bar index to the selected marker time
-    let closestIndex = -1;
-    let closestDiff = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < bars.length; i += 1) {
-      const barTime = bars[i]?.time;
-      if (typeof barTime !== "number" || Number.isNaN(barTime)) continue;
-      const diff = Math.abs(barTime - targetTime);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestIndex = i;
-      }
-    }
-
-    if (closestIndex === -1) return;
-
-    const windowSize = 40;
-    const fromIndex = Math.max(0, closestIndex - windowSize);
-    const toIndex = Math.min(bars.length - 1, closestIndex + windowSize);
-    const fromTime = bars[fromIndex]?.time;
-    const toTime = bars[toIndex]?.time;
-
-    if (fromTime && toTime && chartRef.current) {
-      chartRef.current.timeScale().setVisibleRange({
-        from: fromTime,
-        to: toTime,
-      });
-      lastFocusedMarkerKeyRef.current = markerFocusKey || `${fromTime}-${toTime}`;
-    }
-
-    // Show tooltip for chart-driven selection only. Decision-panel selection opens detail dialog.
-    if (selectedFromDecisionPanel) {
-      setTooltip((prev) => ({ ...prev, visible: false }));
-      return;
-    }
-
-    // Show tooltip for the selected marker if coordinates are available
-    try {
-      const timeScale = chartRef.current.timeScale();
-      const x = timeScale.timeToCoordinate
-        ? timeScale.timeToCoordinate(targetTime)
-        : null;
-      const price = Number(selectedMarker.price);
-      const y = candleSeriesRef.current?.priceToCoordinate
-        ? candleSeriesRef.current.priceToCoordinate(price)
-        : null;
-      if (
-        x !== null &&
-        y !== null &&
-        chartContainerRef.current &&
-        Number.isFinite(x) &&
-        Number.isFinite(y)
-      ) {
-        const rect = chartContainerRef.current.getBoundingClientRect();
-        setTooltip({
-          visible: true,
-          marker: selectedMarker,
-          x: x + rect.left,
-          y: y + rect.top,
-        });
-      }
-    } catch (e) {
-      // Ignore tooltip errors, focus is the priority
-    }
-  }, [selectedMarker, bars]);
-
-  // Handle chart clicks and hover for tooltips
-  useEffect(() => {
-    if (!chartRef.current) return;
-
-    const markerTimeMap = new Map<number, CandlestickChartNormalizedMarker[]>();
-    clickableMarkers.forEach((marker: CandlestickChartNormalizedMarker) => {
-      const key = Math.floor(Number(marker.time));
-      if (!Number.isFinite(key)) return;
-      const existing = markerTimeMap.get(key) || [];
-      existing.push(marker);
-      markerTimeMap.set(key, existing);
-    });
-
-    const resolveMarkerForClick = (
-      param: CandlestickChartClickParam
-    ): CandlestickChartNormalizedMarker | null => {
-      const clickedTime = toUnixSeconds(param?.time);
-      if (!Number.isFinite(clickedTime)) return null;
-
-      const candidates = markerTimeMap.get(Math.floor(clickedTime));
-      if (!candidates || candidates.length === 0) return null;
-      if (candidates.length === 1) return candidates[0];
-
-      const clickedPrice = param?.point && candleSeriesRef.current?.coordinateToPrice
-        ? candleSeriesRef.current.coordinateToPrice(param.point.y)
-        : null;
-
-      if (!Number.isFinite(clickedPrice)) return candidates[0];
-
-      const pricedCandidates = candidates.filter((candidate) => Number.isFinite(Number(candidate.price)));
-      if (!pricedCandidates.length) return candidates[0];
-
-      return pricedCandidates.reduce((best, candidate) => {
-        const bestDiff = Math.abs(Number(best.price) - clickedPrice);
-        const candidateDiff = Math.abs(Number(candidate.price) - clickedPrice);
-        return candidateDiff < bestDiff ? candidate : best;
-      }, pricedCandidates[0]);
-    };
-
-    const handleClick = (param: CandlestickChartClickParam) => {
-      setTooltip((prev) => ({ ...prev, visible: false }));
-
-      // Always call onBarClick if we have a valid time (for intrabar panel)
-      if (param?.time && onBarClick) {
-        const barTime = toUnixSeconds(param.time);
-        if (Number.isFinite(barTime)) {
-          // Find the bar data for this time
-          const bar = bars?.find((b) => Math.floor(Number(b?.time)) === Math.floor(barTime));
-          if (bar) {
-            onBarClick(bar);
-          }
-        }
-      }
-
-      if (!param?.time || markerTimeMap.size === 0) return;
-
-      const marker = resolveMarkerForClick(param);
-      if (!marker) return;
-
-      if (onMarkerClick) {
-        onMarkerClick(marker);
-      }
-
-      const point = param.point;
-      if (point && chartContainerRef.current) {
-        const rect = chartContainerRef.current.getBoundingClientRect();
-        setTooltip({
-          visible: true,
-          marker,
-          x: point.x + rect.left,
-          y: point.y + rect.top,
-        });
-      }
-    };
-
-    chartRef.current.subscribeClick(handleClick);
-
-    return () => {
-      try {
-        if (chartRef.current) {
-          chartRef.current.unsubscribeClick(handleClick);
-        }
-      } catch (e) {
-        // Ignore cleanup errors
-      }
-    };
-  }, [clickableMarkers, onMarkerClick, onBarClick, bars]);
-
-  // Update markers (Decisions + Delta/CVD + Icebergs)
-  useEffect(() => {
-    if (!candleSeriesRef.current || !bars || bars.length === 0) return;
-
-    try {
-      const getCssVar = (name, fallback) => {
-        const value = getComputedStyle(document.documentElement)
-          .getPropertyValue(name)
-          .trim();
-        return value || fallback;
-      };
-      const palette = {
-        long: getCssVar("--accent-green", "#0f766e"),
-        short: getCssVar("--accent-red", "#dc2626"),
-        neutral: "#475569",
-        blue: getCssVar("--accent-blue", "#1d4ed8"),
-        amber: getCssVar("--accent-amber", "#f59e0b"),
-        ice_buy: "#00dbe3", // Svetlo modrá pre Support (Buy Iceberg)
-        ice_sell: "#ff00d4", // Fialová/Magenta pre Rezistenciu (Sell Iceberg) - pre lepší kontrast
-      };
-
-      const validMarkerTypes = [
-        "entry_executed",
-        "exit_executed",
-        "stop_loss_hit",
-        "take_profit_hit",
-        "regime_detected",
-        "strategy_selected",
-        "iceberg_detected",
-      ];
-
-      const finalMarkers = clickableMarkers
-        .filter((m) => m && validMarkerTypes.includes(m.marker_type))
-        .map((m) => {
-          const time = m.time;
-          let position = "aboveBar";
-          let color = "#3b82f6";
-          let shape = "circle";
-          let text = "";
-
-          switch (m.marker_type) {
-            case "entry_executed":
-              if (m.side === "long") {
-                position = "belowBar"; color = palette.long; shape = "arrowUp"; text = "L";
-              } else {
-                position = "aboveBar"; color = palette.short; shape = "arrowDown"; text = "S";
-              }
-              break;
-            case "exit_executed":
-              position = m.side === "long" ? "aboveBar" : "belowBar";
-              color = palette.neutral; shape = "circle"; text = "X";
-              break;
-            case "stop_loss_hit":
-              position = m.side === "long" ? "belowBar" : "aboveBar"; // SL hit pre Long je sell order pod cenou? Zvycajne sa vizualizuje pri cene exitu.
-              color = palette.short; shape = "circle"; text = "SL";
-              break;
-            case "take_profit_hit":
-              position = m.side === "long" ? "aboveBar" : "belowBar";
-              color = palette.long; shape = "circle"; text = "TP";
-              break;
-            
-            // --- ICEBERG VISUALIZATION ---
-            case "iceberg_detected":
-              const isMega = Number(m.total_size || 0) > (avgVolume * 3);
-              
-              if (m.side === "buy") { 
-                  // BUY ICEBERG = SUPPORT = POD SVIEČKOU
-                  position = "belowBar"; 
-                  color = palette.ice_buy;
-                  shape = "arrowUp"; 
-                  text = isMega ? "❄️" : "▲"; // Vločka len pre obrovské, inak šípka
-              } else { 
-                  // SELL ICEBERG = RESISTANCE = NAD SVIEČKOU
-                  position = "aboveBar"; 
-                  color = palette.ice_sell;
-                  shape = "arrowDown"; 
-                  text = isMega ? "❄️" : "▼"; 
-              }
-              break;
-            case "regime_detected":
-              position = "aboveBar";
-              color = palette.blue;
-              shape = "circle";
-              text = m.regime || "R";
-              break;
-            case "strategy_selected":
-              position = "belowBar";
-              color = palette.amber;
-              shape = "square";
-              text = m.strategy?.substring(0, 3).toUpperCase() || "S";
-              break;
-          }
-
-          return {
-            time,
-            position,
-            color,
-            shape,
-            text,
-            id: m.id || `${m.time}-${m.marker_type}`,
-            size: 2,
-          };
-        })
-        .sort((a, b) => a.time - b.time);
-
-      candleSeriesRef.current.setMarkers(finalMarkers);
-    } catch (err) {
-      console.error("Chart markers update error:", err);
-    }
-  }, [clickableMarkers, bars, avgVolume]);
-
+  useCandlestickChartLifecycle({
+    chartContainerRef,
+    chartRef,
+    candleSeriesRef,
+    volumeSeriesRef,
+    appliedBarsMetaRef,
+    lastAppliedRangeRef,
+    lastBroadcastRangeRef,
+    isSyncingRef,
+    isUserInteracting,
+    interactionTimeoutRef,
+    onChartStateChangeRef,
+    onPriceRangeChange,
+    setError,
+  });
+
+  const { avgVolume, clickableMarkers } = useCandlestickChartMarkers({
+    bars,
+    markers,
+    icebergs,
+  });
+
+  useCandlestickChartClickSelection({
+    chartRef,
+    candleSeriesRef,
+    chartContainerRef,
+    clickableMarkers,
+    onMarkerClick,
+    onBarClick,
+    bars,
+    setTooltip,
+  });
+
+  useCandlestickChartSelectedMarkerFocus({
+    chartRef,
+    candleSeriesRef,
+    chartContainerRef,
+    selectedMarker,
+    bars,
+    lastFocusedMarkerKeyRef,
+    setTooltip,
+  });
+
+  useCandlestickChartSeriesMarkers({
+    candleSeriesRef,
+    bars,
+    clickableMarkers,
+    avgVolume,
+  });
+
+  useCandlestickChartBarSeriesData({
+    candleSeriesRef,
+    volumeSeriesRef,
+    appliedBarsMetaRef,
+    chartRef,
+    bars,
+    chartState,
+    setError,
+  });
+
+  useCandlestickChartExternalRangeSync({
+    chartRef,
+    chartState,
+    isUserInteracting,
+    isSyncingRef,
+    lastAppliedRangeRef,
+  });
 
   if (error) {
     return (

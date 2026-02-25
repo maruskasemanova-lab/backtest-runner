@@ -1,4 +1,12 @@
 import type { CSSProperties, ReactNode } from "react";
+import type {
+  DecisionPanelBreakEvenResolution,
+  DecisionPanelDecisionLogResult,
+  DecisionPanelEntryQualityDiagnosticsResult,
+  DecisionPanelIntradayLevelsResult,
+  DecisionPanelL2DiagnosticsResult,
+  DecisionPanelLevelContextResult,
+} from "./decision-panel-diagnostics";
 
 export type DecisionPanelDetailLabelOptions = {
   tooltipLabel?: string;
@@ -84,46 +92,19 @@ export type DecisionPanelDetailsLike = Record<string, unknown> & {
   reasoning?: unknown;
 };
 
-export type DecisionPanelDecisionStateLike = {
-  action?: unknown;
-  phase?: unknown;
-  regime?: unknown;
-  micro_regime?: unknown;
-  selected_strategy?: unknown;
-  [key: string]: unknown;
-};
+export type DecisionPanelDecisionLogLike = DecisionPanelDecisionLogResult;
+export type DecisionPanelDecisionLogPayloadLike = NonNullable<DecisionPanelDecisionLogLike["payload"]>;
+export type DecisionPanelDecisionStateLike = NonNullable<
+  DecisionPanelDecisionLogPayloadLike["decision_state"]
+>;
+export type DecisionPanelContextRiskLike = NonNullable<
+  DecisionPanelDecisionLogPayloadLike["context_risk"]
+>;
+export type DecisionPanelFlowSnapshotLike = NonNullable<
+  DecisionPanelDecisionLogPayloadLike["flow_snapshot"]
+>;
 
-export type DecisionPanelContextRiskLike = {
-  sl_reason?: unknown;
-  tp_reason?: unknown;
-  effective_rr?: unknown;
-  risk_pct?: unknown;
-  [key: string]: unknown;
-};
-
-export type DecisionPanelFlowSnapshotLike = {
-  vwap_execution_flow?: unknown;
-  [key: string]: unknown;
-};
-
-export type DecisionPanelDecisionLogPayloadLike = {
-  decision_state?: DecisionPanelDecisionStateLike | null;
-  context_risk?: DecisionPanelContextRiskLike | null;
-  flow_snapshot?: DecisionPanelFlowSnapshotLike | null;
-  [key: string]: unknown;
-};
-
-export type DecisionPanelDecisionLogLike = {
-  hasAny?: boolean;
-  payload?: DecisionPanelDecisionLogPayloadLike | null;
-  [key: string]: unknown;
-};
-
-export type DecisionPanelBreakEvenPayloadLike = {
-  state?: unknown;
-  activation_reason?: unknown;
-  [key: string]: unknown;
-};
+export type DecisionPanelBreakEvenPayloadLike = NonNullable<DecisionPanelBreakEvenResolution["value"]>;
 
 export type DecisionPanelBreakEvenComputedLike = {
   total_costs_pct?: unknown;
@@ -135,86 +116,24 @@ export type DecisionPanelBreakEvenBufferLike = {
   [key: string]: unknown;
 };
 
-export type DecisionPanelL2DiagnosticsLike = {
-  hasAny: boolean;
-  flowScore?: number | null;
-  signedAggression?: number | null;
-  l2AggressionZ?: number | null;
-  l2BookPressureZ?: number | null;
-  absorptionRate?: number | null;
-  largeTraderActivity?: number | null;
-  vwapExecutionFlow?: number | null;
-  sweepDetected?: boolean | null;
-  sourcePath?: string | null;
-  [key: string]: unknown;
-};
+export type DecisionPanelL2DiagnosticsLike = DecisionPanelL2DiagnosticsResult;
+export type DecisionPanelIntradayLevelsLike = DecisionPanelIntradayLevelsResult;
+export type DecisionPanelIntradayLevelsStatsLike = DecisionPanelIntradayLevelsLike["stats"];
+export type DecisionPanelIntradayLevelsVolumeProfileLike =
+  DecisionPanelIntradayLevelsLike["volumeProfile"];
+export type DecisionPanelIntradayLevelsLatestEventLike = NonNullable<
+  DecisionPanelIntradayLevelsLike["latestEvent"]
+>;
 
-export type DecisionPanelIntradayLevelsStatsLike = Record<string, unknown> & {
-  active_levels?: unknown;
-  tested_levels?: unknown;
-  broken_levels?: unknown;
-  bounce_events?: unknown;
-  break_events?: unknown;
-};
+export type DecisionPanelLevelContextLike = DecisionPanelLevelContextResult;
+export type DecisionPanelLevelContextPayloadLike = DecisionPanelLevelContextLike["payload"];
+export type DecisionPanelLevelContextStatsLike = NonNullable<
+  DecisionPanelLevelContextPayloadLike["stats"]
+>;
+export type DecisionPanelLevelContextVolumeProfileLike = NonNullable<
+  DecisionPanelLevelContextPayloadLike["volume_profile"]
+>;
 
-export type DecisionPanelIntradayLevelsVolumeProfileLike = Record<string, unknown> & {
-  poc_price?: unknown;
-  value_area_low?: unknown;
-  value_area_high?: unknown;
-};
-
-export type DecisionPanelIntradayLevelsLatestEventLike = Record<string, unknown> & {
-  event_type?: unknown;
-  direction?: unknown;
-  price?: unknown;
-};
-
-export type DecisionPanelIntradayLevelsLike = {
-  hasAny: boolean;
-  enabled?: unknown;
-  stats: DecisionPanelIntradayLevelsStatsLike;
-  volumeProfile: DecisionPanelIntradayLevelsVolumeProfileLike;
-  latestEvent?: DecisionPanelIntradayLevelsLatestEventLike | null;
-  [key: string]: unknown;
-};
-
-export type DecisionPanelLevelContextStatsLike = Record<string, unknown> & {
-  near_tested_levels_count?: unknown;
-};
-
-export type DecisionPanelLevelContextVolumeProfileLike = Record<string, unknown> & {
-  value_area_position?: unknown;
-  poc_on_trade_side?: unknown;
-};
-
-export type DecisionPanelLevelContextPayloadLike = Record<string, unknown> & {
-  passed?: unknown;
-  strategy_key?: unknown;
-  reason?: unknown;
-  stats?: DecisionPanelLevelContextStatsLike | null;
-  volume_profile?: DecisionPanelLevelContextVolumeProfileLike | null;
-  room_to_next_opposite_level_pct?: unknown;
-};
-
-export type DecisionPanelLevelContextLike = {
-  hasAny: boolean;
-  payload: DecisionPanelLevelContextPayloadLike;
-  reasons: string[];
-  [key: string]: unknown;
-};
-
-export type DecisionPanelEntryQualityDiagnosticsPayloadLike = Record<string, unknown> & {
-  is_first_bar_stop_loss?: unknown;
-  stop_distance_pct?: unknown;
-  vwap_distance_pct?: unknown;
-  near_confluence_score?: unknown;
-  near_tested_levels_count?: unknown;
-  poc_on_trade_side?: unknown;
-};
-
-export type DecisionPanelEntryQualityDiagnosticsLike = {
-  hasAny: boolean;
-  payload: DecisionPanelEntryQualityDiagnosticsPayloadLike;
-  tags: string[];
-  [key: string]: unknown;
-};
+export type DecisionPanelEntryQualityDiagnosticsLike = DecisionPanelEntryQualityDiagnosticsResult;
+export type DecisionPanelEntryQualityDiagnosticsPayloadLike =
+  DecisionPanelEntryQualityDiagnosticsLike["payload"];

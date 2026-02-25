@@ -1,5 +1,86 @@
 import { toFiniteNumber } from "./decision-panel-utils";
 
+type ObjectRecord = Record<string, unknown>;
+type MaybeObjectRecord = ObjectRecord | null | undefined;
+
+type ResolutionCandidate = {
+  path: string;
+  value: unknown;
+};
+
+type BaseResolutionParams = {
+  details: MaybeObjectRecord;
+  signalMetadata: MaybeObjectRecord;
+  marketContext: MaybeObjectRecord;
+};
+
+type ContextRiskResolutionParams = BaseResolutionParams & {
+  riskControls: MaybeObjectRecord;
+};
+
+type ResolutionResult = {
+  value: ObjectRecord | null;
+  sourcePath: string;
+  candidates: ResolutionCandidate[];
+};
+
+type L2SourceCandidate = {
+  sourcePath: string;
+  source: ObjectRecord;
+};
+
+type L2CandidateDiagnostic = {
+  sourcePath: string;
+  score: number;
+  availableMetrics: string[];
+};
+
+type L2SourceResolution = {
+  source: ObjectRecord | null;
+  sourcePath: string;
+  candidateDiagnostics: L2CandidateDiagnostic[];
+};
+
+type L2DiagnosticsExtractResult = {
+  hasAny: boolean;
+  flowScore: number | null;
+  signedAggression: number | null;
+  l2AggressionZ: number | null;
+  l2BookPressureZ: number | null;
+  absorptionRate: number | null;
+  largeTraderActivity: number | null;
+  vwapExecutionFlow: number | null;
+  sweepDetected: boolean | null;
+  sourcePath: string;
+  candidateDiagnostics: L2CandidateDiagnostic[];
+};
+
+type IntradayLevelsExtractResult = {
+  hasAny: boolean;
+  enabled: boolean;
+  stats: ObjectRecord;
+  volumeProfile: ObjectRecord;
+  latestEvent: ObjectRecord | null;
+};
+
+type LevelContextExtractResult = {
+  hasAny: boolean;
+  payload: ObjectRecord;
+  checks: ObjectRecord;
+  reasons: string[];
+};
+
+type EntryQualityDiagnosticsExtractResult = {
+  hasAny: boolean;
+  payload: ObjectRecord;
+  tags: string[];
+};
+
+type DecisionLogPayloadExtractResult = {
+  hasAny: boolean;
+  payload: ObjectRecord;
+};
+
 const EXIT_MARKER_TYPES = new Set([
   "exit_executed",
   "stop_loss_hit",
@@ -17,10 +98,10 @@ export const L2_DIAGNOSTIC_KEYS = [
   "vwap_execution_flow",
 ];
 
-export const isObjectRecord = (value) =>
+export const isObjectRecord = (value: unknown): value is ObjectRecord =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-const getL2MetricFromSource = (source, metricKey) => {
+const getL2MetricFromSource = (source: unknown, metricKey: string): number | null => {
   if (!isObjectRecord(source)) return null;
   const direct = toFiniteNumber(source[metricKey]);
   if (direct !== null) return direct;
@@ -29,7 +110,7 @@ const getL2MetricFromSource = (source, metricKey) => {
   return null;
 };
 
-const getBooleanMetricFromSource = (source, metricKey) => {
+const getBooleanMetricFromSource = (source: unknown, metricKey: string): boolean | null => {
   if (!isObjectRecord(source)) return null;
   const direct = source[metricKey];
   if (typeof direct === "boolean") return direct;
@@ -38,9 +119,9 @@ const getBooleanMetricFromSource = (source, metricKey) => {
   return null;
 };
 
-const normalizeL2SourceSnapshot = (source) => {
+const normalizeL2SourceSnapshot = (source: unknown): ObjectRecord | null => {
   if (!isObjectRecord(source)) return null;
-  const normalized = { ...source };
+  const normalized: ObjectRecord = { ...source };
   L2_DIAGNOSTIC_KEYS.forEach((metricKey) => {
     if (normalized[metricKey] == null) {
       const resolved = getL2MetricFromSource(source, metricKey);
@@ -58,7 +139,11 @@ const normalizeL2SourceSnapshot = (source) => {
   return normalized;
 };
 
-const buildRiskControlsCandidates = ({ details, signalMetadata, marketContext }) => {
+const buildRiskControlsCandidates = ({
+  details,
+  signalMetadata,
+  marketContext,
+}: BaseResolutionParams): ResolutionCandidate[] => {
   const detailMetadata = isObjectRecord(details?.metadata) ? details.metadata : null;
   return [
     { path: "details.metadata.risk_controls", value: detailMetadata?.risk_controls },
@@ -73,7 +158,7 @@ const buildRiskControlsCandidates = ({ details, signalMetadata, marketContext })
   ];
 };
 
-export const resolveRiskControls = (params) => {
+export const resolveRiskControls = (params: BaseResolutionParams): ResolutionResult => {
   const candidates = buildRiskControlsCandidates(params);
   const selected = candidates.find((candidate) => isObjectRecord(candidate.value));
   return {
@@ -83,7 +168,12 @@ export const resolveRiskControls = (params) => {
   };
 };
 
-const buildContextRiskCandidates = ({ details, signalMetadata, marketContext, riskControls }) => {
+const buildContextRiskCandidates = ({
+  details,
+  signalMetadata,
+  marketContext,
+  riskControls,
+}: ContextRiskResolutionParams): ResolutionCandidate[] => {
   const detailMetadata = isObjectRecord(details?.metadata) ? details.metadata : null;
   return [
     { path: "details.context_risk", value: details?.context_risk },
@@ -107,7 +197,7 @@ const buildContextRiskCandidates = ({ details, signalMetadata, marketContext, ri
   ];
 };
 
-export const resolveContextRisk = (params) => {
+export const resolveContextRisk = (params: ContextRiskResolutionParams): ResolutionResult => {
   const candidates = buildContextRiskCandidates(params);
   const selected = candidates.find((candidate) => isObjectRecord(candidate.value));
   return {
@@ -117,7 +207,11 @@ export const resolveContextRisk = (params) => {
   };
 };
 
-const buildBreakEvenCandidates = ({ details, signalMetadata, marketContext }) => [
+const buildBreakEvenCandidates = ({
+  details,
+  signalMetadata,
+  marketContext,
+}: BaseResolutionParams): ResolutionCandidate[] => [
   { path: "details.break_even", value: details?.break_even },
   {
     path: "details.signal_metadata.break_even",
@@ -132,7 +226,7 @@ const buildBreakEvenCandidates = ({ details, signalMetadata, marketContext }) =>
   { path: "market_context.break_even", value: marketContext?.break_even },
 ];
 
-export const resolveBreakEven = (params) => {
+export const resolveBreakEven = (params: BaseResolutionParams): ResolutionResult => {
   const candidates = buildBreakEvenCandidates(params);
   const selected = candidates.find((candidate) => isObjectRecord(candidate.value));
   return {
@@ -142,15 +236,19 @@ export const resolveBreakEven = (params) => {
   };
 };
 
-const buildL2CandidateSources = (marker, details, metadata) => {
+const buildL2CandidateSources = (
+  marker: MaybeObjectRecord,
+  details: MaybeObjectRecord,
+  metadata: MaybeObjectRecord,
+): L2SourceCandidate[] => {
   const markerType = String(marker?.marker_type || "").trim();
   const detailMetadata = isObjectRecord(details?.metadata) ? details.metadata : null;
   const signalMetadata = isObjectRecord(details?.signal_metadata) ? details.signal_metadata : null;
   const metadataContext = isObjectRecord(metadata) ? metadata : null;
   const marketL2 = isObjectRecord(details?.market_context?.l2) ? details.market_context.l2 : null;
 
-  const candidates = [];
-  const pushCandidate = (sourcePath, source) => {
+  const candidates: L2SourceCandidate[] = [];
+  const pushCandidate = (sourcePath: string, source: unknown) => {
     if (!isObjectRecord(source)) return;
     candidates.push({ sourcePath, source });
   };
@@ -180,7 +278,11 @@ const buildL2CandidateSources = (marker, details, metadata) => {
   return candidates;
 };
 
-const resolveL2Source = (marker, details, metadata) => {
+const resolveL2Source = (
+  marker: MaybeObjectRecord,
+  details: MaybeObjectRecord,
+  metadata: MaybeObjectRecord,
+): L2SourceResolution => {
   const candidates = buildL2CandidateSources(marker, details, metadata);
   const candidateDiagnostics = candidates.map(({ sourcePath, source }) => {
     const availableMetrics = L2_DIAGNOSTIC_KEYS.filter(
@@ -192,7 +294,7 @@ const resolveL2Source = (marker, details, metadata) => {
       availableMetrics,
     };
   });
-  let best = null;
+  let best: (L2SourceCandidate & { score: number; candidateIndex: number }) | null = null;
 
   for (let idx = 0; idx < candidates.length; idx += 1) {
     const candidate = candidates[idx];
@@ -218,7 +320,11 @@ const resolveL2Source = (marker, details, metadata) => {
   };
 };
 
-export const extractL2Diagnostics = (marker, details, metadata) => {
+export const extractL2Diagnostics = (
+  marker: MaybeObjectRecord,
+  details: MaybeObjectRecord,
+  metadata: MaybeObjectRecord,
+): L2DiagnosticsExtractResult => {
   const { source, sourcePath, candidateDiagnostics } = resolveL2Source(marker, details, metadata);
 
   const flowScore = getL2MetricFromSource(source, "flow_score");
@@ -263,7 +369,11 @@ export const extractL2Diagnostics = (marker, details, metadata) => {
   };
 };
 
-export const extractIntradayLevels = (marker, details, metadata) => {
+export const extractIntradayLevels = (
+  marker: MaybeObjectRecord,
+  details: MaybeObjectRecord,
+  metadata: MaybeObjectRecord,
+): IntradayLevelsExtractResult => {
   const candidates = [
     details?.intraday_levels,
     details?.metadata?.intraday_levels,
@@ -298,7 +408,11 @@ export const extractIntradayLevels = (marker, details, metadata) => {
   };
 };
 
-export const extractLevelContext = (marker, details, metadata) => {
+export const extractLevelContext = (
+  marker: MaybeObjectRecord,
+  details: MaybeObjectRecord,
+  metadata: MaybeObjectRecord,
+): LevelContextExtractResult => {
   const candidates = [
     details?.level_context,
     details?.metadata?.level_context,
@@ -327,7 +441,11 @@ export const extractLevelContext = (marker, details, metadata) => {
   };
 };
 
-export const extractEntryQualityDiagnostics = (marker, details, metadata) => {
+export const extractEntryQualityDiagnostics = (
+  marker: MaybeObjectRecord,
+  details: MaybeObjectRecord,
+  metadata: MaybeObjectRecord,
+): EntryQualityDiagnosticsExtractResult => {
   const candidates = [
     details?.entry_quality_diagnostics,
     details?.metadata?.entry_quality_diagnostics,
@@ -350,7 +468,11 @@ export const extractEntryQualityDiagnostics = (marker, details, metadata) => {
   };
 };
 
-export const extractDecisionLogPayload = (marker, details, metadata) => {
+export const extractDecisionLogPayload = (
+  marker: MaybeObjectRecord,
+  details: MaybeObjectRecord,
+  metadata: MaybeObjectRecord,
+): DecisionLogPayloadExtractResult => {
   const markerType = String(marker?.marker_type || "").trim();
   const marketContext =
     details?.market_context && typeof details.market_context === "object" ? details.market_context : null;
@@ -440,3 +562,14 @@ export const extractDecisionLogPayload = (marker, details, metadata) => {
     payload,
   };
 };
+
+export type DecisionPanelRiskControlsResolution = ReturnType<typeof resolveRiskControls>;
+export type DecisionPanelContextRiskResolution = ReturnType<typeof resolveContextRisk>;
+export type DecisionPanelBreakEvenResolution = ReturnType<typeof resolveBreakEven>;
+export type DecisionPanelL2DiagnosticsResult = ReturnType<typeof extractL2Diagnostics>;
+export type DecisionPanelIntradayLevelsResult = ReturnType<typeof extractIntradayLevels>;
+export type DecisionPanelLevelContextResult = ReturnType<typeof extractLevelContext>;
+export type DecisionPanelEntryQualityDiagnosticsResult = ReturnType<
+  typeof extractEntryQualityDiagnostics
+>;
+export type DecisionPanelDecisionLogResult = ReturnType<typeof extractDecisionLogPayload>;

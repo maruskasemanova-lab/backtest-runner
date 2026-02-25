@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-25T07:04:00.449064+00:00",
+  "generated_at": "2026-02-25T15:52:46.102372+00:00",
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -2248,7 +2248,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/models/run_requests.py",
           "exists": true,
           "lines": 274,
-          "last_commit": "fdba1f6 2026-02-25",
+          "last_commit": "03b4ad8 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -3282,7 +3282,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_session_service.py",
           "exists": true,
           "lines": 454,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "03b4ad8 2026-02-25",
           "symbols": [
             {
               "kind": "function",
@@ -3795,7 +3795,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_execution_config_service.py",
           "exists": true,
           "lines": 1696,
-          "last_commit": "fdba1f6 2026-02-25",
+          "last_commit": "03b4ad8 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -4382,7 +4382,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/api_server.py",
           "exists": true,
           "lines": 1249,
-          "last_commit": "a0fc856 2026-02-23",
+          "last_commit": "97fd90d 2026-02-25",
           "symbols": [
             {
               "kind": "function",
@@ -4851,8 +4851,8 @@
           "path": "../market_regime_detection/src/day_trading_manager.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/day_trading_manager.py",
           "exists": true,
-          "lines": 1381,
-          "last_commit": "317bf8c 2026-02-24",
+          "lines": 1382,
+          "last_commit": "97fd90d 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -5216,13 +5216,13 @@
           "path": "../market_regime_detection/src/strategy_factory.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/strategy_factory.py",
           "exists": true,
-          "lines": 40,
+          "lines": 42,
           "last_commit": "bc7ccbe 2026-02-24",
           "symbols": [
             {
               "kind": "function",
               "name": "build_strategy_registry",
-              "line": 24
+              "line": 25
             }
           ],
           "routes": [],
@@ -5269,7 +5269,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/strategies/momentum_flow.py",
           "exists": true,
           "lines": 176,
-          "last_commit": "a0fc856 2026-02-23",
+          "last_commit": "97fd90d 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -6044,7 +6044,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/App.tsx",
           "exists": true,
           "lines": 2585,
-          "last_commit": "c70aa9e 2026-02-24",
+          "last_commit": "03b4ad8 2026-02-25",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6063,8 +6063,8 @@
           "path": "frontend/src/components/CandlestickChart.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/CandlestickChart.tsx",
           "exists": true,
-          "lines": 1010,
-          "last_commit": "fdba1f6 2026-02-25",
+          "lines": 346,
+          "last_commit": "03b4ad8 2026-02-25",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6074,7 +6074,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/DecisionPanel.tsx",
           "exists": true,
           "lines": 1589,
-          "last_commit": "c70aa9e 2026-02-24",
+          "last_commit": "03b4ad8 2026-02-25",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6123,7 +6123,7 @@
           "path": "frontend/src/components/AdaptiveStrategyStudio.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/AdaptiveStrategyStudio.tsx",
           "exists": true,
-          "lines": 3004,
+          "lines": 2561,
           "last_commit": "b9accc6 2026-02-18",
           "symbols": [],
           "routes": [],

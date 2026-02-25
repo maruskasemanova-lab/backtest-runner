@@ -1,6 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { defaultStrategyApiUrl } from "../utils";
 import StrategySettings from "./StrategySettings";
+import AdaptiveStudioDecisionFlowDiagram from "./adaptive-studio/AdaptiveStudioDecisionFlowDiagram";
+import AdaptiveStudioExecutionModulesPanel from "./adaptive-studio/AdaptiveStudioExecutionModulesPanel";
+import AdaptiveStudioFlowBiasPriorityEditor from "./adaptive-studio/AdaptiveStudioFlowBiasPriorityEditor";
+import AdaptiveStudioHeaderControls from "./adaptive-studio/AdaptiveStudioHeaderControls";
+import AdaptiveStudioNotices from "./adaptive-studio/AdaptiveStudioNotices";
+import AdaptiveStudioProfilesTab from "./adaptive-studio/AdaptiveStudioProfilesTab";
+import AdaptiveStudioRegimePreferences from "./adaptive-studio/AdaptiveStudioRegimePreferences";
+import AdaptiveStudioSelectionFlowGate from "./adaptive-studio/AdaptiveStudioSelectionFlowGate";
+import AdaptiveStudioTabsNav from "./adaptive-studio/AdaptiveStudioTabsNav";
+import type {
+  AdaptiveStudioActionLoadingToken,
+  AdaptiveStudioComboProfileRow,
+  AdaptiveStudioObjectRecord,
+  AdaptiveStudioStudioProfileRow,
+  AdaptiveStudioTunedProfileRow,
+  AdaptiveStudioUnifiedProfileRow,
+  AdaptiveStudioUnifiedViewTab,
+} from "./adaptive-studio/profileTypes";
+import { useAdaptiveStudioExecutionModuleHandlers } from "./adaptive-studio/useAdaptiveStudioExecutionModuleHandlers";
 import { useExecutionModulesEditor } from "./adaptive-studio/useExecutionModulesEditor";
 
 const MACRO_REGIMES = ["TRENDING", "CHOPPY", "MIXED"];
@@ -75,6 +94,20 @@ const DEFAULT_MICRO_PREFERENCES = {
 
 const STUDIO_PROFILE_LIST_KEY = "adaptive_studio_profiles";
 const STUDIO_PROFILE_ACTIVE_KEY = "active_adaptive_studio_profile_id";
+
+type ApplyExecutionFieldChangeOptions = {
+  raw?: boolean;
+};
+
+type LoadUnifiedOptions = {
+  tickerConfig?: unknown;
+  comboPayload?: unknown;
+  tunedPayload?: unknown;
+};
+
+type LoadStudioProfileToEditorOptions = {
+  silent?: boolean;
+};
 const STUDIO_PROFILE_MAX_ITEMS = 30;
 const EXECUTION_MODULES = [
   {
@@ -680,7 +713,15 @@ const normalizeTickerAdaptiveForm = (tickerConfig, strategyUniverse) => {
   };
 };
 
-const normalizeAdaptiveFormSnapshot = (value, strategyUniverse) => {
+type AdaptiveStudioFormState = ReturnType<typeof normalizeTickerAdaptiveForm>;
+type AdaptiveStudioFormUpdater =
+  | AdaptiveStudioFormState
+  | ((prev: AdaptiveStudioFormState) => AdaptiveStudioFormState);
+
+const normalizeAdaptiveFormSnapshot = (
+  value,
+  strategyUniverse,
+): AdaptiveStudioFormState => {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     strategy_selection_mode: normalizeMode(source.strategy_selection_mode),
@@ -761,7 +802,7 @@ const normalizeExecutionParamsSnapshot = (value) => {
 
 const readExecutionConfigSnapshot = () => {
   if (typeof window === "undefined") return {};
-  const raw = (window as any).__executionConfig;
+  const raw = (window as { __executionConfig?: unknown }).__executionConfig;
   return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
 };
 
@@ -802,7 +843,7 @@ const parseIsoMs = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const normalizeStudioProfiles = (value, strategyUniverse) => {
+const normalizeStudioProfiles = (value, strategyUniverse): AdaptiveStudioStudioProfileRow[] => {
   if (!Array.isArray(value)) return [];
   const seen = new Set();
   const rows = [];
@@ -830,7 +871,7 @@ const normalizeStudioProfiles = (value, strategyUniverse) => {
   return rows.slice(0, STUDIO_PROFILE_MAX_ITEMS);
 };
 
-const asObject = (value) =>
+const asObject = (value): AdaptiveStudioObjectRecord =>
   value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
 const extractAdaptiveCandidate = (profile) => {
@@ -842,7 +883,7 @@ const extractAdaptiveCandidate = (profile) => {
   return bestCandidate;
 };
 
-const normalizeUnifiedProfiles = (value) => {
+const normalizeUnifiedProfiles = (value): AdaptiveStudioUnifiedProfileRow[] => {
   if (!Array.isArray(value)) return [];
   const out = [];
   const seen = new Set();
@@ -1007,9 +1048,6 @@ const buildStudioProfileId = (ticker, profileName, existingIds) => {
   return candidate;
 };
 
-const countEnabledExecutionModules = (modules) =>
-  EXECUTION_MODULE_PROFILE_KEYS.reduce((acc, key) => acc + (modules?.[key] ? 1 : 0), 0);
-
 const flowSummary = (strategies) => {
   if (!Array.isArray(strategies) || strategies.length === 0) {
     return "none";
@@ -1138,13 +1176,16 @@ const formatV2VectorSummary = (candidate) => {
   return parts.length ? parts : null;
 };
 
-const extractEnabledStrategiesFromCombo = (profile, strategyUniverse) => {
+const extractEnabledStrategiesFromCombo = (
+  profile: AdaptiveStudioComboProfileRow | null | undefined,
+  strategyUniverse,
+) => {
   const strategyParams =
     profile && typeof profile === "object" && typeof profile.strategy_params === "object"
       ? profile.strategy_params
       : {};
   const enabled = [];
-  Object.entries(strategyParams || {}).forEach(([name, params]: [string, any]) => {
+  Object.entries(strategyParams || {}).forEach(([name, params]: [string, unknown]) => {
     const canonical = canonicalizeStrategyName(name, strategyUniverse);
     if (!canonical) return;
     const isEnabled = !(params && typeof params === "object" && params.enabled === false);
@@ -1175,30 +1216,30 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [isDirty, setIsDirty] = useState(false);
-  const [rawTickerConfig, setRawTickerConfig] = useState<Record<string, any>>({});
-  const [form, setForm] = useState<Record<string, any>>(() =>
+  const [rawTickerConfig, setRawTickerConfig] = useState<AdaptiveStudioObjectRecord>({});
+  const [form, setForm] = useState<AdaptiveStudioFormState>(() =>
     normalizeTickerAdaptiveForm({}, DEFAULT_STRATEGIES)
   );
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState(null);
-  const [profileActionLoading, setProfileActionLoading] = useState(null);
-  const [profileList, setProfileList] = useState([]);
+  const [profileActionLoading, setProfileActionLoading] = useState<AdaptiveStudioActionLoadingToken>(null);
+  const [profileList, setProfileList] = useState<AdaptiveStudioTunedProfileRow[]>([]);
   const [activeProfileId, setActiveProfileId] = useState("");
   const [unifiedLoading, setUnifiedLoading] = useState(false);
   const [unifiedError, setUnifiedError] = useState(null);
-  const [unifiedActionLoading, setUnifiedActionLoading] = useState(null);
-  const [unifiedList, setUnifiedList] = useState([]);
+  const [unifiedActionLoading, setUnifiedActionLoading] = useState<AdaptiveStudioActionLoadingToken>(null);
+  const [unifiedList, setUnifiedList] = useState<AdaptiveStudioUnifiedProfileRow[]>([]);
   const [activeUnifiedId, setActiveUnifiedId] = useState("");
   const [unifiedDraftName, setUnifiedDraftName] = useState("");
-  const [unifiedViewTab, setUnifiedViewTab] = useState<"strategy" | "execution">("strategy");
+  const [unifiedViewTab, setUnifiedViewTab] = useState<AdaptiveStudioUnifiedViewTab>("strategy");
   const [comboLoading, setComboLoading] = useState(false);
   const [comboError, setComboError] = useState(null);
-  const [comboActionLoading, setComboActionLoading] = useState(null);
-  const [comboList, setComboList] = useState([]);
+  const [comboActionLoading, setComboActionLoading] = useState<AdaptiveStudioActionLoadingToken>(null);
+  const [comboList, setComboList] = useState<AdaptiveStudioComboProfileRow[]>([]);
   const [activeComboId, setActiveComboId] = useState("");
   const [studioProfileBusy, setStudioProfileBusy] = useState(false);
-  const [studioProfileActionLoading, setStudioProfileActionLoading] = useState(null);
-  const [studioProfileList, setStudioProfileList] = useState([]);
+  const [studioProfileActionLoading, setStudioProfileActionLoading] = useState<AdaptiveStudioActionLoadingToken>(null);
+  const [studioProfileList, setStudioProfileList] = useState<AdaptiveStudioStudioProfileRow[]>([]);
   const [activeStudioProfileId, setActiveStudioProfileId] = useState("");
   const [studioProfileDraftName, setStudioProfileDraftName] = useState("");
   const [captureComboOnStudioSave, setCaptureComboOnStudioSave] = useState(true);
@@ -1313,7 +1354,7 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
   }, []);
 
   const loadUnifiedOptions = useCallback(
-    async (ticker, options: Record<string, any> = {}) => {
+    async (ticker, options: LoadUnifiedOptions = {}) => {
       if (!ticker) return null;
       const upperTicker = String(ticker).toUpperCase();
       setUnifiedLoading(true);
@@ -1512,7 +1553,7 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     };
   }, [activeTicker, loadTickerConfig]);
 
-  const updateForm = (updater) => {
+  const updateForm = (updater: AdaptiveStudioFormUpdater) => {
     setForm((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       return next;
@@ -1521,11 +1562,24 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     setNotice(null);
   };
 
-  const applyExecutionFieldChange = (configKey: string, value: unknown, options: Record<string, any> = {}) => {
-    updateExecutionConfigField(configKey, value, options);
-    setIsDirty(true);
-    setNotice(null);
-  };
+  const applyExecutionFieldChange = useCallback(
+    (
+    configKey: string,
+    value: unknown,
+    options: ApplyExecutionFieldChangeOptions = {},
+    ) => {
+      updateExecutionConfigField(configKey, value, options);
+      setIsDirty(true);
+      setNotice(null);
+    },
+    [updateExecutionConfigField],
+  );
+
+  const { handleToggleEnabled: handleExecutionModuleToggleEnabled, handleFieldValueChange: handleExecutionModuleFieldValueChange } =
+    useAdaptiveStudioExecutionModuleHandlers({
+      applyExecutionFieldChange,
+      normalizeExecutionParamValue,
+    });
 
   const updatePriorityList = (scope, key, nextList) => {
     const normalized = normalizeStrategyList(nextList, [], strategyUniverse);
@@ -1587,14 +1641,8 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     try {
       const normalizedForm = normalizeAdaptiveFormSnapshot(form, strategyUniverse);
 
-      const currentConfig: Record<string, any> =
-        rawTickerConfig && typeof rawTickerConfig === "object" && !Array.isArray(rawTickerConfig)
-          ? (rawTickerConfig as Record<string, any>)
-          : {};
-      const currentAdaptive: Record<string, any> =
-        currentConfig.adaptive && typeof currentConfig.adaptive === "object" && !Array.isArray(currentConfig.adaptive)
-          ? (currentConfig.adaptive as Record<string, any>)
-          : {};
+      const currentConfig = asObject(rawTickerConfig);
+      const currentAdaptive = asObject(currentConfig.adaptive);
       const currentPositioning = asObject(currentConfig.positioning);
       const executionSnapshot = readExecutionConfigSnapshot();
       const executionModulesSnapshot = normalizeExecutionModulesSnapshot(executionSnapshot);
@@ -1667,7 +1715,10 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     setRawTickerConfig(nextConfig);
   };
 
-  const handleLoadStudioProfileToEditor = (profile, options: Record<string, any> = {}) => {
+  const handleLoadStudioProfileToEditor = (
+    profile: AdaptiveStudioStudioProfileRow | null | undefined,
+    options: LoadStudioProfileToEditorOptions = {},
+  ) => {
     const profileId = String(profile?.profile_id || "").trim();
     if (!profileId) {
       setError("Cannot load Studio profile: missing profile ID.");
@@ -1709,10 +1760,7 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     setError(null);
     setNotice(null);
     try {
-      const currentConfig =
-        rawTickerConfig && typeof rawTickerConfig === "object" && !Array.isArray(rawTickerConfig)
-          ? (rawTickerConfig as Record<string, any>)
-          : {};
+      const currentConfig = asObject(rawTickerConfig);
       const normalizedProfiles = normalizeStudioProfiles(
         currentConfig?.[STUDIO_PROFILE_LIST_KEY],
         strategyUniverse
@@ -1824,10 +1872,7 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     setError(null);
     setNotice(null);
     try {
-      const currentConfig =
-        rawTickerConfig && typeof rawTickerConfig === "object" && !Array.isArray(rawTickerConfig)
-          ? (rawTickerConfig as Record<string, any>)
-          : {};
+      const currentConfig = asObject(rawTickerConfig);
       const nextProfiles = normalizeStudioProfiles(
         currentConfig?.[STUDIO_PROFILE_LIST_KEY],
         strategyUniverse
@@ -1870,10 +1915,7 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     setError(null);
     setNotice(null);
     try {
-      const currentConfig =
-        rawTickerConfig && typeof rawTickerConfig === "object" && !Array.isArray(rawTickerConfig)
-          ? (rawTickerConfig as Record<string, any>)
-          : {};
+      const currentConfig = asObject(rawTickerConfig);
       const nextProfiles = normalizeStudioProfiles(
         currentConfig?.[STUDIO_PROFILE_LIST_KEY],
         strategyUniverse
@@ -1981,7 +2023,9 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     }
   };
 
-  const handleLoadUnifiedProfileToEditor = (profile) => {
+  const handleLoadUnifiedProfileToEditor = (
+    profile: AdaptiveStudioUnifiedProfileRow | null | undefined,
+  ) => {
     const profileId = String(profile?.profile_id || "").trim();
     if (!profileId) {
       setError("Cannot load unified profile: missing profile ID.");
@@ -2068,7 +2112,9 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     }
   };
 
-  const handleSetActiveUnifiedProfile = async (profile) => {
+  const handleSetActiveUnifiedProfile = async (
+    profile: AdaptiveStudioUnifiedProfileRow | null | undefined,
+  ) => {
     const profileId = String(profile?.profile_id || "").trim();
     if (!activeTicker || !profileId) return;
     setUnifiedActionLoading(`active:${profileId}`);
@@ -2268,6 +2314,12 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     unifiedList.find(
       (profile) => String(profile?.profile_id || "").trim() === String(activeUnifiedId || "").trim()
     ) || null;
+  const activeUnifiedLegacyComboSourceId = String(
+    activeUnifiedProfile?.source_strategy_combo_profile_id || "",
+  ).trim();
+  const activeUnifiedLegacyTunedSourceId = String(
+    activeUnifiedProfile?.source_adaptive_tuner_profile_id || "",
+  ).trim();
   const activeComboProfile = comboList.find(
     (profile) => String(profile?.profile_id || "").trim() === activeComboId
   ) || null;
@@ -2280,6 +2332,29 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
       (profile) => String(profile?.profile_id || "").trim() === activeStudioProfileId
     ) || null;
   const hasTickers = availableTickers.length > 0;
+  const reloadLoading = loading || unifiedLoading || profileLoading || comboLoading;
+  const reloadDisabled =
+    loading ||
+    saving ||
+    studioProfileBusy ||
+    unifiedLoading ||
+    profileLoading ||
+    comboLoading ||
+    !!unifiedActionLoading ||
+    !!profileActionLoading ||
+    !!comboActionLoading ||
+    !!studioProfileActionLoading ||
+    !activeTicker;
+  const saveDisabled =
+    saving ||
+    studioProfileBusy ||
+    loading ||
+    !!unifiedActionLoading ||
+    !!profileActionLoading ||
+    !!comboActionLoading ||
+    !!studioProfileActionLoading ||
+    !activeTicker ||
+    !isDirty;
 
   const TABS = [
     { id: "profiles" as const, label: "Unified Profiles", icon: "📋" },
@@ -2292,238 +2367,68 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
   return (
     <main className="adaptive-studio-page">
       <section className="card adaptive-studio-controls">
-        <div className="card-header">
-          <span className="card-title">Adaptive Strategy Studio</span>
-          <div className="adaptive-toolbar">
-            <select
-              className="studio-header-ticker"
-              value={activeTicker}
-              onChange={(e) => {
-                if (onTickerChange) onTickerChange(e.target.value);
-              }}
-              disabled={!hasTickers}
-              title="Active ticker"
-            >
-              {!hasTickers && <option value="">No ticker</option>}
-              {availableTickers.map((ticker) => (
-                <option key={ticker} value={ticker}>
-                  {ticker}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleReload}
-              disabled={
-                loading ||
-                saving ||
-                studioProfileBusy ||
-                unifiedLoading ||
-                profileLoading ||
-                comboLoading ||
-                !!unifiedActionLoading ||
-                !!profileActionLoading ||
-                !!comboActionLoading ||
-                !!studioProfileActionLoading ||
-                !activeTicker
-              }
-            >
-              {loading || unifiedLoading || profileLoading || comboLoading ? "Loading..." : "Reload"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleSave}
-              disabled={
-                saving ||
-                studioProfileBusy ||
-                loading ||
-                !!unifiedActionLoading ||
-                !!profileActionLoading ||
-                !!comboActionLoading ||
-                !!studioProfileActionLoading ||
-                !activeTicker ||
-                !isDirty
-              }
-            >
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
+        <AdaptiveStudioHeaderControls
+          activeTicker={activeTicker}
+          availableTickers={availableTickers}
+          hasTickers={hasTickers}
+          onTickerChange={onTickerChange}
+          onReload={handleReload}
+          onSave={handleSave}
+          reloadDisabled={reloadDisabled}
+          saveDisabled={saveDisabled}
+          reloadLoading={reloadLoading}
+          saveLoading={saving}
+        />
 
         {/* Tab bar */}
-        <div className="studio-tabs">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              className={`studio-tab ${activeTab === tab.id ? "active" : ""}`}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <span className="studio-tab-icon">{tab.icon}</span>
-              <span>{tab.label}</span>
-            </button>
-          ))}
-        </div>
+        <AdaptiveStudioTabsNav
+          tabs={TABS}
+          activeTab={activeTab}
+          onTabChange={(tabId) => setActiveTab(tabId as typeof activeTab)}
+        />
 
         {/* Tab content */}
         <div className="studio-tab-content">
           {/* Notices — always visible */}
-          {(error || notice || unifiedError || profileError || comboError) && (
-            <div className="adaptive-column" style={{ gap: 6 }}>
-              {error && <div className="adaptive-error">{error}</div>}
-              {notice && <div className="adaptive-notice">{notice}</div>}
-              {unifiedError && <div className="adaptive-error">{unifiedError}</div>}
-              {profileError && <div className="adaptive-error">{profileError}</div>}
-              {comboError && <div className="adaptive-error">{comboError}</div>}
-            </div>
-          )}
+          <AdaptiveStudioNotices
+            error={error}
+            notice={notice}
+            unifiedError={unifiedError}
+            profileError={profileError}
+            comboError={comboError}
+          />
 
           {/* ── Tab: Profiles ── */}
           {activeTab === "profiles" && (
-            <div className="adaptive-column">
-              <div className="adaptive-section">
-                <h3>Unified Profiles</h3>
-                <div style={{ display: "flex", gap: 8, alignItems: "end" }}>
-                  <div className="form-group" style={{ flex: 1 }}>
-                    <label htmlFor="unified_profile_name">Profile name</label>
-                    <input
-                      id="unified_profile_name"
-                      type="text"
-                      value={unifiedDraftName}
-                      onChange={(e) => setUnifiedDraftName(e.target.value)}
-                      placeholder={`${activeTicker || "TICKER"}-profile`}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={handleCaptureUnifiedProfile}
-                    disabled={
-                      !activeTicker ||
-                      loading ||
-                      saving ||
-                      unifiedLoading ||
-                      !!unifiedActionLoading
-                    }
-                  >
-                    {unifiedActionLoading === "capture" ? "Saving..." : "Capture"}
-                  </button>
-                </div>
-                <div className="adaptive-empty" style={{ marginTop: 6 }}>
-                  Jeden profil obsahuje sekcie Strategy profile + Execution profile.
-                </div>
-              </div>
-
-              <div className="adaptive-section">
-                <details open>
-                  <summary>
-                    <span>Unified Profile List</span>
-                    <span className={`profile-badge ${activeUnifiedId ? "active-badge" : "inactive-badge"}`}>
-                      {activeUnifiedId ? `Active: ${activeUnifiedId.slice(0, 12)}…` : "None active"}
-                    </span>
-                  </summary>
-                  <div>
-                    {unifiedLoading ? (
-                      <div className="adaptive-empty">Loading…</div>
-                    ) : !unifiedList.length ? (
-                      <div className="adaptive-empty">No unified profiles saved yet.</div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {unifiedList.map((profile, idx) => {
-                          const profileId = String(profile?.profile_id || "").trim();
-                          const isActive = !!profileId && profileId === activeUnifiedId;
-                          const strategyCount = Object.keys(profile?.strategy_profile?.strategy_params || {}).length;
-                          const hasExecution =
-                            Object.keys(asObject(profile?.execution_profile?.positioning)).length > 0;
-                          const isSettingActive =
-                            unifiedActionLoading === `active:${profileId}`;
-                          return (
-                            <div className={`profile-table-row ${isActive ? "active" : ""}`} key={profileId || `up-${idx}`}>
-                              <span className={`profile-badge ${isActive ? "active-badge" : "inactive-badge"}`}>
-                                {isActive ? "●" : "○"}
-                              </span>
-                              <span className="profile-name">{profile?.profile_name || profileId || "profile"}</span>
-                              <span className="profile-meta">{strategyCount} strategies</span>
-                              <span className="profile-meta">{hasExecution ? "execution yes" : "execution no"}</span>
-                              <span className="profile-meta">{formatProfileTimestamp(profile?.updated_at || profile?.created_at)}</span>
-                              <div className="profile-table-actions">
-                                <button
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => handleLoadUnifiedProfileToEditor(profile)}
-                                  disabled={!profileId || !!unifiedActionLoading}
-                                >
-                                  Load
-                                </button>
-                                <button
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => handleSetActiveUnifiedProfile(profile)}
-                                  disabled={!profileId || isActive || !!unifiedActionLoading || saving || loading}
-                                >
-                                  {isSettingActive ? "…" : isActive ? "Active" : "Set Active"}
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </details>
-              </div>
-
-              {activeUnifiedProfile && (
-                <div className="adaptive-section">
-                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setUnifiedViewTab("strategy")}
-                      style={{
-                        opacity: unifiedViewTab === "strategy" ? 1 : 0.75,
-                        borderColor:
-                          unifiedViewTab === "strategy" ? "var(--accent-primary)" : undefined,
-                      }}
-                    >
-                      Strategy profile
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setUnifiedViewTab("execution")}
-                      style={{
-                        opacity: unifiedViewTab === "execution" ? 1 : 0.75,
-                        borderColor:
-                          unifiedViewTab === "execution" ? "var(--accent-primary)" : undefined,
-                      }}
-                    >
-                      Execution profile
-                    </button>
-                  </div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: "10px",
-                      borderRadius: "8px",
-                      border: "1px solid var(--border-default)",
-                      background: "var(--surface-2)",
-                      color: "var(--text-primary)",
-                      fontSize: "0.75rem",
-                      overflowX: "auto",
-                      maxHeight: "280px",
-                    }}
-                  >
-{JSON.stringify(
-  unifiedViewTab === "strategy"
-    ? asObject(activeUnifiedProfile?.strategy_profile)
-    : asObject(activeUnifiedProfile?.execution_profile),
-  null,
-  2
-)}
-                  </pre>
-                </div>
-              )}
-            </div>
+            <AdaptiveStudioProfilesTab
+              activeTicker={activeTicker}
+              unifiedDraftName={unifiedDraftName}
+              onUnifiedDraftNameChange={setUnifiedDraftName}
+              onCaptureUnifiedProfile={handleCaptureUnifiedProfile}
+              captureDisabled={
+                !activeTicker ||
+                loading ||
+                saving ||
+                unifiedLoading ||
+                !!unifiedActionLoading
+              }
+              captureLoading={unifiedActionLoading === "capture"}
+              unifiedLoading={!!unifiedLoading}
+              unifiedList={Array.isArray(unifiedList) ? unifiedList : []}
+              activeUnifiedId={String(activeUnifiedId || "")}
+              unifiedActionLoading={typeof unifiedActionLoading === "string" ? unifiedActionLoading : null}
+              saving={!!saving}
+              loading={!!loading}
+              asObject={asObject}
+              formatProfileTimestamp={formatProfileTimestamp}
+              onLoadUnifiedProfileToEditor={handleLoadUnifiedProfileToEditor}
+              onSetActiveUnifiedProfile={handleSetActiveUnifiedProfile}
+              hasActiveUnifiedProfile={!!activeUnifiedProfile}
+              unifiedViewTab={unifiedViewTab}
+              onUnifiedViewTabChange={setUnifiedViewTab}
+              strategyProfileData={asObject(activeUnifiedProfile?.strategy_profile)}
+              executionProfileData={asObject(activeUnifiedProfile?.execution_profile)}
+            />
           )}
 
           {/* ── Tab: Strategies ── */}
@@ -2540,186 +2445,22 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
           {/* ── Tab: Global Modules ── */}
           {activeTab === "modules" && (
             <div className="adaptive-column">
-              <div className="sc-panel">
-                <div className="sc-toolbar">
-                  <div className="sc-toolbar-left">
-                    <span className="sc-counter">
-                      {countEnabledExecutionModules(executionConfigSnapshot)}/{EXECUTION_MODULES.length}
-                    </span>
-                    <span className="sc-msg">
-                      Global defaults synced with RunConfig execution snapshot.
-                    </span>
-                  </div>
-                  <div className="sc-toolbar-right">
-                    <button
-                      className="sc-icon-btn"
-                      onClick={refreshExecutionConfigSnapshot}
-                      title="Refresh snapshot"
-                    >
-                      ↻
-                    </button>
-                    <button
-                      className="sc-icon-btn"
-                      onClick={expandAllExecutionModules}
-                      title="Expand all"
-                    >
-                      ⬇
-                    </button>
-                    <button
-                      className="sc-icon-btn"
-                      onClick={collapseAllExecutionModules}
-                      title="Collapse all"
-                    >
-                      ⬆
-                    </button>
-                  </div>
-                </div>
-
-                <div className="sc-list">
-                  {EXECUTION_MODULES.map((module) => {
-                    const enabled = !!toBoolean(executionConfigSnapshot?.[module.configKey], false);
-                    const moduleFields = EXECUTION_MODULE_PARAM_FIELDS_BY_MODULE[module.key] || [];
-                    const isExpanded = !!expandedExecutionModules[module.key];
-                    const categoryLabel = EXECUTION_MODULE_CATEGORY_LABELS[module.category] || "Other";
-                    return (
-                      <div
-                        key={module.key}
-                        className={`sc-item ${enabled ? "on" : "off"} ${isExpanded ? "open" : ""}`}
-                      >
-                        <div
-                          className="sc-item-head"
-                          onClick={() => toggleExecutionModuleExpanded(module.key)}
-                        >
-                          <div className="sc-item-info">
-                            <span className="sc-item-name">{module.label}</span>
-                            <span className={`sc-cat ${module.category}`}>{categoryLabel}</span>
-                            <span className="sc-regimes">{module.description}</span>
-                          </div>
-                          <div className="sc-item-controls" onClick={(e) => e.stopPropagation()}>
-                            <label className="switch" htmlFor={`studio_module_${module.key}`}>
-                              <input
-                                id={`studio_module_${module.key}`}
-                                type="checkbox"
-                                checked={enabled}
-                                onChange={(e) =>
-                                  applyExecutionFieldChange(module.configKey, e.target.checked, {
-                                    raw: true,
-                                  })
-                                }
-                              />
-                              <span className="slider" />
-                            </label>
-                          </div>
-                          <span className={`sc-expand-arrow ${isExpanded ? "open" : ""}`}>›</span>
-                        </div>
-
-                        {isExpanded && (
-                          <div className="sc-item-body">
-                            <div className="sc-section">
-                              <div className="sc-section-label">Configuration</div>
-                              {moduleFields.length === 0 ? (
-                                <div className="sc-msg">No additional configuration fields.</div>
-                              ) : (
-                                <div className="sc-grid">
-                                  {moduleFields.map((field) => {
-                                    const fieldId = `studio_${module.key}_${field.key}`;
-                                    const fieldDisabled =
-                                      typeof field?.disabledWhen === "function"
-                                        ? !!field.disabledWhen(executionConfigSnapshot || {})
-                                        : false;
-                                    if (field.type === "boolean") {
-                                      return (
-                                        <div key={field.key} className="sc-field sc-field-bool">
-                                          <label className="sc-field-label" htmlFor={fieldId}>
-                                            {field.label}
-                                          </label>
-                                          <input
-                                            id={fieldId}
-                                            type="checkbox"
-                                            className="sc-field-check"
-                                            checked={!!getExecutionParamValue(field)}
-                                            disabled={fieldDisabled}
-                                            onChange={(e) =>
-                                              applyExecutionFieldChange(
-                                                field.key,
-                                                normalizeExecutionParamValue(e.target.checked, field),
-                                                { raw: true }
-                                              )
-                                            }
-                                          />
-                                        </div>
-                                      );
-                                    }
-                                    if (field.type === "select") {
-                                      const selectedValue = String(
-                                        getExecutionParamValue(field) ?? field.fallback ?? ""
-                                      );
-                                      return (
-                                        <div key={field.key} className="sc-field">
-                                          <label className="sc-field-label" htmlFor={fieldId}>
-                                            {field.label}
-                                          </label>
-                                          <select
-                                            id={fieldId}
-                                            className="sc-field-input"
-                                            value={selectedValue}
-                                            disabled={fieldDisabled}
-                                            onChange={(e) =>
-                                              applyExecutionFieldChange(
-                                                field.key,
-                                                normalizeExecutionParamValue(e.target.value, field),
-                                                { raw: true }
-                                              )
-                                            }
-                                          >
-                                            {(Array.isArray(field.options) ? field.options : []).map((option) => {
-                                              const optionValue = String(option?.value || "");
-                                              const optionLabel = String(option?.label || optionValue);
-                                              return (
-                                                <option key={optionValue} value={optionValue}>
-                                                  {optionLabel}
-                                                </option>
-                                              );
-                                            })}
-                                          </select>
-                                        </div>
-                                      );
-                                    }
-                                    return (
-                                      <div key={field.key} className="sc-field">
-                                        <label className="sc-field-label" htmlFor={fieldId}>
-                                          {field.label}
-                                        </label>
-                                        <input
-                                          id={fieldId}
-                                          type="number"
-                                          min={field.min}
-                                          max={field.max}
-                                          step={field.step}
-                                          className="sc-field-input"
-                                          value={getExecutionParamValue(field)}
-                                          disabled={fieldDisabled}
-                                          onChange={(e) =>
-                                            applyExecutionFieldChange(
-                                              field.key,
-                                              normalizeExecutionParamValue(e.target.value, field),
-                                              { raw: true }
-                                            )
-                                          }
-                                        />
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              <AdaptiveStudioExecutionModulesPanel
+                modules={EXECUTION_MODULES}
+                moduleProfileKeys={EXECUTION_MODULE_PROFILE_KEYS}
+                moduleFieldsByModule={EXECUTION_MODULE_PARAM_FIELDS_BY_MODULE}
+                categoryLabelsByCategory={EXECUTION_MODULE_CATEGORY_LABELS}
+                executionConfigSnapshot={executionConfigSnapshot}
+                expandedExecutionModules={expandedExecutionModules}
+                coerceBooleanValue={toBoolean}
+                onRefresh={refreshExecutionConfigSnapshot}
+                onExpandAll={expandAllExecutionModules}
+                onCollapseAll={collapseAllExecutionModules}
+                onToggleExpanded={toggleExecutionModuleExpanded}
+                onToggleEnabled={handleExecutionModuleToggleEnabled}
+                getExecutionParamValue={getExecutionParamValue}
+                onFieldValueChange={handleExecutionModuleFieldValueChange}
+              />
             </div>
           )}
 
@@ -2727,272 +2468,88 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
           {activeTab === "adaptive" && (
             <div className="adaptive-column">
               {/* Row 1: Selection Mode + Flow Gate side-by-side */}
-              <div className="adaptive-grid-2col">
-                <div className="adaptive-section">
-                  <h3>Selection Mode</h3>
-                  <div className="form-group">
-                    <label htmlFor="adaptive_mode">Strategy selection mode</label>
-                    <select
-                      id="adaptive_mode"
-                      value={form.strategy_selection_mode}
-                      onChange={(e) =>
-                        updateForm((prev) => ({
-                          ...prev,
-                          strategy_selection_mode: normalizeMode(e.target.value),
-                        }))
-                      }
-                    >
-                      <option value="adaptive_top_n">Adaptive Top-N</option>
-                      <option value="all_enabled">All Enabled</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="adaptive_max_active">Max active strategies</label>
-                    <input
-                      id="adaptive_max_active"
-                      type="number"
-                      min="1"
-                      max="20"
-                      step="1"
-                      value={normalizeMaxActive(form.max_active_strategies, 3)}
-                      onChange={(e) =>
-                        updateForm((prev) => ({
-                          ...prev,
-                          max_active_strategies: normalizeMaxActive(e.target.value, 3),
-                        }))
-                      }
-                      disabled={form.strategy_selection_mode === "all_enabled"}
-                    />
-                  </div>
-                </div>
+              <AdaptiveStudioSelectionFlowGate
+                strategySelectionMode={String(form.strategy_selection_mode || "adaptive_top_n")}
+                maxActiveStrategiesValue={normalizeMaxActive(form.max_active_strategies, 3)}
+                flowBiasEnabled={!!form.flow_bias_enabled}
+                useOhlcvFallbacks={!!form.use_ohlcv_fallbacks}
+                minActiveBarsBeforeSwitchValue={normalizeNonNegativeInt(
+                  form.min_active_bars_before_switch,
+                  0,
+                )}
+                switchCooldownBarsValue={normalizeNonNegativeInt(form.switch_cooldown_bars, 0)}
+                onStrategySelectionModeChange={(value) =>
+                  updateForm((prev) => ({
+                    ...prev,
+                    strategy_selection_mode: normalizeMode(value),
+                  }))
+                }
+                onMaxActiveStrategiesChange={(value) =>
+                  updateForm((prev) => ({
+                    ...prev,
+                    max_active_strategies: normalizeMaxActive(value, 3),
+                  }))
+                }
+                onFlowBiasEnabledChange={(checked) =>
+                  updateForm((prev) => ({
+                    ...prev,
+                    flow_bias_enabled: checked,
+                  }))
+                }
+                onUseOhlcvFallbacksChange={(checked) =>
+                  updateForm((prev) => ({
+                    ...prev,
+                    use_ohlcv_fallbacks: checked,
+                  }))
+                }
+                onMinActiveBarsBeforeSwitchChange={(value) =>
+                  updateForm((prev) => ({
+                    ...prev,
+                    min_active_bars_before_switch: normalizeNonNegativeInt(value, 0),
+                  }))
+                }
+                onSwitchCooldownBarsChange={(value) =>
+                  updateForm((prev) => ({
+                    ...prev,
+                    switch_cooldown_bars: normalizeNonNegativeInt(value, 0),
+                  }))
+                }
+              />
 
-                <div className="adaptive-section">
-                  <h3>Flow Gate</h3>
-                  <label className="field-row" htmlFor="adaptive_flow_bias_enabled">
-                    <span>Prefer flow strategies when L2 exists</span>
-                    <input
-                      id="adaptive_flow_bias_enabled"
-                      type="checkbox"
-                      checked={!!form.flow_bias_enabled}
-                      onChange={(e) =>
-                        updateForm((prev) => ({
-                          ...prev,
-                          flow_bias_enabled: e.target.checked,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="field-row" htmlFor="adaptive_ohlcv_fallbacks">
-                    <span>OHLCV fallback when no L2</span>
-                    <input
-                      id="adaptive_ohlcv_fallbacks"
-                      type="checkbox"
-                      checked={!!form.use_ohlcv_fallbacks}
-                      onChange={(e) =>
-                        updateForm((prev) => ({
-                          ...prev,
-                          use_ohlcv_fallbacks: e.target.checked,
-                        }))
-                      }
-                    />
-                  </label>
-                  <div className="form-group">
-                    <label htmlFor="adaptive_min_active_bars">Hysteresis (bars)</label>
-                    <input
-                      id="adaptive_min_active_bars"
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={normalizeNonNegativeInt(form.min_active_bars_before_switch, 0)}
-                      onChange={(e) =>
-                        updateForm((prev) => ({
-                          ...prev,
-                          min_active_bars_before_switch: normalizeNonNegativeInt(e.target.value, 0),
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="adaptive_switch_cooldown_bars">Cooldown (bars)</label>
-                    <input
-                      id="adaptive_switch_cooldown_bars"
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={normalizeNonNegativeInt(form.switch_cooldown_bars, 0)}
-                      onChange={(e) =>
-                        updateForm((prev) => ({
-                          ...prev,
-                          switch_cooldown_bars: normalizeNonNegativeInt(e.target.value, 0),
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-              </div> {/* end adaptive-grid-2col */}
-
-              <div className="adaptive-section">
-                <div className="adaptive-priority-editor">
-                  <div className="adaptive-priority-header">
-                    <span>Flow bias strategy order</span>
-                    <span className="adaptive-priority-count">{(form.flow_bias_strategies || []).length} selected</span>
-                  </div>
-
-                  <div className="adaptive-priority-list">
-                    {(form.flow_bias_strategies || []).length === 0 && (
-                      <div className="adaptive-empty">No flow-bias strategies selected.</div>
-                    )}
-                    {(form.flow_bias_strategies || []).map((name, index) => (
-                      <div className="adaptive-priority-item" key={`flow-bias-${name}`}>
-                        <div className="adaptive-priority-item-title">
-                          <span className="adaptive-priority-rank">#{index + 1}</span>
-                          <span>{strategyLabel(name)}</span>
-                        </div>
-                        <div className="adaptive-priority-item-actions">
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => moveFlowBiasStrategy(index, -1)}
-                            disabled={index === 0}
-                          >
-                            Up
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => moveFlowBiasStrategy(index, 1)}
-                            disabled={index === (form.flow_bias_strategies || []).length - 1}
-                          >
-                            Down
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
-                            onClick={() => toggleFlowBiasStrategy(name)}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="adaptive-chip-grid">
-                    {strategyUniverse.map((name) => {
-                      const active = (form.flow_bias_strategies || []).includes(name);
-                      return (
-                        <button
-                          type="button"
-                          key={`flow-chip-${name}`}
-                          className={`adaptive-chip ${active ? "active" : ""}`}
-                          onClick={() => toggleFlowBiasStrategy(name)}
-                        >
-                          {strategyLabel(name)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+              <AdaptiveStudioFlowBiasPriorityEditor
+                selectedStrategies={Array.isArray(form.flow_bias_strategies) ? form.flow_bias_strategies : []}
+                strategyUniverse={Array.isArray(strategyUniverse) ? strategyUniverse : []}
+                strategyLabel={strategyLabel}
+                onMoveStrategy={moveFlowBiasStrategy}
+                onToggleStrategy={toggleFlowBiasStrategy}
+              />
 
               {/* Regime Preferences - collapsible */}
-              <div className="adaptive-grid-2col">
-                <div className="adaptive-section">
-                  <details>
-                    <summary>Macro Regime Preferences</summary>
-                    <div>
-                      <div className="adaptive-editor-grid">
-                        {MACRO_REGIMES.map((regime) =>
-                          renderPriorityEditor("regime_preferences", regime, regime)
-                        )}
-                      </div>
-                    </div>
-                  </details>
-                </div>
-                <div className="adaptive-section">
-                  <details>
-                    <summary>Micro Regime Preferences</summary>
-                    <div>
-                      <div className="adaptive-editor-grid">
-                        {MICRO_REGIMES.map((regime) =>
-                          renderPriorityEditor("micro_regime_preferences", regime, regime)
-                        )}
-                      </div>
-                    </div>
-                  </details>
-                </div>
-              </div>
+              <AdaptiveStudioRegimePreferences
+                macroRegimes={MACRO_REGIMES}
+                microRegimes={MICRO_REGIMES}
+                renderPriorityEditor={renderPriorityEditor}
+              />
             </div>
           )}
 
           {/* ── Tab: Flow ── */}
           {activeTab === "flow" && (
             <div className="adaptive-column">
-              <div className="adaptive-section">
-                <h3>Decision Flow Diagram</h3>
-                <div className="adaptive-flow-diagram">
-                  <div className="adaptive-flow-node">
-                    <strong>1) Regime detection</strong>
-                    <div>Macro + micro regime are refreshed from current bars only.</div>
-                  </div>
-                  <div className="adaptive-flow-arrow">↓</div>
-                  <div className="adaptive-flow-branch-row">
-                    <div className="adaptive-flow-node">
-                      <strong>2A) L2 branch</strong>
-                      <div>
-                        {form.flow_bias_enabled
-                          ? `Flow bias ON: ${flowSummary(form.flow_bias_strategies)}`
-                          : "Flow bias OFF: no forced L2-first priority"}
-                      </div>
-                    </div>
-                    <div className="adaptive-flow-node">
-                      <strong>2B) No-L2 branch</strong>
-                      <div>
-                        {form.use_ohlcv_fallbacks
-                          ? "OHLCV fallback ON"
-                          : "OHLCV fallback OFF"}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="adaptive-flow-arrow">↓</div>
-                  <div className="adaptive-flow-node">
-                    <strong>3) Preference merge</strong>
-                    <div>
-                      Micro preference + macro regime preference + ticker/default candidates.
-                    </div>
-                    <div>
-                      Unified profile: {activeUnifiedId || "none"}.
-                      {activeUnifiedProfile &&
-                        (String(activeUnifiedProfile?.source_strategy_combo_profile_id || "").trim() ||
-                          String(activeUnifiedProfile?.source_adaptive_tuner_profile_id || "").trim()) && (
-                          <>
-                            {" "}
-                            Legacy sources:
-                            {" "}
-                            {String(activeUnifiedProfile?.source_strategy_combo_profile_id || "").trim() || "combo:none"}
-                            {" / "}
-                            {String(activeUnifiedProfile?.source_adaptive_tuner_profile_id || "").trim() || "tuned:none"}
-                            .
-                          </>
-                        )}
-                    </div>
-                  </div>
-                  <div className="adaptive-flow-arrow">↓</div>
-                  <div className="adaptive-flow-node">
-                    <strong>3.5) Switch guard</strong>
-                    <div>
-                      Hysteresis: {normalizeNonNegativeInt(form.min_active_bars_before_switch, 0)} bars.
-                      Cooldown: {normalizeNonNegativeInt(form.switch_cooldown_bars, 0)} bars.
-                    </div>
-                  </div>
-                  <div className="adaptive-flow-arrow">↓</div>
-                  <div className="adaptive-flow-node highlight">
-                    <strong>4) Final selection</strong>
-                    <div>{strategyModeLabel}</div>
-                  </div>
-                </div>
-              </div>
-
+              <AdaptiveStudioDecisionFlowDiagram
+                l2BranchSummary={
+                  form.flow_bias_enabled
+                    ? `Flow bias ON: ${flowSummary(form.flow_bias_strategies)}`
+                    : "Flow bias OFF: no forced L2-first priority"
+                }
+                noL2BranchSummary={form.use_ohlcv_fallbacks ? "OHLCV fallback ON" : "OHLCV fallback OFF"}
+                activeUnifiedId={String(activeUnifiedId || "")}
+                legacyComboSourceId={activeUnifiedLegacyComboSourceId}
+                legacyTunedSourceId={activeUnifiedLegacyTunedSourceId}
+                hysteresisBars={normalizeNonNegativeInt(form.min_active_bars_before_switch, 0)}
+                cooldownBars={normalizeNonNegativeInt(form.switch_cooldown_bars, 0)}
+                strategyModeLabel={strategyModeLabel}
+              />
             </div>
           )}
         </div>

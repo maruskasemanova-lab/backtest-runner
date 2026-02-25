@@ -39,7 +39,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/routes/run_start_routes.py` | yes | 345 | `1273b21 2026-02-23` |
 | `src/routes/v2_routes.py` | yes | 2046 | `1273b21 2026-02-23` |
 | `src/models/config_requests.py` | yes | 47 | `b9accc6 2026-02-18` |
-| `src/models/run_requests.py` | yes | 274 | `fdba1f6 2026-02-25` |
+| `src/models/run_requests.py` | yes | 274 | `03b4ad8 2026-02-25` |
 | `src/models/tuner_requests.py` | yes | 95 | `1273b21 2026-02-23` |
 | `src/security/auth.py` | yes | 279 | `1273b21 2026-02-23` |
 | `src/security/network_policy.py` | yes | 135 | `1273b21 2026-02-23` |
@@ -58,10 +58,10 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/services/strategy_api_types.py` | yes | 33 | `1273b21 2026-02-23` |
 | `src/services/strategy_api_updates_service.py` | yes | 253 | `1273b21 2026-02-23` |
 | `src/services/strategy_api_profiles_service.py` | yes | 933 | `1273b21 2026-02-23` |
-| `src/services/strategy_api_session_service.py` | yes | 454 | `1273b21 2026-02-23` |
+| `src/services/strategy_api_session_service.py` | yes | 454 | `03b4ad8 2026-02-25` |
 | `src/services/start_run_service.py` | yes | 1229 | `8f49f06 2026-02-23` |
 | `src/services/start_run_data_service.py` | yes | 1584 | `1273b21 2026-02-23` |
-| `src/services/start_run_execution_config_service.py` | yes | 1696 | `fdba1f6 2026-02-25` |
+| `src/services/start_run_execution_config_service.py` | yes | 1696 | `03b4ad8 2026-02-25` |
 | `src/services/start_run_local_aos_service.py` | yes | 90 | `1273b21 2026-02-23` |
 | `src/services/start_run_bootstrap_phase_service.py` | yes | 275 | `1273b21 2026-02-23` |
 | `src/services/start_run_load_phase_service.py` | yes | 206 | `1273b21 2026-02-23` |
