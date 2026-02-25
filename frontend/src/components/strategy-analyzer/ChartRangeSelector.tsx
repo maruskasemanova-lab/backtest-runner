@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect, type RefObject } from "react";
+import type { StrategyAnalyzerChartHandle, StrategyAnalyzerPreviewBar } from "./types";
 
 /**
  * Transparent overlay for drag-to-select a time range on a lightweight-charts chart.
@@ -10,8 +11,8 @@ import { useRef, useState, useCallback, useEffect, type RefObject } from "react"
 
 interface ChartRangeSelectorProps {
   enabled: boolean;
-  chartRef: RefObject<{ getChart: () => any; getChartContainer: () => HTMLElement | null } | null>;
-  bars: Array<{ time: number }>;
+  chartRef: RefObject<StrategyAnalyzerChartHandle | null>;
+  bars: StrategyAnalyzerPreviewBar[];
   onRangeSelected: (fromDate: string, toDate: string) => void;
   onSelectionClear: () => void;
   selectedFrom: string | null;
@@ -57,14 +58,17 @@ export default function ChartRangeSelector({
 
   /* ── find bars whose pixel-X falls within [px1, px2] ───────────── */
   const findBarsInPixelRange = useCallback(
-    (px1: number, px2: number): { firstBar: { time: number }; lastBar: { time: number } } | null => {
+    (
+      px1: number,
+      px2: number
+    ): { firstBar: StrategyAnalyzerPreviewBar; lastBar: StrategyAnalyzerPreviewBar } | null => {
       const chart = chartRef.current?.getChart?.();
       if (!chart || !bars.length) return null;
 
       const lo = Math.min(px1, px2);
       const hi = Math.max(px1, px2);
-      let firstBar: { time: number } | null = null;
-      let lastBar: { time: number } | null = null;
+      let firstBar: StrategyAnalyzerPreviewBar | null = null;
+      let lastBar: StrategyAnalyzerPreviewBar | null = null;
 
       for (const bar of bars) {
         const bx = chart.timeScale().timeToCoordinate(bar.time);

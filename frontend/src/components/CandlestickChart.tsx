@@ -6,15 +6,147 @@ import { toUnixSeconds, toIsoTimestamp } from "../utils";
 const MAX_SNAP_SECONDS = 120;
 const RANGE_EPSILON = 0.001;
 
-const normalizeVisibleRange = (range: any) => {
-  const from = Number(range?.from);
-  const to = Number(range?.to);
+export type CandlestickChartVisibleRange = {
+  from: number;
+  to: number;
+};
+
+export type CandlestickChartTimeScaleLike = {
+  timeToCoordinate: (time: number) => number | null | undefined;
+  subscribeVisibleTimeRangeChange: (
+    cb: (range: CandlestickChartVisibleRange | null | undefined) => void
+  ) => void | (() => void);
+  unsubscribeVisibleTimeRangeChange?: (
+    cb: (range: CandlestickChartVisibleRange | null | undefined) => void
+  ) => void;
+  getVisibleRange: () => CandlestickChartVisibleRange | null | undefined;
+  setVisibleRange: (range: CandlestickChartVisibleRange) => void;
+  scrollToPosition: (position: number, animated: boolean) => void;
+};
+
+type CandlestickChartPriceScaleLike = {
+  options: () => { scaleMargins?: { top?: number; bottom?: number } };
+  applyOptions: (options: { scaleMargins?: { top?: number; bottom?: number }; borderVisible?: boolean }) => void;
+};
+
+type CandlestickChartCandleSeriesLike = {
+  setData: (data: CandlestickChartCandlePoint[]) => void;
+  update: (data: CandlestickChartCandlePoint) => void;
+  setMarkers: (markers: Array<Record<string, unknown>>) => void;
+  priceToCoordinate?: (price: number) => number | null | undefined;
+  coordinateToPrice?: (y: number) => number | null | undefined;
+};
+
+type CandlestickChartHistogramSeriesLike = {
+  setData: (data: CandlestickChartVolumePoint[]) => void;
+  update: (data: CandlestickChartVolumePoint) => void;
+};
+
+export type CandlestickChartApiLike = {
+  timeScale: () => CandlestickChartTimeScaleLike;
+  applyOptions: (options: { width?: number; height?: number }) => void;
+  remove: () => void;
+  priceScale: (id: string) => CandlestickChartPriceScaleLike;
+  addCandlestickSeries: (options: Record<string, unknown>) => CandlestickChartCandleSeriesLike;
+  addHistogramSeries: (options: Record<string, unknown>) => CandlestickChartHistogramSeriesLike;
+  subscribeClick: (handler: (param: CandlestickChartClickParam) => void) => void;
+  unsubscribeClick: (handler: (param: CandlestickChartClickParam) => void) => void;
+};
+
+export type CandlestickChartPriceRange = {
+  top?: number;
+  bottom?: number;
+  from?: number;
+  to?: number;
+  [key: string]: unknown;
+} | null;
+
+export type CandlestickChartBar = {
+  time?: number | string | null;
+  open?: number | string | null;
+  high?: number | string | null;
+  low?: number | string | null;
+  close?: number | string | null;
+  volume?: number | string | null;
+  __wfPlaceholder?: boolean;
+  [key: string]: unknown;
+};
+
+export type CandlestickChartMarker = {
+  time?: number | string | null;
+  timestamp?: number | string | null;
+  marker_type?: string | null;
+  id?: string | number | null;
+  price?: number | string | null;
+  side?: string | null;
+  regime?: string | null;
+  strategy?: string | null;
+  trade_size?: number | string | null;
+  hidden_size?: number | string | null;
+  total_size?: number | string | null;
+  title?: string | null;
+  description?: string | null;
+  details?: Record<string, unknown> | null;
+  __selectionSource?: string | null;
+  [key: string]: unknown;
+};
+
+export type CandlestickChartHandle = {
+  getChart: () => CandlestickChartApiLike | null;
+  getChartContainer: () => HTMLElement | null;
+};
+
+export type CandlestickChartProps = {
+  bars: CandlestickChartBar[];
+  markers?: CandlestickChartMarker[];
+  icebergs?: CandlestickChartMarker[];
+  onMarkerClick?: (marker: CandlestickChartMarker) => void;
+  onBarClick?: (bar: CandlestickChartBar) => void;
+  selectedMarker?: CandlestickChartMarker | null;
+  chartState?: CandlestickChartVisibleRange | null;
+  onChartStateChange?: (range: CandlestickChartVisibleRange | null) => void;
+  l2Data?: unknown;
+  priceRange?: CandlestickChartPriceRange;
+  onPriceRangeChange?: (range: CandlestickChartPriceRange) => void;
+};
+
+type CandlestickChartTooltipState = {
+  visible: boolean;
+  marker: CandlestickChartMarker | null;
+  x: number;
+  y: number;
+};
+
+type CandlestickChartClickParam = {
+  time?: unknown;
+  point?: { x: number; y: number } | null;
+};
+
+type CandlestickChartNormalizedMarker = CandlestickChartMarker & {
+  id: string | number;
+  time: number;
+  timestamp?: string | number | null;
+};
+
+type CandlestickChartCandlePoint =
+  | { time: number }
+  | { time: number; open: number; high: number; low: number; close: number };
+
+type CandlestickChartVolumePoint =
+  | { time: number }
+  | { time: number; value: number; color: string };
+
+const normalizeVisibleRange = (range: unknown): CandlestickChartVisibleRange | null => {
+  const value =
+    range && typeof range === "object" ? (range as { from?: unknown; to?: unknown }) : null;
+  const from = Number(value?.from);
+  const to = Number(value?.to);
   if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
   if (from <= to) return { from, to };
   return { from: to, to: from };
 };
 
-const rangesEqual = (left: any, right: any) => {
+const rangesEqual = (left: unknown, right: unknown): boolean => {
   const a = normalizeVisibleRange(left);
   const b = normalizeVisibleRange(right);
   if (!a || !b) return false;
@@ -22,14 +154,32 @@ const rangesEqual = (left: any, right: any) => {
 };
 
 
-const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, icebergs, onMarkerClick, onBarClick, selectedMarker, chartState, onChartStateChange, l2Data, priceRange, onPriceRangeChange }: any, ref) {
-  const chartContainerRef = useRef(null);
-  const chartRef = useRef(null);
-  const candleSeriesRef = useRef(null);
-  const volumeSeriesRef = useRef(null);
-  const appliedBarsMetaRef = useRef({ length: 0, lastTime: null });
-  const lastFocusedMarkerKeyRef = useRef(null);
-  const [error, setError] = useState(null);
+const CandlestickChart = forwardRef<CandlestickChartHandle, CandlestickChartProps>(function CandlestickChart(
+  {
+    bars,
+    markers,
+    icebergs,
+    onMarkerClick,
+    onBarClick,
+    selectedMarker,
+    chartState,
+    onChartStateChange,
+    l2Data,
+    priceRange,
+    onPriceRangeChange,
+  }: CandlestickChartProps,
+  ref
+) {
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<CandlestickChartApiLike | null>(null);
+  const candleSeriesRef = useRef<CandlestickChartCandleSeriesLike | null>(null);
+  const volumeSeriesRef = useRef<CandlestickChartHistogramSeriesLike | null>(null);
+  const appliedBarsMetaRef = useRef<{ length: number; lastTime: number | null }>({
+    length: 0,
+    lastTime: null,
+  });
+  const lastFocusedMarkerKeyRef = useRef<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Expose chart instance to parent via ref
   useImperativeHandle(ref, () => ({
@@ -38,7 +188,7 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
   }));
 
   // Tooltip state
-  const [tooltip, setTooltip] = useState({
+  const [tooltip, setTooltip] = useState<CandlestickChartTooltipState>({
     visible: false,
     marker: null,
     x: 0,
@@ -46,11 +196,11 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
   });
   // Sync guards for external range state vs chart events.
   const isSyncingRef = useRef(false);
-  const lastAppliedRangeRef = useRef(null);
-  const lastBroadcastRangeRef = useRef(null);
+  const lastAppliedRangeRef = useRef<CandlestickChartVisibleRange | null>(null);
+  const lastBroadcastRangeRef = useRef<CandlestickChartVisibleRange | null>(null);
   const isUserInteracting = useRef(false);
-  const interactionTimeoutRef = useRef(null);
-  const onChartStateChangeRef = useRef(onChartStateChange);
+  const interactionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onChartStateChangeRef = useRef<CandlestickChartProps["onChartStateChange"]>(onChartStateChange);
 
   useEffect(() => {
     onChartStateChangeRef.current = onChartStateChange;
@@ -176,7 +326,7 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
       window.addEventListener("resize", handleResize);
 
       // Cmd+Scroll for vertical price scale zoom
-      const handleWheel = (e) => {
+      const handleWheel = (e: WheelEvent) => {
           // Track wheel interaction for leader/follower sync
           // We don't have a clean 'wheel end' event, so we use a timeout
           isUserInteracting.current = true;
@@ -234,9 +384,9 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
         lastBroadcastRangeRef.current = null;
       };
 
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Chart initialization error:", err);
-      setError(err.message);
+      setError(err instanceof Error ? err.message : "Chart initialization error");
     }
   }, []);
 
@@ -245,11 +395,12 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
     [bars]
   );
 
-  const sortedBarTimes = useMemo(() => {
+  const sortedBarTimes = useMemo<number[]>(() => {
     if (!bars || bars.length === 0) return [];
     return bars
       .map((bar) => bar?.time)
-      .filter((time) => Number.isFinite(time))
+      .filter((time): time is number | string => Number.isFinite(Number(time)))
+      .map((time) => Number(time))
       .sort((a, b) => a - b);
   }, [bars]);
 
@@ -266,7 +417,7 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
     return Math.max(MAX_SNAP_SECONDS, minSpacing);
   }, [sortedBarTimes]);
 
-  const findClosestBarTime = useCallback((targetTime) => {
+  const findClosestBarTime = useCallback((targetTime: number): number | null => {
     if (!Number.isFinite(targetTime)) return null;
     if (!sortedBarTimes.length) return targetTime;
 
@@ -296,24 +447,30 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
     return closest;
   }, [sortedBarTimes, snapToleranceSeconds]);
 
-  const normalizeDecisionMarker = useCallback((marker, index) => {
-    if (!marker) return null;
+  const normalizeDecisionMarker = useCallback(
+    (
+      marker: CandlestickChartMarker | null | undefined,
+      index: number
+    ): CandlestickChartNormalizedMarker | null => {
+      if (!marker) return null;
 
-    const rawTime = toUnixSeconds(marker.time ?? marker.timestamp);
-    if (!Number.isFinite(rawTime)) return null;
+      const rawTime = toUnixSeconds(marker.time ?? marker.timestamp);
+      if (!Number.isFinite(rawTime)) return null;
 
-    const snappedTime = findClosestBarTime(rawTime);
-    if (!Number.isFinite(snappedTime)) return null;
+      const snappedTime = findClosestBarTime(rawTime);
+      if (!Number.isFinite(snappedTime)) return null;
 
-    return {
-      ...marker,
-      id: marker.id || `${marker.marker_type || "marker"}-${snappedTime}-${index}`,
-      time: snappedTime,
-      timestamp: marker.timestamp || toIsoTimestamp(rawTime) || toIsoTimestamp(snappedTime),
-    };
-  }, [findClosestBarTime]);
+      return {
+        ...marker,
+        id: marker.id || `${marker.marker_type || "marker"}-${snappedTime}-${index}`,
+        time: snappedTime,
+        timestamp: marker.timestamp || toIsoTimestamp(rawTime) || toIsoTimestamp(snappedTime),
+      };
+    },
+    [findClosestBarTime]
+  );
 
-  const normalizedIcebergs = useMemo(() => {
+  const normalizedIcebergs = useMemo<CandlestickChartNormalizedMarker[]>(() => {
     return (icebergs || [])
       .map((iceberg, index) => {
         const rawTime = toUnixSeconds(iceberg.time ?? iceberg.timestamp);
@@ -349,13 +506,13 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
           },
         };
       })
-      .filter(Boolean);
+      .filter((marker): marker is CandlestickChartNormalizedMarker => Boolean(marker));
   }, [icebergs, findClosestBarTime]);
 
-  const filteredIcebergMarkers = useMemo(() => {
+  const filteredIcebergMarkers = useMemo<CandlestickChartNormalizedMarker[]>(() => {
     if (!normalizedIcebergs.length) return [];
     const minSize = avgVolume * 0.05;
-    const byTime = new Map();
+    const byTime = new Map<number, CandlestickChartNormalizedMarker>();
 
     normalizedIcebergs
       .filter((iceberg) => Number(iceberg.total_size || 0) > minSize)
@@ -369,10 +526,10 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
     return Array.from(byTime.values());
   }, [normalizedIcebergs, avgVolume]);
 
-  const clickableMarkers = useMemo(() => {
+  const clickableMarkers = useMemo<CandlestickChartNormalizedMarker[]>(() => {
     const decisions = (markers || [])
       .map((marker, index) => normalizeDecisionMarker(marker, index))
-      .filter(Boolean);
+      .filter((marker): marker is CandlestickChartNormalizedMarker => Boolean(marker));
     return [...decisions, ...filteredIcebergMarkers];
   }, [markers, normalizeDecisionMarker, filteredIcebergMarkers]);
 
@@ -404,7 +561,7 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
     }
   }, [chartState]);
 
-  const toCandleDataPoint = useCallback((bar) => {
+  const toCandleDataPoint = useCallback((bar: CandlestickChartBar): CandlestickChartCandlePoint => {
     const time = Number(bar?.time) || 0;
     const open = Number(bar?.open);
     const high = Number(bar?.high);
@@ -422,7 +579,7 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
     return { time, open, high, low, close };
   }, []);
 
-  const toVolumeDataPoint = useCallback((bar) => {
+  const toVolumeDataPoint = useCallback((bar: CandlestickChartBar): CandlestickChartVolumePoint => {
     const time = Number(bar?.time) || 0;
     const open = Number(bar?.open);
     const close = Number(bar?.close);
@@ -445,10 +602,10 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
     };
   }, []);
 
-  const applyFullBarDataset = useCallback((sourceBars) => {
+  const applyFullBarDataset = useCallback((sourceBars: CandlestickChartBar[]) => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
-    const seenTimes = new Set();
+    const seenTimes = new Set<number>();
     const validBars = (sourceBars || []).filter((bar) => {
       const time = Number(bar?.time);
       if (!Number.isFinite(time)) return false;
@@ -518,9 +675,9 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
       if (chartRef.current && !chartState) {
         chartRef.current.timeScale().scrollToPosition(0, false);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Chart data update error:", err);
-      setError(err.message);
+      setError(err instanceof Error ? err.message : "Chart data update error");
       applyFullBarDataset(bars);
     }
   }, [applyFullBarDataset, bars, chartState, toCandleDataPoint, toVolumeDataPoint]);
@@ -619,8 +776,8 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
   useEffect(() => {
     if (!chartRef.current) return;
 
-    const markerTimeMap = new Map();
-    clickableMarkers.forEach((marker) => {
+    const markerTimeMap = new Map<number, CandlestickChartNormalizedMarker[]>();
+    clickableMarkers.forEach((marker: CandlestickChartNormalizedMarker) => {
       const key = Math.floor(Number(marker.time));
       if (!Number.isFinite(key)) return;
       const existing = markerTimeMap.get(key) || [];
@@ -628,7 +785,9 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
       markerTimeMap.set(key, existing);
     });
 
-    const resolveMarkerForClick = (param) => {
+    const resolveMarkerForClick = (
+      param: CandlestickChartClickParam
+    ): CandlestickChartNormalizedMarker | null => {
       const clickedTime = toUnixSeconds(param?.time);
       if (!Number.isFinite(clickedTime)) return null;
 
@@ -652,7 +811,7 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
       }, pricedCandidates[0]);
     };
 
-    const handleClick = (param) => {
+    const handleClick = (param: CandlestickChartClickParam) => {
       setTooltip((prev) => ({ ...prev, visible: false }));
 
       // Always call onBarClick if we have a valid time (for intrabar panel)
@@ -660,7 +819,7 @@ const CandlestickChart = forwardRef(function CandlestickChart({ bars, markers, i
         const barTime = toUnixSeconds(param.time);
         if (Number.isFinite(barTime)) {
           // Find the bar data for this time
-          const bar = bars?.find(b => Math.floor(b.time) === Math.floor(barTime));
+          const bar = bars?.find((b) => Math.floor(Number(b?.time)) === Math.floor(barTime));
           if (bar) {
             onBarClick(bar);
           }

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-24T20:06:45.640690+00:00",
+  "generated_at": "2026-02-25T07:04:00.449064+00:00",
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -616,7 +616,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/system_routes.py",
           "exists": true,
           "lines": 1716,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "fdba1f6 2026-02-25",
           "symbols": [
             {
               "kind": "function",
@@ -2247,8 +2247,8 @@
           "path": "src/models/run_requests.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/models/run_requests.py",
           "exists": true,
-          "lines": 254,
-          "last_commit": "8f49f06 2026-02-23",
+          "lines": 274,
+          "last_commit": "fdba1f6 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -2258,12 +2258,12 @@
             {
               "kind": "class",
               "name": "PrewarmRunRequest",
-              "line": 220
+              "line": 240
             },
             {
               "kind": "class",
               "name": "PlayRequest",
-              "line": 247
+              "line": 267
             }
           ],
           "routes": [],
@@ -3281,7 +3281,7 @@
           "path": "src/services/strategy_api_session_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_session_service.py",
           "exists": true,
-          "lines": 452,
+          "lines": 454,
           "last_commit": "1273b21 2026-02-23",
           "symbols": [
             {
@@ -3302,32 +3302,32 @@
             {
               "kind": "async_function",
               "name": "clear_remote_strategy_sessions",
-              "line": 283
+              "line": 285
             },
             {
               "kind": "async_function",
               "name": "reset_remote_orchestrator_state",
-              "line": 313
+              "line": 315
             },
             {
               "kind": "async_function",
               "name": "reset_remote_orchestrator_state_scoped",
-              "line": 341
+              "line": 343
             },
             {
               "kind": "async_function",
               "name": "apply_orchestrator_config",
-              "line": 361
+              "line": 363
             },
             {
               "kind": "async_function",
               "name": "load_remote_checkpoint",
-              "line": 392
+              "line": 394
             },
             {
               "kind": "async_function",
               "name": "save_remote_checkpoint",
-              "line": 417
+              "line": 419
             }
           ],
           "routes": [],
@@ -3794,8 +3794,8 @@
           "path": "src/services/start_run_execution_config_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_execution_config_service.py",
           "exists": true,
-          "lines": 1552,
-          "last_commit": "1273b21 2026-02-23",
+          "lines": 1696,
+          "last_commit": "fdba1f6 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -3820,72 +3820,72 @@
             {
               "kind": "function",
               "name": "_resolve_strategy_selection",
-              "line": 691
+              "line": 832
             },
             {
               "kind": "function",
               "name": "_resolve_positioning_config",
-              "line": 748
+              "line": 889
             },
             {
               "kind": "function",
               "name": "_resolve_l2_lookback_bars",
-              "line": 766
+              "line": 907
             },
             {
               "kind": "function",
               "name": "_resolve_l2_config",
-              "line": 775
+              "line": 916
             },
             {
               "kind": "function",
               "name": "_resolve_positioning_fields",
-              "line": 849
+              "line": 990
             },
             {
               "kind": "function",
               "name": "_apply_intraday_profile_overrides",
-              "line": 972
-            },
-            {
-              "kind": "function",
-              "name": "_apply_context_risk_profile_overrides",
-              "line": 1056
-            },
-            {
-              "kind": "function",
-              "name": "_parse_clamped_int",
               "line": 1113
             },
             {
               "kind": "function",
+              "name": "_apply_context_risk_profile_overrides",
+              "line": 1197
+            },
+            {
+              "kind": "function",
+              "name": "_parse_clamped_int",
+              "line": 1254
+            },
+            {
+              "kind": "function",
               "name": "_request_fields_set",
-              "line": 1121
+              "line": 1262
             },
             {
               "kind": "function",
               "name": "_resolve_regime_runtime_value",
-              "line": 1131
+              "line": 1272
             },
             {
               "kind": "function",
               "name": "_resolve_runtime_basics",
-              "line": 1162
+              "line": 1303
             },
             {
               "kind": "function",
               "name": "_resolve_runtime_stop_loss",
-              "line": 1199
+              "line": 1340
             },
             {
               "kind": "function",
               "name": "_build_trading_config_payload",
-              "line": 1238
+              "line": 1379
             },
             {
               "kind": "function",
               "name": "resolve_execution_config",
-              "line": 1444
+              "line": 1588
             }
           ],
           "routes": [],
@@ -4044,8 +4044,8 @@
           "path": "src/services/start_run_execution_payload_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_execution_payload_service.py",
           "exists": true,
-          "lines": 924,
-          "last_commit": "8f49f06 2026-02-23",
+          "lines": 930,
+          "last_commit": "fdba1f6 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -4070,42 +4070,42 @@
             {
               "kind": "function",
               "name": "_build_runtime_execution_payload",
-              "line": 405
+              "line": 411
             },
             {
               "kind": "function",
               "name": "_build_intraday_levels_payload",
-              "line": 449
+              "line": 455
             },
             {
               "kind": "function",
               "name": "_build_context_risk_payload",
-              "line": 730
+              "line": 736
             },
             {
               "kind": "function",
               "name": "_resolve_include_extended_hours",
-              "line": 768
+              "line": 774
             },
             {
               "kind": "function",
               "name": "_apply_optional_execution_limits",
-              "line": 782
+              "line": 788
             },
             {
               "kind": "function",
               "name": "_apply_effective_profile_metadata",
-              "line": 810
+              "line": 816
             },
             {
               "kind": "function",
               "name": "_build_l2_applied_payload",
-              "line": 858
+              "line": 864
             },
             {
               "kind": "function",
               "name": "build_execution_payload",
-              "line": 877
+              "line": 883
             }
           ],
           "routes": [],
@@ -4381,7 +4381,7 @@
           "path": "../market_regime_detection/api_server.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/api_server.py",
           "exists": true,
-          "lines": 1248,
+          "lines": 1249,
           "last_commit": "a0fc856 2026-02-23",
           "symbols": [
             {
@@ -4537,47 +4537,47 @@
             {
               "kind": "async_function",
               "name": "reset_orchestrator_state",
-              "line": 990
+              "line": 991
             },
             {
               "kind": "async_function",
               "name": "get_system_health",
-              "line": 1014
+              "line": 1015
             },
             {
               "kind": "async_function",
               "name": "get_orchestrator_config",
-              "line": 1023
+              "line": 1024
             },
             {
               "kind": "async_function",
               "name": "update_orchestrator_config",
-              "line": 1050
+              "line": 1051
             },
             {
               "kind": "async_function",
               "name": "save_checkpoint",
-              "line": 1101
+              "line": 1102
             },
             {
               "kind": "async_function",
               "name": "load_checkpoint_endpoint",
-              "line": 1123
+              "line": 1124
             },
             {
               "kind": "async_function",
               "name": "list_checkpoints",
-              "line": 1138
+              "line": 1139
             },
             {
               "kind": "async_function",
               "name": "warmup_feature_store",
-              "line": 1161
+              "line": 1162
             },
             {
               "kind": "async_function",
               "name": "websocket_endpoint",
-              "line": 1181
+              "line": 1182
             }
           ],
           "routes": [
@@ -4753,55 +4753,55 @@
               "method": "POST",
               "path": "/api/orchestrator/reset",
               "handler": "reset_orchestrator_state",
-              "line": 990
+              "line": 991
             },
             {
               "method": "GET",
               "path": "/api/system/health",
               "handler": "get_system_health",
-              "line": 1014
+              "line": 1015
             },
             {
               "method": "GET",
               "path": "/api/orchestrator/config",
               "handler": "get_orchestrator_config",
-              "line": 1023
+              "line": 1024
             },
             {
               "method": "POST",
               "path": "/api/orchestrator/config",
               "handler": "update_orchestrator_config",
-              "line": 1050
+              "line": 1051
             },
             {
               "method": "POST",
               "path": "/api/orchestrator/checkpoint/save",
               "handler": "save_checkpoint",
-              "line": 1101
+              "line": 1102
             },
             {
               "method": "POST",
               "path": "/api/orchestrator/checkpoint/load",
               "handler": "load_checkpoint_endpoint",
-              "line": 1123
+              "line": 1124
             },
             {
               "method": "GET",
               "path": "/api/orchestrator/checkpoints",
               "handler": "list_checkpoints",
-              "line": 1138
+              "line": 1139
             },
             {
               "method": "POST",
               "path": "/api/orchestrator/warmup",
               "handler": "warmup_feature_store",
-              "line": 1161
+              "line": 1162
             },
             {
               "method": "WEBSOCKET",
               "path": "/ws",
               "handler": "websocket_endpoint",
-              "line": 1181
+              "line": 1182
             }
           ],
           "parse_error": null
@@ -4810,8 +4810,8 @@
           "path": "../market_regime_detection/src/api_models.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/api_models.py",
           "exists": true,
-          "lines": 254,
-          "last_commit": "317bf8c 2026-02-24",
+          "lines": 255,
+          "last_commit": "562a066 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -4851,13 +4851,13 @@
           "path": "../market_regime_detection/src/day_trading_manager.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/day_trading_manager.py",
           "exists": true,
-          "lines": 1543,
+          "lines": 1381,
           "last_commit": "317bf8c 2026-02-24",
           "symbols": [
             {
               "kind": "class",
               "name": "DayTradingManager",
-              "line": 77
+              "line": 90
             }
           ],
           "routes": [],
@@ -4975,7 +4975,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/trading_orchestrator.py",
           "exists": true,
           "lines": 473,
-          "last_commit": "018eb2b 2026-02-24",
+          "last_commit": "562a066 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -4996,7 +4996,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/feature_store.py",
           "exists": true,
           "lines": 691,
-          "last_commit": "018eb2b 2026-02-24",
+          "last_commit": "562a066 2026-02-25",
           "symbols": [
             {
               "kind": "class",
@@ -6043,7 +6043,7 @@
           "path": "frontend/src/App.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/App.tsx",
           "exists": true,
-          "lines": 2704,
+          "lines": 2585,
           "last_commit": "c70aa9e 2026-02-24",
           "symbols": [],
           "routes": [],
@@ -6063,8 +6063,8 @@
           "path": "frontend/src/components/CandlestickChart.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/CandlestickChart.tsx",
           "exists": true,
-          "lines": 851,
-          "last_commit": "1273b21 2026-02-23",
+          "lines": 1010,
+          "last_commit": "fdba1f6 2026-02-25",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6073,7 +6073,7 @@
           "path": "frontend/src/components/DecisionPanel.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/DecisionPanel.tsx",
           "exists": true,
-          "lines": 3085,
+          "lines": 1589,
           "last_commit": "c70aa9e 2026-02-24",
           "symbols": [],
           "routes": [],
@@ -6891,7 +6891,7 @@
       "method": "GET",
       "path": "/api/orchestrator/checkpoints",
       "handler": "list_checkpoints",
-      "line": 1138
+      "line": 1139
     },
     {
       "domain": "strategy-engine",
@@ -6899,7 +6899,7 @@
       "method": "GET",
       "path": "/api/orchestrator/config",
       "handler": "get_orchestrator_config",
-      "line": 1023
+      "line": 1024
     },
     {
       "domain": "strategy-engine",
@@ -6987,7 +6987,7 @@
       "method": "GET",
       "path": "/api/system/health",
       "handler": "get_system_health",
-      "line": 1014
+      "line": 1015
     },
     {
       "domain": "strategy-engine",
@@ -7011,7 +7011,7 @@
       "method": "POST",
       "path": "/api/orchestrator/checkpoint/load",
       "handler": "load_checkpoint_endpoint",
-      "line": 1123
+      "line": 1124
     },
     {
       "domain": "strategy-engine",
@@ -7019,7 +7019,7 @@
       "method": "POST",
       "path": "/api/orchestrator/checkpoint/save",
       "handler": "save_checkpoint",
-      "line": 1101
+      "line": 1102
     },
     {
       "domain": "strategy-engine",
@@ -7027,7 +7027,7 @@
       "method": "POST",
       "path": "/api/orchestrator/config",
       "handler": "update_orchestrator_config",
-      "line": 1050
+      "line": 1051
     },
     {
       "domain": "strategy-engine",
@@ -7035,7 +7035,7 @@
       "method": "POST",
       "path": "/api/orchestrator/reset",
       "handler": "reset_orchestrator_state",
-      "line": 990
+      "line": 991
     },
     {
       "domain": "strategy-engine",
@@ -7043,7 +7043,7 @@
       "method": "POST",
       "path": "/api/orchestrator/warmup",
       "handler": "warmup_feature_store",
-      "line": 1161
+      "line": 1162
     },
     {
       "domain": "strategy-engine",
@@ -7123,7 +7123,7 @@
       "method": "WEBSOCKET",
       "path": "/ws",
       "handler": "websocket_endpoint",
-      "line": 1181
+      "line": 1182
     }
   ]
 }

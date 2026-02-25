@@ -3,14 +3,14 @@
   "name": "backtest-runner",
   "path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner",
   "stats": {
-    "files": 290,
-    "symbols": 2839,
-    "relationships": 12537,
-    "clusters": 75,
-    "flows": 157,
-    "dead_code": 262,
-    "coupled_pairs": 589,
-    "embeddings": 3129
+    "files": 326,
+    "symbols": 2979,
+    "relationships": 12951,
+    "clusters": 81,
+    "flows": 173,
+    "dead_code": 266,
+    "coupled_pairs": 568,
+    "embeddings": 3305
   },
-  "last_indexed_at": "2026-02-24T22:59:39.315793+00:00"
+  "last_indexed_at": "2026-02-25T05:21:13.925863+00:00"
 }

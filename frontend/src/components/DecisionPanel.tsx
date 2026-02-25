@@ -1,36 +1,41 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { toUnixSeconds } from "../utils";
-
-const DECISION_MARKER_TYPES = new Set([
-  'entry_executed',
-  'exit_executed',
-  'stop_loss_hit',
-  'take_profit_hit',
-  'signal_generated',
-  'execution_status',
-  'trailing_stop_updated',
-]);
-const EXIT_MARKER_TYPES = new Set([
-  'exit_executed',
-  'stop_loss_hit',
-  'take_profit_hit',
-  'time_exit',
-]);
-const L2_DIAGNOSTIC_KEYS = [
-  'flow_score',
-  'signed_aggression',
-  'l2_aggression_z',
-  'l2_book_pressure_z',
-  'absorption_rate',
-  'large_trader_activity',
-  'vwap_execution_flow',
-];
+import {
+  extractDecisionLogPayload,
+  extractEntryQualityDiagnostics,
+  extractIntradayLevels,
+  extractL2Diagnostics,
+  extractLevelContext,
+  isObjectRecord,
+  L2_DIAGNOSTIC_KEYS,
+  resolveBreakEven,
+  resolveContextRisk,
+  resolveRiskControls,
+} from "./decision-panel-diagnostics";
+import {
+  DECISION_PANEL_LANGUAGE_STORAGE_KEY,
+  formatGenericValue,
+  formatExitMetrics,
+  formatPrice,
+  formatTime,
+  formatTooltipRuntimeValue,
+  getMarkerIcon,
+  getMarkerIdentity,
+  getMarkerKey,
+  isDecisionMarker,
+  isSameMarker,
+  renderValue,
+  resolveDecisionLanguage,
+  resolvePnlPct,
+  resolveTooltipBaseLabel,
+  toFiniteNumber,
+} from "./decision-panel-utils";
+import DecisionPanelDetailChrome from "./DecisionPanelDetailChrome";
+import DecisionPanelDetailBody from "./DecisionPanelDetailBody";
+import DecisionPanelMarkerList from "./DecisionPanelMarkerList";
+import useDecisionPanelTooltips from "./useDecisionPanelTooltips";
 const DECISION_LIST_INITIAL_ROWS = 320;
 const DECISION_LIST_LOAD_STEP = 320;
-const DEFAULT_ACCOUNT_SIZE = 10_000;
-const DECISION_PANEL_LANGUAGE_STORAGE_KEY = "backtest_runner.decision_panel_language";
-const SUPPORTED_DECISION_LANGUAGES = new Set(["sk", "en"]);
 const COST_LABEL_BY_KEY = {
   slippage: "Slippage",
   commission: "Commission",
@@ -439,579 +444,12 @@ const DECISION_TOOLTIPS = {
   en: {},
 };
 
-const TOOLTIP_BASE_LABEL_ALIASES = {
-  "Strategy (Entry)": "Strategy",
-  "Strategy (Gate)": "Strategy",
-  "Near Tested Levels (Gate)": "Near Tested Levels",
-  "Near Tested Levels (Entry Timing)": "Near Tested Levels",
-  "POC On Trade Side (Gate)": "POC On Trade Side",
-  "POC On Trade Side (Entry Timing)": "POC On Trade Side",
-  "VWAP Execution Flow (L2 Diagnostics)": "VWAP Execution Flow",
-  "VWAP Execution Flow (Decision Log)": "VWAP Execution Flow",
-};
-
-const resolveTooltipBaseLabel = (label) => {
-  const normalized = String(label || "").trim();
-  if (!normalized) return "";
-  const aliased = TOOLTIP_BASE_LABEL_ALIASES[normalized];
-  if (aliased) return aliased;
-  return normalized.replace(/\s+\([^)]*\)\s*$/, "");
-};
-
-const formatTooltipRuntimeValue = (value) => {
-  if (value === null || value === undefined) return "n/a";
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return "n/a";
-    if (Math.abs(value) >= 1000) return value.toLocaleString("en-US", { maximumFractionDigits: 6 });
-    return Number.isInteger(value) ? String(value) : value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
-  }
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (Array.isArray(value)) {
-    if (!value.length) return "[]";
-    return value.map((item) => formatTooltipRuntimeValue(item)).join(", ");
-  }
-  if (typeof value === "object") {
-    const entries = Object.entries(value);
-    if (!entries.length) return "{}";
-    return entries
-      .slice(0, 8)
-      .map(([key, item]) => `${key}: ${formatTooltipRuntimeValue(item)}`)
-      .join(" | ");
-  }
-  return String(value);
-};
-
-const resolveDecisionLanguage = () => {
-  if (typeof window === "undefined") return "sk";
-  const stored = String(
-    window.localStorage.getItem(DECISION_PANEL_LANGUAGE_STORAGE_KEY) || "",
-  ).trim().toLowerCase();
-  if (SUPPORTED_DECISION_LANGUAGES.has(stored)) return stored;
-  return "sk";
-};
-
-const isDecisionMarker = (marker) => DECISION_MARKER_TYPES.has(marker?.marker_type);
-
-
-const formatGenericValue = (value) => {
-  if (value === null || value === undefined) return 'n/a';
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return 'n/a';
-    return Number.isInteger(value) ? String(value) : value.toFixed(4);
-  }
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (Array.isArray(value)) {
-    if (!value.length) return '[]';
-    return value.map((item) => {
-      if (typeof item === 'object' && item !== null) return JSON.stringify(item);
-      return String(item);
-    }).join(', ');
-  }
-  if (typeof value === 'object') {
-    const entries = Object.entries(value);
-    if (!entries.length) return '{}';
-    return entries
-      .slice(0, 10)
-      .map(([k, v]) => `${k}: ${formatGenericValue(v)}`)
-      .join(' | ');
-  }
-  return String(value);
-};
-
-// Recursive function to render values (from ChartTooltip)
-const renderValue = (val, keyPrefix = '') => {
-  if (val === null || val === undefined) return 'N/A';
-  
-  if (typeof val === 'object' && !Array.isArray(val)) {
-    if (Object.keys(val).length === 0) return '{}';
-    
-    return (
-      <div className="object-container" style={{ marginLeft: '10px', borderLeft: '2px solid rgba(15, 23, 42, 0.1)', paddingLeft: '8px' }}>
-        {Object.entries(val).map(([k, v]) => (
-          <div key={`${keyPrefix}-${k}`} className="object-row" style={{ marginTop: '4px' }}>
-            <span className="object-key" style={{ fontWeight: 500, color: 'var(--text-secondary)', fontSize: '0.85em' }}>{k}:</span>
-            <div className="nested-object">
-              {renderValue(v, `${keyPrefix}-${k}`)}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
-  
-  if (Array.isArray(val)) {
-    if (val.length === 0) return '[]';
-    return (
-      <div className="object-container" style={{ marginLeft: '10px', borderLeft: '2px solid rgba(15, 23, 42, 0.1)', paddingLeft: '8px' }}>
-        {val.map((v, i) => (
-           <div key={`${keyPrefix}-${i}`} className="object-row" style={{ marginTop: '4px' }}>
-            <span className="object-key" style={{ fontWeight: 500, color: 'var(--text-secondary)', fontSize: '0.85em' }}>[{i}]:</span>
-             <div className="nested-object">
-               {renderValue(v, `${keyPrefix}-${i}`)}
-             </div>
-           </div>
-        ))}
-      </div>
-    );
-  }
-  
-  if (typeof val === 'number') {
-    return <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9em' }}>{Math.abs(val) < 0.01 ? val.toFixed(6) : val.toFixed(4)}</span>;
-  }
-  
-  return <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9em' }}>{String(val)}</span>;
-};
-
-const toFiniteNumber = (value) => {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-};
-
-const resolvePnlPct = (details, pnlDollars) => {
-  const explicitPct = toFiniteNumber(details?.pnl_pct);
-  if (explicitPct !== null) return explicitPct;
-
-  const dollars = Number(pnlDollars);
-  if (!Number.isFinite(dollars)) return null;
-
-  const notional = toFiniteNumber(details?.position_notional_usd);
-  if (notional !== null && notional > 0) {
-    return (dollars / notional) * 100;
-  }
-
-  return (dollars / DEFAULT_ACCOUNT_SIZE) * 100;
-};
-
-const isObjectRecord = (value) =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
-const getL2MetricFromSource = (source, metricKey) => {
-  if (!isObjectRecord(source)) return null;
-  const direct = toFiniteNumber(source[metricKey]);
-  if (direct !== null) return direct;
-  const prefixed = toFiniteNumber(source[`l2_${metricKey}`]);
-  if (prefixed !== null) return prefixed;
-  return null;
-};
-
-const getBooleanMetricFromSource = (source, metricKey) => {
-  if (!isObjectRecord(source)) return null;
-  const direct = source[metricKey];
-  if (typeof direct === "boolean") return direct;
-  const prefixed = source[`l2_${metricKey}`];
-  if (typeof prefixed === "boolean") return prefixed;
-  return null;
-};
-
-const normalizeL2SourceSnapshot = (source) => {
-  if (!isObjectRecord(source)) return null;
-  const normalized = { ...source };
-  L2_DIAGNOSTIC_KEYS.forEach((metricKey) => {
-    if (normalized[metricKey] == null) {
-      const resolved = getL2MetricFromSource(source, metricKey);
-      if (resolved !== null) {
-        normalized[metricKey] = resolved;
-      }
-    }
-  });
-  if (normalized.sweep_detected == null) {
-    const sweepDetected = getBooleanMetricFromSource(source, "sweep_detected");
-    if (sweepDetected !== null) {
-      normalized.sweep_detected = sweepDetected;
-    }
-  }
-  return normalized;
-};
-
-const buildRiskControlsCandidates = ({ details, signalMetadata, marketContext }) => {
-  const detailMetadata = isObjectRecord(details?.metadata) ? details.metadata : null;
-  return [
-    { path: "details.metadata.risk_controls", value: detailMetadata?.risk_controls },
-    { path: "details.risk_controls", value: details?.risk_controls },
-    {
-      path: "details.entry_quality_diagnostics.risk_controls",
-      value: details?.entry_quality_diagnostics?.risk_controls,
-    },
-    { path: "details.signal_metadata.risk_controls", value: details?.signal_metadata?.risk_controls },
-    { path: "signal_metadata.risk_controls", value: signalMetadata?.risk_controls },
-    { path: "market_context.risk_controls", value: marketContext?.risk_controls },
-  ];
-};
-
-const resolveRiskControls = (params) => {
-  const candidates = buildRiskControlsCandidates(params);
-  const selected = candidates.find((candidate) => isObjectRecord(candidate.value));
-  return {
-    value: selected?.value || null,
-    sourcePath: selected?.path || "n/a",
-    candidates,
-  };
-};
-
-const buildContextRiskCandidates = ({ details, signalMetadata, marketContext, riskControls }) => {
-  const detailMetadata = isObjectRecord(details?.metadata) ? details.metadata : null;
-  return [
-    { path: "details.context_risk", value: details?.context_risk },
-    { path: "details.metadata.context_risk", value: detailMetadata?.context_risk },
-    {
-      path: "details.metadata.risk_controls.context_risk",
-      value: detailMetadata?.risk_controls?.context_risk,
-    },
-    { path: "details.risk_controls.context_risk", value: details?.risk_controls?.context_risk },
-    {
-      path: "details.entry_quality_diagnostics.risk_controls.context_risk",
-      value: details?.entry_quality_diagnostics?.risk_controls?.context_risk,
-    },
-    {
-      path: "details.signal_metadata.risk_controls.context_risk",
-      value: details?.signal_metadata?.risk_controls?.context_risk,
-    },
-    { path: "signal_metadata.risk_controls.context_risk", value: signalMetadata?.risk_controls?.context_risk },
-    { path: "market_context.risk_controls.context_risk", value: marketContext?.risk_controls?.context_risk },
-    { path: "resolved_risk_controls.context_risk", value: riskControls?.context_risk },
-  ];
-};
-
-const resolveContextRisk = (params) => {
-  const candidates = buildContextRiskCandidates(params);
-  const selected = candidates.find((candidate) => isObjectRecord(candidate.value));
-  return {
-    value: selected?.value || null,
-    sourcePath: selected?.path || "n/a",
-    candidates,
-  };
-};
-
-const buildBreakEvenCandidates = ({ details, signalMetadata, marketContext }) => [
-  { path: "details.break_even", value: details?.break_even },
-  {
-    path: "details.signal_metadata.break_even",
-    value: details?.signal_metadata?.break_even,
-  },
-  {
-    path: "details.entry_quality_diagnostics.break_even",
-    value: details?.entry_quality_diagnostics?.break_even,
-  },
-  { path: "details.market_context.break_even", value: details?.market_context?.break_even },
-  { path: "signal_metadata.break_even", value: signalMetadata?.break_even },
-  { path: "market_context.break_even", value: marketContext?.break_even },
-];
-
-const resolveBreakEven = (params) => {
-  const candidates = buildBreakEvenCandidates(params);
-  const selected = candidates.find((candidate) => isObjectRecord(candidate.value));
-  return {
-    value: selected?.value || null,
-    sourcePath: selected?.path || "n/a",
-    candidates,
-  };
-};
-
-const buildL2CandidateSources = (marker, details, metadata) => {
-  const markerType = String(marker?.marker_type || '').trim();
-  const detailMetadata = isObjectRecord(details?.metadata) ? details.metadata : null;
-  const signalMetadata = isObjectRecord(details?.signal_metadata) ? details.signal_metadata : null;
-  const metadataContext = isObjectRecord(metadata) ? metadata : null;
-  const marketL2 = isObjectRecord(details?.market_context?.l2) ? details.market_context.l2 : null;
-
-  const candidates = [];
-  const pushCandidate = (sourcePath, source) => {
-    if (!isObjectRecord(source)) return;
-    candidates.push({ sourcePath, source });
-  };
-
-  if (markerType === 'entry_executed') {
-    pushCandidate('details.metadata.order_flow', detailMetadata?.order_flow ?? metadataContext?.order_flow);
-    pushCandidate('details.signal_metadata.order_flow', signalMetadata?.order_flow);
-    pushCandidate('details.flow_snapshot', details?.flow_snapshot);
-  } else if (markerType === 'signal_generated') {
-    pushCandidate('details.flow_snapshot', details?.flow_snapshot);
-    pushCandidate('details.signal_metadata.order_flow', signalMetadata?.order_flow);
-    pushCandidate('details.metadata.order_flow', detailMetadata?.order_flow ?? metadataContext?.order_flow);
-  } else if (EXIT_MARKER_TYPES.has(markerType)) {
-    pushCandidate('details.signal_metadata.order_flow', signalMetadata?.order_flow);
-    pushCandidate('details.flow_snapshot', details?.flow_snapshot);
-    pushCandidate('details.metadata.order_flow', detailMetadata?.order_flow ?? metadataContext?.order_flow);
-  } else {
-    pushCandidate('details.flow_snapshot', details?.flow_snapshot);
-    pushCandidate('details.signal_metadata.order_flow', signalMetadata?.order_flow);
-    pushCandidate('details.metadata.order_flow', detailMetadata?.order_flow ?? metadataContext?.order_flow);
-  }
-
-  pushCandidate('details.order_flow', details?.order_flow);
-  pushCandidate('marker.order_flow', marker?.order_flow);
-  pushCandidate('details.market_context.l2', marketL2);
-
-  return candidates;
-};
-
-const resolveL2Source = (marker, details, metadata) => {
-  const candidates = buildL2CandidateSources(marker, details, metadata);
-  const candidateDiagnostics = candidates.map(({ sourcePath, source }) => {
-    const availableMetrics = L2_DIAGNOSTIC_KEYS.filter(
-      (metricKey) => getL2MetricFromSource(source, metricKey) !== null,
-    );
-    return {
-      sourcePath,
-      score: availableMetrics.length,
-      availableMetrics,
-    };
-  });
-  let best = null;
-
-  for (let idx = 0; idx < candidates.length; idx += 1) {
-    const candidate = candidates[idx];
-    const score = candidateDiagnostics[idx]?.score || 0;
-    if (score <= 0) continue;
-    if (!best || score > best.score) {
-      best = { ...candidate, score, candidateIndex: idx };
-    }
-  }
-
-  if (!best) {
-    return {
-      source: null,
-      sourcePath: 'n/a',
-      candidateDiagnostics,
-    };
-  }
-
-  return {
-    source: best.source,
-    sourcePath: best.sourcePath,
-    candidateDiagnostics,
-  };
-};
-
-const extractL2Diagnostics = (marker, details, metadata) => {
-  const { source, sourcePath, candidateDiagnostics } = resolveL2Source(marker, details, metadata);
-
-  const flowScore = getL2MetricFromSource(source, 'flow_score');
-  const signedAggression = getL2MetricFromSource(source, 'signed_aggression');
-  const l2AggressionZ = getL2MetricFromSource(source, 'l2_aggression_z');
-  const l2BookPressureZ = getL2MetricFromSource(source, 'l2_book_pressure_z');
-  const absorptionRate = getL2MetricFromSource(source, 'absorption_rate');
-  const largeTraderActivity = getL2MetricFromSource(source, 'large_trader_activity');
-  const vwapExecutionFlow = getL2MetricFromSource(source, 'vwap_execution_flow');
-  const detailMetadata = isObjectRecord(details?.metadata) ? details.metadata : null;
-  const signalMetadata = isObjectRecord(details?.signal_metadata) ? details.signal_metadata : null;
-  const sweepDetected =
-    getBooleanMetricFromSource(source, 'sweep_detected') ??
-    (typeof details?.sweep_detected === "boolean" ? details.sweep_detected : null) ??
-    (typeof detailMetadata?.sweep_detected === "boolean" ? detailMetadata.sweep_detected : null) ??
-    (typeof signalMetadata?.sweep_detected === "boolean" ? signalMetadata.sweep_detected : null) ??
-    (typeof detailMetadata?.sweep_triggered === "boolean" ? detailMetadata.sweep_triggered : null);
-
-  const hasAny = [
-    flowScore,
-    signedAggression,
-    l2AggressionZ,
-    l2BookPressureZ,
-    absorptionRate,
-    largeTraderActivity,
-    vwapExecutionFlow,
-  ].some((value) => value !== null) || sweepDetected !== null;
-
-  return {
-    hasAny,
-    flowScore,
-    signedAggression,
-    l2AggressionZ,
-    l2BookPressureZ,
-    absorptionRate,
-    largeTraderActivity,
-    vwapExecutionFlow,
-    sweepDetected,
-    sourcePath,
-    candidateDiagnostics,
-  };
-};
-
-const extractIntradayLevels = (marker, details, metadata) => {
-  const candidates = [
-    details?.intraday_levels,
-    details?.metadata?.intraday_levels,
-    details?.indicators?.intraday_levels,
-    metadata?.intraday_levels,
-    marker?.intraday_levels,
-  ];
-  const payload = candidates.find(
-    (candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate),
-  );
-  if (!payload) {
-    return { hasAny: false, enabled: true, stats: {}, volumeProfile: {}, latestEvent: null };
-  }
-  const stats =
-    payload.stats && typeof payload.stats === "object" && !Array.isArray(payload.stats)
-      ? payload.stats
-      : {};
-  const volumeProfile =
-    payload.volume_profile &&
-    typeof payload.volume_profile === "object" &&
-    !Array.isArray(payload.volume_profile)
-      ? payload.volume_profile
-      : {};
-  const latestEvent =
-    payload.latest_event && typeof payload.latest_event === "object" ? payload.latest_event : null;
-  return {
-    hasAny: true,
-    enabled: payload.enabled !== false,
-    stats,
-    volumeProfile,
-    latestEvent,
-  };
-};
-
-const extractLevelContext = (marker, details, metadata) => {
-  const candidates = [
-    details?.level_context,
-    details?.metadata?.level_context,
-    details?.signal_metadata?.level_context,
-    metadata?.level_context,
-    marker?.level_context,
-  ];
-  const payload = candidates.find(
-    (candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate),
-  );
-  if (!payload) {
-    return { hasAny: false, payload: {}, checks: {}, reasons: [] };
-  }
-  const checks =
-    payload.checks && typeof payload.checks === "object" && !Array.isArray(payload.checks)
-      ? payload.checks
-      : {};
-  const reasons = Array.isArray(payload.reasons)
-    ? payload.reasons.map((item) => String(item || "")).filter(Boolean)
-    : [];
-  return {
-    hasAny: true,
-    payload,
-    checks,
-    reasons,
-  };
-};
-
-const extractEntryQualityDiagnostics = (marker, details, metadata) => {
-  const candidates = [
-    details?.entry_quality_diagnostics,
-    details?.metadata?.entry_quality_diagnostics,
-    metadata?.entry_quality_diagnostics,
-    marker?.entry_quality_diagnostics,
-  ];
-  const payload = candidates.find(
-    (candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate),
-  );
-  if (!payload) {
-    return { hasAny: false, payload: {}, tags: [] };
-  }
-  const tags = Array.isArray(payload.first_bar_stop_tags)
-    ? payload.first_bar_stop_tags.map((item) => String(item || "")).filter(Boolean)
-    : [];
-  return {
-    hasAny: true,
-    payload,
-    tags,
-  };
-};
-
-const extractDecisionLogPayload = (marker, details, metadata) => {
-  const markerType = String(marker?.marker_type || '').trim();
-  const marketContext =
-    details?.market_context && typeof details.market_context === "object" ? details.market_context : null;
-  const signalMetadata =
-    markerType === 'entry_executed'
-      ? details?.metadata && typeof details.metadata === "object"
-        ? details.metadata
-        : null
-      : details?.signal_metadata && typeof details.signal_metadata === "object"
-        ? details.signal_metadata
-        : null;
-  const levelContext =
-    details?.level_context && typeof details.level_context === "object"
-      ? details.level_context
-      : signalMetadata?.level_context && typeof signalMetadata.level_context === "object"
-        ? signalMetadata.level_context
-        : null;
-  const intradayLevels =
-    details?.intraday_levels && typeof details.intraday_levels === "object"
-      ? details.intraday_levels
-      : signalMetadata?.intraday_levels && typeof signalMetadata.intraday_levels === "object"
-        ? signalMetadata.intraday_levels
-        : null;
-  const flowSnapshot = normalizeL2SourceSnapshot(
-    resolveL2Source(marker, details, signalMetadata).source,
-  );
-  const entryQualityDiagnostics =
-    details?.entry_quality_diagnostics && typeof details.entry_quality_diagnostics === "object"
-      ? details.entry_quality_diagnostics
-      : null;
-  const riskControlsResolution = resolveRiskControls({
-    details,
-    signalMetadata,
-    marketContext,
-  });
-  const contextRiskResolution = resolveContextRisk({
-    details,
-    signalMetadata,
-    marketContext,
-    riskControls: riskControlsResolution.value,
-  });
-  const breakEvenResolution = resolveBreakEven({
-    details,
-    signalMetadata,
-    marketContext,
-  });
-  const decisionState =
-    marketContext?.decision_state && typeof marketContext.decision_state === "object"
-      ? marketContext.decision_state
-      : null;
-
-  const payload = {
-    marker_meta: {
-      id: marker?.id ?? null,
-      marker_type: marker?.marker_type ?? null,
-      timestamp: marker?.timestamp ?? marker?.time ?? null,
-      title: marker?.title ?? null,
-      description: marker?.description ?? null,
-      side: marker?.side ?? null,
-      strategy: marker?.strategy ?? null,
-      price: marker?.price ?? null,
-      confidence: marker?.confidence ?? null,
-    },
-    decision_state: decisionState,
-    signal_metadata: signalMetadata,
-    level_context: levelContext,
-    intraday_levels: intradayLevels,
-    flow_snapshot: flowSnapshot,
-    market_context: marketContext,
-    entry_quality_diagnostics: entryQualityDiagnostics,
-    risk_controls: riskControlsResolution.value,
-    context_risk: contextRiskResolution.value,
-    context_risk_source_path: contextRiskResolution.sourcePath,
-    context_risk_candidates: contextRiskResolution.candidates,
-    break_even: breakEvenResolution.value,
-    break_even_source_path: breakEvenResolution.sourcePath,
-    break_even_candidates: breakEvenResolution.candidates,
-    risk_controls_source_path: riskControlsResolution.sourcePath,
-    risk_controls_candidates: riskControlsResolution.candidates,
-    metadata,
-    details,
-  };
-
-  const hasAny = Object.values(payload).some((value) => value != null);
-  return {
-    hasAny,
-    payload,
-  };
-};
-
 function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
   const [detailTab, setDetailTab] = useState('details');
   const [listTab, setListTab] = useState('decisions');
   const [visibleRows, setVisibleRows] = useState(DECISION_LIST_INITIAL_ROWS);
   const [isDetailFullscreen, setIsDetailFullscreen] = useState(false);
   const [uiLanguage, setUiLanguage] = useState(resolveDecisionLanguage);
-  const [activeHelpTooltip, setActiveHelpTooltip] = useState(null);
   const [portalDocument, setPortalDocument] = useState(
     typeof document !== "undefined" ? document : null,
   );
@@ -1052,52 +490,6 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
   ]);
 
   useEffect(() => {
-    setActiveHelpTooltip(null);
-  }, [
-    selectedMarker?.id,
-    selectedMarker?.timestamp,
-    selectedMarker?.time,
-    detailTab,
-    uiLanguage,
-    isDetailFullscreen,
-  ]);
-
-  useEffect(() => {
-    if (!activeHelpTooltip) return undefined;
-    if (!portalWindow) return undefined;
-    const clearTooltip = () => setActiveHelpTooltip(null);
-    portalWindow.addEventListener("scroll", clearTooltip, true);
-    portalWindow.addEventListener("resize", clearTooltip);
-    return () => {
-      portalWindow.removeEventListener("scroll", clearTooltip, true);
-      portalWindow.removeEventListener("resize", clearTooltip);
-    };
-  }, [activeHelpTooltip, portalWindow]);
-
-  useEffect(() => {
-    if (!activeHelpTooltip?.pinned) return undefined;
-    if (!portalWindow) return undefined;
-    const handlePointerDown = (event) => {
-      const target = event.target;
-      const ElementCtor = portalWindow?.Element;
-      if (
-        ElementCtor &&
-        target instanceof ElementCtor &&
-        (
-          target.closest(".detail-label-help") ||
-          target.closest(".detail-label-trigger") ||
-          target.closest(".decision-help-inline")
-        )
-      ) {
-        return;
-      }
-      setActiveHelpTooltip(null);
-    };
-    portalWindow.addEventListener("pointerdown", handlePointerDown, true);
-    return () => portalWindow.removeEventListener("pointerdown", handlePointerDown, true);
-  }, [activeHelpTooltip?.pinned, portalWindow]);
-
-  useEffect(() => {
     if (!isDetailFullscreen) return undefined;
     if (!portalDocument || !portalWindow) return undefined;
     const previousOverflow = portalDocument.body.style.overflow;
@@ -1123,76 +515,6 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
     setVisibleRows(DECISION_LIST_INITIAL_ROWS);
   }, [listTab]);
 
-  // Format time
-  const formatTime = (timestamp) => {
-    if (!timestamp) return 'N/A';
-    const date = new Date(timestamp);
-    if (Number.isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false 
-    });
-  };
-
-  const formatPrice = (value) => {
-    const number = Number(value);
-    return Number.isFinite(number) ? `$${number.toFixed(2)}` : 'N/A';
-  };
-
-  const getMarkerIdentity = (marker) => {
-    if (!marker) return '';
-    if (marker.id) return `id:${marker.id}`;
-    return [
-      marker.marker_type || 'marker',
-      marker.timestamp || marker.time || 'na',
-      marker.price ?? 'na',
-      marker.side || 'na',
-    ].join('|');
-  };
-
-  const getMarkerKey = (marker, idx = 0) => {
-    return marker.id || `${marker.marker_type || 'marker'}-${marker.timestamp || marker.time || 'na'}-${idx}`;
-  };
-
-  const isSameMarker = (a, b) => {
-    if (!a || !b) return false;
-    if (a.id && b.id && a.id === b.id) return true;
-    return (
-      String(a.marker_type || '') === String(b.marker_type || '') &&
-      String(a.timestamp || '') === String(b.timestamp || '') &&
-      String(a.time || '') === String(b.time || '') &&
-      Number(a.price ?? NaN) === Number(b.price ?? NaN)
-    );
-  };
-  
-  // Get marker icon (context-aware: TP with net loss shows red)
-  const getMarkerIcon = (marker) => {
-    const markerType = marker.marker_type;
-    const markerPnlUsd = marker?.details?.pnl_usd ?? marker?.details?.pnl_dollars;
-    const markerPnlPct = resolvePnlPct(marker?.details, markerPnlUsd);
-    // If take-profit but after costs it's a loss, show red icon
-    if (markerType === 'take_profit_hit' && markerPnlPct !== null && markerPnlPct <= 0) {
-      return '🔴';
-    }
-    const icons = {
-      regime_detected: '🎯',
-      strategy_selected: '📋',
-      signal_generated: '📊',
-      execution_status: '⏳',
-      entry_executed: '🟢',
-      exit_executed: '⚪',
-      stop_loss_hit: '🔴',
-      take_profit_hit: '💰',
-      iceberg_detected: '❄️',
-      trailing_stop_updated: '📍',
-      session_started: '🏁',
-      session_ended: '🏆',
-    };
-    return icons[markerType] || '📌';
-  };
-
   const renderTitle = (marker) => {
     const markerPnlUsd = marker?.details?.pnl_usd ?? marker?.details?.pnl_dollars;
     const markerPnlPct = resolvePnlPct(marker?.details, markerPnlUsd);
@@ -1200,34 +522,6 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
       return `${marker.title || t("Take Profit")} (${t("net loss")})`;
     }
     return marker.title || marker.marker_type || t("Decision");
-  };
-
-  const formatExitMetrics = (marker) => {
-    if (!['exit_executed', 'stop_loss_hit', 'take_profit_hit'].includes(marker.marker_type)) {
-      return null;
-    }
-    const details = marker.details || {};
-    const pnlUsd = details.pnl_usd ?? details.pnl_dollars;
-    const pnlPct = resolvePnlPct(details, pnlUsd);
-    const costUsd = details.cost_usd ?? details.costs?.total;
-    const costPct = details.cost_pct;
-    const barsHeld = details.bars_held;
-
-    const parts = [];
-    if (pnlPct != null || pnlUsd != null) {
-      const pctText = pnlPct != null ? `${pnlPct >= 0 ? '+' : ''}${Number(pnlPct).toFixed(2)}%` : "n/a";
-      const usdText = pnlUsd != null ? `${Number(pnlUsd) >= 0 ? '+' : ''}$${Number(pnlUsd).toFixed(2)}` : "n/a";
-      parts.push(`PnL: ${pctText} (${usdText})`);
-    }
-    if (costUsd != null) {
-      const costUsdText = `$${Number(costUsd).toFixed(2)}`;
-      const costPctText = costPct != null ? ` (${Number(costPct).toFixed(2)}%)` : '';
-      parts.push(`Costs: ${costUsdText}${costPctText}`);
-    }
-    if (barsHeld != null) {
-      parts.push(`Held: ${Number(barsHeld)}`);
-    }
-    return parts.length ? parts.join(" | ") : null;
   };
 
   const decisionMarkers = useMemo(
@@ -1317,10 +611,6 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
     );
   }
 
-  const selectedEventTime = toUnixSeconds(selectedMarker?.time ?? selectedMarker?.timestamp);
-  const selectedTicker = selectedMarker?.ticker ?? selectedMarker?.details?.ticker;
-  const selectedRunId = selectedMarker?.run_id ?? selectedMarker?.details?.run_id;
-  
   // Prepare metadata for rendering
   const details = selectedMarker?.details || {};
   const metadata = details.metadata || {};
@@ -2148,161 +1438,23 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
   );
   setRuntimeTooltip("Complete Decision Payload", "JSON payload", "decisionLog.payload");
 
-  const runtimeTooltipFor = (label) => {
-    const runtime =
-      runtimeTooltipByLabel[label] ??
-      runtimeTooltipByLabel[resolveTooltipBaseLabel(label)] ??
-      null;
-    if (!runtime) return "";
-    const lines = [];
-    lines.push(`${tooltipLocaleText.value}: ${formatTooltipRuntimeValue(runtime.value)}`);
-    if (runtime.source) {
-      lines.push(`${tooltipLocaleText.source}: ${runtime.source}`);
-    }
-    runtime.flow.forEach((line) => lines.push(line));
-    return lines.join("\n");
-  };
-  const tooltipFor = (label) => {
-    const base = baseTooltipFor(label);
-    const runtime = runtimeTooltipFor(label);
-    return [base, runtime].filter((part) => String(part || "").trim()).join("\n\n");
-  };
-  const resolveHelpTooltipPosition = (anchorRect, viewportWindow = portalWindow) => {
-    if (!viewportWindow) {
-      return {
-        top: anchorRect.bottom + 10,
-        left: anchorRect.left,
-        maxWidth: 520,
-        placeAbove: false,
-      };
-    }
-    const viewportWidth = Math.max(viewportWindow.innerWidth || 0, 320);
-    const viewportHeight = Math.max(viewportWindow.innerHeight || 0, 320);
-    const maxWidth = Math.min(520, Math.max(280, viewportWidth - 24));
-    const horizontalPadding = 12;
-    const idealLeft = anchorRect.left + (anchorRect.width / 2) - (maxWidth / 2);
-    const left = Math.min(
-      Math.max(horizontalPadding, idealLeft),
-      Math.max(horizontalPadding, viewportWidth - maxWidth - horizontalPadding),
-    );
-    const placeAbove = anchorRect.bottom > viewportHeight * 0.72;
-    const top = placeAbove ? Math.max(10, anchorRect.top - 10) : (anchorRect.bottom + 10);
-    return { top, left, maxWidth, placeAbove };
-  };
-  const showHelpTooltip = (event, tooltipText, pinned = false) => {
-    const text = String(tooltipText || "").trim();
-    if (!text) return;
-    const anchorRect = event.currentTarget.getBoundingClientRect();
-    const anchorWindow = event.currentTarget?.ownerDocument?.defaultView || portalWindow;
-    setActiveHelpTooltip({
-      ...resolveHelpTooltipPosition(anchorRect, anchorWindow),
-      text,
-      pinned,
-    });
-  };
-  const hideHelpTooltip = () => {
-    setActiveHelpTooltip((previous) => (previous?.pinned ? previous : null));
-  };
-  const togglePinnedHelpTooltip = (event, tooltipText) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const text = String(tooltipText || "").trim();
-    if (!text) return;
-    const ElementCtor = portalWindow?.Element || (typeof Element !== "undefined" ? Element : null);
-    const anchorElement =
-      ElementCtor && event.currentTarget instanceof ElementCtor ? event.currentTarget : null;
-    const anchorWindow = anchorElement?.ownerDocument?.defaultView || portalWindow;
-    const nextPosition = anchorElement
-      ? resolveHelpTooltipPosition(anchorElement.getBoundingClientRect(), anchorWindow)
-      : { top: 12, left: 12, maxWidth: 420, placeAbove: false };
-    setActiveHelpTooltip((previous) => {
-      if (previous?.pinned && previous?.text === text) {
-        return null;
-      }
-      return {
-        ...nextPosition,
-        text,
-        pinned: true,
-      };
-    });
-  };
-  const renderDetailLabel = (label, tooltipLabelOrOptions = label, style = undefined) => {
-    const optionsObject =
-      tooltipLabelOrOptions &&
-      typeof tooltipLabelOrOptions === "object" &&
-      !Array.isArray(tooltipLabelOrOptions)
-        ? tooltipLabelOrOptions
-        : null;
-    const tooltipLabel = optionsObject
-      ? optionsObject.tooltipLabel || label
-      : (tooltipLabelOrOptions || label);
-    const effectiveStyle = optionsObject ? optionsObject.style : style;
-    const runtimeOverride = optionsObject
-      ? {
-          value: optionsObject.runtimeValue,
-          source: optionsObject.runtimeSource,
-          flow: Array.isArray(optionsObject.runtimeFlow)
-            ? optionsObject.runtimeFlow
-            : [optionsObject.runtimeFlow].filter(Boolean),
-        }
-      : null;
-    const tooltipText = runtimeOverride
-      ? [
-          baseTooltipFor(tooltipLabel),
-          `${tooltipLocaleText.value}: ${formatTooltipRuntimeValue(runtimeOverride.value)}`,
-          runtimeOverride.source ? `${tooltipLocaleText.source}: ${runtimeOverride.source}` : "",
-          ...(runtimeOverride.flow || []),
-        ]
-          .filter((part) => String(part || "").trim())
-          .join("\n\n")
-      : tooltipFor(tooltipLabel);
-    return (
-      <span className="detail-label-with-tooltip">
-        <button
-          type="button"
-          className="detail-label-trigger"
-          aria-label={tooltipText}
-          style={effectiveStyle}
-          onMouseEnter={(event) => showHelpTooltip(event, tooltipText, false)}
-          onMouseLeave={hideHelpTooltip}
-          onFocus={(event) => showHelpTooltip(event, tooltipText, false)}
-          onBlur={hideHelpTooltip}
-          onClick={(event) => togglePinnedHelpTooltip(event, tooltipText)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              togglePinnedHelpTooltip(event, tooltipText);
-            }
-            if (event.key === "Escape") {
-              setActiveHelpTooltip(null);
-            }
-          }}
-        >
-          {t(label)}
-        </button>
-        <button
-          type="button"
-          className="detail-label-help"
-          aria-label={tooltipText}
-          aria-expanded={Boolean(activeHelpTooltip && activeHelpTooltip.text === tooltipText)}
-          onMouseEnter={(event) => showHelpTooltip(event, tooltipText, false)}
-          onMouseLeave={hideHelpTooltip}
-          onFocus={(event) => showHelpTooltip(event, tooltipText, false)}
-          onBlur={hideHelpTooltip}
-          onClick={(event) => togglePinnedHelpTooltip(event, tooltipText)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              togglePinnedHelpTooltip(event, tooltipText);
-            }
-            if (event.key === "Escape") {
-              setActiveHelpTooltip(null);
-            }
-          }}
-        >
-          i
-        </button>
-      </span>
-    );
-  };
+  const {
+    activeHelpTooltip,
+    setActiveHelpTooltip,
+    renderDetailLabel,
+  } = useDecisionPanelTooltips({
+    portalWindow,
+    runtimeTooltipByLabel,
+    resolveTooltipBaseLabel,
+    formatTooltipRuntimeValue,
+    tooltipLocaleText,
+    baseTooltipFor,
+    t,
+    selectedMarker,
+    detailTab,
+    uiLanguage,
+    isDetailFullscreen,
+  });
   
   // Helper to render sections
   const renderSectionHeader = (title) => (
@@ -2320,593 +1472,50 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
         }
       }}
     >
-      <div className="decision-detail-header">
-        <h4>
-          {getMarkerIcon(selectedMarker)} {renderTitle(selectedMarker)}
-        </h4>
-        <div className="decision-detail-header-actions">
-          <div className="decision-language-toggle" title={t("Language")}>
-            <button
-              type="button"
-              className={`btn btn-secondary decision-detail-expand-btn ${uiLanguage === "sk" ? "active" : ""}`}
-              onClick={() => setUiLanguage("sk")}
-            >
-              SK
-            </button>
-            <button
-              type="button"
-              className={`btn btn-secondary decision-detail-expand-btn ${uiLanguage === "en" ? "active" : ""}`}
-              onClick={() => setUiLanguage("en")}
-            >
-              EN
-            </button>
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary decision-detail-expand-btn"
-            onClick={() => setIsDetailFullscreen((prev) => !prev)}
-            title={fullscreen ? t("Exit Full Screen") : t("Full Screen")}
-          >
-            {fullscreen ? t("Exit Full Screen") : t("Full Screen")}
-          </button>
-        </div>
-      </div>
-      <div className="decision-detail-tabs">
-        <button
-          className={`decision-detail-tab ${detailTab === 'details' ? 'active' : ''}`}
-          onClick={() => setDetailTab('details')}
-        >
-          {t("Details")}
-        </button>
-        <button
-          className={`decision-detail-tab ${detailTab === 'raw' ? 'active' : ''}`}
-          onClick={() => setDetailTab('raw')}
-        >
-          {t("Raw")}
-        </button>
-        <button
-          className={`decision-detail-tab ${detailTab === 'decision_log' ? 'active' : ''}`}
-          onClick={() => setDetailTab('decision_log')}
-        >
-          {t("Decision Log")}
-        </button>
-      </div>
-      {activeHelpTooltip?.pinned && (
-        <div className="decision-help-inline" role="note">
-          <div className="decision-help-inline-head">
-            <strong>{uiLanguage === "en" ? "Tooltip detail" : "Detail tooltipu"}</strong>
-            <button
-              type="button"
-              className="decision-help-inline-close"
-              onClick={() => setActiveHelpTooltip(null)}
-              aria-label={uiLanguage === "en" ? "Close tooltip detail" : "Zavrieť detail tooltipu"}
-            >
-              ×
-            </button>
-          </div>
-          <pre className="decision-help-inline-body">{activeHelpTooltip.text}</pre>
-        </div>
-      )}
-      {detailTab === 'details' && (
-        <>
-          <div className="detail-grid">
-            {/* Basic Info */}
-            <div className="detail-item">
-              {renderDetailLabel("Event Type")}
-              <span className="detail-value">{selectedMarker.marker_type || 'n/a'}</span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Time")}
-              <span className="detail-value">
-                {formatTime(selectedMarker.timestamp)}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Price")}
-              <span className="detail-value">
-                {formatPrice(selectedMarker.price)}
-              </span>
-            </div>
-            {selectedMarker.side && (
-              <div className="detail-item">
-                {renderDetailLabel("Side")}
-                <span className="detail-value" style={{ 
-                  color: selectedMarker.side === 'long' ? 'var(--accent-green)' : 'var(--accent-red)',
-                  fontWeight: 700 
-                }}>
-                  {String(selectedMarker.side).toUpperCase()}
-                </span>
-              </div>
-            )}
-            
-            {/* Entry Specifics */}
-            {selectedMarker.marker_type === 'entry_executed' && (
-              <>
-                <div className="detail-item">
-                  {renderDetailLabel("Strategy", "Strategy (Entry)")}
-                  <span className="detail-value">{selectedMarker.strategy || metadata.strategy || 'Unknown'}</span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Confidence")}
-                  <span className="detail-value">
-                    {selectedMarker.confidence != null ? Number(selectedMarker.confidence).toFixed(0) : 'N/A'}%
-                  </span>
-                </div>
-                {details.stop_loss && (
-                   <div className="detail-item">
-                    {renderDetailLabel("Stop Loss")}
-                    <span className="detail-value">${details.stop_loss.toFixed(2)}</span>
-                  </div>
-                )}
-                {details.take_profit && (
-                   <div className="detail-item">
-                    {renderDetailLabel("Take Profit")}
-                    <span className="detail-value">${details.take_profit.toFixed(2)}</span>
-                  </div>
-                )}
-                {details.risk_reward && (
-                   <div className="detail-item">
-                    {renderDetailLabel("R:R Ratio")}
-                    <span className="detail-value">{details.risk_reward.toFixed(2)}</span>
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* Exit Specifics */}
-            {['exit_executed', 'stop_loss_hit', 'take_profit_hit'].includes(selectedMarker.marker_type) && (
-               <>
-                <div className="detail-item">
-                  {renderDetailLabel("Exit Reason")}
-                  <span className="detail-value">{details.exit_reason || 'Unknown'}</span>
-                </div>
-                {(details.pnl_dollars != null || details.pnl_usd != null) && (
-                  <div className="detail-item">
-                    {renderDetailLabel("PnL")}
-                    <span className={`detail-value ${(resolvePnlPct(details, details.pnl_dollars ?? details.pnl_usd) ?? 0) >= 0 ? 'positive' : 'negative'}`}>
-                      {(() => {
-                        const pct = resolvePnlPct(details, details.pnl_dollars ?? details.pnl_usd);
-                        if (pct == null) return 'n/a';
-                        return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
-                      })()}
-                    </span>
-                  </div>
-                )}
-                {(details.pnl_dollars != null || details.pnl_usd != null) && (
-                  <div className="detail-item">
-                    {renderDetailLabel("PnL $")}
-                    <span className={`detail-value ${(details.pnl_dollars ?? details.pnl_usd) >= 0 ? 'positive' : 'negative'}`}>
-                      {(details.pnl_dollars ?? details.pnl_usd) >= 0 ? '+' : ''}${Number(details.pnl_dollars ?? details.pnl_usd).toFixed(2)}
-                    </span>
-                  </div>
-                )}
-                {details.bars_held && (
-                  <div className="detail-item">
-                    {renderDetailLabel("Bars Held")}
-                    <span className="detail-value">{details.bars_held}</span>
-                  </div>
-                )}
-               </>
-            )}
-
-            {/* Reasoning Section */}
-            {details.reasoning && (
-               <div style={{ gridColumn: '1 / -1', marginTop: '10px', padding: '10px', background: 'rgba(15, 23, 42, 0.04)', borderRadius: '4px' }}>
-                 <div style={{ marginBottom: '5px' }}>{renderDetailLabel("Reasoning", "Reasoning", { fontWeight: 600 })}</div>
-                 <div className="detail-value" style={{ whiteSpace: 'normal', fontSize: '0.9em', lineHeight: '1.4' }}>{details.reasoning}</div>
-               </div>
-            )}
-
-            {/* Costs Breakdown */}
-            {details.costs && (
-              <>
-                {renderSectionHeader("Trading Costs")}
-                 {Object.entries(details.costs).map(([k, v]) => (
-                 <div className="detail-item" key={`cost-${k}`}>
-                    {renderDetailLabel(renderCostLabel(k), {
-                      tooltipLabel: renderCostLabel(k),
-                      runtimeValue: v,
-                      runtimeSource: `details.costs.${k}`,
-                    })}
-                    <span className="detail-value">${Number(v).toFixed(4)}</span>
-                  </div>
-                ))}
-              </>
-            )}
-
-            {l2Diagnostics.hasAny && (
-              <>
-                {renderSectionHeader("L2 Diagnostics")}
-                {l2Diagnostics.flowScore != null && (
-                  <div className="detail-item">
-                    {renderDetailLabel("Flow Score")}
-                    <span className="detail-value">{l2Diagnostics.flowScore.toFixed(1)}</span>
-                  </div>
-                )}
-                {l2Diagnostics.signedAggression != null && (
-                  <div className="detail-item">
-                    {renderDetailLabel("Signed Aggression")}
-                    <span className="detail-value">{l2Diagnostics.signedAggression.toFixed(3)}</span>
-                  </div>
-                )}
-                {l2Diagnostics.l2AggressionZ != null && (
-                  <div className="detail-item">
-                    {renderDetailLabel("L2 Aggression Z")}
-                    <span className="detail-value">{l2Diagnostics.l2AggressionZ.toFixed(3)}</span>
-                  </div>
-                )}
-                {l2Diagnostics.l2BookPressureZ != null && (
-                  <div className="detail-item">
-                    {renderDetailLabel("L2 Book Pressure Z")}
-                    <span className="detail-value">{l2Diagnostics.l2BookPressureZ.toFixed(3)}</span>
-                  </div>
-                )}
-                {l2Diagnostics.absorptionRate != null && (
-                  <div className="detail-item">
-                    {renderDetailLabel("Absorption Rate")}
-                    <span className="detail-value">{l2Diagnostics.absorptionRate.toFixed(3)}</span>
-                  </div>
-                )}
-                {l2Diagnostics.largeTraderActivity != null && (
-                  <div className="detail-item">
-                    {renderDetailLabel("Large Trader Activity")}
-                    <span className="detail-value">{l2Diagnostics.largeTraderActivity.toFixed(3)}</span>
-                  </div>
-                )}
-                {l2Diagnostics.vwapExecutionFlow != null && (
-                  <div className="detail-item">
-                    {renderDetailLabel("VWAP Execution Flow", "VWAP Execution Flow (L2 Diagnostics)")}
-                    <span className="detail-value">{l2Diagnostics.vwapExecutionFlow.toFixed(3)}</span>
-                  </div>
-                )}
-                {l2Diagnostics.sweepDetected != null && (
-                  <div className="detail-item">
-                    {renderDetailLabel("Sweep Detected")}
-                    <span className="detail-value">
-                      {l2Diagnostics.sweepDetected ? t("yes") : t("no")}
-                    </span>
-                  </div>
-                )}
-                <div className="detail-item">
-                  {renderDetailLabel("L2 Source")}
-                  <span className="detail-value">
-                    {l2Diagnostics.sourcePath || t("Source unavailable")}
-                  </span>
-                </div>
-              </>
-            )}
-
-            {intradayLevels.hasAny && (
-              <>
-                {renderSectionHeader("Intraday Levels")}
-                <div className="detail-item">
-                  {renderDetailLabel("Tracker")}
-                  <span className="detail-value">
-                    {renderEnabled(intradayLevels.enabled)}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Active / Tested / Broken")}
-                  <span className="detail-value">
-                    {Number(intradayLevels.stats.active_levels || 0)} /{" "}
-                    {Number(intradayLevels.stats.tested_levels || 0)} /{" "}
-                    {Number(intradayLevels.stats.broken_levels || 0)}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Bounce / Break Events")}
-                  <span className="detail-value">
-                    {Number(intradayLevels.stats.bounce_events || 0)} /{" "}
-                    {Number(intradayLevels.stats.break_events || 0)}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("POC")}
-                  <span className="detail-value">
-                    {intradayLevels.volumeProfile.poc_price != null
-                      ? Number(intradayLevels.volumeProfile.poc_price).toFixed(2)
-                      : "n/a"}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Value Area")}
-                  <span className="detail-value">
-                    {intradayLevels.volumeProfile.value_area_low != null &&
-                    intradayLevels.volumeProfile.value_area_high != null
-                      ? `${Number(intradayLevels.volumeProfile.value_area_low).toFixed(2)} - ${Number(intradayLevels.volumeProfile.value_area_high).toFixed(2)}`
-                      : "n/a"}
-                  </span>
-                </div>
-                {intradayLevels.latestEvent && (
-                  <div className="detail-item">
-                    {renderDetailLabel("Latest Event")}
-                    <span className="detail-value">
-                      {String(intradayLevels.latestEvent.event_type || "event")}
-                      {intradayLevels.latestEvent.direction
-                        ? ` (${String(intradayLevels.latestEvent.direction)})`
-                        : ""}
-                      {intradayLevels.latestEvent.price != null
-                        ? ` @ ${Number(intradayLevels.latestEvent.price).toFixed(2)}`
-                        : ""}
-                    </span>
-                  </div>
-                )}
-              </>
-            )}
-
-            {levelContext.hasAny && (
-              <>
-                {renderSectionHeader("Level Context Gate")}
-                <div className="detail-item">
-                  {renderDetailLabel("Status")}
-                  <span className="detail-value">
-                    {renderGateStatus(levelContext.payload.passed)}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Strategy", "Strategy (Gate)")}
-                  <span className="detail-value">
-                    {String(levelContext.payload.strategy_key || "n/a")}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Gate Reason")}
-                  <span className="detail-value">
-                    {String(levelContext.payload.reason || "n/a")}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Near Tested Levels", "Near Tested Levels (Gate)")}
-                  <span className="detail-value">
-                    {Number(levelContext.payload?.stats?.near_tested_levels_count || 0)}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Value Area Position")}
-                  <span className="detail-value">
-                    {String(levelContext.payload?.volume_profile?.value_area_position || "n/a")}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("POC On Trade Side", "POC On Trade Side (Gate)")}
-                  <span className="detail-value">
-                    {renderYesNo(levelContext.payload?.volume_profile?.poc_on_trade_side)}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Room To Next Opposite Level")}
-                  <span className="detail-value">
-                    {levelContext.payload?.room_to_next_opposite_level_pct != null
-                      ? `${Number(levelContext.payload.room_to_next_opposite_level_pct).toFixed(3)}%`
-                      : "n/a"}
-                  </span>
-                </div>
-                {levelContext.reasons.length > 0 && (
-                  <div className="detail-item" style={{ gridColumn: "1 / -1" }}>
-                    {renderDetailLabel("Fail Reasons")}
-                    <span className="detail-value">{levelContext.reasons.join(", ")}</span>
-                  </div>
-                )}
-              </>
-            )}
-
-            {entryQualityDiagnostics.hasAny && (
-              <>
-                {renderSectionHeader("Entry Timing Diagnostics")}
-                <div className="detail-item">
-                  {renderDetailLabel("First-Bar Stop Loss")}
-                  <span className="detail-value">
-                    {renderYesNo(entryQualityDiagnostics.payload?.is_first_bar_stop_loss)}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Stop Distance")}
-                  <span className="detail-value">
-                    {entryQualityDiagnostics.payload?.stop_distance_pct != null
-                      ? `${Number(entryQualityDiagnostics.payload.stop_distance_pct).toFixed(3)}%`
-                      : "n/a"}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("VWAP Distance")}
-                  <span className="detail-value">
-                    {entryQualityDiagnostics.payload?.vwap_distance_pct != null
-                      ? `${Number(entryQualityDiagnostics.payload.vwap_distance_pct).toFixed(3)}%`
-                      : "n/a"}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Confluence Score")}
-                  <span className="detail-value">
-                    {entryQualityDiagnostics.payload?.near_confluence_score != null
-                      ? Number(entryQualityDiagnostics.payload.near_confluence_score)
-                      : "n/a"}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("Near Tested Levels", "Near Tested Levels (Entry Timing)")}
-                  <span className="detail-value">
-                    {entryQualityDiagnostics.payload?.near_tested_levels_count != null
-                      ? Number(entryQualityDiagnostics.payload.near_tested_levels_count)
-                      : "n/a"}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  {renderDetailLabel("POC On Trade Side", "POC On Trade Side (Entry Timing)")}
-                  <span className="detail-value">
-                    {renderYesNo(entryQualityDiagnostics.payload?.poc_on_trade_side)}
-                  </span>
-                </div>
-                {entryQualityDiagnostics.tags.length > 0 && (
-                  <div className="detail-item" style={{ gridColumn: "1 / -1" }}>
-                    {renderDetailLabel("Diagnosis Tags")}
-                    <span className="detail-value">{entryQualityDiagnostics.tags.join(", ")}</span>
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* Signal Data (Recursive) */}
-            {Object.keys(metadata).length > 0 && (
-              <>
-                 {renderSectionHeader("Signal Data (All Indicators)")}
-                 <div style={{ gridColumn: '1 / -1' }}>
-                   {Object.entries(metadata)
-                    .filter(([key]) => key !== 'strategy')
-                    .map(([key, value]) => (
-                      <div key={key} style={{ marginBottom: '8px' }}>
-                        <span style={{ fontWeight: 600, fontSize: '0.9em', color: 'var(--text-primary)' }}>{key}:</span>
-                        <div style={{ marginTop: '2px' }}>
-                          {renderValue(value, key)}
-                        </div>
-                      </div>
-                   ))}
-                 </div>
-              </>
-            )}
-
-            {/* Fallback for other details */}
-            {Object.entries(details).length > 0 && !details.metadata && !details.costs && (
-               <>
-                {renderSectionHeader("Additional Details")}
-                {Object.entries(details).map(([key, value]) => {
-                  if (['metadata', 'costs', 'reasoning', 'pnl_pct', 'pnl_usd', 'pnl_dollars', 'stop_loss', 'take_profit', 'exit_reason', 'risk_reward'].includes(key)) return null;
-                  return (
-                    <div className="detail-item" key={key}>
-                      {renderDetailLabel(key, {
-                        tooltipLabel: key,
-                        runtimeValue: value,
-                        runtimeSource: `details.${key}`,
-                      })}
-                      <span className="detail-value">{formatGenericValue(value)}</span>
-                    </div>
-                  );
-                })}
-               </>
-            )}
-           </div>
-        </>
-      )}
-      {detailTab === 'raw' && (
-        <pre className="decision-raw-json">{JSON.stringify(selectedMarker, null, 2)}</pre>
-      )}
-      {detailTab === 'decision_log' && (
-        <>
-          <div className="detail-grid">
-            <div className="detail-item">
-              {renderDetailLabel("Decision Action")}
-              <span className="detail-value">
-                {String(decisionLog.payload?.decision_state?.action || "n/a")}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Decision Phase")}
-              <span className="detail-value">
-                {String(decisionLog.payload?.decision_state?.phase || "n/a")}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Regime / Micro")}
-              <span className="detail-value">
-                {String(decisionLog.payload?.decision_state?.regime || "n/a")} /{" "}
-                {String(decisionLog.payload?.decision_state?.micro_regime || "n/a")}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Selected Strategy")}
-              <span className="detail-value">
-                {String(decisionLog.payload?.decision_state?.selected_strategy || selectedMarker?.strategy || "n/a")}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("SL Reason")}
-              <span className="detail-value">
-                {renderReasonValue(decisionLog.payload?.context_risk?.sl_reason)}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("TP Reason")}
-              <span className="detail-value">
-                {renderReasonValue(decisionLog.payload?.context_risk?.tp_reason)}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Effective RR")}
-              <span className="detail-value">
-                {decisionLog.payload?.context_risk?.effective_rr != null
-                  ? Number(decisionLog.payload.context_risk.effective_rr).toFixed(4)
-                  : "n/a"}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Risk %")}
-              <span className="detail-value">
-                {decisionLog.payload?.context_risk?.risk_pct != null
-                  ? `${Number(decisionLog.payload.context_risk.risk_pct).toFixed(4)}%`
-                  : "n/a"}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Break-even State")}
-              <span className="detail-value">
-                {String(breakEvenPayload?.state || "n/a")}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Break-even Trigger")}
-              <span className="detail-value">
-                {renderBreakEvenTrigger(breakEvenPayload?.activation_reason)}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Break-even Proof")}
-              <span className="detail-value">
-                {renderBreakEvenProof(breakEvenPayload)}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Break-even Stop")}
-              <span className="detail-value">
-                {breakEvenStopDisplayValue != null
-                  ? Number(breakEvenStopDisplayValue).toFixed(4)
-                  : "n/a"}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Break-even Costs %")}
-              <span className="detail-value">
-                {formatPctValue(breakEvenComputed?.total_costs_pct, 5)}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Break-even Buffer %")}
-              <span className="detail-value">
-                {formatPctValue(breakEvenBuffer?.selected_buffer_pct, 5)}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("Break-even Anti-Spike")}
-              <span className="detail-value">
-                {breakEvenAntiSpikeSummary}
-              </span>
-            </div>
-            <div className="detail-item">
-              {renderDetailLabel("VWAP Execution Flow", "VWAP Execution Flow (Decision Log)")}
-              <span className="detail-value">
-                {decisionLog.payload?.flow_snapshot?.vwap_execution_flow != null
-                  ? Number(decisionLog.payload.flow_snapshot.vwap_execution_flow).toFixed(3)
-                  : "n/a"}
-              </span>
-            </div>
-            <div className="detail-item" style={{ gridColumn: "1 / -1" }}>
-              {renderDetailLabel("Complete Decision Payload")}
-              <pre className="decision-raw-json" style={{ marginTop: 8 }}>
-                {JSON.stringify(decisionLog.payload, null, 2)}
-              </pre>
-            </div>
-          </div>
-        </>
-      )}
+      <DecisionPanelDetailChrome
+        fullscreen={fullscreen}
+        title={`${getMarkerIcon(selectedMarker)} ${renderTitle(selectedMarker)}`}
+        t={t}
+        uiLanguage={uiLanguage}
+        setUiLanguage={setUiLanguage}
+        detailTab={detailTab}
+        setDetailTab={setDetailTab}
+        onToggleFullscreen={() => setIsDetailFullscreen((prev) => !prev)}
+        activeHelpTooltip={activeHelpTooltip}
+        onClosePinnedTooltip={() => setActiveHelpTooltip(null)}
+      />
+      <DecisionPanelDetailBody
+        detailTab={detailTab}
+        selectedMarker={selectedMarker}
+        details={details}
+        metadata={metadata}
+        l2Diagnostics={l2Diagnostics}
+        intradayLevels={intradayLevels}
+        levelContext={levelContext}
+        entryQualityDiagnostics={entryQualityDiagnostics}
+        decisionLog={decisionLog}
+        t={t}
+        renderDetailLabel={renderDetailLabel}
+        renderSectionHeader={renderSectionHeader}
+        renderCostLabel={renderCostLabel}
+        resolvePnlPct={resolvePnlPct}
+        formatTime={formatTime}
+        formatPrice={formatPrice}
+        renderEnabled={renderEnabled}
+        renderYesNo={renderYesNo}
+        renderGateStatus={renderGateStatus}
+        renderValue={renderValue}
+        formatGenericValue={formatGenericValue}
+        renderReasonValue={renderReasonValue}
+        breakEvenPayload={breakEvenPayload}
+        renderBreakEvenTrigger={renderBreakEvenTrigger}
+        renderBreakEvenProof={renderBreakEvenProof}
+        breakEvenStopDisplayValue={breakEvenStopDisplayValue}
+        breakEvenComputed={breakEvenComputed}
+        breakEvenBuffer={breakEvenBuffer}
+        breakEvenAntiSpikeSummary={breakEvenAntiSpikeSummary}
+        formatPctValue={formatPctValue}
+      />
     </div>
   );
 
@@ -2921,128 +1530,23 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
       }}
       style={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}
     >
-      <div className="decision-list-tabs">
-        <button
-          className={`decision-list-tab ${listTab === 'decisions' ? 'active' : ''}`}
-          onClick={() => setListTab('decisions')}
-        >
-          {t("Decisions")} ({decisionMarkers.length})
-        </button>
-        <button
-          className={`decision-list-tab ${listTab === 'events' ? 'active' : ''}`}
-          onClick={() => setListTab('events')}
-        >
-          {t("Events")} ({eventMarkers.length})
-        </button>
-      </div>
-      <div className="decision-list">
-        {visibleMarkers.length === 0 && (
-          <div className="empty-state">
-            <div className="icon">🗂️</div>
-            <p>
-              {listTab === 'decisions'
-                ? t('No trading decisions in this run yet.')
-                : t('No non-decision events in this run yet.')}
-            </p>
-          </div>
-        )}
-        {renderedMarkers.map((marker, idx) => {
-          const exitMetrics = formatExitMetrics(marker);
-          const markerKey = getMarkerKey(marker, idx);
-          const selected = isSameMarker(selectedMarker, marker);
-          const markerDetails = marker?.details || {};
-          const markerMetadata = markerDetails?.metadata || {};
-          const markerIntradayLevels = extractIntradayLevels(
-            marker,
-            markerDetails,
-            markerMetadata,
-          );
-          const markerIntradayEvent =
-            markerIntradayLevels?.latestEvent &&
-            typeof markerIntradayLevels.latestEvent === "object"
-              ? markerIntradayLevels.latestEvent
-              : null;
-          const markerIntradayEventType = String(
-            markerIntradayEvent?.event_type || "",
-          ).toLowerCase();
-          const markerIntradayEventDirection = String(
-            markerIntradayEvent?.direction || "",
-          ).toLowerCase();
-          const markerIntradayEventLabel = markerIntradayEvent
-            ? `Levels ${markerIntradayEventType || "event"}${markerIntradayEventDirection ? ` ${markerIntradayEventDirection}` : ""}${
-                markerIntradayEvent.price != null
-                  ? ` @ ${Number(markerIntradayEvent.price).toFixed(2)}`
-                  : ""
-              }`
-            : "";
-          const markerIntradayEventColor =
-            markerIntradayEventType === "break"
-              ? "var(--accent-green)"
-              : markerIntradayEventType === "bounce"
-                ? "var(--text-secondary)"
-                : "var(--text-muted)";
-          return (
-          <div
-            key={markerKey}
-            ref={(node) => {
-              if (node) itemRefs.current.set(markerKey, node);
-              else itemRefs.current.delete(markerKey);
-            }}
-            className={`decision-item ${marker.marker_type} ${selected ? 'selected' : ''}`}
-            onClick={() => {
-              setIsDetailFullscreen(true);
-              onSelectMarker({
-                ...marker,
-                __selectionSource: "decision_panel",
-              });
-            }}
-          >
-            <div className="decision-header">
-              <span className="decision-title">
-                {getMarkerIcon(marker)} {renderTitle(marker)}
-              </span>
-              <span className="decision-time">{formatTime(marker.timestamp)}</span>
-            </div>
-            <div className="decision-description">
-              {exitMetrics
-                ? `${t("Reason")}: ${marker.details?.exit_reason || "n/a"}`
-                : (marker.description || t("No description"))}
-              {exitMetrics && (
-                <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: '0.78rem', fontWeight: 600 }}>
-                  {exitMetrics}
-                </div>
-              )}
-              {markerIntradayEvent && (
-                <div
-                  style={{
-                    marginTop: 4,
-                    color: markerIntradayEventColor,
-                    fontSize: "0.75rem",
-                    fontWeight: 600,
-                  }}
-                >
-                  {markerIntradayEventLabel}
-                </div>
-              )}
-            </div>
-          </div>
-        );})}
-      </div>
-      {hasMoreRows && (
-        <div style={{ padding: '0 var(--spacing-sm) var(--spacing-sm)' }}>
-          <button
-            type="button"
-            className="btn btn-secondary tw-full-btn"
-            onClick={() =>
-              setVisibleRows((prev) =>
-                Math.min(visibleMarkers.length, prev + DECISION_LIST_LOAD_STEP)
-              )
-            }
-          >
-            {t('Load older')} ({visibleMarkers.length - renderedMarkers.length} {t('remaining')})
-          </button>
-        </div>
-      )}
+      <DecisionPanelMarkerList
+        listTab={listTab}
+        setListTab={setListTab}
+        decisionMarkers={decisionMarkers}
+        eventMarkers={eventMarkers}
+        visibleMarkers={visibleMarkers}
+        renderedMarkers={renderedMarkers}
+        hasMoreRows={hasMoreRows}
+        selectedMarker={selectedMarker}
+        itemRefs={itemRefs}
+        setIsDetailFullscreen={setIsDetailFullscreen}
+        onSelectMarker={onSelectMarker}
+        t={t}
+        renderTitle={renderTitle}
+        setVisibleRows={setVisibleRows}
+        decisionListLoadStep={DECISION_LIST_LOAD_STEP}
+      />
 
       {activeHelpTooltip && !activeHelpTooltip.pinned && portalBody &&
         createPortal(

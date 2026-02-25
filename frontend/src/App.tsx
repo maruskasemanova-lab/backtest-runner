@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from 'react';
 import {
   toUnixSeconds,
   toIsoTimestamp,
@@ -8,7 +16,16 @@ import {
   resolveWsLiveUrl,
   wsFeatureEnabled,
 } from './utils';
-import CandlestickChart from './components/CandlestickChart';
+import {
+  buildIntradayLevelsDialogSelection,
+  type IntradayLevelsDialogSelection,
+} from './intradayLevelsUtils';
+import CandlestickChart, {
+  type CandlestickChartBar,
+  type CandlestickChartMarker,
+  type CandlestickChartPriceRange,
+  type CandlestickChartVisibleRange,
+} from './components/CandlestickChart';
 import FootprintChart from './components/FootprintChart';
 import PlaybackControls from './components/PlaybackControls';
 import DecisionPanel from './components/DecisionPanel';
@@ -24,6 +41,13 @@ import AdaptiveTuner from './components/AdaptiveTuner';
 import LiveTraderMonitor from './components/LiveTraderMonitor';
 import DiagnosticCalendar from './components/DiagnosticCalendar';
 import StrategyAnalyzer from './components/StrategyAnalyzer';
+import type {
+  StrategyAnalyzerChartMarkerClickTarget,
+  StrategyAnalyzerConditionsLiveAnalysis,
+  StrategyAnalyzerDecisionMarker,
+  StrategyAnalyzerOnEvaluateIntrabarSlice,
+  StrategyAnalyzerRunBarLike,
+} from './components/strategy-analyzer/types';
 import {
   isSupabaseAuthEnabled,
   signInWithGoogle,
@@ -33,7 +57,10 @@ import {
 } from './auth/supabaseAuth';
 
 
-const scoreMarkerMatch = (candidate, target) => {
+const scoreMarkerMatch = (
+  candidate: StrategyAnalyzerDecisionMarker | null | undefined,
+  target: CandlestickChartMarker | StrategyAnalyzerDecisionMarker | null | undefined
+) => {
   if (!candidate || !target) return Number.NEGATIVE_INFINITY;
 
   const candidateId = normalizeText(candidate.id);
@@ -436,131 +463,11 @@ const toChartBar = (bar) => {
   };
 };
 
-const isObjectRecord = (value) =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
 const resolveChartTimeframeSeconds = (timeframe) => {
   const normalized = String(timeframe || '').trim().toLowerCase();
   if (normalized === '1h') return 3600;
   const minutes = Number.parseInt(normalized, 10);
   return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 : 60;
-};
-
-const pickIntradayLevelsPayload = (sources) => {
-  if (!Array.isArray(sources)) return { payload: null, sourcePath: null };
-  for (const source of sources) {
-    if (!source || !isObjectRecord(source.payload)) continue;
-    const sourcePath = String(source.sourcePath || '').trim();
-    return {
-      payload: source.payload,
-      sourcePath: sourcePath || null,
-    };
-  }
-  return { payload: null, sourcePath: null };
-};
-
-const extractIntradayLevelsFromAnalysisObject = (analysis, sourcePrefix) => {
-  if (!isObjectRecord(analysis)) return { payload: null, sourcePath: null };
-  return pickIntradayLevelsPayload([
-    { sourcePath: `${sourcePrefix}.intraday_levels`, payload: analysis.intraday_levels },
-    {
-      sourcePath: `${sourcePrefix}.metadata.intraday_levels`,
-      payload: analysis.metadata?.intraday_levels,
-    },
-    {
-      sourcePath: `${sourcePrefix}.indicators.intraday_levels`,
-      payload: analysis.indicators?.intraday_levels,
-    },
-    {
-      sourcePath: `${sourcePrefix}.signal_metadata.intraday_levels`,
-      payload: analysis.signal_metadata?.intraday_levels,
-    },
-    {
-      sourcePath: `${sourcePrefix}.signal.intraday_levels`,
-      payload: analysis.signal?.intraday_levels,
-    },
-    {
-      sourcePath: `${sourcePrefix}.signal.metadata.intraday_levels`,
-      payload: analysis.signal?.metadata?.intraday_levels,
-    },
-  ]);
-};
-
-const extractIntradayLevelsFromBarPayload = (bar) => {
-  if (!isObjectRecord(bar)) return { payload: null, sourcePath: null };
-  const barAnalysis = extractIntradayLevelsFromAnalysisObject(bar.analysis, 'bar.analysis');
-  const strategyAnalysis = extractIntradayLevelsFromAnalysisObject(
-    bar.strategy_analysis,
-    'bar.strategy_analysis',
-  );
-  return pickIntradayLevelsPayload([
-    { sourcePath: 'bar.intraday_levels', payload: bar.intraday_levels },
-    barAnalysis,
-    strategyAnalysis,
-  ]);
-};
-
-const extractIntradayLevelsFromMarkerPayload = (marker) => {
-  if (!isObjectRecord(marker)) return { payload: null, sourcePath: null };
-  const details = isObjectRecord(marker.details) ? marker.details : {};
-  const detailMetadata = isObjectRecord(details.metadata) ? details.metadata : {};
-  return pickIntradayLevelsPayload([
-    { sourcePath: 'marker.details.intraday_levels', payload: details.intraday_levels },
-    {
-      sourcePath: 'marker.details.metadata.intraday_levels',
-      payload: details.metadata?.intraday_levels,
-    },
-    {
-      sourcePath: 'marker.details.indicators.intraday_levels',
-      payload: details.indicators?.intraday_levels,
-    },
-    {
-      sourcePath: 'marker.details.signal_metadata.intraday_levels',
-      payload: details.signal_metadata?.intraday_levels,
-    },
-    { sourcePath: 'marker.metadata.intraday_levels', payload: detailMetadata.intraday_levels },
-    { sourcePath: 'marker.intraday_levels', payload: marker.intraday_levels },
-  ]);
-};
-
-const resolveNearestMarkerWithIntradayLevels = (allMarkers, barTime) => {
-  if (!Array.isArray(allMarkers) || !Number.isFinite(barTime)) return null;
-  let nearest = null;
-  allMarkers.forEach((marker) => {
-    const markerTime = toUnixSeconds(marker?.time ?? marker?.timestamp);
-    if (!Number.isFinite(markerTime)) return;
-    const markerLevels = extractIntradayLevelsFromMarkerPayload(marker);
-    if (!markerLevels.payload) return;
-    const diff = Math.abs(markerTime - barTime);
-    if (!nearest || diff < nearest.diff) {
-      nearest = { marker, levels: markerLevels, diff, markerTime };
-      return;
-    }
-    if (diff === nearest.diff) {
-      const nearestIsFuture = nearest.markerTime > barTime;
-      const currentIsPastOrNow = markerTime <= barTime;
-      if (nearestIsFuture && currentIsPastOrNow) {
-        nearest = { marker, levels: markerLevels, diff, markerTime };
-      }
-    }
-  });
-  return nearest;
-};
-
-const resolveMarkersInBarWindow = (allMarkers, barTime, timeframeSeconds) => {
-  if (!Array.isArray(allMarkers) || !Number.isFinite(barTime)) return [];
-  const windowSize = Number.isFinite(timeframeSeconds) && timeframeSeconds > 0 ? timeframeSeconds : 60;
-  const startTime = Math.floor(barTime);
-  const endTime = startTime + windowSize;
-  return allMarkers
-    .map((marker) => {
-      const markerTime = toUnixSeconds(marker?.time ?? marker?.timestamp);
-      return Number.isFinite(markerTime) ? { marker, markerTime } : null;
-    })
-    .filter(Boolean)
-    .filter(({ markerTime }) => markerTime >= startTime && markerTime < endTime)
-    .sort((left, right) => left.markerTime - right.markerTime)
-    .map(({ marker }) => marker);
 };
 
 const VIEW_TABS = [
@@ -635,13 +542,13 @@ function App() {
   const [activeRuns, setActiveRuns] = useState([]);
   
   // Data
-  const [bars, setBars] = useState([]);
-  const [markers, setMarkers] = useState([]);
-  const [selectedMarker, setSelectedMarker] = useState(null);
-  const [currentBar, setCurrentBar] = useState(null);
-  const [latestBarAnalysis, setLatestBarAnalysis] = useState<any>(null);
+  const [bars, setBars] = useState<CandlestickChartBar[]>([]);
+  const [markers, setMarkers] = useState<StrategyAnalyzerDecisionMarker[]>([]);
+  const [selectedMarker, setSelectedMarker] = useState<StrategyAnalyzerDecisionMarker | null>(null);
+  const [currentBar, setCurrentBar] = useState<StrategyAnalyzerRunBarLike | null>(null);
+  const [latestBarAnalysis, setLatestBarAnalysis] = useState<StrategyAnalyzerConditionsLiveAnalysis>(null);
   const [selectedIntrabar, setSelectedIntrabar] = useState(null);
-  const [selectedIntradayLevels, setSelectedIntradayLevels] = useState(null);
+  const [selectedIntradayLevels, setSelectedIntradayLevels] = useState<IntradayLevelsDialogSelection | null>(null);
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [strategyApiUrl, setStrategyApiUrl] = useState(defaultStrategyApiUrl);
   
@@ -660,8 +567,8 @@ function App() {
   const [timeframe, setTimeframe] = useState("1min");
   
   // Chart Synchronization State
-  const [chartState, setChartState] = useState(null); // { from: number, to: number } (Time Range)
-  const [priceRange, setPriceRange] = useState(null); // { from: number, to: number } (Price Range)
+  const [chartState, setChartState] = useState<CandlestickChartVisibleRange | null>(null); // { from: number, to: number } (Time Range)
+  const [priceRange, setPriceRange] = useState<CandlestickChartPriceRange>(null); // { from: number, to: number } (Price Range)
 
   // Marker visibility toggles
   const [markerVisibility, setMarkerVisibility] = useState({
@@ -870,7 +777,8 @@ function App() {
     }
   }, [authActionBusy]);
 
-  const hydrateRunSnapshot = useCallback(async (targetRunKey: string, options: Record<string, any> = {}) => {
+  const hydrateRunSnapshot = useCallback(
+    async (targetRunKey: string, options: { showBusy?: boolean } = {}) => {
     const { showBusy = true } = options;
     const parsed = parseRunKey(targetRunKey);
     if (!parsed) return false;
@@ -1122,7 +1030,7 @@ function App() {
   }, [activeView]);
   
   // Handle new bar from WebSocket
-  const handleEvaluateIntrabarSlice = useCallback(async (ts: number) => {
+  const handleEvaluateIntrabarSlice = useCallback<StrategyAnalyzerOnEvaluateIntrabarSlice>(async (ts: number) => {
     if (!activeRunApiBase) return null;
     // Find the minute bar that contains this checkpoint timestamp
     const targetBar = bars.find(b => b.time <= ts && ts < b.time + 60);
@@ -1153,7 +1061,7 @@ function App() {
   }, [activeRunApiBase, activeRunId, activeRunTicker, bars]);
 
   // Handle new bar from WebSocket
-  const handleNewBar = useCallback((bar) => {
+  const handleNewBar = useCallback((bar: StrategyAnalyzerRunBarLike | null | undefined) => {
     const chartBar = toChartBar(bar);
     if (!chartBar) return;
     
@@ -1429,7 +1337,7 @@ function App() {
       .slice(-ICEBERG_RENDER_LIMIT);
   }, [icebergs]);
 
-  const decisionEvents = useMemo(
+  const decisionEvents = useMemo<StrategyAnalyzerDecisionMarker[]>(
     () => markerVisibility.icebergs ? [...markers, ...icebergDecisionMarkers] : markers,
     [markers, icebergDecisionMarkers, markerVisibility.icebergs]
   );
@@ -1611,7 +1519,7 @@ function App() {
       
       return data;
     } catch (error) {
-      const message = String((error as any)?.message || '');
+      const message = String(error instanceof Error ? error.message : '');
       if (!RUN_ID_COLLISION_PATTERN.test(message)) {
         console.error('Start run error:', error);
       }
@@ -1934,7 +1842,7 @@ function App() {
   }, [hydrateRunSnapshot]);
   
   // Click marker on chart
-  const handleMarkerClick = useCallback((markerOrId) => {
+  const handleMarkerClick = useCallback((markerOrId: StrategyAnalyzerChartMarkerClickTarget | null | undefined) => {
     if (!markerOrId) return;
 
     if (typeof markerOrId !== 'object') {
@@ -1948,7 +1856,7 @@ function App() {
       return;
     }
 
-    let bestMatch = null;
+    let bestMatch: StrategyAnalyzerDecisionMarker | null = null;
     let bestScore = Number.NEGATIVE_INFINITY;
     decisionEvents.forEach((eventMarker) => {
       const score = scoreMarkerMatch(eventMarker, markerOrId);
@@ -1976,56 +1884,29 @@ function App() {
     setSelectedIntradayLevels(null);
   }, []);
 
-  const handleBarClick = useCallback((bar) => {
+  const handleBarClick = useCallback((bar: CandlestickChartBar | null | undefined) => {
     if (!bar || typeof bar !== 'object') return;
 
     setSelectedIntrabar(bar);
 
-    const barTime = Number(bar.time);
     const timeframeSeconds = resolveChartTimeframeSeconds(timeframe);
-    const markersInWindow = resolveMarkersInBarWindow(markers, barTime, timeframeSeconds);
+    const barTime = Number(bar.time);
+    const currentBarTime = toUnixSeconds(currentBar?.timestamp ?? currentBar?.time);
+    const shouldUseLatestBarAnalysisFallback =
+      Number.isFinite(currentBarTime) &&
+      Number.isFinite(barTime) &&
+      Math.floor(currentBarTime) === Math.floor(barTime);
 
-    let resolved = extractIntradayLevelsFromBarPayload(bar);
-    let sourceMarker = null;
-
-    if (!resolved.payload) {
-      const currentBarTime = toUnixSeconds(currentBar?.timestamp ?? currentBar?.time);
-      if (Number.isFinite(currentBarTime) && Number.isFinite(barTime) && Math.floor(currentBarTime) === Math.floor(barTime)) {
-        resolved = extractIntradayLevelsFromAnalysisObject(latestBarAnalysis, 'latest_bar_analysis');
-      }
-    }
-
-    if (!resolved.payload) {
-      for (const marker of markersInWindow) {
-        const markerLevels = extractIntradayLevelsFromMarkerPayload(marker);
-        if (!markerLevels.payload) continue;
-        resolved = markerLevels;
-        sourceMarker = marker;
-        break;
-      }
-    }
-
-    if (!resolved.payload) {
-      const nearestMarkerMatch = resolveNearestMarkerWithIntradayLevels(markers, barTime);
-      if (nearestMarkerMatch) {
-        resolved = nearestMarkerMatch.levels;
-        sourceMarker = nearestMarkerMatch.marker;
-      }
-    }
-
-    const relatedMarkers =
-      sourceMarker && !markersInWindow.some((candidate) => candidate?.id === sourceMarker?.id)
-        ? [...markersInWindow, sourceMarker]
-        : markersInWindow;
-
-    setSelectedIntradayLevels({
+    const selection = buildIntradayLevelsDialogSelection({
       bar,
-      payload: resolved.payload,
-      sourcePath: resolved.sourcePath,
-      sourceMarker,
-      relatedMarkers,
+      allMarkers: markers,
       timeframeSeconds,
+      fallbackAnalysis: shouldUseLatestBarAnalysisFallback ? latestBarAnalysis : null,
+      fallbackAnalysisSourcePath: 'latest_bar_analysis',
     });
+    if (selection) {
+      setSelectedIntradayLevels(selection);
+    }
   }, [currentBar, latestBarAnalysis, markers, timeframe]);
 
   const activeRunConfigSidebarMode = useMemo<'all' | 'dates' | 'profiles' | 'start'>(() => {
@@ -2120,7 +2001,7 @@ function App() {
       title: string;
       rangeLabel: string;
       maxHeight: number;
-      content: any;
+      content: ReactNode;
     }> = [
       {
         id: 'run-config',

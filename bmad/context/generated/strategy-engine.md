@@ -21,13 +21,13 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 1248 | `a0fc856 2026-02-23` |
-| `../market_regime_detection/src/api_models.py` | yes | 254 | `317bf8c 2026-02-24` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 1543 | `317bf8c 2026-02-24` |
+| `../market_regime_detection/api_server.py` | yes | 1249 | `a0fc856 2026-02-23` |
+| `../market_regime_detection/src/api_models.py` | yes | 255 | `562a066 2026-02-25` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 1381 | `317bf8c 2026-02-24` |
 | `../market_regime_detection/src/intraday_levels.py` | yes | 814 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 41 | `a0fc856 2026-02-23` |
-| `../market_regime_detection/src/trading_orchestrator.py` | yes | 473 | `018eb2b 2026-02-24` |
-| `../market_regime_detection/src/feature_store.py` | yes | 691 | `018eb2b 2026-02-24` |
+| `../market_regime_detection/src/trading_orchestrator.py` | yes | 473 | `562a066 2026-02-25` |
+| `../market_regime_detection/src/feature_store.py` | yes | 691 | `562a066 2026-02-25` |
 | `../market_regime_detection/src/ensemble_combiner.py` | yes | 461 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/edge_monitor.py` | yes | 364 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/checkpoint.py` | yes | 284 | `d33cc78 2026-02-07` |
@@ -94,7 +94,7 @@ Own regime detection, signal generation, position management, learning component
 - `class` `TradingConfig` (line 87)
 
 ### `../market_regime_detection/src/day_trading_manager.py`
-- `class` `DayTradingManager` (line 77)
+- `class` `DayTradingManager` (line 90)
 
 ### `../market_regime_detection/src/intraday_levels.py`
 - `function` `_level_tolerance` (line 16)

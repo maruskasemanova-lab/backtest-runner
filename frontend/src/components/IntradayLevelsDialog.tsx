@@ -1,29 +1,41 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import { toIsoTimestamp, toUnixSeconds } from "../utils";
+import type {
+  IntradayLevelsDialogSelection,
+  IntradayLevelsObject,
+} from "../intradayLevelsUtils";
 
-const isObjectRecord = (value) =>
+type IntradayLevelsLevelRow = IntradayLevelsObject & {
+  __key: string;
+  key?: string;
+  value?: unknown;
+};
+
+const EMPTY_OBJECT: IntradayLevelsObject = {};
+
+const isObjectRecord = (value: unknown): value is IntradayLevelsObject =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-const toFiniteNumber = (value) => {
+const toFiniteNumber = (value: unknown): number | null => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const formatNumber = (value, digits = 2) => {
+const formatNumber = (value: unknown, digits = 2): string => {
   const parsed = toFiniteNumber(value);
   return parsed === null ? "n/a" : parsed.toFixed(digits);
 };
 
-const formatCandleValue = (value) => {
+const formatCandleValue = (value: unknown): string => {
   const parsed = toFiniteNumber(value);
   return parsed === null ? "n/a" : parsed.toFixed(2);
 };
 
-const extractLevelRows = (payload) => {
+const extractLevelRows = (payload: unknown): IntradayLevelsLevelRow[] => {
   if (!isObjectRecord(payload)) return [];
   const rawLevels = payload.levels;
   if (Array.isArray(rawLevels)) {
-    return rawLevels.map((entry, index) => {
+    return rawLevels.map((entry: unknown, index: number): IntradayLevelsLevelRow => {
       if (isObjectRecord(entry)) {
         const key = String(entry.id || entry.level_id || entry.name || `level-${index}`);
         return { __key: key, ...entry };
@@ -32,7 +44,8 @@ const extractLevelRows = (payload) => {
     });
   }
   if (isObjectRecord(rawLevels)) {
-    return Object.entries(rawLevels).map(([key, entry], index) => {
+    return Object.entries(rawLevels).map(
+      ([key, entry]: [string, unknown], index: number): IntradayLevelsLevelRow => {
       if (isObjectRecord(entry)) {
         return {
           __key: String(entry.id || entry.level_id || key || `level-${index}`),
@@ -41,9 +54,14 @@ const extractLevelRows = (payload) => {
         };
       }
       return { __key: String(key), key, value: entry };
-    });
+      }
+    );
   }
   return [];
+};
+
+type IntradayLevelsDialogProps = IntradayLevelsDialogSelection & {
+  onClose?: () => void;
 };
 
 function IntradayLevelsDialog({
@@ -54,10 +72,12 @@ function IntradayLevelsDialog({
   relatedMarkers,
   timeframeSeconds = 60,
   onClose,
-}: any) {
+}: IntradayLevelsDialogProps) {
   const safePayload = isObjectRecord(payload) ? payload : null;
-  const stats = isObjectRecord(safePayload?.stats) ? safePayload.stats : {};
-  const volumeProfile = isObjectRecord(safePayload?.volume_profile) ? safePayload.volume_profile : {};
+  const stats = isObjectRecord(safePayload?.stats) ? safePayload.stats : EMPTY_OBJECT;
+  const volumeProfile = isObjectRecord(safePayload?.volume_profile)
+    ? safePayload.volume_profile
+    : EMPTY_OBJECT;
   const latestEvent = isObjectRecord(safePayload?.latest_event) ? safePayload.latest_event : null;
 
   const levelRows = useMemo(() => extractLevelRows(safePayload), [safePayload]);
@@ -77,7 +97,7 @@ function IntradayLevelsDialog({
     : "n/a";
 
   useEffect(() => {
-    const handleKeyDown = (event) => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose?.();
       }
@@ -99,7 +119,7 @@ function IntradayLevelsDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Intraday levels detail"
-        onClick={(event) => event.stopPropagation()}
+        onClick={(event: ReactMouseEvent) => event.stopPropagation()}
       >
         <header className="intraday-levels-dialog__header">
           <div className="intraday-levels-dialog__heading">

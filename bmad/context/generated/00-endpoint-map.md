@@ -93,8 +93,8 @@ Generated from mapped Python files in `component-map.json`.
 | `strategy-engine` | `GET` | `/api/current` | `get_current_price` | `../market_regime_detection/api_server.py` | 436 |
 | `strategy-engine` | `GET` | `/api/history` | `get_history` | `../market_regime_detection/api_server.py` | 443 |
 | `strategy-engine` | `GET` | `/api/indicators` | `get_all_indicators` | `../market_regime_detection/api_server.py` | 450 |
-| `strategy-engine` | `GET` | `/api/orchestrator/checkpoints` | `list_checkpoints` | `../market_regime_detection/api_server.py` | 1138 |
-| `strategy-engine` | `GET` | `/api/orchestrator/config` | `get_orchestrator_config` | `../market_regime_detection/api_server.py` | 1023 |
+| `strategy-engine` | `GET` | `/api/orchestrator/checkpoints` | `list_checkpoints` | `../market_regime_detection/api_server.py` | 1139 |
+| `strategy-engine` | `GET` | `/api/orchestrator/config` | `get_orchestrator_config` | `../market_regime_detection/api_server.py` | 1024 |
 | `strategy-engine` | `GET` | `/api/performance` | `get_performance` | `../market_regime_detection/api_server.py` | 399 |
 | `strategy-engine` | `GET` | `/api/positions` | `get_positions` | `../market_regime_detection/api_server.py` | 378 |
 | `strategy-engine` | `GET` | `/api/regime` | `get_regime` | `../market_regime_detection/api_server.py` | 193 |
@@ -105,14 +105,14 @@ Generated from mapped Python files in `component-map.json`.
 | `strategy-engine` | `GET` | `/api/signals` | `get_signals` | `../market_regime_detection/api_server.py` | 368 |
 | `strategy-engine` | `GET` | `/api/state` | `get_state` | `../market_regime_detection/api_server.py` | 187 |
 | `strategy-engine` | `GET` | `/api/strategies` | `get_strategies` | `../market_regime_detection/api_server.py` | 213 |
-| `strategy-engine` | `GET` | `/api/system/health` | `get_system_health` | `../market_regime_detection/api_server.py` | 1014 |
+| `strategy-engine` | `GET` | `/api/system/health` | `get_system_health` | `../market_regime_detection/api_server.py` | 1015 |
 | `strategy-engine` | `GET` | `/api/trades` | `get_trades` | `../market_regime_detection/api_server.py` | 389 |
 | `strategy-engine` | `POST` | `/api/config/trading` | `update_trading_config` | `../market_regime_detection/api_server.py` | 687 |
-| `strategy-engine` | `POST` | `/api/orchestrator/checkpoint/load` | `load_checkpoint_endpoint` | `../market_regime_detection/api_server.py` | 1123 |
-| `strategy-engine` | `POST` | `/api/orchestrator/checkpoint/save` | `save_checkpoint` | `../market_regime_detection/api_server.py` | 1101 |
-| `strategy-engine` | `POST` | `/api/orchestrator/config` | `update_orchestrator_config` | `../market_regime_detection/api_server.py` | 1050 |
-| `strategy-engine` | `POST` | `/api/orchestrator/reset` | `reset_orchestrator_state` | `../market_regime_detection/api_server.py` | 990 |
-| `strategy-engine` | `POST` | `/api/orchestrator/warmup` | `warmup_feature_store` | `../market_regime_detection/api_server.py` | 1161 |
+| `strategy-engine` | `POST` | `/api/orchestrator/checkpoint/load` | `load_checkpoint_endpoint` | `../market_regime_detection/api_server.py` | 1124 |
+| `strategy-engine` | `POST` | `/api/orchestrator/checkpoint/save` | `save_checkpoint` | `../market_regime_detection/api_server.py` | 1102 |
+| `strategy-engine` | `POST` | `/api/orchestrator/config` | `update_orchestrator_config` | `../market_regime_detection/api_server.py` | 1051 |
+| `strategy-engine` | `POST` | `/api/orchestrator/reset` | `reset_orchestrator_state` | `../market_regime_detection/api_server.py` | 991 |
+| `strategy-engine` | `POST` | `/api/orchestrator/warmup` | `warmup_feature_store` | `../market_regime_detection/api_server.py` | 1162 |
 | `strategy-engine` | `POST` | `/api/reset` | `reset_engine` | `../market_regime_detection/api_server.py` | 428 |
 | `strategy-engine` | `POST` | `/api/run` | `run_backtest` | `../market_regime_detection/api_server.py` | 412 |
 | `strategy-engine` | `POST` | `/api/session/bar` | `process_bar` | `../market_regime_detection/api_server.py` | 512 |
@@ -122,4 +122,4 @@ Generated from mapped Python files in `component-map.json`.
 | `strategy-engine` | `POST` | `/api/step` | `step_backtest` | `../market_regime_detection/api_server.py` | 405 |
 | `strategy-engine` | `POST` | `/api/strategies/toggle` | `toggle_strategy` | `../market_regime_detection/api_server.py` | 229 |
 | `strategy-engine` | `POST` | `/api/strategies/update` | `update_strategy` | `../market_regime_detection/api_server.py` | 249 |
-| `strategy-engine` | `WEBSOCKET` | `/ws` | `websocket_endpoint` | `../market_regime_detection/api_server.py` | 1181 |
+| `strategy-engine` | `WEBSOCKET` | `/ws` | `websocket_endpoint` | `../market_regime_detection/api_server.py` | 1182 |

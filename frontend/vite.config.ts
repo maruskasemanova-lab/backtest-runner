@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import react from "@vitejs/plugin-react-swc";
 
 const apiProxyTarget = process.env.VITE_PROXY_API_TARGET || "http://localhost:8002";
 const wsProxyTarget = process.env.VITE_PROXY_WS_TARGET || "ws://localhost:8002";

@@ -5,6 +5,25 @@ from pydantic import BaseModel
 
 class StartRunRequest(BaseModel):
     run_id: str
+    book_pressure_block_z_threshold: float = 1.65
+    break_even_l2_proof_book_pressure_threshold: float = 0.06
+    break_even_l2_proof_imbalance_threshold: float = 0.1
+    break_even_l2_proof_signed_threshold: float = 0.07
+    break_even_proof_logic: str = "OR"
+    ev_relaxation_enabled: bool = True
+    ev_relaxation_factor: float = 0.5
+    ev_relaxation_threshold: float = 10.0
+    hard_l2_block_enabled: bool = True
+    intraday_levels_bounce_conflict_buffer_bars: int = 2
+    micro_confirmation_mode: str = "volume_delta"
+    micro_confirmation_volume_delta_min_pct: float = 0.6
+    signed_aggression_block_z_threshold: float = 1.65
+    strategy_time_windows: Optional[Dict[str, Any]] = None
+    time_of_day_filter_enabled: bool = True
+    volume_profile_poc_mode: str = "favor_bounce_mean_reversion"
+    weak_l2_aggression_threshold: float = 0.05
+    weak_l2_break_even_min_hold_bars: int = 1
+    weak_l2_fast_break_even_enabled: bool = False
     ticker: str
     date: Optional[str] = None
     date_from: Optional[str] = None

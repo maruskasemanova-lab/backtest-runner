@@ -28,7 +28,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `decision_tracker.py` | yes | 499 | `1273b21 2026-02-23` |
 | `performance_tracker.py` | yes | 876 | `1273b21 2026-02-23` |
 | `src/routes/context.py` | yes | 46 | `1273b21 2026-02-23` |
-| `src/routes/system_routes.py` | yes | 1716 | `1273b21 2026-02-23` |
+| `src/routes/system_routes.py` | yes | 1716 | `fdba1f6 2026-02-25` |
 | `src/routes/l2_routes.py` | yes | 122 | `1273b21 2026-02-23` |
 | `src/routes/data_loader_routes.py` | yes | 289 | `1273b21 2026-02-23` |
 | `src/routes/live_trader_routes.py` | yes | 68 | `da07c20 2026-02-12` |
@@ -39,7 +39,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/routes/run_start_routes.py` | yes | 345 | `1273b21 2026-02-23` |
 | `src/routes/v2_routes.py` | yes | 2046 | `1273b21 2026-02-23` |
 | `src/models/config_requests.py` | yes | 47 | `b9accc6 2026-02-18` |
-| `src/models/run_requests.py` | yes | 254 | `8f49f06 2026-02-23` |
+| `src/models/run_requests.py` | yes | 274 | `fdba1f6 2026-02-25` |
 | `src/models/tuner_requests.py` | yes | 95 | `1273b21 2026-02-23` |
 | `src/security/auth.py` | yes | 279 | `1273b21 2026-02-23` |
 | `src/security/network_policy.py` | yes | 135 | `1273b21 2026-02-23` |
@@ -58,15 +58,15 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/services/strategy_api_types.py` | yes | 33 | `1273b21 2026-02-23` |
 | `src/services/strategy_api_updates_service.py` | yes | 253 | `1273b21 2026-02-23` |
 | `src/services/strategy_api_profiles_service.py` | yes | 933 | `1273b21 2026-02-23` |
-| `src/services/strategy_api_session_service.py` | yes | 452 | `1273b21 2026-02-23` |
+| `src/services/strategy_api_session_service.py` | yes | 454 | `1273b21 2026-02-23` |
 | `src/services/start_run_service.py` | yes | 1229 | `8f49f06 2026-02-23` |
 | `src/services/start_run_data_service.py` | yes | 1584 | `1273b21 2026-02-23` |
-| `src/services/start_run_execution_config_service.py` | yes | 1552 | `1273b21 2026-02-23` |
+| `src/services/start_run_execution_config_service.py` | yes | 1696 | `fdba1f6 2026-02-25` |
 | `src/services/start_run_local_aos_service.py` | yes | 90 | `1273b21 2026-02-23` |
 | `src/services/start_run_bootstrap_phase_service.py` | yes | 275 | `1273b21 2026-02-23` |
 | `src/services/start_run_load_phase_service.py` | yes | 206 | `1273b21 2026-02-23` |
 | `src/services/start_run_session_phase_service.py` | yes | 131 | `8f49f06 2026-02-23` |
-| `src/services/start_run_execution_payload_service.py` | yes | 924 | `8f49f06 2026-02-23` |
+| `src/services/start_run_execution_payload_service.py` | yes | 930 | `fdba1f6 2026-02-25` |
 | `src/services/start_run_runner_setup_service.py` | yes | 365 | `8f49f06 2026-02-23` |
 | `src/services/execution_config/helpers.py` | yes | 310 | `1273b21 2026-02-23` |
 | `src/services/execution_config/intraday_context.py` | yes | 466 | `1273b21 2026-02-23` |
@@ -261,8 +261,8 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 ### `src/models/run_requests.py`
 - `class` `StartRunRequest` (line 6)
-- `class` `PrewarmRunRequest` (line 220)
-- `class` `PlayRequest` (line 247)
+- `class` `PrewarmRunRequest` (line 240)
+- `class` `PlayRequest` (line 267)
 
 ### `src/models/tuner_requests.py`
 - `class` `AdaptiveTunerRequest` (line 6)
@@ -441,12 +441,12 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `function` `_parse_positive_float_env` (line 13)
 - `function` `_strategy_api_headers` (line 33)
 - `async_function` `configure_session` (line 37)
-- `async_function` `clear_remote_strategy_sessions` (line 283)
-- `async_function` `reset_remote_orchestrator_state` (line 313)
-- `async_function` `reset_remote_orchestrator_state_scoped` (line 341)
-- `async_function` `apply_orchestrator_config` (line 361)
-- `async_function` `load_remote_checkpoint` (line 392)
-- `async_function` `save_remote_checkpoint` (line 417)
+- `async_function` `clear_remote_strategy_sessions` (line 285)
+- `async_function` `reset_remote_orchestrator_state` (line 315)
+- `async_function` `reset_remote_orchestrator_state_scoped` (line 343)
+- `async_function` `apply_orchestrator_config` (line 363)
+- `async_function` `load_remote_checkpoint` (line 394)
+- `async_function` `save_remote_checkpoint` (line 419)
 
 ### `src/services/start_run_service.py`
 - `function` `_parse_non_negative_int_env` (line 59)
@@ -483,14 +483,14 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `class` `IntPositioningSpec` (line 38)
 - `class` `BoolPositioningSpec` (line 51)
 - `class` `StringPositioningSpec` (line 61)
-- `function` `_resolve_strategy_selection` (line 691)
-- `function` `_resolve_positioning_config` (line 748)
-- `function` `_resolve_l2_lookback_bars` (line 766)
-- `function` `_resolve_l2_config` (line 775)
-- `function` `_resolve_positioning_fields` (line 849)
-- `function` `_apply_intraday_profile_overrides` (line 972)
-- `function` `_apply_context_risk_profile_overrides` (line 1056)
-- `function` `_parse_clamped_int` (line 1113)
+- `function` `_resolve_strategy_selection` (line 832)
+- `function` `_resolve_positioning_config` (line 889)
+- `function` `_resolve_l2_lookback_bars` (line 907)
+- `function` `_resolve_l2_config` (line 916)
+- `function` `_resolve_positioning_fields` (line 990)
+- `function` `_apply_intraday_profile_overrides` (line 1113)
+- `function` `_apply_context_risk_profile_overrides` (line 1197)
+- `function` `_parse_clamped_int` (line 1254)
 - ... 6 more symbols
 
 ### `src/services/start_run_local_aos_service.py`
@@ -527,14 +527,14 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `class` `ExecutionPayloadResult` (line 36)
 - `function` `_build_l2_thresholds` (line 41)
 - `function` `_build_core_execution_payload` (line 57)
-- `function` `_build_runtime_execution_payload` (line 405)
-- `function` `_build_intraday_levels_payload` (line 449)
-- `function` `_build_context_risk_payload` (line 730)
-- `function` `_resolve_include_extended_hours` (line 768)
-- `function` `_apply_optional_execution_limits` (line 782)
-- `function` `_apply_effective_profile_metadata` (line 810)
-- `function` `_build_l2_applied_payload` (line 858)
-- `function` `build_execution_payload` (line 877)
+- `function` `_build_runtime_execution_payload` (line 411)
+- `function` `_build_intraday_levels_payload` (line 455)
+- `function` `_build_context_risk_payload` (line 736)
+- `function` `_resolve_include_extended_hours` (line 774)
+- `function` `_apply_optional_execution_limits` (line 788)
+- `function` `_apply_effective_profile_metadata` (line 816)
+- `function` `_build_l2_applied_payload` (line 864)
+- `function` `build_execution_payload` (line 883)
 
 ### `src/services/start_run_runner_setup_service.py`
 - `class` `RunnerSetupInputs` (line 14)
