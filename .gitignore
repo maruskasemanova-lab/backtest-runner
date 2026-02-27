@@ -40,6 +40,7 @@ tuning_results.json
 wfo_results.json
 aos_walk_forward_results/
 walk_forward_results/
+temp_test_sweep*.json
 
 # Specific run artifacts
 mu_*.json
@@ -59,3 +60,4 @@ reports/
 .vercel
 # Local axon binary cache (too large for GitHub)
 .axon/kuzu
+**/.axon/kuzu

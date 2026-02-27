@@ -66,6 +66,7 @@ class BatchRunner:
         start_date: str,
         end_date: str,
         output_file: Optional[str] = None,
+        overrides: Optional[Dict[str, Any]] = None,
     ) -> BatchReport:
 
         # 1. Generate dates
@@ -92,6 +93,7 @@ class BatchRunner:
                     date=date,
                     run_id=run_id,
                     verbose=False,  # Keep individual runs quiet
+                    start_overrides=overrides,
                 )
 
                 # Add to aggregate
@@ -192,8 +194,11 @@ async def main():
     )
     parser.add_argument("--end-date", "-e", required=True, help="End date (YYYY-MM-DD)")
     parser.add_argument("--output", "-o", help="Output JSON file path")
+    parser.add_argument("--override", help="JSON string of start overrides")
 
     args = parser.parse_args()
+
+    overrides = json.loads(args.override) if args.override else None
 
     runner = BatchRunner()
     await runner.run_batch(
@@ -201,6 +206,7 @@ async def main():
         start_date=args.start_date,
         end_date=args.end_date,
         output_file=args.output,
+        overrides=overrides,
     )
 
 

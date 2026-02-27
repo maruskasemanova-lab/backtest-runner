@@ -91,7 +91,7 @@
       "min_effective_rr": 2.2,
       "min_room_pct": 0.45,
       "partial_protect_min_mfe_r": 1.0,
-      "options_flow_alpha_enabled": true
+      "options_flow_alpha_enabled": false
     },
     "GOOGL": {
       "risk_per_trade_pct": 0.6,

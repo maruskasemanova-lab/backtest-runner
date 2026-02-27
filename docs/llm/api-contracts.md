@@ -285,7 +285,7 @@ Compatibility notes:
 
 - marker schema changes require frontend compatibility checks.
 - execution-layer pending/no-fill outcomes are emitted as marker type `execution_status` (with `details.execution_status`, `details.execution_action`, `details.reason`) and are intentionally excluded from `signals` counts, which remain based on `signal_generated`.
-- summary fields are consumed by reports and regression workflows.
+- summary fields are consumed by diagnostics history and regression workflows.
 - `total_pnl_pct` in runner summary is normalized from `total_pnl_dollars / account_size_usd` to keep percent and dollar PnL directionally consistent.
 - run `state` payload includes `selection_warnings[]` (resolved from strategy-selection responses) so FE can surface strict-selection config gaps without fallback.
 
@@ -365,28 +365,9 @@ Snapshot contract (`GET /api/live-trader/snapshot/{run_id}`):
 - returns per-stream existence/count/latest row for dashboard status cards
 - includes aggregate `status` (`active|idle|finished|error`), `updated_at`, and top-level `runtime` latest summary
 
-### `GET /api/reports/diagnostic/{ticker}`
-
-Purpose: expose saved JSON diagnostic reports for frontend day-level analytics (calendar/funnel debugging).
-
-Query contract:
-
-- `phase` (default `0`) -> resolves `phase{phase}_diagnostic.json`
-- `profile` (default `diagnostic`) -> resolves directory `reports/{ticker_lower}_{profile}`
-- `summary_only` (default `false`) -> when `true`, returns compact structural summary instead of full payload body
-- `refresh_cache` (default `false`) -> when `true`, bypasses DB cache read and refreshes cached payload from file
-
-Behavioral notes:
-
-- endpoint returns explicit errors on missing or invalid report artifacts (no fallback substitution):
-  - `404` when target file does not exist
-  - `400` when route/query tokens are invalid
-  - `500` when file cannot be read or JSON is malformed
-- when SaaS store is available, endpoint caches parsed payload by `(ticker, profile, phase, source_path, source_mtime_ns)` and serves from cache on repeated requests while file mtime is unchanged.
-
 ### `GET /api/reports/history/{ticker}`
 
-Purpose: expose calendar-friendly aggregates from historical run artifacts so frontend Diagnostics can inspect previous runs and adaptive profile usage per day.
+Purpose: expose calendar-friendly aggregates from persisted run summaries so frontend Diagnostics can inspect previous runs and adaptive profile usage per day.
 
 Query contract:
 
@@ -406,21 +387,42 @@ Response notes:
   - day signal/regime counts from markers (`signals`, `regime_evaluations`)
   - day bars when resolvable (`processed_bars`, `total_bars`; often `null` for multi-day range artifacts)
   - `trade_details[]` including entry/exit reasons when available
-  - `runs[]` summaries (run id, saved-at, profile metadata, per-run day PnL/trades, plus run-level totals: `run_total_trades`, `run_total_pnl_pct`, `run_total_pnl_dollars`, `run_signals`, `run_regime_evaluations`, `run_processed_bars`, `run_total_bars`)
+  - `runs[]` summaries (run id, run key, saved-at, profile metadata, per-run day PnL/trades, plus run-level totals: `run_total_trades`, `run_total_pnl_pct`, `run_total_pnl_dollars`, `run_signals`, `run_regime_evaluations`, `run_processed_bars`, `run_total_bars`)
+  - per-run request snapshot `run_request_config` (full `POST /api/run/start` payload when present in stored summary); for single-run days, `day_results[].run_request_config` mirrors that snapshot for convenience.
 - includes `filter_options` payload for diagnostics dropdowns:
   - `filter_options.run_ids[]` with `run_id` and `latest_saved_at`
   - `filter_options.adaptive_profiles[]` merged from history metadata and `aos_optimization/aos_config.json`
 - by default, report artifacts with zero closed trades are excluded from history payload and run dropdown options; set `include_zero_trade_runs=true` to include them.
 - includes calendar metadata: `split`, `metrics`, `matched_reports`, `scanned_reports`.
 - includes source metadata for diagnostics header rendering:
-  - `source_mode` (`supabase_run_reports|sqlite_run_reports|run_reports_store|filesystem_reports`)
-  - `source_path_hint` (`run_reports_store` or `reports/*/session_summary.json`)
+  - `source_mode` (`supabase_run_reports|sqlite_run_reports|run_reports_store`)
+  - `source_path_hint` (`run_reports_store`)
 - malformed historical artifacts are skipped and counted under `skipped_invalid_reports`.
 - source resolution:
   - endpoint also merges currently active in-memory runs (`active_runners`) so Diagnostics can surface Strategy Analyzer sessions before explicit delete/final save.
-  - when run report store is configured (`app.state.run_reports_store`), endpoint reads that store as the authoritative source (Supabase in prod, SQLite in local-by-default runtime).
-  - local filesystem artifacts are read only when no run report store is configured.
-  - if no source data exists, endpoint returns `200` with empty `day_results` (no hard `404` for missing local `reports/` directory).
+  - endpoint reads `app.state.run_reports_store` as the authoritative persisted source (Supabase in prod, SQLite in local-by-default runtime).
+- if no source data exists, endpoint returns `200` with empty `day_results`.
+
+### `GET /api/reports/run-snapshot`
+
+Purpose: fetch one persisted run playback snapshot by `run_key` for Diagnostics -> Strategy Analyzer fast open.
+
+Query contract:
+
+- `run_key` required, format `run_id:ticker:date_or_range`.
+
+Response notes:
+
+- checks active in-memory run first (`active_runners`) and returns live bars/markers/state when present.
+- otherwise reads persisted `run_summaries` row from configured run-report store (Supabase or SQLite).
+- expects compressed playback payload under `summary.playback_snapshot` (`encoding=gzip+base64`).
+- returns:
+  - `run_key`
+  - `state` (read-only snapshot state with `is_snapshot=true`)
+  - `bars[]`, `markers[]`
+  - `summary` (same summary object but `playback_snapshot.payload_b64` removed from response)
+  - `snapshot_meta` and `report_saved_at`
+- if snapshot payload is missing (older run rows), endpoint returns `404` with guidance to rerun once with snapshot persistence enabled.
 
 ### `GET /api/system/l2/runtime` / `POST /api/system/l2/runtime`
 
@@ -573,12 +575,16 @@ Custom formula fields:
 
 - `custom_entry_formula_enabled` (`bool`) + `custom_entry_formula` (`string`)
 - `custom_exit_formula_enabled` (`bool`) + `custom_exit_formula` (`string`)
+- optional liquidity sweep ownership fields:
+  - `liquidity_sweep_signal_enabled` (`bool`) gates whether a strategy may own runtime `liquidity_sweep_confirmed` entries
+  - `liquidity_sweep_signal_priority` (`int`) chooses the owner when `selected_strategy="adaptive"` and multiple active strategies are eligible
 
 Behavioral notes:
 
 - formula strings are validated server-side with restricted expression grammar (safe AST; no arbitrary code).
 - update rejects invalid formulas with `HTTP 400`.
 - strategy payload exposes supported formula variables and examples to drive frontend editors.
+- liquidity sweep ownership fields are backward-compatible and only affect the synthetic sweep-confirmation signal path; the global session flag `liquidity_sweep_detection_enabled` still controls whether sweep detection runs at all.
 
 ## Cross-Service Coupling
 

@@ -495,25 +495,68 @@ def find_tcbbo_files(
     ticker: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Discover TCBBO parquet files in the data directory."""
-    root = Path(data_dir)
+    roots: List[Path] = []
+    seen_roots = set()
+
+    def _push_root(value: Path | str) -> None:
+        try:
+            candidate = Path(value).expanduser().resolve()
+        except Exception:
+            candidate = Path(value).expanduser()
+        key = str(candidate)
+        if key in seen_roots:
+            return
+        seen_roots.add(key)
+        roots.append(candidate)
+
+    # Preserve explicit caller-provided root first.
+    _push_root(data_dir)
+
+    # Runtime-friendly fallback: when callers use the default local "data" path
+    # (e.g., git worktrees), also scan configured/shared data roots.
+    try:
+        is_default_local = str(data_dir).strip() in {"", ".", "data"}
+        if is_default_local:
+            try:
+                from src.system_settings import SystemSettings
+
+                for configured_dir in SystemSettings().get_ohlcv_dirs(existing_only=False):
+                    _push_root(configured_dir)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     pattern = "*_OPRA_tcbbo_*.parquet"
     if ticker:
         pattern = f"{ticker.upper()}_OPRA_tcbbo_*.parquet"
 
     results = []
-    for p in sorted(root.glob(pattern)):
-        parts = p.stem.split("_")
-        # Expected: {TICKER}_OPRA_tcbbo_{START}_{END}
-        if len(parts) >= 5:
-            results.append(
-                {
-                    "file": str(p),
-                    "ticker": parts[0],
-                    "start_date": parts[3],
-                    "end_date": parts[4],
-                    "size_mb": round(p.stat().st_size / (1024 * 1024), 2),
-                }
-            )
+    seen_files = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for p in sorted(root.glob(pattern)):
+            try:
+                resolved_file = str(p.resolve())
+            except Exception:
+                resolved_file = str(p)
+            if resolved_file in seen_files:
+                continue
+            seen_files.add(resolved_file)
+            parts = p.stem.split("_")
+            # Expected: {TICKER}_OPRA_tcbbo_{START}_{END}
+            if len(parts) >= 5:
+                results.append(
+                    {
+                        "file": resolved_file,
+                        "ticker": parts[0],
+                        "start_date": parts[3],
+                        "end_date": parts[4],
+                        "size_mb": round(p.stat().st_size / (1024 * 1024), 2),
+                        "search_root": str(root),
+                    }
+                )
     return results
 
 

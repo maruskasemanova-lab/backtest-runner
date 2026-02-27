@@ -1475,9 +1475,23 @@ def enrich_bars_with_tcbbo(
         "tcbbo_minutes_covered": 0,
         "tcbbo_bars_enriched": 0,
         "tcbbo_bars_total": len(bars),
+        "tcbbo_files_found": 0,
+        "tcbbo_missing_reason": "tcbbo_file_not_found",
     }
 
     files = find_tcbbo_files(data_dir="data", ticker=ticker)
+    tcbbo_stats["tcbbo_files_found"] = len(files)
+    if files:
+        roots = []
+        seen_roots = set()
+        for row in files:
+            root = str(row.get("search_root") or "").strip()
+            if not root or root in seen_roots:
+                continue
+            seen_roots.add(root)
+            roots.append(root)
+        if roots:
+            tcbbo_stats["tcbbo_search_roots"] = roots
     if not files:
         return bars, tcbbo_stats
 
@@ -1492,15 +1506,22 @@ def enrich_bars_with_tcbbo(
     if best_file is None:
         # Fallback: use the first file for this ticker
         best_file = files[0]["file"]
+    tcbbo_stats["tcbbo_selected_file"] = str(best_file)
 
     try:
         feature_map, build_stats = build_tcbbo_feature_map(best_file)
     except Exception as exc:
         logger.warning("TCBBO enrichment failed for %s: %s", ticker, exc)
+        tcbbo_stats["tcbbo_missing_reason"] = "tcbbo_build_failed"
+        tcbbo_stats["tcbbo_error"] = str(exc)
         return bars, tcbbo_stats
 
     tcbbo_stats.update(build_stats)
     tcbbo_stats["tcbbo_available"] = len(feature_map) > 0
+    if feature_map:
+        tcbbo_stats["tcbbo_missing_reason"] = None
+    else:
+        tcbbo_stats["tcbbo_missing_reason"] = "tcbbo_no_feature_rows"
 
     enriched = 0
     for bar in bars:
@@ -1523,6 +1544,8 @@ def enrich_bars_with_tcbbo(
             enriched += 1
 
     tcbbo_stats["tcbbo_bars_enriched"] = enriched
+    if not enriched and tcbbo_stats.get("tcbbo_available"):
+        tcbbo_stats["tcbbo_missing_reason"] = "tcbbo_no_bar_overlap"
     logger.info(
         "TCBBO enrichment: %d/%d bars enriched from %s",
         enriched,

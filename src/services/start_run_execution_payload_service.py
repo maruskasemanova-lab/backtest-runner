@@ -54,6 +54,15 @@ def _build_l2_thresholds(execution_cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _is_options_flow_alpha_enabled(aos_applied: Dict[str, Any]) -> bool:
+    if not isinstance(aos_applied, dict):
+        return False
+    positioning = aos_applied.get("positioning")
+    if isinstance(positioning, dict):
+        return bool(positioning.get("options_flow_alpha_enabled", False))
+    return bool(aos_applied.get("options_flow_alpha_enabled", False))
+
+
 def _build_core_execution_payload(execution_cfg: Dict[str, Any]) -> Dict[str, Any]:
     positioning_cfg = dict(execution_cfg["positioning_cfg"])
     return {
@@ -866,6 +875,14 @@ def _build_l2_applied_payload(
     inputs: ExecutionPayloadInputs,
     l2_thresholds: Dict[str, Any],
 ) -> Dict[str, Any]:
+    tcbbo_gate_enabled = bool(inputs.execution_cfg.get("effective_tcbbo_gate_enabled", False))
+    options_flow_alpha_enabled = _is_options_flow_alpha_enabled(inputs.aos_applied)
+    tcbbo_feature_required_by: list[str] = []
+    if tcbbo_gate_enabled:
+        tcbbo_feature_required_by.append("tcbbo_gate")
+    if options_flow_alpha_enabled:
+        tcbbo_feature_required_by.append("options_flow_alpha")
+
     return {
         **inputs.l2_stats,
         "l2_requested": bool(
@@ -873,6 +890,19 @@ def _build_l2_applied_payload(
         ),
         "l2_guard_reason": inputs.l2_guard_reason,
         "effective_l2_confirm_enabled": inputs.effective_l2_confirm,
+        "tcbbo_gate_enabled": tcbbo_gate_enabled,
+        "tcbbo_min_net_premium": float(
+            inputs.execution_cfg.get("effective_tcbbo_min_net_premium", 0.0)
+        ),
+        "tcbbo_sweep_boost": float(
+            inputs.execution_cfg.get("effective_tcbbo_sweep_boost", 5.0)
+        ),
+        "tcbbo_lookback_bars": int(
+            inputs.execution_cfg.get("effective_tcbbo_lookback_bars", 5)
+        ),
+        "options_flow_alpha_enabled": options_flow_alpha_enabled,
+        "tcbbo_feature_required": bool(tcbbo_feature_required_by),
+        "tcbbo_feature_required_by": list(tcbbo_feature_required_by),
         "liquidity_sweep_l2_auto_enabled": bool(inputs.l2_auto_enabled_by_sweep),
         "liquidity_sweep_l2_auto_source": str(inputs.l2_auto_enabled_source),
         **l2_thresholds,

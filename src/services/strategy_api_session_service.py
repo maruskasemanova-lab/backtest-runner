@@ -315,7 +315,17 @@ async def clear_remote_strategy_sessions(
 async def reset_remote_orchestrator_state(
     strategy_api_url: str,
     deps: StrategyApiIntegrationDeps,
-) -> bool:
+) -> Dict[str, Any]:
+    detail: Dict[str, Any] = {
+        "success": False,
+        "scope": "all",
+        "clear_sessions": True,
+        "strategy_api_url": str(strategy_api_url or ""),
+        "endpoint": "/api/orchestrator/reset",
+        "endpoint_supported": True,
+        "http_status": None,
+        "error": None,
+    }
     try:
         async with aiohttp.ClientSession(
             timeout=_STRATEGY_API_CLIENT_TIMEOUT
@@ -325,39 +335,86 @@ async def reset_remote_orchestrator_state(
                 params={"scope": "all", "clear_sessions": "true"},
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
+                detail["http_status"] = int(resp.status)
                 if resp.status == 200:
-                    return True
+                    detail["success"] = True
+                    try:
+                        payload = await resp.json()
+                    except Exception:
+                        payload = None
+                    if isinstance(payload, dict) and payload:
+                        detail["response"] = payload
+                    return detail
                 if resp.status in (404, 405):
-                    return False
+                    detail["endpoint_supported"] = False
+                    detail["error"] = f"endpoint_unavailable_http_{resp.status}"
+                    return detail
                 deps.logger.warning(
                     f"Remote orchestrator reset failed (HTTP {resp.status}) at {strategy_api_url}"
                 )
-                return False
+                body_text = str(await resp.text() or "").strip()
+                detail["error"] = body_text or f"http_{resp.status}"
+                return detail
     except Exception as exc:
         deps.logger.warning(
             f"Remote orchestrator reset error at {strategy_api_url}: {exc}"
         )
-        return False
+        detail["error"] = str(exc)
+        return detail
 
 
 async def reset_remote_orchestrator_state_scoped(
     strategy_api_url: str,
     scope: str,
     deps: StrategyApiIntegrationDeps,
-) -> bool:
+) -> Dict[str, Any]:
+    normalized_scope = str(scope or "session").strip().lower() or "session"
+    detail: Dict[str, Any] = {
+        "success": False,
+        "scope": normalized_scope,
+        "clear_sessions": True,
+        "strategy_api_url": str(strategy_api_url or ""),
+        "endpoint": "/api/orchestrator/reset",
+        "endpoint_supported": True,
+        "http_status": None,
+        "error": None,
+    }
     try:
         async with aiohttp.ClientSession(
             timeout=_STRATEGY_API_CLIENT_TIMEOUT
         ) as session:
             async with session.post(
                 f"{strategy_api_url}/api/orchestrator/reset",
-                params={"scope": scope, "clear_sessions": "true"},
+                params={"scope": normalized_scope, "clear_sessions": "true"},
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
-                return resp.status == 200
+                detail["http_status"] = int(resp.status)
+                if resp.status == 200:
+                    detail["success"] = True
+                    try:
+                        payload = await resp.json()
+                    except Exception:
+                        payload = None
+                    if isinstance(payload, dict) and payload:
+                        detail["response"] = payload
+                    return detail
+                if resp.status in (404, 405):
+                    detail["endpoint_supported"] = False
+                    detail["error"] = f"endpoint_unavailable_http_{resp.status}"
+                    return detail
+                deps.logger.warning(
+                    "Remote orchestrator scoped reset failed (HTTP %s, scope=%s) at %s",
+                    resp.status,
+                    normalized_scope,
+                    strategy_api_url,
+                )
+                body_text = str(await resp.text() or "").strip()
+                detail["error"] = body_text or f"http_{resp.status}"
+                return detail
     except Exception as exc:
         deps.logger.warning(f"Remote orchestrator scoped reset error: {exc}")
-        return False
+        detail["error"] = str(exc)
+        return detail
 
 
 async def apply_orchestrator_config(

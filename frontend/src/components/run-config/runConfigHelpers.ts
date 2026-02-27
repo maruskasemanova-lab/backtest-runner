@@ -43,7 +43,7 @@ export const AUTO_PREWARM_RETRY_BASE_MS = 900;
 export const SHOW_RUN_CONFIG_ADVANCED_EXECUTION_CONTROLS = true;
 export const SHOW_UNIFIED_PROFILE_ADVANCED_VIEW = false;
 export const RUN_CONFIG_DRAFT_STORAGE_KEY = "backtest_runner.run_config_draft.v2";
-export const RUN_CONFIG_DRAFT_VERSION = 8;
+export const RUN_CONFIG_DRAFT_VERSION = 9;
 export const RUN_ID_COLLISION_PATTERN = /Run already exists:/i;
 export const START_MODE_STANDARD = "standard";
 export const START_MODE_FAST_RESTART = "fast_restart";
@@ -259,7 +259,8 @@ export const applyMuMomentumDefaults = (draft, ticker, previousTicker) => {
     momentum_diversification_override_enabled: false,
     momentum_apply_to_strategies: MU_DEFAULT_MOMENTUM_APPLY_TO_STRATEGIES,
     include_extended_hours: false,
-    l2_confirm_enabled: false,
+    l2_confirm_enabled: true,
+    tcbbo_gate_enabled: true,
     apply_aos_optimizations_on_start: false,
     start_mode: START_MODE_FAST_RESTART,
     ...MU_INTRADAY_NON_OVERFIT_BASELINE,
@@ -364,6 +365,20 @@ export const applyRunConfigDraftMigrations = (mergedConfig, draftConfig, draftVe
     if (ticker === MU_TICKER) {
       nextConfig.intraday_levels_entry_quality_enabled = true;
     }
+  }
+  // v8 -> v9: default to using both L2 and TCBBO flow gates in run-start payloads.
+  if (version < 9) {
+    nextConfig.l2_confirm_enabled = true;
+    nextConfig.tcbbo_gate_enabled = true;
+    nextConfig.tcbbo_min_net_premium = Number.isFinite(Number(nextConfig.tcbbo_min_net_premium))
+      ? Number(nextConfig.tcbbo_min_net_premium)
+      : 0.0;
+    nextConfig.tcbbo_sweep_boost = Number.isFinite(Number(nextConfig.tcbbo_sweep_boost))
+      ? Number(nextConfig.tcbbo_sweep_boost)
+      : 5.0;
+    nextConfig.tcbbo_lookback_bars = Number.isFinite(Number(nextConfig.tcbbo_lookback_bars))
+      ? Math.max(1, Math.trunc(Number(nextConfig.tcbbo_lookback_bars)))
+      : 5;
   }
   return nextConfig;
 };
@@ -723,6 +738,30 @@ export const l2GateFieldConfig = [
   },
 ];
 
+export const tcbboGateFieldConfig = [
+  {
+    key: "tcbbo_min_net_premium",
+    label: "Min Net Premium ($)",
+    hint: "0 keeps the gate permissive while still forcing TCBBO enrichment + diagnostics.",
+    min: "0",
+    step: "1000",
+  },
+  {
+    key: "tcbbo_sweep_boost",
+    label: "Sweep Boost",
+    hint: "Confidence boost applied when TCBBO sweep flow aligns with signal direction.",
+    min: "0",
+    step: "0.5",
+  },
+  {
+    key: "tcbbo_lookback_bars",
+    label: "Lookback Bars",
+    hint: "Recent bars used for TCBBO confirmation/regime override checks.",
+    min: "1",
+    step: "1",
+  },
+];
+
 export const buildDefaultRunConfig = () => ({
   run_id: buildDefaultRunId(),
   ticker: "",
@@ -764,11 +803,15 @@ export const buildDefaultRunConfig = () => ({
   stop_loss_mode: "strategy",
   fixed_stop_loss_pct: 0.0,
   l2_only: false,
-  l2_confirm_enabled: false,
+  l2_confirm_enabled: true,
   l2_min_imbalance: 0.0,
   l2_min_directional_consistency: 0.0,
   l2_min_signed_aggression: 0.0,
   l2_lookback_bars: 3,
+  tcbbo_gate_enabled: true,
+  tcbbo_min_net_premium: 0.0,
+  tcbbo_sweep_boost: 5.0,
+  tcbbo_lookback_bars: 5,
   intraday_levels_enabled: true,
   intraday_levels_swing_left_bars: 2,
   intraday_levels_swing_right_bars: 2,

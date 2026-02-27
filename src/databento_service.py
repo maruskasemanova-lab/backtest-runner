@@ -1,6 +1,6 @@
 """
 Databento data loader service.
-Downloads and catalogs L2, OHLCV, and trades data from Databento.
+Downloads and catalogs L2, OHLCV, trades, and TCBBO data from Databento.
 """
 
 from __future__ import annotations
@@ -30,6 +30,10 @@ SUPPORTED_SCHEMAS = {
     "mbp-10": {"description": "L2 Market Depth (10 levels)", "ext_primary": ".mbn"},
     "ohlcv-1m": {"description": "1-Minute OHLCV Bars", "ext_primary": ".csv"},
     "trades": {"description": "Raw Trade Tape", "ext_primary": ".mbn"},
+    "tcbbo": {
+        "description": "Options Trades With BBO (OPRA parent)",
+        "ext_primary": ".parquet",
+    },
 }
 
 
@@ -259,6 +263,58 @@ class DatabentoService:
             return False
 
     @staticmethod
+    def _normalize_date_token(value: str) -> Optional[str]:
+        token = str(value or "").strip()
+        if DatabentoService._is_valid_iso_date(token):
+            return token
+        # TCBBO filenames often store compact YYYYMMDD tokens.
+        if len(token) == 8 and token.isdigit():
+            try:
+                return datetime.strptime(token, "%Y%m%d").strftime("%Y-%m-%d")
+            except Exception:
+                return None
+        return None
+
+    @staticmethod
+    def _compact_date_token(value: str) -> str:
+        token = str(value or "").strip()
+        if DatabentoService._is_valid_iso_date(token):
+            return token.replace("-", "")
+        return token
+
+    @staticmethod
+    def _resolve_download_request(
+        ticker: str,
+        schema: str,
+        dataset: str,
+    ) -> Dict[str, Any]:
+        schema_lower = str(schema or "").strip().lower()
+        ticker_upper = str(ticker or "").strip().upper()
+        dataset_raw = str(dataset or "").strip()
+
+        if schema_lower == "tcbbo":
+            base_ticker = (
+                ticker_upper[:-4] if ticker_upper.endswith(".OPT") else ticker_upper
+            )
+            if not base_ticker:
+                raise ValueError("Ticker is required for tcbbo requests")
+            return {
+                "schema": schema_lower,
+                "storage_ticker": base_ticker,
+                "dataset": "OPRA.PILLAR",
+                "symbols": [f"{base_ticker}.OPT"],
+                "stype_in": "parent",
+            }
+
+        return {
+            "schema": schema_lower,
+            "storage_ticker": ticker_upper,
+            "dataset": dataset_raw or "XNAS.ITCH",
+            "symbols": [ticker_upper],
+            "stype_in": "raw_symbol",
+        }
+
+    @staticmethod
     def _parse_l2_basename(stem: str) -> Optional[Tuple[str, str, str, str]]:
         # trades: TICKER_trades_YYYY-MM-DD_YYYY-MM-DD
         if "_trades_" in stem:
@@ -287,6 +343,22 @@ class DatabentoService:
         ):
             return None
         return ticker, schema, start_date, end_date
+
+    @staticmethod
+    def _parse_tcbbo_basename(stem: str) -> Optional[Tuple[str, str, str, str]]:
+        # TCBBO: {TICKER}_OPRA_tcbbo_{YYYYMMDD|YYYY-MM-DD}_{YYYYMMDD|YYYY-MM-DD}
+        marker = "_OPRA_tcbbo_"
+        if marker not in stem:
+            return None
+        ticker, tail = stem.split(marker, 1)
+        parts = tail.split("_")
+        if len(parts) < 2:
+            return None
+        start_date = DatabentoService._normalize_date_token(parts[0])
+        end_date = DatabentoService._normalize_date_token(parts[1])
+        if not start_date or not end_date:
+            return None
+        return ticker.upper(), "tcbbo", start_date, end_date
 
     @staticmethod
     def _parse_ohlcv_basename(stem: str) -> Optional[Tuple[str, str, str, str]]:
@@ -938,6 +1010,62 @@ class DatabentoService:
                 self.catalog.upsert(entry)
                 new_entries.append(entry)
 
+        # Scan TCBBO files (OPRA options flow parquet)
+        for data_dir in self._ohlcv_scan_dirs:
+            if not data_dir.exists():
+                try:
+                    data_dir.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    continue
+            if not data_dir.is_dir():
+                continue
+
+            grouped: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
+            for file_path in data_dir.glob("*_OPRA_tcbbo_*_*.parquet"):
+                parsed = self._parse_tcbbo_basename(file_path.stem)
+                if not parsed:
+                    continue
+                ticker, schema, start_date, end_date = parsed
+                key = (ticker, schema, start_date, end_date)
+                grouped[key] = {
+                    "ticker": ticker,
+                    "schema": schema,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "file_parquet": file_path,
+                    "source_root": str(data_dir.resolve()),
+                }
+
+            for ticker, schema, start_date, end_date in grouped.keys():
+                if self.catalog.find(ticker, schema, start_date, end_date):
+                    continue
+                info = grouped[(ticker, schema, start_date, end_date)]
+                parquet_path = info.get("file_parquet")
+                if parquet_path is None:
+                    continue
+
+                entry = CatalogEntry(
+                    ticker=ticker,
+                    schema=schema,
+                    dataset="OPRA.PILLAR",
+                    start_date=start_date,
+                    end_date=end_date,
+                    file_parquet=str(parquet_path),
+                    size_bytes=(
+                        parquet_path.stat().st_size if parquet_path.exists() else 0
+                    ),
+                    status="ready",
+                    downloaded_at=(
+                        datetime.fromtimestamp(parquet_path.stat().st_mtime).isoformat()
+                        if parquet_path.exists()
+                        else None
+                    ),
+                    source_root=info.get("source_root"),
+                    managed=self._is_managed_path(parquet_path),
+                )
+                self.catalog.upsert(entry)
+                new_entries.append(entry)
+
         if new_entries:
             logger.info(f"Scanned and registered {len(new_entries)} new file(s)")
         return new_entries
@@ -1391,26 +1519,31 @@ class DatabentoService:
     ) -> Dict[str, Any]:
         """Get cost estimate from Databento before downloading."""
         client = self._get_client()
+        request_meta = self._resolve_download_request(
+            ticker=ticker,
+            schema=schema,
+            dataset=dataset,
+        )
         # Databento end is exclusive - add 1 day.
         end_exclusive = (
             datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)
         ).strftime("%Y-%m-%d")
 
         cost = client.metadata.get_cost(
-            dataset=dataset,
-            symbols=[ticker],
-            schema=schema,
+            dataset=request_meta["dataset"],
+            symbols=request_meta["symbols"],
+            schema=request_meta["schema"],
             start=start,
             end=end_exclusive,
-            stype_in="raw_symbol",
+            stype_in=request_meta["stype_in"],
         )
         return {
             "estimated_cost_usd": cost,
-            "ticker": ticker,
-            "schema": schema,
+            "ticker": request_meta["storage_ticker"],
+            "schema": request_meta["schema"],
             "start_date": start,
             "end_date": end,
-            "dataset": dataset,
+            "dataset": request_meta["dataset"],
         }
 
     def _output_dir(self, schema: str) -> Path:
@@ -1419,6 +1552,10 @@ class DatabentoService:
         return self.ohlcv_dir
 
     def _output_filename(self, ticker: str, schema: str, start: str, end: str) -> str:
+        if schema == "tcbbo":
+            start_compact = self._compact_date_token(start)
+            end_compact = self._compact_date_token(end)
+            return f"{ticker}_OPRA_tcbbo_{start_compact}_{end_compact}.parquet"
         if schema.startswith("ohlcv-"):
             return f"{ticker}_{schema}_{start}_{end}.csv"
         if schema == "trades":
@@ -1505,6 +1642,36 @@ class DatabentoService:
             "trade_events": int(stats.get("trade_events", 0) or 0),
         }
 
+    @staticmethod
+    def _write_store_to_mbn(data: Any, out_path: Path) -> None:
+        """
+        Persist DBN payload to .mbn across Databento client versions.
+
+        Newer Databento clients expose `to_file(path)`, while older clients
+        accepted `replay(path)` for direct file writes.
+        """
+        target = str(out_path)
+
+        writer = getattr(data, "to_file", None)
+        if callable(writer):
+            writer(target)
+            return
+
+        replay = getattr(data, "replay", None)
+        if callable(replay):
+            try:
+                replay(target)
+                return
+            except TypeError as exc:
+                raise RuntimeError(
+                    "Databento DBNStore.replay now expects a callback; "
+                    "use a client version with DBNStore.to_file support."
+                ) from exc
+
+        raise RuntimeError(
+            "Databento response cannot be persisted: missing to_file()/replay()."
+        )
+
     def _blocking_download(
         self,
         ticker: str,
@@ -1516,6 +1683,15 @@ class DatabentoService:
     ) -> CatalogEntry:
         """Synchronous download - runs in executor."""
         import databento as db
+
+        request_meta = self._resolve_download_request(
+            ticker=ticker,
+            schema=schema,
+            dataset=dataset,
+        )
+        schema = request_meta["schema"]
+        ticker = request_meta["storage_ticker"]
+        dataset = request_meta["dataset"]
 
         client = self._get_client()
         out_dir = self._output_dir(schema)
@@ -1534,11 +1710,11 @@ class DatabentoService:
 
         data = client.timeseries.get_range(
             dataset=dataset,
-            symbols=[ticker],
+            symbols=request_meta["symbols"],
             schema=schema,
             start=start,
             end=end_exclusive,
-            stype_in="raw_symbol",
+            stype_in=request_meta["stype_in"],
         )
 
         entry = CatalogEntry(
@@ -1568,9 +1744,19 @@ class DatabentoService:
             entry.file_csv = str(out_path)
             entry.size_bytes = out_path.stat().st_size
             entry.row_count = len(df)
+        elif schema == "tcbbo":
+            df = data.to_df()
+            if df.empty:
+                entry.status = "error"
+                entry.error_message = "No data returned"
+                return entry
+            write_parquet_compat(df, str(out_path), index=False)
+            entry.file_parquet = str(out_path)
+            entry.size_bytes = out_path.stat().st_size
+            entry.row_count = len(df)
         else:
             # Save as MBN first.
-            data.replay(str(out_path))
+            self._write_store_to_mbn(data, out_path)
             entry.file_mbn = str(out_path)
 
             if convert_to_parquet:
@@ -1600,7 +1786,19 @@ class DatabentoService:
         broadcast_fn: Optional[Callable] = None,
     ) -> CatalogEntry:
         """Download data from Databento asynchronously, one file per day."""
-        job_key = f"{ticker}:{schema}:{start_date}:{end_date}"
+        schema_lower = str(schema or "").strip().lower()
+        request_meta = self._resolve_download_request(
+            ticker=ticker,
+            schema=schema_lower,
+            dataset=dataset,
+        )
+        ticker_upper = str(request_meta["storage_ticker"]).upper()
+        dataset = str(request_meta["dataset"])
+
+        if schema_lower not in SUPPORTED_SCHEMAS:
+            raise RuntimeError(f"Unsupported schema: {schema}")
+
+        job_key = f"{ticker_upper}:{schema_lower}:{start_date}:{end_date}"
         if job_key in self._active_downloads:
             raise RuntimeError(f"Download already in progress: {job_key}")
 
@@ -1610,8 +1808,8 @@ class DatabentoService:
 
         self._active_downloads[job_key] = {
             "status": "downloading",
-            "ticker": ticker,
-            "schema": schema,
+            "ticker": ticker_upper,
+            "schema": schema_lower,
             "start_date": start_date,
             "end_date": end_date,
             "total_days": len(days),
@@ -1621,18 +1819,18 @@ class DatabentoService:
             await broadcast_fn(
                 {
                     "type": "download_progress",
-                    "ticker": ticker,
-                    "schema": schema,
+                    "ticker": ticker_upper,
+                    "schema": schema_lower,
                     "status": "downloading",
                     "progress_pct": 0,
-                    "message": f"Downloading {schema} data for {ticker} in {len(days)} day chunk(s)...",
+                    "message": f"Downloading {schema_lower} data for {ticker_upper} in {len(days)} day chunk(s)...",
                 }
             )
 
-        source_root = str(self._output_dir(schema).resolve())
+        source_root = str(self._output_dir(schema_lower).resolve())
         summary = CatalogEntry(
-            ticker=ticker,
-            schema=schema,
+            ticker=ticker_upper,
+            schema=schema_lower,
             dataset=dataset,
             start_date=start_date,
             end_date=end_date,
@@ -1651,13 +1849,13 @@ class DatabentoService:
 
         try:
             loop = asyncio.get_event_loop()
-            entries = self.list_catalog(refresh=False, ticker=ticker)
+            entries = self.list_catalog(refresh=False, ticker=ticker_upper)
             for idx, day in enumerate(days, start=1):
                 progress_before = round(((idx - 1) / len(days)) * 100.0, 1)
 
                 if self._has_ready_coverage_for_day(
-                    ticker=ticker,
-                    schema=schema,
+                    ticker=ticker_upper,
+                    schema=schema_lower,
                     day=day,
                     entries=entries,
                 ):
@@ -1666,8 +1864,8 @@ class DatabentoService:
                         await broadcast_fn(
                             {
                                 "type": "download_progress",
-                                "ticker": ticker,
-                                "schema": schema,
+                                "ticker": ticker_upper,
+                                "schema": schema_lower,
                                 "status": "downloading",
                                 "progress_pct": progress_before,
                                 "message": (
@@ -1679,8 +1877,8 @@ class DatabentoService:
                     continue
 
                 pending = CatalogEntry(
-                    ticker=ticker,
-                    schema=schema,
+                    ticker=ticker_upper,
+                    schema=schema_lower,
                     dataset=dataset,
                     start_date=day,
                     end_date=day,
@@ -1696,8 +1894,8 @@ class DatabentoService:
                     await broadcast_fn(
                         {
                             "type": "download_progress",
-                            "ticker": ticker,
-                            "schema": schema,
+                            "ticker": ticker_upper,
+                            "schema": schema_lower,
                             "status": "downloading",
                             "progress_pct": progress_before,
                             "message": f"[{idx}/{len(days)}] Downloading {day}...",
@@ -1708,8 +1906,8 @@ class DatabentoService:
                     entry = await loop.run_in_executor(
                         None,
                         self._blocking_download,
-                        ticker,
-                        schema,
+                        ticker_upper,
+                        schema_lower,
                         day,
                         day,
                         dataset,
@@ -1717,8 +1915,8 @@ class DatabentoService:
                     )
                 except Exception as exc:
                     entry = CatalogEntry(
-                        ticker=ticker,
-                        schema=schema,
+                        ticker=ticker_upper,
+                        schema=schema_lower,
                         dataset=dataset,
                         start_date=day,
                         end_date=day,
@@ -1729,12 +1927,12 @@ class DatabentoService:
                     )
 
                 self.catalog.upsert(entry)
-                entries = self.list_catalog(refresh=False, ticker=ticker)
+                entries = self.list_catalog(refresh=False, ticker=ticker_upper)
                 if entry.status == "ready":
                     downloaded_days += 1
                     total_rows += int(entry.row_count or 0)
                     should_precompute = bool(
-                        str(schema).lower() == "mbp-10"
+                        str(schema_lower).lower() == "mbp-10"
                         and bool(
                             getattr(self, "_auto_precompute_l2_on_download", False)
                         )
@@ -1744,7 +1942,7 @@ class DatabentoService:
                             precompute_result = await loop.run_in_executor(
                                 None,
                                 self._blocking_precompute_l2_day,
-                                ticker,
+                                ticker_upper,
                                 day,
                                 bool(
                                     getattr(
@@ -1757,21 +1955,21 @@ class DatabentoService:
                             if bool(precompute_result.get("built")):
                                 logger.info(
                                     "Auto-precomputed L2 features for %s %s (%s minutes)",
-                                    ticker,
+                                    ticker_upper,
                                     day,
                                     int(precompute_result.get("minutes", 0) or 0),
                                 )
                             else:
                                 logger.warning(
                                     "Skipped auto-precompute for %s %s: %s",
-                                    ticker,
+                                    ticker_upper,
                                     day,
                                     str(precompute_result.get("reason", "unknown")),
                                 )
                         except Exception as precompute_exc:
                             logger.warning(
                                 "Auto-precompute failed for %s %s: %s",
-                                ticker,
+                                ticker_upper,
                                 day,
                                 precompute_exc,
                             )
@@ -1787,12 +1985,12 @@ class DatabentoService:
                     await broadcast_fn(
                         {
                             "type": "download_progress",
-                            "ticker": ticker,
-                            "schema": schema,
+                            "ticker": ticker_upper,
+                            "schema": schema_lower,
                             "status": "error",
                             "progress_pct": 100,
                             "message": (
-                                f"Daily download finished with errors for {ticker} {schema}: "
+                                f"Daily download finished with errors for {ticker_upper} {schema_lower}: "
                                 f"{downloaded_days} downloaded, {skipped_days} skipped, {error_days} failed."
                             ),
                         }
@@ -1802,12 +2000,12 @@ class DatabentoService:
                     await broadcast_fn(
                         {
                             "type": "download_progress",
-                            "ticker": ticker,
-                            "schema": schema,
+                            "ticker": ticker_upper,
+                            "schema": schema_lower,
                             "status": "ready",
                             "progress_pct": 100,
                             "message": (
-                                f"Daily download complete: {ticker} {schema} "
+                                f"Daily download complete: {ticker_upper} {schema_lower} "
                                 f"({downloaded_days} downloaded, {skipped_days} skipped)."
                             ),
                         }

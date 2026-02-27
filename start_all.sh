@@ -16,7 +16,7 @@ check_port() {
 # Start Strategy Evaluator on port 8001
 echo "📊 Starting Strategy Evaluator on port 8001..."
 cd /Users/hotovo/.gemini/antigravity/scratch/market_regime_detection
-python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8001 --reload &
+python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8001 --reload > strategy_api.log 2>&1 &
 STRATEGY_PID=$!
 sleep 2
 
@@ -35,7 +35,7 @@ export BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS=0
 export BACKTEST_PROGRESSIVE_LOAD_ALLOW_COMPARABLE_MODE=1
 export BACKTEST_PROGRESSIVE_LOAD_COMPARABLE_INITIAL_DAYS=1
 export BACKTEST_PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS=1
-python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8002 --reload &
+python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8002 --reload > runner_api.log 2>&1 &
 RUNNER_PID=$!
 sleep 2
 

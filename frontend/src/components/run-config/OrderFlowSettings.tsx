@@ -1,6 +1,10 @@
 import React from "react";
 import MomentumDiversificationEditor from "./MomentumDiversificationEditor";
-import { l2GateFieldConfig, SHOW_RUN_CONFIG_ADVANCED_EXECUTION_CONTROLS } from "./runConfigHelpers";
+import {
+  l2GateFieldConfig,
+  SHOW_RUN_CONFIG_ADVANCED_EXECUTION_CONTROLS,
+  tcbboGateFieldConfig,
+} from "./runConfigHelpers";
 import type { MomentumSleeveDraft } from "./momentumUtils";
 
 interface OrderFlowSettingsProps {
@@ -161,6 +165,55 @@ export function OrderFlowSettings({
                     <div className="tw-inline-note">
                       {field.hint}
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {SHOW_RUN_CONFIG_ADVANCED_EXECUTION_CONTROLS && (
+        <div className="tw-panel">
+          <div className="tw-panel-title">TCBBO Options Flow Gate</div>
+          <div className="tw-panel-hint">
+            Uses OPRA TCBBO options-flow features for confirmation/regime override and diagnostics.
+          </div>
+          <div className="form-group">
+            <label className="field-row" htmlFor="tcbbo_gate_enabled">
+              <span>Enable TCBBO Flow Gate</span>
+              <input
+                id="tcbbo_gate_enabled"
+                type="checkbox"
+                checked={config.tcbbo_gate_enabled !== false}
+                onChange={(e) => handleChange("tcbbo_gate_enabled", e.target.checked)}
+              />
+            </label>
+          </div>
+
+          {config.tcbbo_gate_enabled !== false && (
+            <div className="tw-grid-fit-190">
+              {tcbboGateFieldConfig.map((field) => {
+                const isLookback = field.key === "tcbbo_lookback_bars";
+                return (
+                  <div key={field.key} className="form-group">
+                    <label htmlFor={field.key}>{field.label}</label>
+                    <input
+                      id={field.key}
+                      type="number"
+                      min={field.min}
+                      step={field.step}
+                      value={config[field.key] ?? ""}
+                      onChange={(e) =>
+                        handleChange(
+                          field.key,
+                          isLookback
+                            ? Math.max(1, Math.trunc(Number(e.target.value)))
+                            : Math.max(0, Number(e.target.value)),
+                        )
+                      }
+                    />
+                    <div className="tw-inline-note">{field.hint}</div>
                   </div>
                 );
               })}

@@ -2658,9 +2658,21 @@ body {
 }
 
 .diagnostic-cell {
+  --diagnostic-cell-accent: transparent;
+  --diagnostic-cell-border-intensity: 0%;
+  --diagnostic-cell-intensity: 0%;
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.72);
+  background: color-mix(
+    in srgb,
+    var(--diagnostic-cell-accent) var(--diagnostic-cell-intensity),
+    rgba(255, 255, 255, 0.72)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--diagnostic-cell-accent) var(--diagnostic-cell-border-intensity),
+    rgba(15, 23, 42, 0.08)
+  );
   color: var(--text-primary);
   min-height: 74px;
   padding: 6px;
@@ -2672,6 +2684,15 @@ body {
   text-align: left;
   cursor: pointer;
   transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.diagnostic-cell.profit {
+  --diagnostic-cell-accent: rgb(15 118 110);
+}
+
+.diagnostic-cell.loss,
+.diagnostic-cell.failed {
+  --diagnostic-cell-accent: rgb(220 38 38);
 }
 
 .diagnostic-cell:hover:not(:disabled) {
@@ -2748,9 +2769,9 @@ body {
 }
 
 .legend-chip.profit {
-  background: rgba(15, 118, 110, 0.18);
+  background: color-mix(in srgb, rgb(15 118 110) 18%, transparent);
   color: #065f46;
-  border-color: rgba(15, 118, 110, 0.3);
+  border-color: color-mix(in srgb, rgb(15 118 110) 30%, transparent);
 }
 
 .legend-chip.flat {
@@ -2760,15 +2781,15 @@ body {
 }
 
 .legend-chip.loss {
-  background: rgba(220, 38, 38, 0.18);
+  background: color-mix(in srgb, rgb(220 38 38) 18%, transparent);
   color: #991b1b;
-  border-color: rgba(220, 38, 38, 0.3);
+  border-color: color-mix(in srgb, rgb(220 38 38) 30%, transparent);
 }
 
 .legend-chip.failed {
-  background: rgba(220, 38, 38, 0.3);
+  background: color-mix(in srgb, rgb(220 38 38) 30%, transparent);
   color: #7f1d1d;
-  border-color: rgba(220, 38, 38, 0.46);
+  border-color: color-mix(in srgb, rgb(220 38 38) 46%, transparent);
 }
 
 .diagnostic-day-date {

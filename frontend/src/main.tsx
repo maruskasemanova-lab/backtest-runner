@@ -1,11 +1,26 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NuqsAdapter } from 'nuqs/adapters/react';
 import App from './App'
 import './index.css'
-import { resolveApiRequestUrl } from './utils';
+import { hasConfiguredApiRequestRewrite, resolveApiRequestUrl } from './utils';
 import { bootstrapAuthSession } from './auth/supabaseAuth';
 
-if (typeof window !== "undefined" && typeof window.fetch === "function") {
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+if (
+  typeof window !== "undefined" &&
+  typeof window.fetch === "function" &&
+  hasConfiguredApiRequestRewrite
+) {
   const nativeFetch = window.fetch.bind(window);
   window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
     if (typeof input === "string" && input.startsWith("/api")) {
@@ -18,7 +33,11 @@ if (typeof window !== "undefined" && typeof window.fetch === "function") {
 const mount = () => {
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
-      <App />
+      <QueryClientProvider client={queryClient}>
+        <NuqsAdapter>
+          <App />
+        </NuqsAdapter>
+      </QueryClientProvider>
     </React.StrictMode>
   );
 };

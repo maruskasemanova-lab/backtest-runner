@@ -79,6 +79,108 @@ function SessionSummary({ runState, markers }: { runState?: any; markers?: any[]
 
     return rows;
   })();
+
+  const dataCoverage = (() => {
+    const l2Applied =
+      runState?.l2_applied && typeof runState.l2_applied === "object" ? runState.l2_applied : null;
+    if (!l2Applied) return null;
+
+    const asFiniteInt = (value: any, fallback = 0) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return fallback;
+      return Math.trunc(parsed);
+    };
+
+    const l2Required = Boolean(
+      l2Applied.effective_l2_confirm_enabled ||
+      l2Applied.l2_requested
+    );
+    const l2MissingDaysCount = asFiniteInt(
+      l2Applied.missing_l2_days_count,
+      Array.isArray(l2Applied.missing_l2_days) ? l2Applied.missing_l2_days.length : 0,
+    );
+    const l2HasData = l2Applied.has_l2 === true;
+    const l2Status = !l2Required
+      ? "disabled"
+      : (l2HasData && l2MissingDaysCount === 0 ? "ready" : "missing");
+
+    const tcbboEnabled = l2Applied.tcbbo_gate_enabled === true;
+    const tcbboAvailable = l2Applied.tcbbo_available === true;
+    const tcbboBarsEnriched = asFiniteInt(l2Applied.tcbbo_bars_enriched);
+    const tcbboStatus = !tcbboEnabled
+      ? "disabled"
+      : (tcbboAvailable && tcbboBarsEnriched > 0 ? "ready" : "missing");
+
+    const notes: string[] = [];
+    if (l2Status === "missing" && l2MissingDaysCount > 0) {
+      const preview = Array.isArray(l2Applied.missing_l2_days)
+        ? l2Applied.missing_l2_days.slice(0, 3).join(", ")
+        : "";
+      notes.push(
+        `L2 missing ${l2MissingDaysCount} day(s)${preview ? `: ${preview}` : ""}`,
+      );
+    } else if (l2Status === "missing") {
+      notes.push("L2 requested but not loaded");
+    }
+    if (tcbboStatus === "missing") {
+      const reason = String(l2Applied.tcbbo_missing_reason || "").trim();
+      const reasonLabelMap: Record<string, string> = {
+        tcbbo_file_not_found: "TCBBO parquet not found",
+        tcbbo_build_failed: "TCBBO parse/build failed",
+        tcbbo_no_feature_rows: "TCBBO produced no feature rows",
+        tcbbo_no_bar_overlap: "TCBBO has no overlap with bars",
+      };
+      notes.push(reasonLabelMap[reason] || "TCBBO data missing");
+    }
+
+    return {
+      l2: {
+        status: l2Status,
+        label:
+          l2Status === "ready" ? "Ready" : l2Status === "missing" ? "Missing" : "Disabled",
+        detail:
+          l2Status === "ready"
+            ? `${asFiniteInt(l2Applied.bars_with_l2)}/${asFiniteInt(l2Applied.bars_total)} bars`
+            : undefined,
+      },
+      tcbbo: {
+        status: tcbboStatus,
+        label:
+          tcbboStatus === "ready"
+            ? "Ready"
+            : tcbboStatus === "missing"
+              ? "Missing"
+              : "Disabled",
+        detail:
+          tcbboStatus === "ready"
+            ? `${tcbboBarsEnriched}/${asFiniteInt(l2Applied.tcbbo_bars_total)} bars`
+            : undefined,
+      },
+      notes,
+    };
+  })();
+
+  const statusBadgeStyle = (status: string) => {
+    if (status === "ready") {
+      return {
+        color: "var(--accent-green)",
+        background: "rgba(34, 197, 94, 0.12)",
+        border: "1px solid rgba(34, 197, 94, 0.25)",
+      };
+    }
+    if (status === "missing") {
+      return {
+        color: "var(--accent-red)",
+        background: "rgba(239, 68, 68, 0.12)",
+        border: "1px solid rgba(239, 68, 68, 0.25)",
+      };
+    }
+    return {
+      color: "var(--text-muted)",
+      background: "var(--bg-tertiary)",
+      border: "1px solid var(--border-color)",
+    };
+  };
   
   return (
     <div className="card">
@@ -124,6 +226,66 @@ function SessionSummary({ runState, markers }: { runState?: any; markers?: any[]
                 {warning}
               </div>
             ))}
+          </div>
+        )}
+
+        {dataCoverage && (
+          <div
+            style={{
+              padding: "var(--spacing-sm) var(--spacing-md)",
+              background: "var(--bg-tertiary)",
+              borderRadius: "var(--border-radius-sm)",
+              marginBottom: "var(--spacing-md)",
+              border: "1px solid var(--border-color)",
+            }}
+          >
+            <div style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginBottom: "6px" }}>
+              Data Coverage (L2 + TCBBO)
+            </div>
+            {(["l2", "tcbbo"] as const).map((key) => {
+              const row = dataCoverage[key];
+              return (
+                <div
+                  key={key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "8px",
+                    marginTop: key === "l2" ? 0 : "6px",
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <span style={{ fontWeight: 500 }}>{key.toUpperCase()}</span>
+                    {row.detail ? (
+                      <span style={{ color: "var(--text-muted)", fontSize: "0.72rem" }}>
+                        {row.detail}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      fontSize: "0.72rem",
+                      fontWeight: 600,
+                      ...statusBadgeStyle(row.status),
+                    }}
+                  >
+                    {row.label}
+                  </span>
+                </div>
+              );
+            })}
+            {dataCoverage.notes.length > 0 && (
+              <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                {dataCoverage.notes.map((note, idx) => (
+                  <div key={`${note}-${idx}`} style={{ color: "var(--accent-red)", fontSize: "0.75rem" }}>
+                    {note}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         

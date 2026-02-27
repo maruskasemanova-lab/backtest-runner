@@ -1,4 +1,4 @@
-import DecisionPanel from "../DecisionPanel";
+import DecisionPanel from "../decision-panel/DecisionPanel";
 import type { StrategyAnalyzerDecisionMarker } from "./types";
 
 type Props = {

@@ -36,10 +36,10 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 12. Retention control: per-plan retention is enforced by backend cleanup of terminal DB rows so FREE tier does not accumulate unbounded historical state.
 13. Admin operations can query `/api/v2/ops/metrics` to watch queue saturation, HTTP latency/error trends, websocket load, and SaaS DB growth.
 14. Adaptive strategy profiles are multi-tenant: each user manages personal profiles while superuser/admin can publish global profiles.
-15. Large diagnostic JSON reads can be cached in SaaS store and optionally queried via compact summary mode (`summary_only=true`) to reduce heavy payload reads.
+15. Diagnostics history reads merge active in-memory runs with persisted SQL `run_summaries` rows so calendar views work before and after run teardown.
 16. Frontend can persist user-scoped UI draft settings (for example run ticker/date/profile draft) via `/api/v2/user/settings` (`GET`/`PUT`) when authenticated; backend stores them in SQLite by default or Supabase Postgres when external settings adapter is enabled.
 17. Optional remote market-data manifest (`BACKTEST_REMOTE_MANIFEST_URL`) can hydrate catalog entries from object storage (e.g. R2) via `https://...` or `s3://...`; remote files are pulled lazily to `BACKTEST_REMOTE_CACHE_DIR` when selected for run data resolution.
-18. Run-report history is store-backed in both prod and local runtimes: Supabase `run_summaries` when configured, otherwise local SQLite `run_summaries`; filesystem `reports/` artifacts are used only when no run-reports store is configured.
+18. Run-report history is store-backed in both prod and local runtimes: Supabase `run_summaries` when configured, otherwise local SQLite `run_summaries` (no filesystem `reports/` fallback).
 
 ## Session And State Model
 
@@ -90,12 +90,13 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 - `RunConfig.tsx`: includes intraday-level tracker controls (session-scoped S/R + volume-profile parameters) that are sent in run-start payload and applied during strategy session configuration.
 - `RunConfig.tsx`: preserves draft form state across sidebar collapse/remount and page reload via local browser storage (`backtest_runner.run_config_draft.v2`), and when signed-in syncs that draft to `/api/v2/user/settings` so ticker/date/profile intent is restored per user.
 - `main.tsx` + `auth/supabaseAuth.ts`: Supabase-backed Google OAuth bootstrap (`/auth/callback`) with JWT token sync into `backtest_jwt`/`supabase_jwt` keys used by v2 API requests (`VITE_SUPABASE_PUBLISHABLE_KEY`, legacy fallback `VITE_SUPABASE_ANON_KEY`, optional `VITE_SUPABASE_OAUTH_REDIRECT_URL` override for proxied/public-origin deploys).
-- `DecisionPanel.tsx`: marker timeline and explanation details, including intraday `Level Context Gate` diagnostics, L2/flow context, BE diagnostics (`state`, `trigger`, `proof`, `stop`, `costs`, `buffer`, `anti-spike`) surfaced from signal/exit metadata, and execution-layer `execution_status` markers for pending/no-fill drop reasons.
+- `decision-panel/DecisionPanel.tsx`: marker timeline and explanation details, including intraday `Level Context Gate` diagnostics, L2/flow context, BE diagnostics (`state`, `trigger`, `proof`, `stop`, `costs`, `buffer`, `anti-spike`) surfaced from signal/exit metadata, and execution-layer `execution_status` markers for pending/no-fill drop reasons.
 - `CandlestickChart.tsx` + related components: visual representation of bars/markers.
 - `StrategySettings.tsx`: strategy toggles + per-strategy parameter editing with capture/apply strategy-combination profiles per ticker, including per-strategy `exit_mode|risk_mode` (`custom|global`), built-in entry/exit rule visibility, and optional custom formula rules (`custom_entry_formula*`, `custom_exit_formula*`) for user-defined entry/exit gating.
 - `AdaptiveStrategyStudio.tsx`: adaptive selection-flow editor with Global Modules execution controls; saves adaptive fields plus execution `positioning` snapshot to `aos_config.json` via `/api/aos-config/update` for next-run apply, with tuned-profile list/load/apply actions and strategy-combination-aware recomposition.
 - `AdaptiveTuner.tsx`: adaptive v1 tuner UI tab with real OHLCV/L2 coverage ranges, date-range trial execution, scored candidate ranking, saved tuned profile list, and apply-to-backtest action.
 - `AdaptiveTuner.tsx` quick approximation controls: optional sampled-day tuning (`quick_mode`) with configurable `quick_max_days` and `quick_trial_boost`.
 - `LiveTraderMonitor.tsx`: live stream monitor tab that reads realtime trader artifact streams (`runtime|decisions|signals|orders`) via runner API.
+- `diagnostic-calendar/DiagnosticCalendar.tsx` + `StrategyAnalyzer.tsx`: Diagnostics day/run selection can open persisted run playback snapshots by `run_key` from run-reports store, enabling read-only analyzer view without rerunning strategy.
 
 For concrete file ownership and symbol inventory, use generated domain packs.

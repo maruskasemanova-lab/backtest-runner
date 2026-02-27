@@ -1,0 +1,16 @@
+{
+  "version": "0.2.3",
+  "name": "src",
+  "path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src",
+  "stats": {
+    "files": 141,
+    "symbols": 838,
+    "relationships": 2449,
+    "clusters": 37,
+    "flows": 53,
+    "dead_code": 142,
+    "coupled_pairs": 0,
+    "embeddings": 0
+  },
+  "last_indexed_at": "2026-02-26T22:33:58.443683+00:00"
+}

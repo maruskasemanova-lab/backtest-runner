@@ -1,4 +1,7 @@
 import requests
+from pathlib import Path
+from tempfile import gettempdir
+from datetime import datetime
 
 url = "http://localhost:8002/api/run/start"
 payload = {
@@ -17,7 +20,10 @@ data = resp.json()
 import json
 
 # let's just save data to a file so I can parse it
-with open("temp_test_sweep.json", "w") as f:
+output_path = Path(gettempdir()) / (
+    f"temp_test_sweep_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+)
+with output_path.open("w", encoding="utf-8") as f:
     json.dump(data, f)
 
-print("Saved to temp_test_sweep.json")
+print(f"Saved to {output_path}")

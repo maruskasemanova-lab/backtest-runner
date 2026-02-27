@@ -3,18 +3,73 @@ Session Runner - Orchestrates the connection between data source and strategy ev
 """
 
 import asyncio
-import aiohttp
 import math
-import os
 import time as time_module
-from datetime import datetime, time, timedelta, timezone
-from typing import Dict, Any, List, Optional, Set
+from datetime import datetime, time, timezone
+from typing import Callable, Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field
 import logging
+
+import httpx
+import orjson
 
 from decision_tracker import DecisionTracker, MarkerType
 from performance_tracker import PerformanceTracker
 from strategy_api_auth_headers import build_strategy_api_headers
+from src.services.session_runner_execution_state import ExecutionStateManager
+from src.services.session_runner_market_context import MarketContextProvider
+from src.services.session_runner_marker_utils import (
+    apply_intraday_levels_details,
+    enrich_signal_marker_details,
+    resolve_execution_status_marker_price,
+    resolve_intraday_levels_payload,
+    resolve_signal_marker_snapshot,
+    resolve_strategy_selection_options,
+)
+from src.services.session_runner_intrabar_utils import IntrabarQuoteProvider
+from src.services.session_runner_bar_processing import StrategyBarProcessor
+from src.services.session_runner_payload_utils import (
+    StrategyBarPayloadBuilder,
+    StrategyBarPayloadBuildContext,
+    StrategyBarPayloadInput,
+)
+from src.services.session_runner_models import (
+    Err,
+    StrategyBarResponse,
+    StrategySignalPayload,
+    dump_payload,
+    dump_payload_or_none,
+    ExecutionLifecycle,
+    Ok,
+)
+from src.services.session_runner_payload_validator import (
+    StrategyBarPayloadValidator,
+)
+from src.services.session_runner_response_utils import (
+    PendingExecutionStatusMarker,
+    build_pending_execution_status_marker,
+    extract_candidate_diagnostics,
+    extract_strategy_label,
+    generate_regime_explanation,
+)
+from src.services.session_runner_strategy_recovery import (
+    StrategySessionRecoveryHelper,
+)
+from src.services.session_runner_strategy_client import StrategyApiClient
+from src.services.session_runner_summary_utils import (
+    build_runner_state_payload,
+    build_session_summary_payload,
+    build_summary_payload,
+    resolve_session_end_update,
+)
+from src.services.session_runner_trade_utils import (
+    apply_entry_marker_details,
+    build_exit_marker_kwargs,
+    build_closed_trade_record_kwargs,
+    build_exit_marker_details,
+    resolve_entry_marker_context,
+    resolve_entry_position_snapshot,
+)
 
 try:
     from src.services.context_aware_risk_service import (
@@ -36,6 +91,7 @@ except Exception:  # pragma: no cover - numpy may be unavailable in some envs
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SessionRunner")
 _PROFILE_PLACEHOLDER_TOKENS = {"none", "null", "n/a", "na", "undefined", "-"}
+_ORJSON_OPTIONS = orjson.OPT_NAIVE_UTC | orjson.OPT_SERIALIZE_NUMPY
 
 
 def _normalize_profile_token(value: Any) -> str:
@@ -127,22 +183,61 @@ class SessionRunner:
         self.last_response: Optional[Dict[str, Any]] = None
         self.session_summary: Optional[Dict[str, Any]] = None
         self.selection_warnings: List[str] = []
+        self._data_selection_warnings: List[str] = []
         # Optional run-level metadata injected by start_run service for reports.
         self._report_metadata: Dict[str, Any] = {}
         self._aos_applied: Dict[str, Any] = {}
         self._execution_config: Dict[str, Any] = {}
+        self._run_request_config: Dict[str, Any] = {}
+        self._l2_applied: Dict[str, Any] = {}
+        self._strategy_state_reset: Optional[bool] = None
+        self._strategy_state_reset_detail: Optional[Dict[str, Any]] = None
+        self._orchestrator_reset_scope: Optional[str] = None
+        self._checkpoint_loaded: Optional[Any] = None
         self._context_risk_config: Optional[Any] = None
         self._context_risk_skip_count: int = 0
         self._session_end_marker_keys: Set[str] = set()
         self._session_start_marker_emitted: bool = False
-        self._position_active: bool = False
-        self._pending_entry: bool = False
+        self._execution_state_manager = ExecutionStateManager()
+        self._market_context_provider: Optional[MarketContextProvider] = None
 
         # Cross-asset reference bars (e.g. QQQ), keyed by ISO timestamp
         self.ref_bars_map: Dict[str, Dict[str, Any]] = {}
         self.l2_manager: Optional[Any] = None
         self._intrabar_quote_cache: Dict[int, Optional[List[Dict[str, float]]]] = {}
-        self._strategy_http_session: Optional[aiohttp.ClientSession] = None
+        self._strategy_http_session: Optional[Any] = None
+        self._strategy_http_session_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._strategy_api_client = StrategyApiClient(
+            strategy_api_url=self.config.strategy_api_url,
+            headers_factory=self._strategy_api_headers,
+            session_factory=lambda **kwargs: httpx.AsyncClient(**kwargs),
+        )
+        self._strategy_bar_processor = StrategyBarProcessor(
+            strategy_api_client=self._strategy_api_client,
+            recover_strategy_session=self._recover_strategy_session,
+            on_session_state_change=self._sync_strategy_client_state,
+            close_client=self.close_http_session,
+            is_recoverable_strategy_error=self._is_recoverable_strategy_error,
+        )
+        self._strategy_bar_payload_validator = StrategyBarPayloadValidator()
+        self._strategy_recovery_helper = StrategySessionRecoveryHelper(
+            strategy_api_client=self._strategy_api_client,
+            validate_strategy_bar_payload=self._strategy_bar_payload_validator.validate,
+            on_session_state_change=self._sync_strategy_client_state,
+            close_client=self.close_http_session,
+            logger=logger,
+        )
+        self._intrabar_quote_provider = IntrabarQuoteProvider(
+            ticker=self.config.ticker,
+            to_utc_datetime=self._to_utc_datetime,
+            logger=logger,
+        )
+        self._strategy_bar_payload_builder = StrategyBarPayloadBuilder(
+            l2_payload_keys=self.L2_PAYLOAD_KEYS,
+            tcbbo_payload_keys=self.TCBBO_PAYLOAD_KEYS,
+            validate_strategy_bar_payload=self._strategy_bar_payload_validator.validate,
+            logger=logger,
+        )
         # Optional progressive loader state (set by start_run service).
         self._progressive_loading_enabled: bool = False
         self._progressive_loading_complete: bool = True
@@ -156,20 +251,66 @@ class SessionRunner:
         self._trade_start_time: Optional[datetime] = None
         self._trade_end_time: Optional[datetime] = None
 
-        # Callbacks for real-time updates
-        self._on_bar_callbacks: List[callable] = []
-        self._on_decision_callbacks: List[callable] = []
+        # Event callbacks + queue-based pub/sub fanout.
+        self._on_bar_callbacks: List[Callable[[Dict[str, Any]], Any]] = []
+        self._on_decision_callbacks: List[Callable[[Dict[str, Any]], Any]] = []
+        self._bar_events_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+        self._decision_events_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
 
-    def on_bar(self, callback: callable):
+    def on_bar(self, callback: Callable[[Dict[str, Any]], Any]):
         """Register callback for bar updates."""
         self._on_bar_callbacks.append(callback)
 
-    def on_decision(self, callback: callable):
+    def on_decision(self, callback: Callable[[Dict[str, Any]], Any]):
         """Register callback for decision updates."""
         self._on_decision_callbacks.append(callback)
 
+    def bar_events(self) -> asyncio.Queue[Dict[str, Any]]:
+        return self._bar_events_queue
+
+    def decision_events(self) -> asyncio.Queue[Dict[str, Any]]:
+        return self._decision_events_queue
+
+    @property
+    def _position_active(self) -> bool:
+        return bool(self._execution_state_manager.position_active)
+
+    @_position_active.setter
+    def _position_active(self, value: bool) -> None:
+        self._execution_state_manager.position_active = bool(value)
+
+    @property
+    def _pending_entry(self) -> bool:
+        return bool(self._execution_state_manager.pending_entry)
+
+    @_pending_entry.setter
+    def _pending_entry(self, value: bool) -> None:
+        self._execution_state_manager.pending_entry = bool(value)
+
+    @property
+    def _execution_lifecycle(self) -> ExecutionLifecycle:
+        return self._execution_state_manager.lifecycle
+
+    @_execution_lifecycle.setter
+    def _execution_lifecycle(self, value: ExecutionLifecycle) -> None:
+        self._execution_state_manager.lifecycle = value
+
+    @staticmethod
+    def _drain_queue(queue: asyncio.Queue[Any]) -> None:
+        while not queue.empty():
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+    async def _publish_event(
+        self, queue: asyncio.Queue[Dict[str, Any]], payload: Dict[str, Any]
+    ) -> None:
+        await queue.put(self._to_json_safe(payload))
+
     async def _notify_bar(self, bar: Dict[str, Any]):
         """Notify all bar callbacks."""
+        await self._publish_event(self._bar_events_queue, bar)
         for cb in self._on_bar_callbacks:
             try:
                 if asyncio.iscoroutinefunction(cb):
@@ -181,6 +322,7 @@ class SessionRunner:
 
     async def _notify_decision(self, marker: Dict[str, Any]):
         """Notify all decision callbacks."""
+        await self._publish_event(self._decision_events_queue, marker)
         for cb in self._on_decision_callbacks:
             try:
                 if asyncio.iscoroutinefunction(cb):
@@ -193,14 +335,19 @@ class SessionRunner:
     def load_bars(self, bars: List[Dict[str, Any]]):
         """Load bars for the session."""
         self.bars = bars
+        self._market_context_provider = MarketContextProvider(
+            bars=bars,
+            safe_float=self._safe_float,
+        )
         self.current_bar_index = 0
         self._progressive_wait_started_at = None
         self._session_end_marker_keys.clear()
         self._session_start_marker_emitted = False
         self.selection_warnings = []
-        self._position_active = False
-        self._pending_entry = False
+        self._execution_state_manager.reset_flat()
         self._intrabar_quote_cache.clear()
+        self._drain_queue(self._bar_events_queue)
+        self._drain_queue(self._decision_events_queue)
         logger.info(f"Loaded {len(bars)} bars for session")
 
     def reset_for_replay(self):
@@ -216,9 +363,10 @@ class SessionRunner:
         self._progressive_wait_started_at = None
         self._session_end_marker_keys.clear()
         self._session_start_marker_emitted = False
-        self._position_active = False
-        self._pending_entry = False
+        self._execution_state_manager.reset_flat()
         self._intrabar_quote_cache.clear()
+        self._drain_queue(self._bar_events_queue)
+        self._drain_queue(self._decision_events_queue)
         self.decision_tracker = DecisionTracker(
             run_id=self.config.run_id,
             ticker=self.config.ticker,
@@ -254,45 +402,91 @@ class SessionRunner:
             normalized.append(text)
         return normalized
 
-    def _extract_response_selection_warnings(
-        self, response: Dict[str, Any]
-    ) -> Optional[List[str]]:
-        if not isinstance(response, dict):
+    def _extract_response_selection_warnings(self, response: Any) -> Optional[List[str]]:
+        if isinstance(response, StrategyBarResponse):
+            if "selection_warnings" in response.model_fields_set:
+                return self._normalize_selection_warnings(response.selection_warnings)
+            regime_update = response.regime_update
+            if (
+                regime_update is not None
+                and "selection_warnings" in regime_update.model_fields_set
+            ):
+                return self._normalize_selection_warnings(
+                    regime_update.selection_warnings
+                )
             return None
-        if "selection_warnings" in response:
+
+        response_payload = dump_payload(response)
+        if not response_payload:
+            return None
+        if "selection_warnings" in response_payload:
             return self._normalize_selection_warnings(
-                response.get("selection_warnings")
+                response_payload.get("selection_warnings")
             )
-        regime_update = response.get("regime_update")
+        regime_update = response_payload.get("regime_update")
         if isinstance(regime_update, dict) and "selection_warnings" in regime_update:
             return self._normalize_selection_warnings(
                 regime_update.get("selection_warnings")
             )
         return None
 
+    def _merged_selection_warnings(self) -> List[str]:
+        return self._merge_selection_warnings(
+            self._data_selection_warnings,
+            self.selection_warnings,
+        )
+
+    def _merge_selection_warnings(self, *sources: Any) -> List[str]:
+        merged: List[str] = []
+        seen: Set[str] = set()
+        for source in sources:
+            for item in self._normalize_selection_warnings(source):
+                if item in seen:
+                    continue
+                seen.add(item)
+                merged.append(item)
+        return merged
+
+    def _apply_strategy_reset_metadata(self, target: Dict[str, Any]) -> None:
+        if self._strategy_state_reset is not None:
+            target["strategy_state_reset"] = bool(self._strategy_state_reset)
+        if (
+            isinstance(self._strategy_state_reset_detail, dict)
+            and self._strategy_state_reset_detail
+        ):
+            target["strategy_state_reset_detail"] = self._to_json_safe(
+                dict(self._strategy_state_reset_detail)
+            )
+        if self._orchestrator_reset_scope:
+            target["orchestrator_reset_scope"] = str(self._orchestrator_reset_scope)
+
     @staticmethod
     def _to_json_safe(value: Any) -> Any:
-        """Recursively normalize payload values to JSON-serializable primitives."""
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            return value
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, dict):
-            return {str(k): SessionRunner._to_json_safe(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple, set)):
-            return [SessionRunner._to_json_safe(v) for v in value]
-        if _np is not None:
-            if isinstance(value, _np.ndarray):
-                return [SessionRunner._to_json_safe(v) for v in value.tolist()]
-            if isinstance(value, _np.generic):
-                return value.item()
-        item_method = getattr(value, "item", None)
-        if callable(item_method):
-            try:
-                return SessionRunner._to_json_safe(item_method())
-            except Exception:
-                pass
-        return value
+        """Normalize values using orjson for fast, native serialization."""
+        try:
+            return orjson.loads(orjson.dumps(value, option=_ORJSON_OPTIONS))
+        except TypeError:
+            if isinstance(value, datetime):
+                return value.isoformat()
+            if isinstance(value, dict):
+                return {
+                    str(key): SessionRunner._to_json_safe(item)
+                    for key, item in value.items()
+                }
+            if isinstance(value, (list, tuple, set)):
+                return [SessionRunner._to_json_safe(item) for item in value]
+            if _np is not None:
+                if isinstance(value, _np.ndarray):
+                    return [SessionRunner._to_json_safe(item) for item in value.tolist()]
+                if isinstance(value, _np.generic):
+                    return value.item()
+            item_method = getattr(value, "item", None)
+            if callable(item_method):
+                try:
+                    return SessionRunner._to_json_safe(item_method())
+                except Exception:
+                    pass
+            return str(value)
 
     @staticmethod
     def _safe_float(value: Any) -> Optional[float]:
@@ -315,130 +509,68 @@ class SessionRunner:
         return ((current - baseline) / baseline) * 100.0
 
     @staticmethod
-    def _average(values: List[float]) -> Optional[float]:
-        if not values:
-            return None
-        return sum(values) / len(values)
-
-    @staticmethod
-    def _stddev(values: List[float]) -> Optional[float]:
-        if len(values) < 2:
-            return None
-        mean = sum(values) / len(values)
-        variance = sum((value - mean) ** 2 for value in values) / len(values)
-        return math.sqrt(max(variance, 0.0))
+    def _extract_candidate_diagnostics(
+        api_response: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        return extract_candidate_diagnostics(api_response)
 
     def _build_marker_market_context(
         self,
         bar: Dict[str, Any],
         timestamp: datetime,
-        response: Optional[Dict[str, Any]] = None,
+        response: Any = None,
     ) -> Dict[str, Any]:
-        history_end = min(self.current_bar_index + 1, len(self.bars))
-        history = self.bars[:history_end] if history_end > 0 else []
+        if self._market_context_provider is not None:
+            context = self._market_context_provider.build_context(self.current_bar_index)
+        else:
+            context = {
+                "timestamp": (
+                    timestamp.isoformat()
+                    if hasattr(timestamp, "isoformat")
+                    else str(timestamp)
+                ),
+                "bar_index": int(self.current_bar_index),
+                "total_bars": int(len(self.bars)),
+                "progress_pct": (
+                    ((self.current_bar_index + 1) / len(self.bars) * 100.0)
+                    if self.bars
+                    else 0.0
+                ),
+                "bar_ohlcv": {
+                    "open": self._safe_float(bar.get("open")),
+                    "high": self._safe_float(bar.get("high")),
+                    "low": self._safe_float(bar.get("low")),
+                    "close": self._safe_float(bar.get("close")),
+                    "volume": self._safe_float(bar.get("volume")),
+                    "vwap": self._safe_float(bar.get("vwap")),
+                },
+                "candle": {},
+                "price_evolution": {},
+                "volume_context": {},
+                "recent_bars": [],
+            }
 
-        open_px = self._safe_float(bar.get("open"))
-        high_px = self._safe_float(bar.get("high"))
-        low_px = self._safe_float(bar.get("low"))
-        close_px = self._safe_float(bar.get("close"))
-        volume = self._safe_float(bar.get("volume"))
-        vwap = self._safe_float(bar.get("vwap"))
+        bar_ohlcv = context.get("bar_ohlcv") if isinstance(context, dict) else {}
+        open_px = self._safe_float(bar_ohlcv.get("open")) if isinstance(bar_ohlcv, dict) else self._safe_float(bar.get("open"))
+        close_px = self._safe_float(bar_ohlcv.get("close")) if isinstance(bar_ohlcv, dict) else self._safe_float(bar.get("close"))
 
-        candle_range = (
-            high_px - low_px if high_px is not None and low_px is not None else None
+        is_typed_response = isinstance(response, StrategyBarResponse)
+        response_payload = (
+            {}
+            if is_typed_response
+            else dump_payload(response)
         )
-        candle_body = (
-            close_px - open_px if close_px is not None and open_px is not None else None
-        )
-        upper_wick = (
-            high_px - max(open_px, close_px)
-            if high_px is not None and open_px is not None and close_px is not None
-            else None
-        )
-        lower_wick = (
-            min(open_px, close_px) - low_px
-            if low_px is not None and open_px is not None and close_px is not None
-            else None
-        )
-        close_location_pct = None
-        if (
-            candle_range is not None
-            and candle_range > 0
-            and close_px is not None
-            and low_px is not None
-        ):
-            close_location_pct = ((close_px - low_px) / candle_range) * 100.0
-
-        closes: List[float] = []
-        highs: List[float] = []
-        lows: List[float] = []
-        volumes: List[float] = []
-        for item in history:
-            c_val = self._safe_float(item.get("close"))
-            if c_val is not None:
-                closes.append(c_val)
-            h_val = self._safe_float(item.get("high"))
-            if h_val is not None:
-                highs.append(h_val)
-            l_val = self._safe_float(item.get("low"))
-            if l_val is not None:
-                lows.append(l_val)
-            v_val = self._safe_float(item.get("volume"))
-            if v_val is not None:
-                volumes.append(v_val)
-
-        returns: List[float] = []
-        if len(closes) >= 2:
-            for idx in range(1, len(closes)):
-                change = self._pct_change(closes[idx], closes[idx - 1])
-                if change is not None:
-                    returns.append(change)
-
-        def _lookback_close_pct(lookback_bars: int) -> Optional[float]:
-            if close_px is None or lookback_bars <= 0:
-                return None
-            if len(closes) <= lookback_bars:
-                return None
-            baseline = closes[-(lookback_bars + 1)]
-            return self._pct_change(close_px, baseline)
-
-        recent_bars: List[Dict[str, Any]] = []
-        for item in history[-5:]:
-            item_timestamp = item.get("timestamp")
-            if isinstance(item_timestamp, datetime):
-                ts_value = item_timestamp.isoformat()
-            else:
-                ts_value = str(item_timestamp)
-            recent_bars.append(
-                {
-                    "timestamp": ts_value,
-                    "open": self._safe_float(item.get("open")),
-                    "high": self._safe_float(item.get("high")),
-                    "low": self._safe_float(item.get("low")),
-                    "close": self._safe_float(item.get("close")),
-                    "volume": self._safe_float(item.get("volume")),
-                    "vwap": self._safe_float(item.get("vwap")),
-                    "l2_signed_aggression": self._safe_float(
-                        item.get("l2_signed_aggression")
-                    ),
-                    "l2_imbalance": self._safe_float(item.get("l2_imbalance")),
-                    "l2_book_pressure": self._safe_float(item.get("l2_book_pressure")),
-                }
-            )
-
-        avg_volume_5 = self._average(volumes[-5:])
-        avg_volume_20 = self._average(volumes[-20:])
-        session_open = closes[0] if closes else None
-        session_high = max(highs) if highs else None
-        session_low = min(lows) if lows else None
-
         decision_state: Optional[Dict[str, Any]] = None
-        if isinstance(response, dict):
+        if is_typed_response or response_payload:
             decision_state = {
-                "phase": response.get("phase"),
-                "action": response.get("action"),
-                "regime": response.get("regime"),
-                "micro_regime": response.get("micro_regime"),
+                "phase": response.phase if is_typed_response else response_payload.get("phase"),
+                "action": response.action if is_typed_response else response_payload.get("action"),
+                "regime": response.regime if is_typed_response else response_payload.get("regime"),
+                "micro_regime": (
+                    response.micro_regime
+                    if is_typed_response
+                    else response_payload.get("micro_regime")
+                ),
                 "selected_strategy": self._extract_strategy_label(response),
             }
             normalized_warnings = self._extract_response_selection_warnings(response)
@@ -455,8 +587,12 @@ class SessionRunner:
             for key in self.TCBBO_PAYLOAD_KEYS
             if key in bar
         }
-        if not l2_snapshot and isinstance(response, dict):
-            l2_quality = response.get("l2_quality")
+        if not l2_snapshot:
+            l2_quality = (
+                dump_payload_or_none(response.l2_quality)
+                if is_typed_response
+                else response_payload.get("l2_quality")
+            )
             if isinstance(l2_quality, dict):
                 l2_snapshot["l2_quality"] = dict(l2_quality)
 
@@ -478,78 +614,6 @@ class SessionRunner:
                 "return_pct": self._pct_change(ref_close, ref_open),
             }
 
-        context: Dict[str, Any] = {
-            "timestamp": (
-                timestamp.isoformat()
-                if hasattr(timestamp, "isoformat")
-                else str(timestamp)
-            ),
-            "bar_index": int(self.current_bar_index),
-            "total_bars": int(len(self.bars)),
-            "progress_pct": (
-                ((self.current_bar_index + 1) / len(self.bars) * 100.0)
-                if self.bars
-                else 0.0
-            ),
-            "bar_ohlcv": {
-                "open": open_px,
-                "high": high_px,
-                "low": low_px,
-                "close": close_px,
-                "volume": volume,
-                "vwap": vwap,
-            },
-            "candle": {
-                "range": candle_range,
-                "body": candle_body,
-                "body_to_range_ratio": (
-                    (abs(candle_body) / candle_range)
-                    if candle_body is not None and candle_range not in (None, 0)
-                    else None
-                ),
-                "upper_wick": upper_wick,
-                "lower_wick": lower_wick,
-                "close_location_pct": close_location_pct,
-                "bar_return_pct": self._pct_change(close_px, open_px),
-                "close_to_vwap_pct": self._pct_change(close_px, vwap),
-            },
-            "price_evolution": {
-                "close_change_1_bar_pct": _lookback_close_pct(1),
-                "close_change_3_bar_pct": _lookback_close_pct(3),
-                "close_change_5_bar_pct": _lookback_close_pct(5),
-                "close_change_10_bar_pct": _lookback_close_pct(10),
-                "close_change_20_bar_pct": _lookback_close_pct(20),
-                "realized_volatility_5_bar_pct": self._stddev(returns[-5:]),
-                "realized_volatility_20_bar_pct": self._stddev(returns[-20:]),
-                "session_open_price": session_open,
-                "session_high_so_far": session_high,
-                "session_low_so_far": session_low,
-                "distance_from_session_open_pct": self._pct_change(
-                    close_px, session_open
-                ),
-                "distance_from_session_high_pct": self._pct_change(
-                    close_px, session_high
-                ),
-                "distance_from_session_low_pct": self._pct_change(
-                    close_px, session_low
-                ),
-            },
-            "volume_context": {
-                "avg_volume_5_bar": avg_volume_5,
-                "avg_volume_20_bar": avg_volume_20,
-                "volume_vs_avg_5_ratio": (
-                    (volume / avg_volume_5)
-                    if volume is not None and avg_volume_5 not in (None, 0)
-                    else None
-                ),
-                "volume_vs_avg_20_ratio": (
-                    (volume / avg_volume_20)
-                    if volume is not None and avg_volume_20 not in (None, 0)
-                    else None
-                ),
-            },
-            "recent_bars": recent_bars,
-        }
         if decision_state is not None:
             context["decision_state"] = decision_state
         if l2_snapshot:
@@ -558,24 +622,36 @@ class SessionRunner:
             context["tcbbo"] = tcbbo_snapshot
         if reference_context is not None:
             context["reference_asset"] = reference_context
-        if isinstance(response, dict):
-            break_even_payload = response.get("break_even")
+        if is_typed_response or response_payload:
+            break_even_payload = (
+                dump_payload_or_none(response.break_even)
+                if is_typed_response
+                else response_payload.get("break_even")
+            )
             if not isinstance(break_even_payload, dict):
-                opened = response.get("position_opened")
-                if isinstance(opened, dict):
+                if is_typed_response and response.position_opened is not None:
+                    opened_md = dump_payload(response.position_opened.metadata)
+                else:
+                    opened = response_payload.get("position_opened")
                     opened_md = (
                         opened.get("metadata")
-                        if isinstance(opened.get("metadata"), dict)
+                        if isinstance(opened, dict)
+                        and isinstance(opened.get("metadata"), dict)
                         else {}
                     )
-                    if isinstance(opened_md.get("break_even"), dict):
-                        break_even_payload = dict(opened_md.get("break_even") or {})
+                if isinstance(opened_md.get("break_even"), dict):
+                    break_even_payload = dict(opened_md.get("break_even") or {})
             if not isinstance(break_even_payload, dict):
-                closed = response.get("position_closed")
-                if isinstance(closed, dict) and isinstance(
-                    closed.get("break_even"), dict
-                ):
-                    break_even_payload = dict(closed.get("break_even") or {})
+                if is_typed_response and response.position_closed is not None:
+                    break_even_payload = dump_payload_or_none(
+                        response.position_closed.break_even
+                    )
+                else:
+                    closed = response_payload.get("position_closed")
+                    if isinstance(closed, dict) and isinstance(
+                        closed.get("break_even"), dict
+                    ):
+                        break_even_payload = dict(closed.get("break_even") or {})
             if isinstance(break_even_payload, dict):
                 context["break_even"] = self._to_json_safe(break_even_payload)
         return self._to_json_safe(context)
@@ -586,142 +662,69 @@ class SessionRunner:
         marker.details["market_context"] = self._to_json_safe(market_context)
 
     def _build_pending_execution_status_marker(
-        self,
-        response: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+        self, response: Any
+    ) -> Optional[PendingExecutionStatusMarker]:
         """Translate pending-signal execution outcomes into explicit decision-log markers."""
-        if not isinstance(response, dict):
-            return None
+        return build_pending_execution_status_marker(
+            response,
+            safe_float=self._safe_float,
+        )
 
-        action = str(response.get("action") or "").strip()
-        reason = str(response.get("reason") or "").strip()
-        details: Dict[str, Any] = {}
+    def _apply_response_analysis_to_bar(
+        self,
+        target: Dict[str, Any],
+        api_response: Any,
+        *,
+        processed_bar_index: int,
+        warmup_only: bool,
+        include_debug_log: bool = False,
+    ) -> None:
+        if isinstance(api_response, StrategyBarResponse):
+            layer_scores = dump_payload_or_none(api_response.layer_scores)
+            signal_rejected = dump_payload_or_none(api_response.signal_rejected)
+            golden_setup = dump_payload_or_none(api_response.golden_setup)
+            intrabar_eval_trace = dump_payload_or_none(api_response.intrabar_eval_trace)
+        else:
+            response_payload = dump_payload(api_response)
+            if not response_payload:
+                return
+            layer_scores = response_payload.get("layer_scores")
+            signal_rejected = response_payload.get("signal_rejected")
+            golden_setup = response_payload.get("golden_setup")
+            intrabar_eval_trace = response_payload.get("intrabar_eval_trace")
 
-        action_templates = {
-            "pending_micro_confirmation": {
-                "status": "pending",
-                "signal_type": "PENDING",
-                "title": "Signal Pending Confirmation",
-                "default_reason": "Awaiting consecutive close confirmation.",
-            },
-            "pending_intrabar_confirmation": {
-                "status": "pending",
-                "signal_type": "PENDING",
-                "title": "Signal Pending Intrabar Confirmation",
-                "default_reason": "Awaiting intrabar flow confirmation.",
-            },
-            "micro_confirmation_failed": {
-                "status": "no_fill",
-                "signal_type": "NO_FILL",
-                "title": "Signal Dropped (Micro Confirmation)",
-                "default_reason": "Consecutive close confirmation failed.",
-            },
-            "intrabar_confirmation_failed": {
-                "status": "no_fill",
-                "signal_type": "NO_FILL",
-                "title": "Signal Dropped (Intrabar Confirmation)",
-                "default_reason": "Intrabar flow confirmation failed.",
-            },
-            "consecutive_loss_cooldown": {
-                "status": "no_fill",
-                "signal_type": "NO_FILL",
-                "title": "Signal Dropped (Cooldown)",
-                "default_reason": "Consecutive-loss cooldown blocked entry.",
-            },
-            "regime_warmup": {
-                "status": "no_fill",
-                "signal_type": "NO_FILL",
-                "title": "Signal Dropped (Regime Warmup)",
-                "default_reason": "Regime warmup incomplete; pending signal discarded.",
-            },
-            "context_risk_skip": {
-                "status": "no_fill",
-                "signal_type": "NO_FILL",
-                "title": "Signal Dropped (Context Risk)",
-                "default_reason": "Context-aware risk guard skipped the pending signal.",
-            },
-            "insufficient_fill": {
-                "status": "no_fill",
-                "signal_type": "NO_FILL",
-                "title": "Signal Dropped (Insufficient Fill)",
-                "default_reason": "Position size after risk/fill constraints is zero.",
-            },
-        }
+        if isinstance(layer_scores, dict):
+            target["layer_scores"] = layer_scores
 
-        template = action_templates.get(action)
-        if template is None and bool(response.get("stale_pending_signal_dropped")):
-            action = action or "stale_pending_signal_dropped"
-            template = {
-                "status": "no_fill",
-                "signal_type": "NO_FILL",
-                "title": "Signal Dropped (Stale)",
-                "default_reason": "Pending signal expired before execution.",
-            }
-            stale_age = response.get("stale_pending_signal_age_bars")
-            stale_ttl = response.get("pending_signal_ttl_bars")
-            if stale_age is not None:
-                details["stale_pending_signal_age_bars"] = stale_age
-            if stale_ttl is not None:
-                details["pending_signal_ttl_bars"] = stale_ttl
-            if not reason and stale_age is not None and stale_ttl is not None:
-                reason = f"Pending signal expired after {stale_age} bars (ttl {stale_ttl} bars)."
+        if isinstance(signal_rejected, dict):
+            target["signal_rejected"] = signal_rejected
 
-        if template is None:
-            return None
+        if isinstance(golden_setup, dict):
+            target["golden_setup"] = golden_setup
 
-        if not reason:
-            reason = template["default_reason"]
+        if isinstance(intrabar_eval_trace, dict):
+            target["intrabar_eval_trace"] = intrabar_eval_trace
 
-        strategy = "pending_signal"
-        confidence = 0.0
-
-        signal_payload = response.get("signal")
-        if isinstance(signal_payload, dict):
-            strategy = (
-                str(
-                    signal_payload.get("strategy")
-                    or signal_payload.get("strategy_name")
-                    or strategy
-                ).strip()
-                or strategy
+        if include_debug_log and processed_bar_index <= 3:
+            has_quotes = isinstance(intrabar_eval_trace, dict)
+            checkpoint_count = (
+                len(intrabar_eval_trace.get("checkpoints", []))
+                if isinstance(intrabar_eval_trace, dict)
+                else 0
             )
-            parsed_confidence = self._safe_float(signal_payload.get("confidence"))
-            if parsed_confidence is not None:
-                confidence = parsed_confidence
-
-        opened_payload = response.get("position_opened")
-        if isinstance(opened_payload, dict):
-            strategy = (
-                str(opened_payload.get("strategy") or strategy).strip() or strategy
+            logger.warning(
+                "[INTRABAR-DEBUG] bar=%s has_trace=%s checkpoints=%s "
+                "has_layer_scores=%s warmup=%s",
+                processed_bar_index,
+                has_quotes,
+                checkpoint_count,
+                isinstance(layer_scores, dict),
+                warmup_only,
             )
-            parsed_confidence = self._safe_float(opened_payload.get("confidence"))
-            if parsed_confidence is not None:
-                confidence = parsed_confidence
 
-        micro_confirmation = response.get("micro_confirmation")
-        if isinstance(micro_confirmation, dict):
-            details["micro_confirmation"] = dict(micro_confirmation)
-
-        intrabar_confirmation = response.get("intrabar_confirmation")
-        if isinstance(intrabar_confirmation, dict):
-            details["intrabar_confirmation"] = dict(intrabar_confirmation)
-
-        context_risk = response.get("context_risk")
-        if isinstance(context_risk, dict):
-            details["context_risk"] = dict(context_risk)
-
-        details["execution_status"] = template["status"]
-        details["execution_action"] = action or "pending_signal_update"
-        details["reason"] = reason
-
-        return {
-            "title": template["title"],
-            "description": reason,
-            "signal_type": template["signal_type"],
-            "strategy": strategy,
-            "confidence": confidence,
-            "details": details,
-        }
+        candidate_diagnostics = self._extract_candidate_diagnostics(api_response)
+        if isinstance(candidate_diagnostics, dict):
+            target["candidate_diagnostics"] = candidate_diagnostics
 
     def _should_attach_intrabar_quotes(
         self, include_pending_entry: bool = False
@@ -734,160 +737,43 @@ class SessionRunner:
         )
 
     def _intrabar_eval_step_seconds(self) -> int:
-        raw = getattr(self.config, "intrabar_eval_step_seconds", 1)
-        try:
-            parsed = int(raw)
-        except (TypeError, ValueError):
-            parsed = 1
-        return max(1, min(60, parsed))
+        return self._intrabar_quote_provider.resolve_eval_step_seconds(
+            getattr(self.config, "intrabar_eval_step_seconds", 1)
+        )
 
     def _apply_intrabar_eval_step(
         self, quotes: Optional[List[Dict[str, float]]]
     ) -> Optional[List[Dict[str, float]]]:
-        if not quotes:
-            return None
-        step = self._intrabar_eval_step_seconds()
-        if step <= 1:
-            return quotes
-
-        last_index = len(quotes) - 1
-        selected: List[Dict[str, float]] = []
-        for idx, quote in enumerate(quotes):
-            sec_raw = quote.get("s")
-            try:
-                sec = int(sec_raw)
-            except (TypeError, ValueError):
-                sec = -1
-            include = idx == 0 or idx == last_index or (sec >= 0 and sec % step == 0)
-            if not include:
-                continue
-            if selected:
-                prev_sec = selected[-1].get("s")
-                try:
-                    if int(prev_sec) == sec:
-                        continue
-                except (TypeError, ValueError):
-                    pass
-            selected.append(quote)
-
-        if not selected:
-            return quotes
-        return selected
+        return self._intrabar_quote_provider.apply_eval_step(
+            quotes,
+            raw_step_seconds=getattr(self.config, "intrabar_eval_step_seconds", 1),
+        )
 
     def _load_intrabar_quotes(
         self, timestamp: datetime
     ) -> Optional[List[Dict[str, float]]]:
-        """
-        Load compact 1-second bid/ask quotes for one minute.
-
-        Returns cached payload format:
-          [{"s": second, "bid": top_bid_px, "ask": top_ask_px}, ...]
-        """
-        if self.l2_manager is None:
-            return None
-
-        ts_utc = self._to_utc_datetime(timestamp)
-        minute_start = ts_utc.replace(second=0, microsecond=0)
-        minute_key = int(minute_start.timestamp())
-        if minute_key in self._intrabar_quote_cache:
-            cached_quotes = self._intrabar_quote_cache[minute_key]
-            return self._apply_intrabar_eval_step(cached_quotes)
-
-        minute_end = minute_start + timedelta(seconds=59, microseconds=999999)
-        try:
-            frames = self.l2_manager.get_intrabar_frames(
-                ticker=self.config.ticker,
-                start_time=minute_start,
-                end_time=minute_end,
-            )
-            # Add debug printing
-            logger.warning(f"[INTRABAR-DEEP-DEBUG] get_intrabar_frames returned {len(frames) if frames is not None else 'None'} frames. type={type(frames)}")
-            if frames is not None and not frames.empty:
-                logger.warning(f"[INTRABAR-DEEP-DEBUG] first row has_book_coverage={frames['has_book_coverage'].iloc[0]}")
-        except Exception as exc:
-            import traceback
-            logger.warning(
-                f"[INTRABAR-DEEP-DEBUG] Intrabar quote load exc for {self.config.ticker} @ {minute_start}: {exc}\n{traceback.format_exc()}"
-            )
-            self._intrabar_quote_cache[minute_key] = None
-            return None
-
-        if frames is None or len(frames) == 0:
-            logger.warning("[INTRABAR-DEEP-DEBUG] Frames empty or None!")
-            self._intrabar_quote_cache[minute_key] = None
-            return None
-
-        quote_rows: List[Dict[str, float]] = []
-        for _, row in frames.iterrows():
-            if not bool(row.get("has_book_coverage", False)):
-                continue
-
-            try:
-                bid = float(row.get("top_bid_px", 0.0) or 0.0)
-                ask = float(row.get("top_ask_px", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                continue
-
-            if bid <= 0.0 and ask <= 0.0:
-                continue
-
-            ts_sec = row.get("ts_sec")
-            try:
-                sec_dt = self._to_utc_datetime(ts_sec)
-                second = int(sec_dt.second)
-            except Exception:
-                continue
-
-            quote_rows.append(
-                {
-                    "s": second,
-                    "bid": round(bid, 6),
-                    "ask": round(ask, 6),
-                }
-            )
-
-        quote_rows.sort(key=lambda item: item["s"])
-        cached = quote_rows if quote_rows else None
-        
-        logger.warning(f"[INTRABAR-DEEP-DEBUG] quote_rows built: {len(quote_rows)} quotes.")
-        if not quote_rows and frames is not None and not frames.empty:
-            sample_row = frames.iloc[0].to_dict()
-            logger.warning(f"[INTRABAR-DEEP-DEBUG] Why empty? Sample row: {sample_row}")
-
-        self._intrabar_quote_cache[minute_key] = cached
-        return self._apply_intrabar_eval_step(cached)
+        return self._intrabar_quote_provider.load_quotes_for_timestamp(
+            timestamp=timestamp,
+            l2_manager=self.l2_manager,
+            cache=self._intrabar_quote_cache,
+            raw_step_seconds=getattr(self.config, "intrabar_eval_step_seconds", 1),
+        )
 
     def _strategy_api_headers(self) -> Dict[str, str]:
         return build_strategy_api_headers(self.config.strategy_api_url)
 
-    async def _get_strategy_http_session(self) -> aiohttp.ClientSession:
-        if (
-            self._strategy_http_session is not None
-            and not self._strategy_http_session.closed
-        ):
-            return self._strategy_http_session
-        try:
-            timeout_total = float(
-                os.getenv("BACKTEST_STRATEGY_API_TIMEOUT_SECONDS", "6.0")
-            )
-        except (TypeError, ValueError):
-            timeout_total = 6.0
-        timeout = aiohttp.ClientTimeout(
-            total=max(0.1, timeout_total),
-            connect=3.0,
-        )
-        try:
-            self._strategy_http_session = aiohttp.ClientSession(timeout=timeout)
-        except TypeError:
-            # Test doubles may not accept keyword args; fall back to defaults.
-            self._strategy_http_session = aiohttp.ClientSession()
-        return self._strategy_http_session
+    def _sync_strategy_client_state(self) -> None:
+        self._strategy_http_session = self._strategy_api_client.session
+        self._strategy_http_session_loop = self._strategy_api_client.session_loop
+
+    async def _get_strategy_http_session(self) -> Any:
+        session = await self._strategy_api_client.get_session()
+        self._sync_strategy_client_state()
+        return session
 
     async def close_http_session(self) -> None:
-        session = self._strategy_http_session
-        self._strategy_http_session = None
-        if session is not None and not session.closed:
-            await session.close()
+        await self._strategy_api_client.close()
+        self._sync_strategy_client_state()
 
     @staticmethod
     def _is_recoverable_strategy_error(status: int, detail: str) -> bool:
@@ -898,18 +784,16 @@ class SessionRunner:
         return "session not found" in text or "internal server error" in text
 
     def _resolve_strategy_session_date(self) -> str:
-        token = str(
-            getattr(self, "_restart_session_date", "")
-            or self.config.date_from
-            or self.config.date
-        ).strip()
-        return token
+        return self._strategy_recovery_helper.resolve_session_date(
+            restart_session_date=getattr(self, "_restart_session_date", ""),
+            date_from=self.config.date_from,
+            date=self.config.date,
+        )
 
     def _resolve_strategy_session_config_snapshot(self) -> Dict[str, Any]:
-        snapshot = getattr(self, "_restart_session_config", {})
-        if not isinstance(snapshot, dict):
-            return {}
-        return dict(snapshot)
+        return self._strategy_recovery_helper.resolve_config_snapshot(
+            getattr(self, "_restart_session_config", {})
+        )
 
     async def _recover_strategy_session(self, *, reason: str, detail: str = "") -> bool:
         """
@@ -927,150 +811,39 @@ class SessionRunner:
                 "Strategy session recovery skipped (missing config snapshot)."
             )
             return False
-
-        headers = self._strategy_api_headers()
-        post_kwargs: Dict[str, Any] = {
-            "params": {
-                "run_id": self.config.run_id,
-                "ticker": self.config.ticker,
-                "date": session_date,
-            },
-            "json": config_snapshot,
-        }
-        if headers:
-            post_kwargs["headers"] = headers
-
-        last_error = ""
-        for attempt in range(3):
-            session = await self._get_strategy_http_session()
-            try:
-                async with session.post(
-                    f"{self.config.strategy_api_url}/api/session/config",
-                    **post_kwargs,
-                ) as resp:
-                    body = await resp.text()
-                    if resp.status == 200:
-                        logger.warning(
-                            "Strategy session recovered run_id=%s ticker=%s date=%s reason=%s",
-                            self.config.run_id,
-                            self.config.ticker,
-                            session_date,
-                            reason,
-                        )
-                        return await self._replay_historical_bars(session_date)
-                    last_error = f"http_{resp.status}:{body[:200]}"
-            except aiohttp.ClientError as exc:
-                last_error = f"connection:{str(exc)}"
-            await self.close_http_session()
-            if attempt < 2:
-                await asyncio.sleep(0.2 * (attempt + 1))
-
-        logger.warning(
-            "Strategy session recovery failed reason=%s detail=%s last_error=%s",
-            reason,
-            detail[:200],
-            last_error[:300],
+        return await self._strategy_recovery_helper.recover_session(
+            run_id=self.config.run_id,
+            ticker=self.config.ticker,
+            reason=reason,
+            detail=detail,
+            session_date=session_date,
+            config_snapshot=config_snapshot,
+            current_bar_index=self.current_bar_index,
+            bars=self.bars,
+            l2_payload_keys=self.L2_PAYLOAD_KEYS,
+            tcbbo_payload_keys=self.TCBBO_PAYLOAD_KEYS,
+            ref_bars_map=self.ref_bars_map,
         )
-        return False
 
     async def _replay_historical_bars(self, session_date: str) -> bool:
         """
         Replay all bars for the current session_date up to self.current_bar_index.
         This properly rebuilds the strategy API state (VWAP, intraday levels, positions) after a restart.
         """
-        bars_to_replay = []
-        for i in range(self.current_bar_index):
-            bar = self.bars[i]
-            ts = bar.get("timestamp", "")
-            ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-            if session_date in ts_str:
-                bars_to_replay.append((i, bar, ts_str))
-
-        if not bars_to_replay:
-            return True
-
-        logger.info(
-            f"Replaying {len(bars_to_replay)} historical bars for session {session_date} to rebuild state."
+        return await self._strategy_recovery_helper.replay_historical_bars(
+            run_id=self.config.run_id,
+            ticker=self.config.ticker,
+            session_date=session_date,
+            current_bar_index=self.current_bar_index,
+            bars=self.bars,
+            l2_payload_keys=self.L2_PAYLOAD_KEYS,
+            tcbbo_payload_keys=self.TCBBO_PAYLOAD_KEYS,
+            ref_bars_map=self.ref_bars_map,
         )
-        headers = self._strategy_api_headers()
-
-        # In a real batch optimization, the strategy API would accept a list.
-        # Since we only have /api/session/bar, we must replay them sequentially.
-        session = await self._get_strategy_http_session()
-        try:
-            for i, bar, ts_str in bars_to_replay:
-                payload = {
-                    "run_id": self.config.run_id,
-                    "ticker": self.config.ticker,
-                    "timestamp": ts_str,
-                    "open": bar["open"],
-                    "high": bar["high"],
-                    "low": bar["low"],
-                    "close": bar["close"],
-                    "volume": bar["volume"],
-                    "vwap": bar.get("vwap"),
-                }
-                for l2_key in self.L2_PAYLOAD_KEYS:
-                    if l2_key in bar:
-                        payload[l2_key] = bar.get(l2_key)
-                for tcbbo_key in self.TCBBO_PAYLOAD_KEYS:
-                    if tcbbo_key in bar:
-                        payload[tcbbo_key] = bar.get(tcbbo_key)
-
-                # Check for cross-asset ref bar
-                ref_bar = self.ref_bars_map.get(ts_str)
-                if ref_bar:
-                    payload["ref_ticker"] = ref_bar.get("ticker", "QQQ")
-                    payload["ref_open"] = ref_bar.get("open")
-                    payload["ref_high"] = ref_bar.get("high")
-                    payload["ref_low"] = ref_bar.get("low")
-                    payload["ref_close"] = ref_bar.get("close")
-                    payload["ref_volume"] = ref_bar.get("volume")
-
-                payload = self._to_json_safe(payload)
-
-                post_kwargs: Dict[str, Any] = {"json": payload}
-                if headers:
-                    post_kwargs["headers"] = headers
-
-                async with session.post(
-                    f"{self.config.strategy_api_url}/api/session/bar",
-                    **post_kwargs,
-                ) as resp:
-                    if resp.status != 200:
-                        err = await resp.text()
-                        logger.error(
-                            f"Failed to replay bar index {i}: HTTP {resp.status} {err}"
-                        )
-                        return False
-            return True
-        except Exception as e:
-            logger.error(f"Error replaying historical bars: {e}")
-            return False
 
     def _update_execution_state(self, response: Dict[str, Any]) -> None:
         """Track whether next bar needs execution-level intrabar payload."""
-        action = str(response.get("action", "") or "")
-        opened = "position_opened" in response
-        closed = (
-            "position_closed" in response
-            or action.startswith("position_closed_")
-            or action == "max_loss_stop"
-            or action == "session_ended"
-        )
-
-        if opened:
-            self._position_active = True
-        if closed:
-            self._position_active = False
-
-        queued = bool(response.get("queued_for_next_bar")) or action == "signal_queued"
-        if queued:
-            self._pending_entry = True
-
-        if response.get("phase") == "END_OF_DAY":
-            self._position_active = False
-            self._pending_entry = False
+        self._execution_state_manager.apply_response(response)
 
     async def step(self, notify: bool = True) -> Dict[str, Any]:
         """Process the next bar and return the result.
@@ -1112,6 +885,7 @@ class SessionRunner:
             self.is_running = False
             return result
 
+        response_model = result.pop("_response_model", None)
         self.current_bar_index += 1
         self.last_response = result
         processed_bar_index = self.current_bar_index - 1
@@ -1122,56 +896,18 @@ class SessionRunner:
         if isinstance(bar, dict):
             bar["bar_index"] = processed_bar_index
             bar["warmup_only"] = bool(result.get("warmup_only", False))
-            api_response = result.get("response") if isinstance(result, dict) else None
-            if isinstance(api_response, dict):
-                ls = api_response.get("layer_scores")
-                if isinstance(ls, dict):
-                    bar["layer_scores"] = ls
-                sr = api_response.get("signal_rejected")
-                if isinstance(sr, dict):
-                    bar["signal_rejected"] = sr
-                gs = api_response.get("golden_setup")
-                if isinstance(gs, dict):
-                    bar["golden_setup"] = gs
-                intrabar_eval_trace = api_response.get("intrabar_eval_trace")
-                if isinstance(intrabar_eval_trace, dict):
-                    bar["intrabar_eval_trace"] = intrabar_eval_trace
-                if processed_bar_index <= 3:
-                    _has_quotes = bool(
-                        isinstance(api_response, dict)
-                        and isinstance(api_response.get("intrabar_eval_trace"), dict)
-                    )
-                    _cp_count = (
-                        len(intrabar_eval_trace.get("checkpoints", []))
-                        if isinstance(intrabar_eval_trace, dict)
-                        else 0
-                    )
-                    logger.warning(
-                        "[INTRABAR-DEBUG] bar=%s has_trace=%s checkpoints=%s "
-                        "has_layer_scores=%s warmup=%s",
-                        processed_bar_index,
-                        _has_quotes,
-                        _cp_count,
-                        isinstance(ls, dict),
-                        bool(result.get("warmup_only", False)),
-                    )
-                cd = None
-                pos = api_response.get("position_opened")
-                if isinstance(pos, dict):
-                    md = pos.get("metadata")
-                    if isinstance(md, dict):
-                        cd = md.get("candidate_diagnostics")
-                if cd is None:
-                    for sig in api_response.get("signals") or []:
-                        if isinstance(sig, dict):
-                            sig_md = sig.get("metadata")
-                            if isinstance(sig_md, dict) and isinstance(
-                                sig_md.get("candidate_diagnostics"), dict
-                            ):
-                                cd = sig_md["candidate_diagnostics"]
-                                break
-                if isinstance(cd, dict):
-                    bar["candidate_diagnostics"] = cd
+            api_response = (
+                response_model
+                if response_model is not None
+                else (result.get("response") if isinstance(result, dict) else None)
+            )
+            self._apply_response_analysis_to_bar(
+                bar,
+                api_response,
+                processed_bar_index=processed_bar_index,
+                warmup_only=bool(result.get("warmup_only", False)),
+                include_debug_log=True,
+            )
 
         # Notify callbacks if requested
         if notify:
@@ -1180,38 +916,17 @@ class SessionRunner:
                 "bar_index": processed_bar_index,
                 "warmup_only": bool(result.get("warmup_only", False)),
             }
-            # Attach live strategy analysis for the UI conditions panel.
-            api_response = result.get("response") if isinstance(result, dict) else None
-            if isinstance(api_response, dict):
-                ls = api_response.get("layer_scores")
-                if isinstance(ls, dict):
-                    bar_payload["layer_scores"] = ls
-                sr = api_response.get("signal_rejected")
-                if isinstance(sr, dict):
-                    bar_payload["signal_rejected"] = sr
-                gs = api_response.get("golden_setup")
-                if isinstance(gs, dict):
-                    bar_payload["golden_setup"] = gs
-                intrabar_eval_trace = api_response.get("intrabar_eval_trace")
-                if isinstance(intrabar_eval_trace, dict):
-                    bar_payload["intrabar_eval_trace"] = intrabar_eval_trace
-                cd = None
-                pos = api_response.get("position_opened")
-                if isinstance(pos, dict):
-                    md = pos.get("metadata")
-                    if isinstance(md, dict):
-                        cd = md.get("candidate_diagnostics")
-                if cd is None:
-                    for sig in api_response.get("signals") or []:
-                        if isinstance(sig, dict):
-                            sig_md = sig.get("metadata")
-                            if isinstance(sig_md, dict) and isinstance(
-                                sig_md.get("candidate_diagnostics"), dict
-                            ):
-                                cd = sig_md["candidate_diagnostics"]
-                                break
-                if isinstance(cd, dict):
-                    bar_payload["candidate_diagnostics"] = cd
+            api_response = (
+                response_model
+                if response_model is not None
+                else (result.get("response") if isinstance(result, dict) else None)
+            )
+            self._apply_response_analysis_to_bar(
+                bar_payload,
+                api_response,
+                processed_bar_index=processed_bar_index,
+                warmup_only=bool(result.get("warmup_only", False)),
+            )
             await self._notify_bar(bar_payload)
 
         return result
@@ -1250,142 +965,61 @@ class SessionRunner:
             await self._notify_decision(marker.to_dict())
 
         # Send to strategy API
-        consume_pending_entry = self._pending_entry
-        if consume_pending_entry:
-            # Pending signal is consumed at this bar open (fill or reject).
-            self._pending_entry = False
-        payload = {
-            "run_id": self.config.run_id,
-            "ticker": self.config.ticker,
-            "timestamp": (
-                timestamp.isoformat()
-                if hasattr(timestamp, "isoformat")
-                else str(timestamp)
+        # Pending signal is consumed at this bar open (fill or reject).
+        consume_pending_entry = self._execution_state_manager.consume_pending_entry()
+        should_attach_intrabar_quotes = self._should_attach_intrabar_quotes(
+            consume_pending_entry
+        )
+        intrabar_quotes = (
+            self._load_intrabar_quotes(timestamp)
+            if should_attach_intrabar_quotes
+            else None
+        )
+        validated_payload = self._strategy_bar_payload_builder.build_validated_live_payload(
+            payload_input=StrategyBarPayloadInput(
+                run_id=self.config.run_id,
+                ticker=self.config.ticker,
+                bar=bar,
+                timestamp=timestamp,
+                warmup_only=warmup_only,
+                current_bar_index=self.current_bar_index,
+                include_pending_entry=consume_pending_entry,
             ),
-            "open": bar["open"],
-            "high": bar["high"],
-            "low": bar["low"],
-            "close": bar["close"],
-            "volume": bar["volume"],
-            "vwap": bar.get("vwap"),
-            "warmup_only": warmup_only,
-        }
-        for l2_key in self.L2_PAYLOAD_KEYS:
-            if l2_key in bar:
-                payload[l2_key] = bar.get(l2_key)
-        for tcbbo_key in self.TCBBO_PAYLOAD_KEYS:
-            if tcbbo_key in bar:
-                payload[tcbbo_key] = bar.get(tcbbo_key)
-
-        _should_attach = self._should_attach_intrabar_quotes(
-            include_pending_entry=consume_pending_entry
+            build_context=StrategyBarPayloadBuildContext(
+                ref_bars_map=self.ref_bars_map,
+                should_attach_intrabar_quotes=should_attach_intrabar_quotes,
+                intrabar_recalc_enabled=bool(
+                    getattr(self.config, "intrabar_execution_recalc_1s", False)
+                ),
+                l2_manager_name=(
+                    type(self.l2_manager).__name__ if self.l2_manager else None
+                ),
+                intrabar_quotes_1s=intrabar_quotes,
+            ),
         )
-        if not _should_attach and self.current_bar_index <= 3:
-            logger.warning(
-                "[INTRABAR-DEBUG] bar=%s should_attach=False "
-                "intrabar_recalc=%s l2_manager=%s",
-                self.current_bar_index,
-                getattr(self.config, "intrabar_execution_recalc_1s", "?"),
-                type(self.l2_manager).__name__ if self.l2_manager else None,
-            )
-        if _should_attach:
-            intrabar_quotes = self._load_intrabar_quotes(timestamp)
-            if intrabar_quotes:
-                payload["intrabar_quotes_1s"] = intrabar_quotes
-            elif self.current_bar_index <= 3:
-                logger.warning(
-                    "[INTRABAR-DEBUG] bar=%s quotes=None for %s",
-                    self.current_bar_index,
-                    timestamp,
-                )
-
-        # Attach cross-asset reference bar if available
-        ts_key = (
-            timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
-        )
-        ref_bar = self.ref_bars_map.get(ts_key)
-        if ref_bar:
-            payload["ref_ticker"] = ref_bar.get("ticker", "QQQ")
-            payload["ref_open"] = ref_bar.get("open")
-            payload["ref_high"] = ref_bar.get("high")
-            payload["ref_low"] = ref_bar.get("low")
-            payload["ref_close"] = ref_bar.get("close")
-            payload["ref_volume"] = ref_bar.get("volume")
-        payload = self._to_json_safe(payload)
-
-        result: Optional[Dict[str, Any]] = None
-        recovery_attempted = False
-        for attempt in range(2):
-            try:
-                session = await self._get_strategy_http_session()
-                post_kwargs: Dict[str, Any] = {"json": payload}
-                headers = self._strategy_api_headers()
-                if headers:
-                    post_kwargs["headers"] = headers
-                async with session.post(
-                    f"{self.config.strategy_api_url}/api/session/bar",
-                    **post_kwargs,
-                ) as resp:
-                    if resp.status != 200:
-                        error_text = await resp.text()
-                        can_recover = (
-                            not recovery_attempted
-                            and attempt == 0
-                            and self._is_recoverable_strategy_error(
-                                resp.status, error_text
-                            )
-                        )
-                        if can_recover:
-                            recovery_attempted = True
-                            recovered = await self._recover_strategy_session(
-                                reason=f"http_{resp.status}",
-                                detail=error_text,
-                            )
-                            if recovered:
-                                continue
-                            if resp.status in {502, 503, 504}:
-                                await asyncio.sleep(0.2)
-                                await self.close_http_session()
-                                continue
-                        if consume_pending_entry:
-                            self._pending_entry = True
-                        return {
-                            "success": False,
-                            "error": f"API error {resp.status}: {error_text}",
-                            "bar_index": self.current_bar_index,
-                        }
-
-                    result = await resp.json()
-                    break
-            except aiohttp.ClientError as e:
-                can_recover = not recovery_attempted and attempt == 0
-                if can_recover:
-                    recovery_attempted = True
-                    recovered = await self._recover_strategy_session(
-                        reason="connection_error",
-                        detail=str(e),
-                    )
-                    if recovered:
-                        continue
-                    await asyncio.sleep(0.2)
-                    await self.close_http_session()
-                    continue
+        match validated_payload:
+            case Ok(value=payload):
+                pass
+            case Err(error=error_text):
                 if consume_pending_entry:
                     self._pending_entry = True
                 return {
                     "success": False,
-                    "error": f"Connection error: {str(e)}",
+                    "error": f"Payload validation error: {error_text}",
                     "bar_index": self.current_bar_index,
                 }
 
-        if result is None:
+        processed_result = await self._strategy_bar_processor.process(payload=payload)
+        if not processed_result.success:
             if consume_pending_entry:
                 self._pending_entry = True
             return {
                 "success": False,
-                "error": "Strategy response missing after recovery attempts",
+                "error": str(processed_result.error or "unknown error"),
                 "bar_index": self.current_bar_index,
             }
+        result = dict(processed_result.response_payload or {})
+        result_model = processed_result.response_model
 
         # Update phase
         self.phase = result.get("phase", self.phase)
@@ -1393,12 +1027,19 @@ class SessionRunner:
 
         # Process decision markers from response
         if warmup_only:
-            resolved_warnings = self._extract_response_selection_warnings(result)
+            resolved_warnings = self._extract_response_selection_warnings(
+                result_model or result
+            )
             if resolved_warnings is not None:
                 self.selection_warnings = resolved_warnings
             result["warmup_only"] = True
         else:
-            await self._process_decision_markers(result, bar, timestamp)
+            await self._process_decision_markers(
+                result,
+                bar,
+                timestamp,
+                response_model=result_model,
+            )
 
         return {
             "success": True,
@@ -1409,64 +1050,125 @@ class SessionRunner:
             "total_bars": len(self.bars),
             "progress_pct": (self.current_bar_index + 1) / len(self.bars) * 100,
             "warmup_only": warmup_only,
+            "_response_model": result_model,
         }
 
     async def _process_decision_markers(
-        self, response: Dict[str, Any], bar: Dict[str, Any], timestamp: datetime
+        self,
+        response: Dict[str, Any],
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        *,
+        response_model: Optional[StrategyBarResponse] = None,
     ):
         """Extract and record decision markers from API response."""
-        resolved_warnings = self._extract_response_selection_warnings(response)
+        response_view: Any = response_model or response
+        resolved_warnings = self._extract_response_selection_warnings(response_view)
         if resolved_warnings is not None:
             self.selection_warnings = resolved_warnings
 
-        intraday_levels_payload = response.get("intraday_levels")
-        if not isinstance(intraday_levels_payload, dict):
-            intraday_levels_payload = None
+        intraday_levels_payload = resolve_intraday_levels_payload(response_view)
         market_context = self._build_marker_market_context(
             bar=bar,
             timestamp=timestamp,
-            response=response,
+            response=response_view,
         )
 
-        action = response.get("action", "")
+        await self._emit_regime_strategy_markers(
+            response=response,
+            response_view=response_view,
+            bar=bar,
+            timestamp=timestamp,
+            intraday_levels_payload=intraday_levels_payload,
+            market_context=market_context,
+        )
+        await self._emit_signal_markers(
+            response=response,
+            response_view=response_view,
+            bar=bar,
+            timestamp=timestamp,
+            intraday_levels_payload=intraday_levels_payload,
+            market_context=market_context,
+        )
+        await self._emit_pending_execution_status_marker(
+            response=response_view,
+            bar=bar,
+            timestamp=timestamp,
+            intraday_levels_payload=intraday_levels_payload,
+            market_context=market_context,
+        )
+        should_continue = await self._emit_position_opened_marker(
+            response=response,
+            response_view=response_view,
+            bar=bar,
+            timestamp=timestamp,
+            intraday_levels_payload=intraday_levels_payload,
+            market_context=market_context,
+        )
+        if not should_continue:
+            return
+        await self._emit_position_closed_marker(
+            response=response,
+            response_view=response_view,
+            bar=bar,
+            timestamp=timestamp,
+            intraday_levels_payload=intraday_levels_payload,
+            market_context=market_context,
+        )
+        await self._emit_session_end_marker(
+            response_view=response_view,
+            bar=bar,
+            timestamp=timestamp,
+            market_context=market_context,
+        )
 
-        # Regime detected (allow one per day by relying on action flag)
+    async def _emit_regime_strategy_markers(
+        self,
+        *,
+        response: Dict[str, Any],
+        response_view: Any,
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        intraday_levels_payload: Optional[Dict[str, Any]],
+        market_context: Dict[str, Any],
+    ) -> None:
+        is_typed_response = isinstance(response_view, StrategyBarResponse)
+        response_view_payload = {} if is_typed_response else dump_payload(response_view)
+        response_indicators = (
+            dump_payload_or_none(response_view.indicators) or {}
+            if is_typed_response
+            else response_view_payload.get("indicators", {})
+        )
+        action = response_view.action if is_typed_response else response_view_payload.get("action", "")
         if action == "regime_detected":
-            regime = response.get("regime")
+            regime = response_view.regime if is_typed_response else response_view_payload.get("regime")
             if regime:
-                explanation = self._generate_regime_explanation(response)
+                explanation = self._generate_regime_explanation(response_view)
                 marker = self.decision_tracker.add_regime_detected(
                     timestamp=timestamp,
                     bar_index=self.current_bar_index,
                     price=bar["close"],
                     regime=regime,
                     explanation=explanation,
-                    indicators=response.get("indicators", {}),
+                    indicators=response_indicators,
                 )
-                if intraday_levels_payload is not None:
-                    marker.details["intraday_levels"] = dict(intraday_levels_payload)
+                marker.details = apply_intraday_levels_details(
+                    marker.details,
+                    intraday_levels_payload,
+                )
                 self._attach_market_context(marker, market_context)
                 await self._notify_decision(marker.to_dict())
 
-                # Also add strategy selected marker for this day
-                strategy = self._extract_strategy_label(response)
+                strategy = self._extract_strategy_label(response_view)
                 if strategy:
-                    active_strategies = [
-                        str(name).strip()
-                        for name in (
-                            response.get("strategies")
-                            if isinstance(response.get("strategies"), list)
-                            else []
-                        )
-                        if str(name).strip()
-                    ]
-                    strategy_token = str(strategy).strip()
-                    if strategy_token.lower() == "adaptive":
-                        alternative_strategies = list(active_strategies)
-                    else:
-                        alternative_strategies = [
-                            name for name in active_strategies if name != strategy_token
-                        ]
+                    options = resolve_strategy_selection_options(
+                        strategy,
+                        (
+                            response_view.strategies
+                            if is_typed_response
+                            else response_view_payload.get("strategies")
+                        ),
+                    )
                     marker = self.decision_tracker.add_strategy_selected(
                         timestamp=timestamp,
                         bar_index=self.current_bar_index,
@@ -1474,543 +1176,449 @@ class SessionRunner:
                         strategy=strategy,
                         regime=regime,
                         reasoning=f"Selected {strategy} strategy for {regime} regime",
-                        alternative_strategies=alternative_strategies,
-                        active_strategies=active_strategies,
+                        alternative_strategies=options.alternative_strategies,
+                        active_strategies=options.active_strategies,
                         selection_warnings=self.selection_warnings,
                     )
                     self._attach_market_context(marker, market_context)
                     await self._notify_decision(marker.to_dict())
 
-        # Intraday regime refresh (dynamic reclassification).
-        regime_update = response.get("regime_update")
-        if isinstance(regime_update, dict):
-            regime = regime_update.get("regime") or response.get("regime")
-            regime_indicators = regime_update.get("indicators") or response.get(
-                "indicators", {}
-            )
-            if regime:
-                update_payload = {
-                    **response,
-                    "regime": regime,
-                    "indicators": regime_indicators,
-                }
-                explanation = f"Intraday refresh: {self._generate_regime_explanation(update_payload)}"
-                marker = self.decision_tracker.add_regime_detected(
-                    timestamp=timestamp,
-                    bar_index=self.current_bar_index,
-                    price=bar["close"],
-                    regime=regime,
-                    explanation=explanation,
-                    indicators=regime_indicators,
-                )
-                if intraday_levels_payload is not None:
-                    marker.details["intraday_levels"] = dict(intraday_levels_payload)
-                self._attach_market_context(marker, market_context)
-                await self._notify_decision(marker.to_dict())
+        regime_update = (
+            response_view.regime_update
+            if is_typed_response
+            else response_view_payload.get("regime_update")
+        )
+        if not regime_update:
+            return
 
-            strategy = regime_update.get("strategy") or self._extract_strategy_label(
-                response
+        regime_update_payload = dump_payload_or_none(regime_update) or {}
+        regime = (
+            regime_update.regime
+            if is_typed_response and regime_update.regime
+            else regime_update_payload.get("regime") or response_view_payload.get("regime")
+        )
+        regime_indicators = (
+            dump_payload_or_none(regime_update.indicators) or response_indicators
+            if is_typed_response
+            else regime_update_payload.get("indicators") or response_indicators
+        )
+        if regime:
+            update_payload = {
+                "regime": regime,
+                "micro_regime": (
+                    response_view.micro_regime
+                    if is_typed_response
+                    else response_view_payload.get("micro_regime")
+                ),
+                "indicators": regime_indicators,
+            }
+            explanation = (
+                f"Intraday refresh: {self._generate_regime_explanation(update_payload)}"
             )
-            if strategy and regime:
-                active_strategies = [
-                    str(name).strip()
-                    for name in (
-                        regime_update.get("strategies")
-                        if isinstance(regime_update.get("strategies"), list)
-                        else (
-                            response.get("strategies")
-                            if isinstance(response.get("strategies"), list)
-                            else []
-                        )
-                    )
-                    if str(name).strip()
-                ]
-                strategy_token = str(strategy).strip()
-                if strategy_token.lower() == "adaptive":
-                    alternative_strategies = list(active_strategies)
-                else:
-                    alternative_strategies = [
-                        name for name in active_strategies if name != strategy_token
-                    ]
-                marker = self.decision_tracker.add_strategy_selected(
-                    timestamp=timestamp,
-                    bar_index=self.current_bar_index,
-                    price=bar["close"],
-                    strategy=strategy,
-                    regime=regime,
-                    reasoning=f"Updated {strategy} after intraday regime refresh",
-                    alternative_strategies=alternative_strategies,
-                    active_strategies=active_strategies,
-                    selection_warnings=self.selection_warnings,
-                    switch_guard=(
-                        regime_update.get("switch_guard")
-                        if isinstance(regime_update.get("switch_guard"), dict)
-                        else None
-                    ),
-                )
-                self._attach_market_context(marker, market_context)
-                await self._notify_decision(marker.to_dict())
+            marker = self.decision_tracker.add_regime_detected(
+                timestamp=timestamp,
+                bar_index=self.current_bar_index,
+                price=bar["close"],
+                regime=regime,
+                explanation=explanation,
+                indicators=regime_indicators,
+            )
+            marker.details = apply_intraday_levels_details(
+                marker.details,
+                intraday_levels_payload,
+            )
+            self._attach_market_context(marker, market_context)
+            await self._notify_decision(marker.to_dict())
 
-        # Signals generated
-        signals = response.get("signals", [])
+        strategy = (
+            regime_update.strategy
+            if is_typed_response and regime_update.strategy
+            else regime_update_payload.get("strategy") or self._extract_strategy_label(response_view)
+        )
+        if not (strategy and regime):
+            return
+
+        strategy_options_payload = (
+            regime_update.strategies
+            if is_typed_response and isinstance(regime_update.strategies, list)
+            else (
+                regime_update_payload.get("strategies")
+                if isinstance(regime_update_payload.get("strategies"), list)
+                else (
+                    response_view.strategies
+                    if is_typed_response
+                    else response_view_payload.get("strategies")
+                )
+            )
+        )
+        options = resolve_strategy_selection_options(strategy, strategy_options_payload)
+        marker = self.decision_tracker.add_strategy_selected(
+            timestamp=timestamp,
+            bar_index=self.current_bar_index,
+            price=bar["close"],
+            strategy=strategy,
+            regime=regime,
+            reasoning=f"Updated {strategy} after intraday regime refresh",
+            alternative_strategies=options.alternative_strategies,
+            active_strategies=options.active_strategies,
+            selection_warnings=self.selection_warnings,
+            switch_guard=(
+                dump_payload_or_none(regime_update.switch_guard)
+                if is_typed_response
+                else (
+                    regime_update_payload.get("switch_guard")
+                    if isinstance(regime_update_payload.get("switch_guard"), dict)
+                    else None
+                )
+            ),
+        )
+        self._attach_market_context(marker, market_context)
+        await self._notify_decision(marker.to_dict())
+
+    async def _emit_signal_markers(
+        self,
+        *,
+        response: Dict[str, Any],
+        response_view: Any,
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        intraday_levels_payload: Optional[Dict[str, Any]],
+        market_context: Dict[str, Any],
+    ) -> None:
+        response_view_payload = (
+            {}
+            if isinstance(response_view, StrategyBarResponse)
+            else dump_payload(response_view)
+        )
+        signals = (
+            response_view.signals
+            if isinstance(response_view, StrategyBarResponse)
+            else response_view_payload.get("signals", [])
+        )
         response_tcbbo_confirmation = (
-            response.get("tcbbo_confirmation")
-            if isinstance(response.get("tcbbo_confirmation"), dict)
-            else None
+            response_view.tcbbo_confirmation
+            if isinstance(response_view, StrategyBarResponse)
+            else response_view_payload.get("tcbbo_confirmation")
         )
         for signal in signals:
+            signal_snapshot = resolve_signal_marker_snapshot(
+                signal,
+                default_price=bar["close"],
+            )
             marker = self.decision_tracker.add_signal(
                 timestamp=timestamp,
                 bar_index=self.current_bar_index,
-                price=signal.get("price", bar["close"]),
-                signal_type=signal.get("signal", "BUY"),
-                strategy=signal.get("strategy", "unknown"),
-                confidence=signal.get("confidence", 50),
-                reasoning=signal.get("reasoning", ""),
-                stop_loss=signal.get("stop_loss"),
-                take_profit=signal.get("take_profit"),
+                price=signal_snapshot.price,
+                signal_type=signal_snapshot.signal_type,
+                strategy=signal_snapshot.strategy,
+                confidence=signal_snapshot.confidence,
+                reasoning=signal_snapshot.reasoning,
+                stop_loss=signal_snapshot.stop_loss,
+                take_profit=signal_snapshot.take_profit,
             )
-            if intraday_levels_payload is not None:
-                marker.details["intraday_levels"] = dict(intraday_levels_payload)
-            signal_metadata = signal.get("metadata") if isinstance(signal, dict) else {}
-            if isinstance(signal_metadata, dict):
-                marker.details["signal_metadata"] = dict(signal_metadata)
-                level_context = signal_metadata.get("level_context")
-                if isinstance(level_context, dict):
-                    marker.details["level_context"] = dict(level_context)
-                flow_snapshot = signal_metadata.get("order_flow")
-                if isinstance(flow_snapshot, dict):
-                    marker.details["flow_snapshot"] = dict(flow_snapshot)
-                    marker.details["signed_aggression"] = flow_snapshot.get(
-                        "signed_aggression"
-                    )
-                tcbbo_confirmation = signal_metadata.get("tcbbo_confirmation")
-                if isinstance(tcbbo_confirmation, dict):
-                    marker.details["tcbbo_confirmation"] = dict(tcbbo_confirmation)
-            if "tcbbo_confirmation" not in marker.details and isinstance(
-                response_tcbbo_confirmation, dict
-            ):
-                marker.details["tcbbo_confirmation"] = dict(response_tcbbo_confirmation)
+            marker.details = enrich_signal_marker_details(
+                marker.details,
+                signal=signal,
+                response_tcbbo_confirmation=response_tcbbo_confirmation,
+                intraday_levels_payload=intraday_levels_payload,
+            )
             self._attach_market_context(marker, market_context)
             await self._notify_decision(marker.to_dict())
 
+    async def _emit_pending_execution_status_marker(
+        self,
+        *,
+        response: Dict[str, Any],
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        intraday_levels_payload: Optional[Dict[str, Any]],
+        market_context: Dict[str, Any],
+    ) -> None:
         pending_execution_status = self._build_pending_execution_status_marker(response)
-        if pending_execution_status is not None:
-            marker_price = self._safe_float(bar.get("open"))
-            if marker_price is None:
-                marker_price = self._safe_float(bar.get("close"))
-            if marker_price is None:
-                marker_price = 0.0
-            marker_details = dict(pending_execution_status.get("details") or {})
-            if intraday_levels_payload is not None:
-                marker_details["intraday_levels"] = dict(intraday_levels_payload)
-            marker = self.decision_tracker.add_execution_status(
-                timestamp=timestamp,
-                bar_index=self.current_bar_index,
-                price=marker_price,
-                title=str(pending_execution_status.get("title") or "Execution Status"),
-                description=str(pending_execution_status.get("description") or ""),
-                strategy=str(
-                    pending_execution_status.get("strategy") or "pending_signal"
-                ),
-                confidence=float(pending_execution_status.get("confidence") or 0.0),
-                details=marker_details,
-            )
-            self._attach_market_context(marker, market_context)
-            await self._notify_decision(marker.to_dict())
+        if pending_execution_status is None:
+            return
 
-        # Trades opened
-        if "position_opened" in response:
-            pos = response["position_opened"]
-            # Get signal details if available
-            signal_data = response.get("signal") or {}
+        marker = self.decision_tracker.add_execution_status(
+            timestamp=timestamp,
+            bar_index=self.current_bar_index,
+            price=resolve_execution_status_marker_price(
+                bar,
+                safe_float=self._safe_float,
+            ),
+            title=pending_execution_status.title,
+            description=pending_execution_status.description,
+            strategy=pending_execution_status.strategy,
+            confidence=pending_execution_status.confidence,
+            details=apply_intraday_levels_details(
+                dict(pending_execution_status.details),
+                intraday_levels_payload,
+            ),
+        )
+        self._attach_market_context(marker, market_context)
+        await self._notify_decision(marker.to_dict())
 
-            logger.info(
-                f"DEBUG_SIGNAL_RECV: Bar {self.current_bar_index} Time {timestamp} "
-                f"Strat {pos.get('strategy')} "
-                f"Reasoning: {str(signal_data.get('reasoning', ''))[:100]}"
-            )
-
-            if not isinstance(signal_data, dict):
-                signal_data = {}
-            reasoning = pos.get("reasoning", signal_data.get("reasoning", ""))
-            confidence = pos.get("confidence", signal_data.get("confidence", 50))
-            metadata = pos.get("metadata", signal_data.get("metadata", {}))
-
-            # --- Context-aware risk adjustment ---
-            risk_adjustment = None
-            context_risk_payload = response.get("context_risk")
-            if not isinstance(context_risk_payload, dict):
-                context_from_metadata = (
-                    metadata.get("context_risk") if isinstance(metadata, dict) else None
-                )
-                context_risk_payload = (
-                    dict(context_from_metadata)
-                    if isinstance(context_from_metadata, dict)
-                    else None
-                )
-            else:
-                context_risk_payload = dict(context_risk_payload)
-
-            # Backward-compatibility fallback for older strategy APIs that do not
-            # adjust risk server-side yet.
-            if context_risk_payload is None:
-                ctx_cfg = self._context_risk_config
-                if ctx_cfg is None and ContextRiskConfig is not None:
-                    ctx_cfg = ContextRiskConfig.from_execution_config(
-                        self._execution_config
-                    )
-                    self._context_risk_config = ctx_cfg
-
-                if (
-                    ctx_cfg is not None
-                    and getattr(ctx_cfg, "enabled", False)
-                    and adjust_entry_risk is not None
-                    and intraday_levels_payload is not None
-                ):
-                    try:
-                        sweep_payload = (
-                            metadata.get("liquidity_sweep")
-                            if isinstance(metadata, dict)
-                            and isinstance(metadata.get("liquidity_sweep"), dict)
-                            else {}
-                        )
-                        atr_for_context = None
-                        if isinstance(sweep_payload, dict):
-                            atr_for_context = sweep_payload.get("atr")
-                        if atr_for_context is None and isinstance(market_context, dict):
-                            atr_for_context = market_context.get("atr")
-                            if atr_for_context is None:
-                                mc_indicators = market_context.get("indicators")
-                                if isinstance(mc_indicators, dict):
-                                    atr_for_context = mc_indicators.get("atr")
-
-                        risk_adjustment = adjust_entry_risk(
-                            entry_price=pos.get("entry_price", bar["close"]),
-                            side=pos.get("side", "long"),
-                            original_sl=pos.get("stop_loss", 0),
-                            original_tp=pos.get("take_profit", 0),
-                            levels_payload=intraday_levels_payload,
-                            config=ctx_cfg,
-                            atr=atr_for_context,
-                            is_sweep_trade=bool(
-                                isinstance(metadata, dict)
-                                and (
-                                    metadata.get("sweep_triggered", False)
-                                    or (
-                                        isinstance(sweep_payload, dict)
-                                        and sweep_payload.get("detected", False)
-                                    )
-                                )
-                            ),
-                            strategy_key=str(pos.get("strategy", "")),
-                        )
-                        if risk_adjustment.skip:
-                            self._context_risk_skip_count += 1
-                            logger.info(
-                                "Context-aware risk SKIP trade: %s (%s)",
-                                pos.get("strategy", "?"),
-                                risk_adjustment.skip_reason,
-                            )
-                            # Record skip as a decision marker for UI visibility
-                            skip_marker = self.decision_tracker.add_signal(
-                                timestamp=timestamp,
-                                bar_index=self.current_bar_index,
-                                price=pos.get("entry_price", bar["close"]),
-                                signal_type="SKIP",
-                                strategy=pos.get("strategy", "unknown"),
-                                confidence=confidence,
-                                reasoning=f"Context-risk skip: {risk_adjustment.skip_reason}",
-                                stop_loss=risk_adjustment.original_sl,
-                                take_profit=risk_adjustment.original_tp,
-                            )
-                            skip_marker.details["context_risk"] = (
-                                risk_adjustment.to_dict()
-                            )
-                            if intraday_levels_payload is not None:
-                                skip_marker.details["intraday_levels"] = dict(
-                                    intraday_levels_payload
-                                )
-                            self._attach_market_context(skip_marker, market_context)
-                            await self._notify_decision(skip_marker.to_dict())
-                            return  # Skip this trade
-
-                        # Apply adjusted SL/TP
-                        pos["stop_loss"] = risk_adjustment.adjusted_sl
-                        pos["take_profit"] = risk_adjustment.adjusted_tp
-                        logger.info(
-                            "Context-aware risk adjusted %s: SL %.2f→%.2f (%s), TP %.2f→%.2f (%s)",
-                            pos.get("strategy", "?"),
-                            risk_adjustment.original_sl,
-                            risk_adjustment.adjusted_sl,
-                            risk_adjustment.sl_reason,
-                            risk_adjustment.original_tp,
-                            risk_adjustment.adjusted_tp,
-                            risk_adjustment.tp_reason,
-                        )
-                    except Exception as exc:
-                        logger.warning("Context-aware risk adjustment error: %s", exc)
-            # --- End context-aware risk ---
-
-            marker = self.decision_tracker.add_entry(
-                timestamp=timestamp,
-                bar_index=self.current_bar_index,
-                price=pos.get("entry_price", bar["close"]),
-                side=pos.get("side", "long"),
-                strategy=pos.get("strategy", "unknown"),
-                size=pos.get("size", 1.0),
-                stop_loss=pos.get("stop_loss", 0),
-                take_profit=pos.get("take_profit", 0),
-                reasoning=reasoning,
-                confidence=confidence,
-                metadata=metadata,
-            )
-            if intraday_levels_payload is not None:
-                marker.details["intraday_levels"] = dict(intraday_levels_payload)
-            if context_risk_payload is not None:
-                marker.details["context_risk"] = dict(context_risk_payload)
-            elif risk_adjustment is not None:
-                marker.details["context_risk"] = risk_adjustment.to_dict()
-            if isinstance(metadata, dict) and isinstance(
-                metadata.get("break_even"), dict
-            ):
-                marker.details["break_even"] = dict(metadata.get("break_even") or {})
-            elif isinstance(response.get("break_even"), dict):
-                marker.details["break_even"] = dict(response.get("break_even") or {})
-            # Attach regime for UI context if available
-            marker.regime = response.get("regime") or marker.regime
-            self._attach_market_context(marker, market_context)
-            await self._notify_decision(marker.to_dict())
-
-        # Trades closed
-        if "position_closed" in response:
-            pos = response["position_closed"]
-            marker = self.decision_tracker.add_exit(
-                timestamp=timestamp,
-                bar_index=self.current_bar_index,
-                price=pos.get("exit_price", bar["close"]),
-                side=pos.get("side", "long"),
-                reason=pos.get("exit_reason", "unknown"),
-                pnl_pct=pos.get("pnl_pct", 0),
-                pnl_dollars=pos.get("pnl_dollars", 0),
-                entry_price=pos.get("entry_price"),
-                entry_time=pos.get("entry_time"),
-                bars_held=pos.get("bars_held"),
-                size=pos.get("size"),
-                costs=pos.get("costs"),
-                gross_pnl_pct=pos.get("gross_pnl_pct"),
-                gross_pnl_dollars=(
-                    pos.get("gross_pnl_dollars")
-                    if pos.get("gross_pnl_dollars") is not None
-                    else (
-                        pos.get("gross_pnl_pct", 0)
-                        * pos.get("entry_price", 0)
-                        * pos.get("size", 1)
-                        / 100
-                        if pos.get("gross_pnl_pct") is not None
-                        else None
-                    )
-                ),
-                cost_usd=pos.get("cost_usd"),
-                cost_pct=pos.get("cost_pct"),
-                pnl_usd=pos.get("pnl_usd"),
-                position_notional_usd=pos.get("position_notional_usd"),
-                schema_version=pos.get("schema_version", 1),
-            )
-            if intraday_levels_payload is not None:
-                marker.details["intraday_levels"] = dict(intraday_levels_payload)
-            if isinstance(pos.get("level_context"), dict):
-                marker.details["level_context"] = dict(pos.get("level_context") or {})
-            if isinstance(pos.get("flow_snapshot"), dict):
-                marker.details["flow_snapshot"] = dict(pos.get("flow_snapshot") or {})
-            if isinstance(pos.get("signal_metadata"), dict):
-                marker.details["signal_metadata"] = dict(
-                    pos.get("signal_metadata") or {}
-                )
-                signal_be = pos.get("signal_metadata", {}).get("break_even")
-                if isinstance(signal_be, dict):
-                    marker.details["break_even"] = dict(signal_be)
-            if isinstance(pos.get("break_even"), dict):
-                marker.details["break_even"] = dict(pos.get("break_even") or {})
-            if isinstance(pos.get("entry_quality_diagnostics"), dict):
-                marker.details["entry_quality_diagnostics"] = dict(
-                    pos.get("entry_quality_diagnostics") or {}
-                )
-            if "flow_strategy" in pos:
-                marker.details["flow_strategy"] = bool(pos.get("flow_strategy"))
-            if "book_pressure_confirmed" in pos:
-                marker.details["book_pressure_confirmed"] = pos.get(
-                    "book_pressure_confirmed"
-                )
-            if "book_pressure_avg" in pos:
-                marker.details["book_pressure_avg"] = pos.get("book_pressure_avg")
-            if "book_pressure_trend" in pos:
-                marker.details["book_pressure_trend"] = pos.get("book_pressure_trend")
-            if "signed_aggression" in pos:
-                marker.details["signed_aggression"] = pos.get("signed_aggression")
-            self._attach_market_context(marker, market_context)
-            await self._notify_decision(marker.to_dict())
-
-            # Record in Performance Tracker
-            # Note: position_closed payload uses 'cost_usd', not 'total_costs'
-            cost_usd = pos.get("cost_usd", 0.0) or 0.0
-            # Fallback: extract from costs dict if cost_usd not present
-            if cost_usd == 0.0 and "costs" in pos:
-                cost_usd = pos["costs"].get("total", 0.0) or 0.0
-            trade_regime = (
-                pos.get("regime")
-                or response.get("regime")
-                or (
-                    response.get("regime_update", {}).get("regime")
-                    if isinstance(response.get("regime_update"), dict)
-                    else None
-                )
-                or "unknown"
-            )
-
-            self.perf_tracker.record_trade(
-                strategy=pos.get("strategy", "unknown"),
-                regime=trade_regime,
-                ticker=self.config.ticker,
-                date=self.config.date,
-                side=pos.get("side", "long"),
-                entry_price=pos.get("entry_price", 0.0),
-                exit_price=pos.get("exit_price", bar["close"]),
-                entry_time=pos.get("entry_time", ""),
-                exit_time=(
-                    timestamp.isoformat()
-                    if hasattr(timestamp, "isoformat")
-                    else str(timestamp)
-                ),
-                pnl_pct=pos.get("pnl_pct", 0.0),
-                pnl_dollars=pos.get("pnl_dollars", 0.0),
-                gross_pnl_pct=pos.get("gross_pnl_pct", 0.0),
-                total_costs=cost_usd,
-                exit_reason=pos.get("exit_reason", "unknown"),
-                bars_held=pos.get("bars_held", 0),
-                flow_strategy=pos.get("flow_strategy", False),
-                book_pressure_confirmed=pos.get("book_pressure_confirmed"),
-                book_pressure_avg=pos.get("book_pressure_avg"),
-                book_pressure_trend=pos.get("book_pressure_trend"),
-                signed_aggression=pos.get("signed_aggression"),
-                entry_quality_diagnostics=(
-                    dict(pos.get("entry_quality_diagnostics", {}))
-                    if isinstance(pos.get("entry_quality_diagnostics"), dict)
-                    else None
-                ),
-            )
-
-        # Session ended
-        if response.get("phase") == "END_OF_DAY" and isinstance(
-            response.get("session_summary"), dict
+    async def _emit_position_opened_marker(
+        self,
+        *,
+        response: Dict[str, Any],
+        response_view: Any,
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        intraday_levels_payload: Optional[Dict[str, Any]],
+        market_context: Dict[str, Any],
+    ) -> bool:
+        response_view_payload = (
+            {}
+            if isinstance(response_view, StrategyBarResponse)
+            else dump_payload(response_view)
+        )
+        position_source = (
+            response_view.position_opened
+            if isinstance(response_view, StrategyBarResponse)
+            else response_view_payload.get("position_opened")
+        )
+        if position_source is None or (
+            isinstance(position_source, dict) and not position_source
         ):
-            self.session_summary = response["session_summary"]
-            summary_warnings = self._normalize_selection_warnings(
-                self.session_summary.get("selection_warnings")
-            )
-            if summary_warnings:
-                self.selection_warnings = summary_warnings
-            elif self.selection_warnings:
-                self.session_summary["selection_warnings"] = list(
-                    self.selection_warnings
-                )
-            marker_key = str(
-                self.session_summary.get("date")
-                or (
-                    timestamp.date().isoformat()
-                    if hasattr(timestamp, "date")
-                    else timestamp
-                )
-            )
-            if marker_key not in self._session_end_marker_keys:
-                marker = self.decision_tracker.add_session_end(
-                    timestamp=timestamp,
-                    bar_index=self.current_bar_index,
-                    price=bar["close"],
-                    summary=dict(self.session_summary),
-                )
-                self._attach_market_context(marker, market_context)
-                self._session_end_marker_keys.add(marker_key)
-                await self._notify_decision(marker.to_dict())
+            return True
 
-    @staticmethod
-    def _extract_strategy_label(response: Dict[str, Any]) -> Optional[str]:
-        """Resolve selected strategy from possible response keys."""
-        return (
-            response.get("strategy")
-            or response.get("selected_strategy")
-            or (response.get("strategies") or [None])[0]
+        entry_snapshot = resolve_entry_position_snapshot(
+            position_source,
+            default_entry_price=bar["close"],
+        )
+        entry_context = resolve_entry_marker_context(response_view, position_source)
+        logger.info(
+            f"DEBUG_SIGNAL_RECV: Bar {self.current_bar_index} Time {timestamp} "
+            f"Strat {entry_snapshot.strategy} "
+            f"Reasoning: {entry_context.reasoning[:100]}"
         )
 
-    def _generate_regime_explanation(self, response: Dict[str, Any]) -> str:
-        """Generate human-readable explanation for regime detection."""
-        regime = response.get("regime", "UNKNOWN")
-        micro_regime = response.get("micro_regime")
-        indicators = response.get("indicators", {})
+        risk_adjustment = None
+        resolved_stop_loss = entry_snapshot.stop_loss
+        resolved_take_profit = entry_snapshot.take_profit
+        if entry_context.context_risk_payload is None:
+            ctx_cfg = self._context_risk_config
+            if ctx_cfg is None and ContextRiskConfig is not None:
+                ctx_cfg = ContextRiskConfig.from_execution_config(self._execution_config)
+                self._context_risk_config = ctx_cfg
 
-        def _as_float(value):
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return None
+            if (
+                ctx_cfg is not None
+                and getattr(ctx_cfg, "enabled", False)
+                and adjust_entry_risk is not None
+                and intraday_levels_payload is not None
+            ):
+                try:
+                    sweep_payload = entry_context.liquidity_sweep_payload or {}
+                    atr_for_context = None
+                    if isinstance(sweep_payload, dict):
+                        atr_for_context = sweep_payload.get("atr")
+                    if atr_for_context is None and isinstance(market_context, dict):
+                        atr_for_context = market_context.get("atr")
+                        if atr_for_context is None:
+                            mc_indicators = market_context.get("indicators")
+                            if isinstance(mc_indicators, dict):
+                                atr_for_context = mc_indicators.get("atr")
 
-        trend_eff = _as_float(indicators.get("trend_efficiency"))
-        volatility = _as_float(indicators.get("volatility"))
-        adx = _as_float(indicators.get("adx"))
+                    risk_adjustment = adjust_entry_risk(
+                        entry_price=entry_snapshot.entry_price,
+                        side=entry_snapshot.side,
+                        original_sl=resolved_stop_loss,
+                        original_tp=resolved_take_profit,
+                        levels_payload=intraday_levels_payload,
+                        config=ctx_cfg,
+                        atr=atr_for_context,
+                        is_sweep_trade=bool(
+                            entry_context.sweep_triggered
+                            or (
+                                isinstance(sweep_payload, dict)
+                                and sweep_payload.get("detected", False)
+                            )
+                        ),
+                        strategy_key=str(entry_snapshot.strategy),
+                    )
+                    if risk_adjustment.skip:
+                        self._context_risk_skip_count += 1
+                        logger.info(
+                            "Context-aware risk SKIP trade: %s (%s)",
+                            entry_snapshot.strategy,
+                            risk_adjustment.skip_reason,
+                        )
+                        skip_marker = self.decision_tracker.add_signal(
+                            timestamp=timestamp,
+                            bar_index=self.current_bar_index,
+                            price=entry_snapshot.entry_price,
+                            signal_type="SKIP",
+                            strategy=entry_snapshot.strategy,
+                            confidence=entry_context.confidence,
+                            reasoning=f"Context-risk skip: {risk_adjustment.skip_reason}",
+                            stop_loss=risk_adjustment.original_sl,
+                            take_profit=risk_adjustment.original_tp,
+                        )
+                        skip_marker.details["context_risk"] = risk_adjustment.to_dict()
+                        skip_marker.details = apply_intraday_levels_details(
+                            skip_marker.details,
+                            intraday_levels_payload,
+                        )
+                        self._attach_market_context(skip_marker, market_context)
+                        await self._notify_decision(skip_marker.to_dict())
+                        return False
 
-        if regime == "TRENDING":
-            if trend_eff is None:
-                base = "Market showing directional movement (trend context unavailable)"
-            elif trend_eff >= 0.45:
-                base = (
-                    "Market showing directional movement with elevated trend efficiency"
-                )
-            elif trend_eff < 0.15:
-                base = "Market tagged TRENDING, but measured trend efficiency is low (transition/noise risk)"
-            else:
-                base = "Market showing directional bias with moderate trend efficiency"
-        elif regime == "CHOPPY":
-            base = (
-                "Market showing sideways/noisy movement with low directional efficiency"
+                    resolved_stop_loss = risk_adjustment.adjusted_sl
+                    resolved_take_profit = risk_adjustment.adjusted_tp
+                    logger.info(
+                        "Context-aware risk adjusted %s: SL %.2f→%.2f (%s), TP %.2f→%.2f (%s)",
+                        entry_snapshot.strategy,
+                        risk_adjustment.original_sl,
+                        risk_adjustment.adjusted_sl,
+                        risk_adjustment.sl_reason,
+                        risk_adjustment.original_tp,
+                        risk_adjustment.adjusted_tp,
+                        risk_adjustment.tp_reason,
+                    )
+                except Exception as exc:
+                    logger.warning("Context-aware risk adjustment error: %s", exc)
+
+        marker = self.decision_tracker.add_entry(
+            timestamp=timestamp,
+            bar_index=self.current_bar_index,
+            price=entry_snapshot.entry_price,
+            side=entry_snapshot.side,
+            strategy=entry_snapshot.strategy,
+            size=entry_snapshot.size,
+            stop_loss=resolved_stop_loss,
+            take_profit=resolved_take_profit,
+            reasoning=entry_context.reasoning,
+            confidence=entry_context.confidence,
+            metadata=entry_context.metadata,
+        )
+        marker.details = apply_entry_marker_details(
+            marker.details,
+            intraday_levels_payload=intraday_levels_payload,
+            entry_context=entry_context,
+            response_break_even=(
+                response_view.break_even
+                if isinstance(response_view, StrategyBarResponse)
+                else response_view_payload.get("break_even")
+            ),
+            risk_adjustment=risk_adjustment,
+        )
+        marker.regime = (
+            response_view.regime
+            if isinstance(response_view, StrategyBarResponse)
+            else response_view_payload.get("regime")
+        ) or marker.regime
+        self._attach_market_context(marker, market_context)
+        await self._notify_decision(marker.to_dict())
+        return True
+
+    async def _emit_position_closed_marker(
+        self,
+        *,
+        response: Dict[str, Any],
+        response_view: Any,
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        intraday_levels_payload: Optional[Dict[str, Any]],
+        market_context: Dict[str, Any],
+    ) -> None:
+        response_view_payload = (
+            {}
+            if isinstance(response_view, StrategyBarResponse)
+            else dump_payload(response_view)
+        )
+        position_source = (
+            response_view.position_closed
+            if isinstance(response_view, StrategyBarResponse)
+            else response_view_payload.get("position_closed")
+        )
+        if position_source is None or (
+            isinstance(position_source, dict) and not position_source
+        ):
+            return
+
+        marker = self.decision_tracker.add_exit(
+            timestamp=timestamp,
+            bar_index=self.current_bar_index,
+            **build_exit_marker_kwargs(
+                position_source,
+                default_exit_price=bar["close"],
+            ),
+        )
+        marker.details = build_exit_marker_details(
+            marker.details,
+            position_payload=position_source,
+            intraday_levels_payload=intraday_levels_payload,
+        )
+        self._attach_market_context(marker, market_context)
+        await self._notify_decision(marker.to_dict())
+
+        exit_time = timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(
+            timestamp
+        )
+        self.perf_tracker.record_trade(
+            **build_closed_trade_record_kwargs(
+                position_source,
+                response_view,
+                ticker=self.config.ticker,
+                date=self.config.date,
+                exit_time=exit_time,
+                default_exit_price=bar["close"],
             )
-        elif regime == "MIXED":
-            base = "Market showing mixed directional and mean-reverting behavior"
-        else:
-            base = f"Detected {regime} regime"
+        )
 
-        if micro_regime and micro_regime != regime:
-            base += f" (micro: {micro_regime})"
+    async def _emit_session_end_marker(
+        self,
+        *,
+        response_view: Any,
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        market_context: Dict[str, Any],
+    ) -> None:
+        phase = (
+            response_view.phase
+            if isinstance(response_view, StrategyBarResponse)
+            else dump_payload(response_view).get("phase")
+        )
+        session_summary_payload = (
+            response_view.session_summary
+            if isinstance(response_view, StrategyBarResponse)
+            else dump_payload(response_view).get("session_summary")
+        )
+        session_summary = dump_payload_or_none(session_summary_payload) or {}
+        if phase != "END_OF_DAY" or not session_summary:
+            return
 
-        # Highlight strong macro/micro disagreement.
-        if regime == "TRENDING" and micro_regime in {"CHOPPY", "MIXED", "TRANSITION"}:
-            base += " [macro/micro divergence]"
-        elif regime == "CHOPPY" and micro_regime in {
-            "TRENDING_UP",
-            "TRENDING_DOWN",
-            "BREAKOUT",
-        }:
-            base += " [macro/micro divergence]"
-        elif micro_regime == "TRANSITION":
-            base += " [transition/noisy trend]"
+        session_end_update = resolve_session_end_update(
+            session_summary_payload=session_summary,
+            selection_warnings=list(self.selection_warnings),
+            timestamp=timestamp,
+            normalize_selection_warnings=self._normalize_selection_warnings,
+        )
+        self.session_summary = dict(session_end_update.session_summary)
+        self.selection_warnings = list(session_end_update.selection_warnings)
 
-        if indicators:
-            details = []
-            if trend_eff is not None:
-                details.append(f"Trend Efficiency: {trend_eff:.2f}")
-            if volatility is not None:
-                details.append(f"Volatility: {volatility:.2f}%")
-            if adx is not None:
-                details.append(f"ADX: {adx:.1f}")
-            else:
-                details.append("ADX: N/A")
-            atr = _as_float(indicators.get("atr"))
-            if atr is not None:
-                details.append(f"ATR: {atr:.2f}")
+        if session_end_update.marker_key in self._session_end_marker_keys:
+            return
 
-            if details:
-                base += f" ({', '.join(details)})"
+        marker = self.decision_tracker.add_session_end(
+            timestamp=timestamp,
+            bar_index=self.current_bar_index,
+            price=bar["close"],
+            summary=dict(self.session_summary),
+        )
+        self._attach_market_context(marker, market_context)
+        self._session_end_marker_keys.add(session_end_update.marker_key)
+        await self._notify_decision(marker.to_dict())
 
-        return base
+    @staticmethod
+    def _extract_strategy_label(response: Any) -> Optional[str]:
+        """Resolve selected strategy from possible response keys."""
+        return extract_strategy_label(response)
+
+    def _generate_regime_explanation(self, response: Any) -> str:
+        """Generate human-readable explanation for regime detection."""
+        return generate_regime_explanation(response)
 
     async def run_all(self, speed_ms=100) -> Dict[str, Any]:
         """Run through all bars with a simple, predictable delay per bar.
@@ -2122,33 +1730,33 @@ class SessionRunner:
 
     def get_state(self) -> Dict[str, Any]:
         """Get current runner state."""
-        state = {
-            "run_id": self.config.run_id,
-            "ticker": self.config.ticker,
-            "date": self.config.date,
-            "date_from": self.config.date_from,
-            "date_to": self.config.date_to,
-            "current_bar_index": self.current_bar_index,
-            "total_bars": len(self.bars),
-            "progress_pct": (
-                (self.current_bar_index / len(self.bars) * 100) if self.bars else 0
+        return build_runner_state_payload(
+            run_id=self.config.run_id,
+            ticker=self.config.ticker,
+            date=self.config.date,
+            date_from=self.config.date_from,
+            date_to=self.config.date_to,
+            current_bar_index=self.current_bar_index,
+            total_bars=len(self.bars),
+            phase=self.phase,
+            execution_lifecycle=self._execution_lifecycle.value,
+            is_running=self.is_running,
+            is_paused=self.is_paused,
+            markers_count=len(self.decision_tracker.markers),
+            selection_warnings=self._merged_selection_warnings(),
+            l2_applied=(
+                dict(self._l2_applied)
+                if isinstance(self._l2_applied, dict) and self._l2_applied
+                else {}
             ),
-            "phase": self.phase,
-            "is_running": self.is_running,
-            "is_paused": self.is_paused,
-            "markers_count": len(self.decision_tracker.markers),
-            "selection_warnings": list(self.selection_warnings),
-        }
-        if self._progressive_loading_enabled:
-            state["data_loading"] = {
-                "enabled": True,
-                "complete": bool(self._progressive_loading_complete),
-                "loaded_until": self._progressive_loading_loaded_until,
-                "target_end": self._progressive_loading_target_end,
-                "pending_chunks": int(self._progressive_loading_pending_chunks),
-                "last_error": self._progressive_loading_last_error,
-            }
-        return state
+            progressive_loading_enabled=bool(self._progressive_loading_enabled),
+            progressive_loading_complete=bool(self._progressive_loading_complete),
+            progressive_loading_loaded_until=self._progressive_loading_loaded_until,
+            progressive_loading_target_end=self._progressive_loading_target_end,
+            progressive_loading_pending_chunks=int(self._progressive_loading_pending_chunks),
+            progressive_loading_last_error=self._progressive_loading_last_error,
+            apply_strategy_reset_metadata=self._apply_strategy_reset_metadata,
+        )
 
     def get_markers(self) -> List[Dict[str, Any]]:
         """Get all decision markers."""
@@ -2165,46 +1773,46 @@ class SessionRunner:
     def get_summary(self) -> Dict[str, Any]:
         """Get session summary."""
         summary = self._build_session_summary()
-        payload: Dict[str, Any] = {
-            "run_id": self.config.run_id,
-            "ticker": self.config.ticker,
-            "date": self.config.date,
-            "total_bars": len(self.bars),
-            "processed_bars": self.current_bar_index,
-            "phase": self.phase,
-            "markers": self.decision_tracker.get_markers(),
-            "session_summary": summary,
-        }
-        if isinstance(self._report_metadata, dict) and self._report_metadata:
-            payload["report_metadata"] = dict(self._report_metadata)
-            report_profile_fields = {
-                "unified_profile_id": _normalize_profile_token(
-                    self._report_metadata.get("unified_profile_id")
-                ),
-                "unified_profile_name": _normalize_profile_token(
-                    self._report_metadata.get("unified_profile_name")
-                ),
-                "adaptive_profile_id": _normalize_profile_token(
-                    self._report_metadata.get("adaptive_profile_id")
-                ),
-                "adaptive_profile_name": _normalize_profile_token(
-                    self._report_metadata.get("adaptive_profile_name")
-                ),
-                "strategy_combo_profile_id": _normalize_profile_token(
-                    self._report_metadata.get("strategy_combo_profile_id")
-                ),
-                "strategy_combo_profile_name": _normalize_profile_token(
-                    self._report_metadata.get("strategy_combo_profile_name")
-                ),
-            }
-            for field, token in report_profile_fields.items():
-                if token:
-                    payload[field] = token
-        if isinstance(self._aos_applied, dict) and self._aos_applied:
-            payload["aos_applied"] = dict(self._aos_applied)
-        if isinstance(self._execution_config, dict) and self._execution_config:
-            payload["execution_config"] = dict(self._execution_config)
-        return payload
+        return build_summary_payload(
+            run_id=self.config.run_id,
+            ticker=self.config.ticker,
+            date=self.config.date,
+            total_bars=len(self.bars),
+            processed_bars=self.current_bar_index,
+            phase=self.phase,
+            markers=self.decision_tracker.get_markers(),
+            session_summary=summary,
+            report_metadata=(
+                dict(self._report_metadata)
+                if isinstance(self._report_metadata, dict) and self._report_metadata
+                else {}
+            ),
+            aos_applied=(
+                dict(self._aos_applied)
+                if isinstance(self._aos_applied, dict) and self._aos_applied
+                else {}
+            ),
+            execution_config=(
+                dict(self._execution_config)
+                if isinstance(self._execution_config, dict) and self._execution_config
+                else {}
+            ),
+            run_request_config=(
+                dict(self._run_request_config)
+                if isinstance(self._run_request_config, dict)
+                and self._run_request_config
+                else {}
+            ),
+            l2_applied=(
+                dict(self._l2_applied)
+                if isinstance(self._l2_applied, dict) and self._l2_applied
+                else {}
+            ),
+            checkpoint_loaded=self._checkpoint_loaded,
+            to_json_safe=self._to_json_safe,
+            normalize_profile_token=_normalize_profile_token,
+            apply_strategy_reset_metadata=self._apply_strategy_reset_metadata,
+        )
 
     def _build_session_summary(self) -> Optional[Dict[str, Any]]:
         """
@@ -2217,133 +1825,26 @@ class SessionRunner:
             dict(self.session_summary) if isinstance(self.session_summary, dict) else {}
         )
         overall = self.perf_tracker.get_overall_stats()
-        total_trades = int(overall.get("total_trades", 0) or 0)
-        if total_trades <= 0:
-            if base_summary:
-                base_summary.setdefault("run_id", self.config.run_id)
-                base_summary.setdefault("ticker", self.config.ticker)
-                base_summary.setdefault("date", self.config.date)
-                base_summary["bars_processed"] = self.current_bar_index
-                base_summary.setdefault(
-                    "selection_warnings",
-                    list(self.selection_warnings),
-                )
-                return base_summary
-            return None
-
-        trades = self.perf_tracker.get_all_trades()
-        pnl_pct_values = [float(t.pnl_pct) for t in trades]
-        pnl_dollar_values = [float(t.pnl_dollars) for t in trades]
-        total_pnl_dollars = float(overall.get("total_pnl_dollars", 0.0) or 0.0)
-        total_costs = float(overall.get("total_costs", 0.0) or 0.0)
-        account_size_usd = float(
-            base_summary.get("account_size_usd", self.config.account_size_usd) or 0.0
-        )
-        if account_size_usd > 0:
-            total_pnl_pct = (total_pnl_dollars / account_size_usd) * 100.0
-        else:
-            total_pnl_pct = float(overall.get("total_pnl_pct", 0.0) or 0.0)
-
-        gross_wins = sum(x for x in pnl_dollar_values if x > 0)
-        gross_losses = abs(sum(x for x in pnl_dollar_values if x <= 0))
-        profit_factor_dollars = (
-            (gross_wins / gross_losses) if gross_losses > 0 else float("inf")
-        )
-
-        running = 0.0
-        peak = 0.0
-        max_drawdown_dollars = 0.0
-        for pnl in pnl_dollar_values:
-            running += pnl
-            peak = max(peak, running)
-            max_drawdown_dollars = max(max_drawdown_dollars, peak - running)
-
-        selection_warnings = self._normalize_selection_warnings(
-            base_summary.get("selection_warnings")
-        )
-        if not selection_warnings and self.selection_warnings:
-            selection_warnings = list(self.selection_warnings)
         entry_timing_breakdown = (
             dict(overall.get("entry_timing_breakdown"))
             if isinstance(overall.get("entry_timing_breakdown"), dict)
             else self.perf_tracker.get_entry_timing_breakdown()
         )
-        vwap_diag_bucket = None
-        if isinstance(entry_timing_breakdown, dict):
-            by_strategy = (
-                entry_timing_breakdown.get("first_bar_stop_by_strategy")
-                if isinstance(
-                    entry_timing_breakdown.get("first_bar_stop_by_strategy"), dict
-                )
-                else {}
-            )
-            vwap_diag_bucket = (
-                by_strategy.get("vwap_magnet")
-                or by_strategy.get("vwapmagnet")
-                or by_strategy.get("vwap magnet")
-            )
-
-        merged = {
-            "ticker": self.config.ticker,
-            "date": self.config.date,
-            "run_id": self.config.run_id,
-            "regime": base_summary.get("regime")
-            or (self.last_response or {}).get("regime"),
-            "micro_regime": base_summary.get("micro_regime")
-            or (self.last_response or {}).get("micro_regime"),
-            "strategy": base_summary.get("strategy")
-            or (self.last_response or {}).get("strategy"),
-            "total_trades": total_trades,
-            "winning_trades": int(overall.get("winning_trades", 0) or 0),
-            "losing_trades": int(overall.get("losing_trades", 0) or 0),
-            "win_rate": float(overall.get("win_rate", 0.0) or 0.0),
-            "trades": [t.to_dict() for t in trades],
-            "total_pnl_pct": round(total_pnl_pct, 4),
-            "avg_pnl_pct": round(total_pnl_pct / total_trades, 4),
-            "total_pnl_dollars": round(total_pnl_dollars, 4),
-            "avg_pnl_dollars": round(total_pnl_dollars / total_trades, 4),
-            "total_costs": round(total_costs, 4),
-            "best_trade": round(max(pnl_pct_values), 4),
-            "worst_trade": round(min(pnl_pct_values), 4),
-            "profit_factor_dollars": (
-                "inf"
-                if profit_factor_dollars == float("inf")
-                else round(profit_factor_dollars, 4)
-            ),
-            "max_drawdown_dollars": round(max_drawdown_dollars, 4),
-            "bars_processed": self.current_bar_index,
-            "pre_market_bars": base_summary.get("pre_market_bars", 0),
-            "selection_warnings": selection_warnings,
-            "regime_history": list(base_summary.get("regime_history", [])),
-            "entry_timing_diagnostics": entry_timing_breakdown,
-            "success": total_pnl_dollars > 0.0,
-        }
-        if isinstance(vwap_diag_bucket, dict):
-            merged["vwap_magnet_entry_timing_diagnostics"] = dict(vwap_diag_bucket)
-        return merged
-
-    def save_reports(self, output_dir: str):
-        """Save performance report and trades."""
-        import json
-        from pathlib import Path
-
-        out_path = Path(output_dir)
-        out_path.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # Save performance data
-        perf_path = out_path / "performance_data.json"
-        self.perf_tracker.save(str(perf_path))
-        logger.info(f"Saved performance data to {perf_path}")
-
-        # Save trades CSV
-        csv_path = out_path / "trades.csv"
-        self.perf_tracker.export_csv(str(csv_path))
-        logger.info(f"Saved trades CSV to {csv_path}")
-
-        # Save session summary JSON
-        summary_path = out_path / "session_summary.json"
-        with open(summary_path, "w") as f:
-            json.dump(self.get_summary(), f, indent=2, default=str)
-        logger.info(f"Saved session summary to {summary_path}")
+        if entry_timing_breakdown:
+            overall = {**overall, "entry_timing_breakdown": entry_timing_breakdown}
+        return build_session_summary_payload(
+            base_summary=base_summary,
+            overall=overall,
+            trades=self.perf_tracker.get_all_trades(),
+            run_id=self.config.run_id,
+            ticker=self.config.ticker,
+            date=self.config.date,
+            current_bar_index=self.current_bar_index,
+            account_size_usd_default=self.config.account_size_usd,
+            merged_selection_warnings=self._merged_selection_warnings(),
+            data_selection_warnings=list(self._data_selection_warnings),
+            last_response=self.last_response,
+            normalize_selection_warnings=self._normalize_selection_warnings,
+            merge_selection_warnings=self._merge_selection_warnings,
+            apply_strategy_reset_metadata=self._apply_strategy_reset_metadata,
+        )

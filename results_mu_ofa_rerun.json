@@ -1,0 +1,96 @@
+{
+  "ticker": "MU",
+  "start_date": "2026-02-02",
+  "end_date": "2026-02-13",
+  "run_timestamp": "2026-02-26T15:21:31.512240",
+  "total_days": 10,
+  "param_regime_detection_minutes": 15,
+  "total_trades": 16,
+  "total_pnl_dollars": 43.0862,
+  "total_costs": 9.2378,
+  "winning_trades": 9,
+  "losing_trades": 7,
+  "daily_results": [
+    {
+      "date": "2026-02-02",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 1,
+      "pnl": 3.3972,
+      "win_rate": 100.0
+    },
+    {
+      "date": "2026-02-03",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 1,
+      "pnl": -24.7396,
+      "win_rate": 0.0
+    },
+    {
+      "date": "2026-02-04",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 2,
+      "pnl": 68.675,
+      "win_rate": 100.0
+    },
+    {
+      "date": "2026-02-05",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 2,
+      "pnl": 0.3254,
+      "win_rate": 50.0
+    },
+    {
+      "date": "2026-02-06",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 1,
+      "pnl": -8.3453,
+      "win_rate": 0.0
+    },
+    {
+      "date": "2026-02-09",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 0,
+      "pnl": 0,
+      "win_rate": 0
+    },
+    {
+      "date": "2026-02-10",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 2,
+      "pnl": -18.1683,
+      "win_rate": 50.0
+    },
+    {
+      "date": "2026-02-11",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 3,
+      "pnl": 27.5858,
+      "win_rate": 66.66666666666666
+    },
+    {
+      "date": "2026-02-12",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 2,
+      "pnl": -21.7623,
+      "win_rate": 0.0
+    },
+    {
+      "date": "2026-02-13",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 2,
+      "pnl": 16.1183,
+      "win_rate": 100.0
+    }
+  ],
+  "errors": []
+}

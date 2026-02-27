@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -108,7 +107,6 @@ def _build_deps(runner: _DummyRunner, calls: dict) -> RunControlDeps:
         active_runners={},
         marker_type_enum=None,
         logger=None,
-        reports_dir=Path("."),
         save_remote_checkpoint=None,
         clear_remote_strategy_sessions=_clear_remote,
         configure_session=_configure_session,

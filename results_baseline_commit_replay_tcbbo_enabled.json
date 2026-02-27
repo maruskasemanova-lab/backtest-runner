@@ -1,0 +1,24 @@
+{
+  "run_id": "analyzer-replay-tcbbo-1772096572063",
+  "date": "2026-02-05_to_2026-02-06",
+  "total_bars": 1354,
+  "bars_processed": 1354,
+  "total_trades": 4,
+  "winning_trades": 3,
+  "losing_trades": 1,
+  "win_rate": 75.0,
+  "total_pnl_pct": 0.2753,
+  "total_pnl_dollars": 27.5261,
+  "total_costs": 2.0255,
+  "strategies": [
+    "Pullback",
+    "VolumeProfile"
+  ],
+  "errors": [],
+  "tcbbo_payload": {
+    "tcbbo_gate_enabled": true,
+    "tcbbo_min_net_premium": 0.0,
+    "tcbbo_sweep_boost": 5.0,
+    "tcbbo_lookback_bars": 5
+  }
+}

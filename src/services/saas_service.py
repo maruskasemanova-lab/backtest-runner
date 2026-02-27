@@ -134,6 +134,12 @@ class RunReportsStore(Protocol):
         summary: Dict[str, Any],
     ) -> None: ...
 
+    def get_run_summary(
+        self,
+        *,
+        run_key: str,
+    ) -> Optional[Dict[str, Any]]: ...
+
     def list_run_summaries(
         self,
         *,
@@ -652,6 +658,40 @@ class SupabaseRunReportsStore:
             prefer="resolution=merge-duplicates,return=representation",
         )
 
+    def get_run_summary(
+        self,
+        *,
+        run_key: str,
+    ) -> Optional[Dict[str, Any]]:
+        normalized_run_key = str(run_key or "").strip()
+        if not normalized_run_key:
+            return None
+
+        params: Dict[str, str] = {
+            "select": "run_key,summary,updated_at",
+            "run_key": f"eq.{normalized_run_key}",
+            "limit": "1",
+        }
+        if self._default_user_id:
+            params["user_id"] = f"eq.{self._default_user_id}"
+
+        rows = self._request_json(
+            method="GET",
+            endpoint=self._endpoint,
+            params=params,
+        )
+        if not isinstance(rows, list) or not rows:
+            return None
+        row = rows[0] if isinstance(rows[0], dict) else {}
+        summary_payload = row.get("summary")
+        if not isinstance(summary_payload, dict):
+            summary_payload = {}
+        return {
+            "run_key": str(row.get("run_key") or normalized_run_key),
+            "summary": summary_payload,
+            "updated_at": row.get("updated_at"),
+        }
+
     def list_run_summaries(
         self,
         *,
@@ -1095,6 +1135,33 @@ class SaaSStateStore:
                 (normalized_run_key, serialized, now, now),
             )
             self._conn.commit()
+
+    def get_run_summary(
+        self,
+        *,
+        run_key: str,
+    ) -> Optional[Dict[str, Any]]:
+        normalized_run_key = str(run_key or "").strip()
+        if not normalized_run_key:
+            return None
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute(
+                """
+                SELECT run_key, summary_json, updated_at
+                FROM run_summaries
+                WHERE run_key = ?
+                LIMIT 1
+                """,
+                (normalized_run_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "run_key": str(row["run_key"] or normalized_run_key),
+            "summary": self._decode_json(row["summary_json"]),
+            "updated_at": row["updated_at"],
+        }
 
     def list_run_summaries(
         self,

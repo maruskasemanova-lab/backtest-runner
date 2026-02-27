@@ -30,8 +30,8 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 | `tuning_runner.py` | yes | 359 | `1273b21 2026-02-23` |
 | `aos_walk_forward.py` | yes | 633 | `1273b21 2026-02-23` |
 | `aos_optimizer.py` | yes | 422 | `1273b21 2026-02-23` |
-| `run_strategy_test.py` | yes | 622 | `1273b21 2026-02-23` |
-| `batch_runner.py` | yes | 208 | `1273b21 2026-02-23` |
+| `run_strategy_test.py` | yes | 644 | `1273b21 2026-02-23` |
+| `batch_runner.py` | yes | 214 | `1273b21 2026-02-23` |
 
 ## Change Checks
 
@@ -128,12 +128,12 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 - `class` `TradeResult` (line 19)
 - `class` `BacktestReport` (line 40)
 - `class` `StrategyTester` (line 75)
-- `async_function` `main` (line 587)
+- `async_function` `main` (line 594)
 
 ### `batch_runner.py`
 - `class` `BatchReport` (line 19)
 - `class` `BatchRunner` (line 55)
-- `async_function` `main` (line 185)
+- `async_function` `main` (line 187)
 
 ## Endpoint Summary
 

@@ -1,0 +1,32 @@
+{
+  "run_id": "mu-tcbbo-range-1772098275782",
+  "date": "2026-02-02_to_2026-02-13",
+  "total_bars": 3600,
+  "bars_processed": 3600,
+  "total_trades": 18,
+  "winning_trades": 7,
+  "losing_trades": 11,
+  "win_rate": 38.88888888888889,
+  "total_pnl_pct": -0.6441,
+  "total_pnl_dollars": -64.4126,
+  "total_costs": 10.0003,
+  "strategies": [
+    "EvidenceScalp",
+    "MomentumFlow",
+    "Pullback",
+    "VWAPMagnet",
+    "VolumeProfile"
+  ],
+  "errors": [],
+  "payload": {
+    "date_from": "2026-02-02",
+    "date_to": "2026-02-13",
+    "trade_eval_mode": "intrabar_5s",
+    "l2_only": false,
+    "l2_confirm_enabled": true,
+    "tcbbo_gate_enabled": true,
+    "tcbbo_min_net_premium": 0.0,
+    "tcbbo_sweep_boost": 5.0,
+    "tcbbo_lookback_bars": 5
+  }
+}

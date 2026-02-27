@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
+import gzip
 import json
-import os
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -10,12 +12,69 @@ from fastapi.testclient import TestClient
 from src.routes import system_routes
 
 
+def _fixture_report_updated_at(folder_name: str) -> str | None:
+    token = str(folder_name or "").strip()
+    if len(token) < 15:
+        return None
+    try:
+        parsed = datetime.strptime(token[:15], "%Y%m%d_%H%M%S")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+class _FixtureRunReportsStore:
+    def __init__(self, root):
+        self._root = root
+
+    def list_run_summaries(self, *, limit=300):
+        query_limit = max(1, min(int(limit or 300), 5000))
+        reports_root = self._root / "reports"
+        if not reports_root.exists():
+            return []
+
+        rows = []
+        report_files = sorted(
+            reports_root.glob("*/session_summary.json"),
+            key=lambda path: path.parent.name,
+            reverse=True,
+        )
+        for report_file in report_files[:query_limit]:
+            try:
+                payload = json.loads(report_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            run_id = str(payload.get("run_id") or "").strip()
+            ticker = str(payload.get("ticker") or "").strip()
+            date_label = str(payload.get("date") or "").strip()
+            run_key = (
+                f"{run_id}:{ticker}:{date_label}"
+                if run_id and ticker and date_label
+                else report_file.parent.name
+            )
+            rows.append(
+                {
+                    "run_key": run_key,
+                    "updated_at": _fixture_report_updated_at(report_file.parent.name),
+                    "summary": payload,
+                }
+            )
+        return rows
+
+
 def _build_client(monkeypatch, tmp_path, *, state_setup=None):
     app = FastAPI()
     app.include_router(system_routes.router)
     monkeypatch.setattr(system_routes, "_project_root", lambda: tmp_path)
     if callable(state_setup):
         state_setup(app)
+    if getattr(app.state, "run_reports_store", None) is None:
+        app.state.run_reports_store = _FixtureRunReportsStore(tmp_path)
+        app.state.run_reports_source_mode = "sqlite_run_reports"
+    elif not getattr(app.state, "run_reports_source_mode", None):
+        app.state.run_reports_source_mode = "run_reports_store"
     return TestClient(app)
 
 
@@ -25,138 +84,6 @@ def _write_session_summary(tmp_path, folder_name: str, payload: dict) -> None:
     (report_dir / "session_summary.json").write_text(
         json.dumps(payload), encoding="utf-8"
     )
-
-
-def test_get_diagnostic_report_returns_payload(monkeypatch, tmp_path):
-    report_dir = tmp_path / "reports" / "mu_diagnostic"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    payload = {"phase": 0, "status": "ok", "day_results": [{"date": "2025-11-03"}]}
-    (report_dir / "phase0_diagnostic.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    client = _build_client(monkeypatch, tmp_path)
-    response = client.get("/api/reports/diagnostic/MU")
-
-    assert response.status_code == 200
-    assert response.json() == payload
-
-
-def test_get_diagnostic_report_returns_404_when_missing(monkeypatch, tmp_path):
-    client = _build_client(monkeypatch, tmp_path)
-
-    response = client.get("/api/reports/diagnostic/MU")
-
-    assert response.status_code == 404
-    assert "phase0_diagnostic.json" in response.json()["detail"]
-
-
-def test_get_diagnostic_report_rejects_invalid_ticker(monkeypatch, tmp_path):
-    client = _build_client(monkeypatch, tmp_path)
-
-    response = client.get("/api/reports/diagnostic/MU..")
-
-    assert response.status_code == 400
-    assert "Invalid ticker" in response.json()["detail"]
-
-
-def test_get_diagnostic_report_rejects_invalid_json(monkeypatch, tmp_path):
-    report_dir = tmp_path / "reports" / "mu_diagnostic"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    (report_dir / "phase0_diagnostic.json").write_text(
-        "{invalid json}", encoding="utf-8"
-    )
-
-    client = _build_client(monkeypatch, tmp_path)
-    response = client.get("/api/reports/diagnostic/MU")
-
-    assert response.status_code == 500
-    assert "not valid JSON" in response.json()["detail"]
-
-
-def test_get_diagnostic_report_summary_only(monkeypatch, tmp_path):
-    report_dir = tmp_path / "reports" / "mu_diagnostic"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "phase": 0,
-        "status": "ok",
-        "day_results": [{"date": "2025-11-03"}, {"date": "2025-11-04"}],
-        "details": {"foo": "bar"},
-    }
-    (report_dir / "phase0_diagnostic.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    client = _build_client(monkeypatch, tmp_path)
-    response = client.get("/api/reports/diagnostic/MU?summary_only=true")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["source"] == "diagnostic_summary"
-    assert body["ticker"] == "MU"
-    assert body["profile"] == "diagnostic"
-    assert body["phase"] == 0
-    assert body["day_results_count"] == 2
-    assert "day_results" in body["keys"]
-
-
-def test_get_diagnostic_report_uses_cache_when_file_unchanged(monkeypatch, tmp_path):
-    class _StubStore:
-        def __init__(self):
-            self.cache = {}
-
-        def diagnostic_cache_key(self, *, ticker, profile, phase):
-            return f"{ticker}:{profile}:{phase}"
-
-        def get_diagnostic_payload_cache(
-            self, *, cache_key, source_path, source_mtime_ns
-        ):
-            item = self.cache.get((cache_key, source_path, source_mtime_ns))
-            return item
-
-        def upsert_diagnostic_payload_cache(
-            self,
-            *,
-            cache_key,
-            ticker,
-            profile,
-            phase,
-            source_path,
-            source_mtime_ns,
-            payload,
-        ):
-            self.cache[(cache_key, source_path, source_mtime_ns)] = payload
-            return {"cache_key": cache_key}
-
-    report_dir = tmp_path / "reports" / "mu_diagnostic"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    report_file = report_dir / "phase0_diagnostic.json"
-    payload = {"phase": 0, "status": "ok", "day_results": [{"date": "2025-11-03"}]}
-    report_file.write_text(json.dumps(payload), encoding="utf-8")
-
-    stub_store = _StubStore()
-    client = _build_client(
-        monkeypatch,
-        tmp_path,
-        state_setup=lambda app: setattr(
-            app.state, "v2_services", SimpleNamespace(store=stub_store)
-        ),
-    )
-
-    first = client.get("/api/reports/diagnostic/MU")
-    assert first.status_code == 200
-    assert first.json() == payload
-
-    original_stat = report_file.stat()
-    report_file.write_text("{invalid json", encoding="utf-8")
-    os.utime(report_file, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
-
-    second = client.get("/api/reports/diagnostic/MU")
-    assert second.status_code == 200
-    assert second.json() == payload
-
-    bypass = client.get("/api/reports/diagnostic/MU?refresh_cache=true")
-    assert bypass.status_code == 500
 
 
 def test_get_saved_run_history_aggregates_days_and_reasons(monkeypatch, tmp_path):
@@ -244,8 +171,8 @@ def test_get_saved_run_history_aggregates_days_and_reasons(monkeypatch, tmp_path
 
     payload = response.json()
     assert payload["source"] == "saved_run_history"
-    assert payload["source_mode"] == "filesystem_reports"
-    assert payload["source_path_hint"] == "reports/*/session_summary.json"
+    assert payload["source_mode"] == "sqlite_run_reports"
+    assert payload["source_path_hint"] == "run_reports_store"
     assert payload["ticker"] == "MU"
     assert payload["split"]["start"] == "2026-02-03"
     assert payload["split"]["end"] == "2026-02-04"
@@ -261,6 +188,7 @@ def test_get_saved_run_history_aggregates_days_and_reasons(monkeypatch, tmp_path
     assert day_a["trade_details"][0]["entry_reason"] == "L2 breakout confirmation"
     assert day_a["trade_details"][0]["exit_reason"] == "take_profit"
     assert day_a["runs"][0]["run_total_trades"] == 2
+    assert day_a["runs"][0]["run_key"] == "backtest-a:MU:2026-02-03_to_2026-02-04"
     assert day_a["runs"][0]["run_total_pnl_pct"] == 0.8
     assert day_a["runs"][0]["run_total_pnl_dollars"] == 8.0
     assert day_a["runs"][0]["run_processed_bars"] == 200
@@ -289,6 +217,60 @@ def test_get_saved_run_history_aggregates_days_and_reasons(monkeypatch, tmp_path
         option["profile_id"] == "c4bb2197e651"
         for option in payload["filter_options"]["unified_profiles"]
     )
+
+
+def test_get_saved_run_history_includes_run_request_config_snapshot(
+    monkeypatch, tmp_path
+):
+    _write_session_summary(
+        tmp_path,
+        "20260214_100000_MU_config-snapshot",
+        {
+            "run_id": "config-snapshot",
+            "ticker": "MU",
+            "date": "2026-02-10",
+            "session_summary": {
+                "total_trades": 1,
+                "trades": [
+                    {
+                        "trade_id": 31,
+                        "strategy": "AdaptiveCore",
+                        "side": "long",
+                        "entry_time": "2026-02-10T14:30:00+00:00",
+                        "exit_time": "2026-02-10T14:35:00+00:00",
+                        "pnl_pct": 0.2,
+                        "pnl_dollars": 2.0,
+                        "bars_held": 6,
+                    }
+                ],
+            },
+            "markers": [],
+            "run_request_config": {
+                "run_id": "config-snapshot",
+                "ticker": "MU",
+                "date": "2026-02-10",
+                "trade_eval_mode": "intrabar_5s",
+                "l2_confirm_enabled": True,
+                "strategy_time_windows": {"momentum_flow": {"enabled": False}},
+            },
+        },
+    )
+
+    client = _build_client(monkeypatch, tmp_path)
+    response = client.get("/api/reports/history/MU")
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["date"] for item in payload["day_results"]] == ["2026-02-10"]
+
+    day_row = payload["day_results"][0]
+    assert day_row["run_request_config"]["trade_eval_mode"] == "intrabar_5s"
+    assert day_row["run_request_config"]["l2_confirm_enabled"] is True
+
+    run_row = day_row["runs"][0]
+    assert run_row["run_request_config"]["trade_eval_mode"] == "intrabar_5s"
+    assert run_row["run_request_config"]["strategy_time_windows"] == {
+        "momentum_flow": {"enabled": False}
+    }
 
 
 def test_get_saved_run_history_filters_by_profile_exact_only(monkeypatch, tmp_path):
@@ -824,6 +806,10 @@ def test_get_saved_run_history_includes_active_runner_summary(monkeypatch, tmp_p
     assert payload["matched_reports"] == 1
     assert [item["date"] for item in payload["day_results"]] == ["2026-02-13"]
     assert payload["day_results"][0]["runs"][0]["run_id"] == "analyzer-live"
+    assert (
+        payload["day_results"][0]["runs"][0]["run_key"]
+        == "analyzer-live:MU:2026-02-13_to_2026-02-13"
+    )
     assert payload["filter_options"]["run_ids"][0]["run_id"] == "analyzer-live"
 
 
@@ -891,3 +877,114 @@ def test_get_saved_run_history_rejects_invalid_ticker(monkeypatch, tmp_path):
     response = client.get("/api/reports/history/MU..")
     assert response.status_code == 400
     assert "Invalid ticker" in response.json()["detail"]
+
+
+def _build_playback_snapshot_payload(*, run_key: str, bars: list[dict], markers: list[dict]) -> dict:
+    raw_payload = {
+        "schema_version": 1,
+        "run_key": run_key,
+        "created_at": "2026-02-26T00:00:00Z",
+        "bars": bars,
+        "markers": markers,
+    }
+    encoded = json.dumps(raw_payload, separators=(",", ":")).encode("utf-8")
+    compressed = gzip.compress(encoded, compresslevel=6)
+    return {
+        "schema_version": 1,
+        "encoding": "gzip+base64",
+        "bars_count": len(bars),
+        "markers_count": len(markers),
+        "payload_b64": base64.b64encode(compressed).decode("ascii"),
+        "uncompressed_bytes": len(encoded),
+        "compressed_bytes": len(compressed),
+        "skip_reason": None,
+    }
+
+
+def test_get_run_playback_snapshot_from_store(monkeypatch, tmp_path):
+    run_key = "snapshot-run:MU:2026-02-13"
+    bars = [
+        {
+            "timestamp": "2026-02-13T14:30:00+00:00",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.5,
+            "close": 100.5,
+            "volume": 1200.0,
+            "bar_index": 0,
+            "time": 1770993000,
+        },
+        {
+            "timestamp": "2026-02-13T14:31:00+00:00",
+            "open": 100.5,
+            "high": 101.2,
+            "low": 100.2,
+            "close": 101.0,
+            "volume": 900.0,
+            "bar_index": 1,
+            "time": 1770993060,
+        },
+    ]
+    markers = [
+        {
+            "id": "m-1",
+            "marker_type": "signal_generated",
+            "timestamp": "2026-02-13T14:30:00+00:00",
+            "strategy": "AdaptiveCore",
+        }
+    ]
+    _write_session_summary(
+        tmp_path,
+        "20260214_100000_MU_snapshot-run",
+        {
+            "run_id": "snapshot-run",
+            "ticker": "MU",
+            "date": "2026-02-13",
+            "phase": "COMPLETED",
+            "processed_bars": 2,
+            "total_bars": 2,
+            "session_summary": {"total_trades": 1, "trades": []},
+            "markers": markers,
+            "playback_snapshot": _build_playback_snapshot_payload(
+                run_key=run_key,
+                bars=bars,
+                markers=markers,
+            ),
+        },
+    )
+
+    client = _build_client(monkeypatch, tmp_path)
+    response = client.get(f"/api/reports/run-snapshot?run_key={run_key}")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["run_key"] == run_key
+    assert payload["source"] == "run_reports_store"
+    assert payload["state"]["run_id"] == "snapshot-run"
+    assert payload["state"]["ticker"] == "MU"
+    assert payload["state"]["is_running"] is False
+    assert payload["state"]["total_bars"] == 2
+    assert len(payload["bars"]) == 2
+    assert len(payload["markers"]) == 1
+    assert payload["summary"]["playback_snapshot"]["encoding"] == "gzip+base64"
+    assert "payload_b64" not in payload["summary"]["playback_snapshot"]
+
+
+def test_get_run_playback_snapshot_without_payload_returns_404(monkeypatch, tmp_path):
+    run_key = "no-snapshot:MU:2026-02-13"
+    _write_session_summary(
+        tmp_path,
+        "20260214_100000_MU_no-snapshot",
+        {
+            "run_id": "no-snapshot",
+            "ticker": "MU",
+            "date": "2026-02-13",
+            "session_summary": {"total_trades": 0, "trades": []},
+            "markers": [],
+        },
+    )
+
+    client = _build_client(monkeypatch, tmp_path)
+    response = client.get(f"/api/reports/run-snapshot?run_key={run_key}")
+    assert response.status_code == 404
+    assert "Playback snapshot is not available" in response.json()["detail"]

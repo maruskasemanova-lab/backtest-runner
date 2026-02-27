@@ -1,0 +1,191 @@
+{
+  "meta": {
+    "ticker": "MU",
+    "dates": [
+      "2026-02-02",
+      "2026-02-03",
+      "2026-02-04",
+      "2026-02-05",
+      "2026-02-06",
+      "2026-02-09",
+      "2026-02-10",
+      "2026-02-11",
+      "2026-02-12",
+      "2026-02-13"
+    ],
+    "replay_profile": "cluster7-like (2026-02-25 19:55:41Z..20:00:20Z batch config)",
+    "start_overrides": {
+      "trade_eval_mode": "intrabar_1s",
+      "l2_confirm_enabled": true,
+      "tcbbo_gate_enabled": false,
+      "tcbbo_min_net_premium": 0.0,
+      "tcbbo_sweep_boost": 5.0,
+      "tcbbo_lookback_bars": 5,
+      "apply_aos_optimizations_on_start": true
+    },
+    "api_url": "http://localhost:8002",
+    "strategy_api_url": "http://localhost:8001",
+    "duration_seconds_total": 255.96
+  },
+  "expected_cluster7_sum_pnl": 60.6725,
+  "actual_replay_sum_pnl": 55.431,
+  "delta_sum_pnl": -5.2415,
+  "results": [
+    {
+      "date": "2026-02-02",
+      "run_id": "replay-batch7-like-2026-02-02-1772099593",
+      "bars_processed": 360,
+      "total_bars": 360,
+      "total_pnl_dollars": 3.3972,
+      "total_pnl_pct": 0.034,
+      "total_trades": 1,
+      "win_rate": 100.0,
+      "errors": [],
+      "duration_seconds": 29.02,
+      "expected_db_cluster7_pnl": 3.3972,
+      "delta_vs_expected_pnl": 0.0
+    },
+    {
+      "date": "2026-02-03",
+      "run_id": "replay-batch7-like-2026-02-03-1772099622",
+      "bars_processed": 360,
+      "total_bars": 360,
+      "total_pnl_dollars": -24.7396,
+      "total_pnl_pct": -0.2474,
+      "total_trades": 1,
+      "win_rate": 0.0,
+      "errors": [],
+      "duration_seconds": 31.04,
+      "expected_db_cluster7_pnl": -24.7396,
+      "delta_vs_expected_pnl": 0.0
+    },
+    {
+      "date": "2026-02-04",
+      "run_id": "replay-batch7-like-2026-02-04-1772099653",
+      "bars_processed": 360,
+      "total_bars": 360,
+      "total_pnl_dollars": 68.675,
+      "total_pnl_pct": 0.6867,
+      "total_trades": 2,
+      "win_rate": 100.0,
+      "errors": [],
+      "duration_seconds": 34.03,
+      "expected_db_cluster7_pnl": 68.675,
+      "delta_vs_expected_pnl": 0.0
+    },
+    {
+      "date": "2026-02-05",
+      "run_id": "replay-batch7-like-2026-02-05-1772099687",
+      "bars_processed": 360,
+      "total_bars": 360,
+      "total_pnl_dollars": 0.3254,
+      "total_pnl_pct": 0.0033,
+      "total_trades": 2,
+      "win_rate": 50.0,
+      "errors": [],
+      "duration_seconds": 27.68,
+      "expected_db_cluster7_pnl": 17.9117,
+      "delta_vs_expected_pnl": -17.5863
+    },
+    {
+      "date": "2026-02-06",
+      "run_id": "replay-batch7-like-2026-02-06-1772099715",
+      "bars_processed": 360,
+      "total_bars": 360,
+      "total_pnl_dollars": -8.3453,
+      "total_pnl_pct": -0.0835,
+      "total_trades": 1,
+      "win_rate": 0.0,
+      "errors": [],
+      "duration_seconds": 29.83,
+      "expected_db_cluster7_pnl": -8.3453,
+      "delta_vs_expected_pnl": 0.0
+    },
+    {
+      "date": "2026-02-09",
+      "run_id": "replay-batch7-like-2026-02-09-1772099745",
+      "bars_processed": 323,
+      "total_bars": 360,
+      "total_pnl_dollars": 0.0,
+      "total_pnl_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0,
+      "errors": [
+        "State poll failed: {\"detail\":\"Run not found: replay-batch7-like-2026-02-09-1772099745:MU:2026-02-09\"}",
+        "Summary HTTP 404: {\"detail\":\"Run not found: replay-batch7-like-2026-02-09-1772099745:MU:2026-02-09\"}",
+        "Markers HTTP 404: {\"detail\":\"Run not found: replay-batch7-like-2026-02-09-1772099745:MU:2026-02-09\"}"
+      ],
+      "duration_seconds": 28.72,
+      "expected_db_cluster7_pnl": null,
+      "delta_vs_expected_pnl": null
+    },
+    {
+      "date": "2026-02-10",
+      "run_id": "replay-batch7-like-2026-02-10-1772099773",
+      "bars_processed": 309,
+      "total_bars": 360,
+      "total_pnl_dollars": 0.0,
+      "total_pnl_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0,
+      "errors": [
+        "State poll failed: {\"detail\":\"Run not found: replay-batch7-like-2026-02-10-1772099773:MU:2026-02-10\"}",
+        "Summary HTTP 404: {\"detail\":\"Run not found: replay-batch7-like-2026-02-10-1772099773:MU:2026-02-10\"}",
+        "Markers HTTP 404: {\"detail\":\"Run not found: replay-batch7-like-2026-02-10-1772099773:MU:2026-02-10\"}"
+      ],
+      "duration_seconds": 22.93,
+      "expected_db_cluster7_pnl": -18.1683,
+      "delta_vs_expected_pnl": 18.1683
+    },
+    {
+      "date": "2026-02-11",
+      "run_id": "replay-batch7-like-2026-02-11-1772099796",
+      "bars_processed": 82,
+      "total_bars": 360,
+      "total_pnl_dollars": 0.0,
+      "total_pnl_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0,
+      "errors": [
+        "State poll failed: {\"detail\":\"Run not found: replay-batch7-like-2026-02-11-1772099796:MU:2026-02-11\"}",
+        "Summary HTTP 404: {\"detail\":\"Run not found: replay-batch7-like-2026-02-11-1772099796:MU:2026-02-11\"}",
+        "Markers HTTP 404: {\"detail\":\"Run not found: replay-batch7-like-2026-02-11-1772099796:MU:2026-02-11\"}"
+      ],
+      "duration_seconds": 16.46,
+      "expected_db_cluster7_pnl": 27.5858,
+      "delta_vs_expected_pnl": -27.5858
+    },
+    {
+      "date": "2026-02-12",
+      "run_id": "replay-batch7-like-2026-02-12-1772099813",
+      "bars_processed": 40,
+      "total_bars": 360,
+      "total_pnl_dollars": 0.0,
+      "total_pnl_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0,
+      "errors": [
+        "State poll failed: {\"detail\":\"Run not found: replay-batch7-like-2026-02-12-1772099813:MU:2026-02-12\"}",
+        "Summary HTTP 404: {\"detail\":\"Run not found: replay-batch7-like-2026-02-12-1772099813:MU:2026-02-12\"}",
+        "Markers HTTP 404: {\"detail\":\"Run not found: replay-batch7-like-2026-02-12-1772099813:MU:2026-02-12\"}"
+      ],
+      "duration_seconds": 8.56,
+      "expected_db_cluster7_pnl": -21.7623,
+      "delta_vs_expected_pnl": 21.7623
+    },
+    {
+      "date": "2026-02-13",
+      "run_id": "replay-batch7-like-2026-02-13-1772099821",
+      "bars_processed": 360,
+      "total_bars": 360,
+      "total_pnl_dollars": 16.1183,
+      "total_pnl_pct": 0.1612,
+      "total_trades": 2,
+      "win_rate": 100.0,
+      "errors": [],
+      "duration_seconds": 27.68,
+      "expected_db_cluster7_pnl": 16.1183,
+      "delta_vs_expected_pnl": 0.0
+    }
+  ]
+}

@@ -57,6 +57,34 @@ class LoadPhaseResult:
     progressive_plan: Optional[Dict[str, Any]]
 
 
+def _is_options_flow_alpha_enabled(aos_applied: Dict[str, Any]) -> bool:
+    if not isinstance(aos_applied, dict):
+        return False
+    positioning = aos_applied.get("positioning")
+    if isinstance(positioning, dict):
+        return bool(positioning.get("options_flow_alpha_enabled", False))
+    return bool(aos_applied.get("options_flow_alpha_enabled", False))
+
+
+def _resolve_tcbbo_enrichment_reasons(
+    *,
+    execution_cfg: Dict[str, Any],
+    aos_applied: Dict[str, Any],
+) -> list[str]:
+    reasons: list[str] = []
+    print(f"DEBUG: execution_cfg effective_tcbbo_gate_enabled={execution_cfg.get('effective_tcbbo_gate_enabled')}")
+    if bool(execution_cfg.get("effective_tcbbo_gate_enabled", False)):
+        reasons.append("tcbbo_gate")
+    
+    alpha_enabled = _is_options_flow_alpha_enabled(aos_applied)
+    print(f"DEBUG: is_options_flow_alpha_enabled={alpha_enabled}")
+    if alpha_enabled:
+        reasons.append("options_flow_alpha")
+    
+    print(f"DEBUG: tcbbo_enrichment_reasons={reasons}")
+    return reasons
+
+
 async def run_start_load_phase(
     *,
     inputs: LoadPhaseInputs,
@@ -166,10 +194,11 @@ async def run_start_load_phase(
 
     # TCBBO options flow enrichment (optional, non-blocking)
     tcbbo_stats: Dict[str, Any] = {}
-    tcbbo_gate_enabled = bool(
-        inputs.execution_cfg.get("effective_tcbbo_gate_enabled", False)
+    tcbbo_enrichment_reasons = _resolve_tcbbo_enrichment_reasons(
+        execution_cfg=inputs.execution_cfg,
+        aos_applied=inputs.aos_applied,
     )
-    if tcbbo_gate_enabled:
+    if tcbbo_enrichment_reasons:
         from src.services.start_run_data_service import enrich_bars_with_tcbbo
 
         phase_started = perf_counter()
@@ -181,6 +210,12 @@ async def run_start_load_phase(
             logger=deps.logger,
         )
         record_phase_ms("enrich_bars_with_tcbbo", phase_started)
+        if not isinstance(tcbbo_stats, dict):
+            tcbbo_stats = {}
+        tcbbo_stats.setdefault("tcbbo_enrichment_required", True)
+        tcbbo_stats.setdefault(
+            "tcbbo_enrichment_reasons", list(tcbbo_enrichment_reasons)
+        )
     if tcbbo_stats:
         l2_stats.update(tcbbo_stats)
 

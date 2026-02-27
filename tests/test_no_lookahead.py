@@ -12,6 +12,9 @@ sys.modules.pop("src", None)
 from src.day_trading_manager import DayTradingManager  # noqa: E402
 from src.strategies.base_strategy import Regime, Signal, SignalType  # noqa: E402
 
+sys.path = [entry for entry in sys.path if entry != str(STRATEGY_ROOT)]
+sys.modules.pop("src", None)
+
 
 class NoLookaheadInvariantTests(unittest.TestCase):
     def test_signal_bar_index_is_strictly_before_entry_bar_index(self) -> None:

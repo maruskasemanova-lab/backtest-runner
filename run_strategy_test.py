@@ -177,6 +177,13 @@ class StrategyTester:
                 }
                 if start_overrides:
                     start_payload.update(start_overrides)
+                # Default to order-flow-aware runs (L2 + TCBBO). Missing coverage is
+                # surfaced by backend diagnostics and should not hard-fail the run.
+                start_payload.setdefault("l2_confirm_enabled", True)
+                start_payload.setdefault("tcbbo_gate_enabled", True)
+                start_payload.setdefault("tcbbo_min_net_premium", 0.0)
+                start_payload.setdefault("tcbbo_sweep_boost", 5.0)
+                start_payload.setdefault("tcbbo_lookback_bars", 5)
 
                 async with session.post(
                     f"{self.api_url}/api/run/start", json=start_payload
@@ -603,13 +610,28 @@ async def main():
     parser.add_argument(
         "--quiet", "-q", action="store_true", help="Quiet mode (less output)"
     )
+    parser.add_argument(
+        "--override", help="JSON string of start overrides (e.g., '{\"options_flow_alpha_enabled\": true}')"
+    )
 
     args = parser.parse_args()
 
     tester = StrategyTester(api_url=args.api_url, strategy_api_url=args.strategy_url)
 
+    overrides = {}
+    if args.override:
+        try:
+            overrides = json.loads(args.override)
+        except json.JSONDecodeError as e:
+            print(f"❌ Error parsing --override JSON: {e}")
+            return
+
     report = await tester.run_test(
-        ticker=args.ticker, date=args.date, run_id=args.run_id, verbose=not args.quiet
+        ticker=args.ticker,
+        date=args.date,
+        run_id=args.run_id,
+        verbose=not args.quiet,
+        start_overrides=overrides,
     )
 
     tester.print_report(report)

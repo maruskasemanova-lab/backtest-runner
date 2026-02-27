@@ -21,9 +21,9 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 1249 | `97fd90d 2026-02-25` |
-| `../market_regime_detection/src/api_models.py` | yes | 255 | `562a066 2026-02-25` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 1382 | `97fd90d 2026-02-25` |
+| `../market_regime_detection/api_server.py` | yes | 1271 | `97fd90d 2026-02-25` |
+| `../market_regime_detection/src/api_models.py` | yes | 266 | `562a066 2026-02-25` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 1382 | `1f7a1f5 2026-02-25` |
 | `../market_regime_detection/src/intraday_levels.py` | yes | 814 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 41 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/trading_orchestrator.py` | yes | 473 | `562a066 2026-02-25` |
@@ -34,8 +34,8 @@ Own regime detection, signal generation, position management, learning component
 | `../market_regime_detection/src/adaptive_regime.py` | yes | 27 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/position_sizing.py` | yes | 145 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/evidence_decision.py` | yes | 530 | `018eb2b 2026-02-24` |
-| `../market_regime_detection/src/strategy_factory.py` | yes | 42 | `bc7ccbe 2026-02-24` |
-| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 561 | `a0fc856 2026-02-23` |
+| `../market_regime_detection/src/strategy_factory.py` | yes | 42 | `1f7a1f5 2026-02-25` |
+| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 570 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 176 | `97fd90d 2026-02-25` |
 | `../market_regime_detection/src/strategies/absorption_reversal.py` | yes | 177 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/strategies/exhaustion_fade.py` | yes | 178 | `a0fc856 2026-02-23` |
@@ -90,8 +90,8 @@ Own regime detection, signal generation, position management, learning component
 - `class` `StrategyUpdate` (line 16)
 - `class` `TrailingStopConfig` (line 21)
 - `class` `BarInput` (line 28)
-- `class` `SessionQuery` (line 79)
-- `class` `TradingConfig` (line 87)
+- `class` `SessionQuery` (line 90)
+- `class` `TradingConfig` (line 98)
 
 ### `../market_regime_detection/src/day_trading_manager.py`
 - `class` `DayTradingManager` (line 90)

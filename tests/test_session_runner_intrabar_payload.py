@@ -207,7 +207,7 @@ def test_process_bar_attaches_intrabar_quotes_before_any_position(monkeypatch) -
             captured["json"] = json
             return _FakeResponse()
 
-    monkeypatch.setattr(session_runner_module.aiohttp, "ClientSession", _FakeSession)
+    monkeypatch.setattr(session_runner_module.httpx, "AsyncClient", _FakeSession)
 
     bar = {
         "timestamp": datetime(2026, 2, 6, 15, 0, tzinfo=timezone.utc),

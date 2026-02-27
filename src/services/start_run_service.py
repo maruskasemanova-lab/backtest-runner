@@ -8,7 +8,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from time import perf_counter
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from fastapi import HTTPException
 
@@ -118,6 +118,18 @@ PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS = _parse_non_negative_int_env(
 _PREWARM_INFLIGHT: Dict[str, concurrent.futures.Future] = {}
 _PREWARM_INFLIGHT_LOCK = threading.Lock()
 _PROFILE_PLACEHOLDER_TOKENS = {"none", "null", "n/a", "na", "undefined", "-"}
+
+
+def _strategy_reset_success(value: Any) -> bool:
+    if isinstance(value, dict):
+        return bool(value.get("success"))
+    return bool(value)
+
+
+def _strategy_reset_detail(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    return {"success": bool(value), "legacy_bool_result": bool(value)}
 
 
 def _acquire_prewarm_inflight(key: str) -> tuple[concurrent.futures.Future, bool]:
@@ -263,6 +275,100 @@ def _extract_effective_profile_metadata(
     }
 
 
+def _summarize_days_preview(days: Any, limit: int = 3) -> str:
+    if not isinstance(days, list):
+        return ""
+    normalized = [str(day).strip() for day in days if str(day or "").strip()]
+    if not normalized:
+        return ""
+    if len(normalized) <= limit:
+        return ", ".join(normalized)
+    return f"{', '.join(normalized[:limit])}, ..."
+
+
+def _build_data_availability_warnings(
+    *,
+    execution_config: Dict[str, Any],
+    l2_applied: Dict[str, Any],
+) -> List[str]:
+    warnings: List[str] = []
+
+    l2_required = bool(
+        l2_applied.get("effective_l2_confirm_enabled", False)
+        or l2_applied.get("l2_requested", False)
+    )
+    missing_l2_days = (
+        list(l2_applied.get("missing_l2_days", []))
+        if isinstance(l2_applied.get("missing_l2_days"), list)
+        else []
+    )
+    missing_l2_days_count = int(
+        l2_applied.get("missing_l2_days_count", len(missing_l2_days)) or 0
+    )
+    has_l2 = bool(l2_applied.get("has_l2", False))
+    if l2_required and (missing_l2_days_count > 0 or not has_l2):
+        if missing_l2_days_count > 0:
+            preview = _summarize_days_preview(missing_l2_days)
+            suffix = f" ({preview})" if preview else ""
+            warnings.append(
+                f"[Data] L2 coverage missing for {missing_l2_days_count} day(s){suffix}."
+            )
+        elif not has_l2:
+            warnings.append("[Data] L2 requested, but no L2 data was loaded for this run.")
+
+    tcbbo_enabled = bool(
+        l2_applied.get("tcbbo_gate_enabled", execution_config.get("tcbbo_gate_enabled"))
+    )
+    tcbbo_required_by = (
+        list(l2_applied.get("tcbbo_feature_required_by", []))
+        if isinstance(l2_applied.get("tcbbo_feature_required_by"), list)
+        else []
+    )
+    tcbbo_feature_required = bool(
+        l2_applied.get("tcbbo_feature_required", tcbbo_enabled)
+    )
+    tcbbo_available = bool(l2_applied.get("tcbbo_available", False))
+    if tcbbo_feature_required and not tcbbo_available:
+        reason = str(l2_applied.get("tcbbo_missing_reason") or "").strip()
+        reason_map = {
+            "tcbbo_file_not_found": "TCBBO parquet file not found",
+            "tcbbo_build_failed": "TCBBO parse/build failed",
+            "tcbbo_no_feature_rows": "TCBBO file loaded but produced no minute features",
+            "tcbbo_no_bar_overlap": "TCBBO data does not overlap loaded bars",
+        }
+        reason_text = reason_map.get(reason, "TCBBO data unavailable")
+        files_found = int(l2_applied.get("tcbbo_files_found", 0) or 0)
+        roots = (
+            list(l2_applied.get("tcbbo_search_roots", []))
+            if isinstance(l2_applied.get("tcbbo_search_roots"), list)
+            else []
+        )
+        roots_preview = ", ".join(str(r) for r in roots[:2]) if roots else ""
+        extra = []
+        if files_found:
+            extra.append(f"files_found={files_found}")
+        if roots_preview:
+            extra.append(f"search_roots={roots_preview}")
+        extra_suffix = f" ({'; '.join(extra)})" if extra else ""
+        message = f"[Data] {reason_text}.{extra_suffix}"
+        if "options_flow_alpha" in tcbbo_required_by and not tcbbo_enabled:
+            message += " OptionsFlowAlpha is enabled, but it will run without TCBBO flow inputs."
+        elif "options_flow_alpha" in tcbbo_required_by and tcbbo_enabled:
+            message += " OptionsFlowAlpha and TCBBO gate are both enabled."
+        warnings.append(message)
+
+    # De-duplicate while preserving order.
+    deduped: List[str] = []
+    seen = set()
+    for item in warnings:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        deduped.append(text)
+    return deduped
+
+
 async def _force_enable_all_remote_strategies(
     *,
     strategy_api_url: str,
@@ -321,6 +427,26 @@ def _build_report_metadata(
         "strategy_combo_profile_id": profile_meta.get("strategy_combo_profile_id"),
         "strategy_combo_profile_name": profile_meta.get("strategy_combo_profile_name"),
     }
+
+
+def _build_run_request_config_snapshot(request: StartRunRequest) -> Dict[str, Any]:
+    """
+    Capture the full run/start request payload for diagnostics replay visibility.
+
+    The snapshot is JSON-normalized so it can be persisted inside run summaries
+    and rendered safely in frontend read-only forms.
+    """
+    payload: Dict[str, Any]
+    try:
+        payload = request.dict()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return {}
+    try:
+        return json.loads(json.dumps(payload, default=str))
+    except Exception:
+        return payload
 
 
 def _canonical_trading_hours(raw_hours: Any) -> tuple[int, ...]:
@@ -923,12 +1049,30 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         dict(bootstrap.aos_applied) if isinstance(bootstrap.aos_applied, dict) else {}
     )
     runner._execution_config = dict(execution_config_payload)
+    runner._l2_applied = dict(l2_applied_payload)
+    runner._strategy_state_reset = _strategy_reset_success(bootstrap.orchestrator_reset)
+    runner._strategy_state_reset_detail = _strategy_reset_detail(
+        bootstrap.orchestrator_reset
+    )
+    runner._orchestrator_reset_scope = bootstrap.effective_reset_scope
+    runner._checkpoint_loaded = (
+        dict(bootstrap.checkpoint_loaded)
+        if isinstance(bootstrap.checkpoint_loaded, dict)
+        else bootstrap.checkpoint_loaded
+    )
+    runner._data_selection_warnings = _build_data_availability_warnings(
+        execution_config=runner._execution_config,
+        l2_applied=runner._l2_applied,
+    )
+    if runner._data_selection_warnings:
+        runner.selection_warnings = list(runner._data_selection_warnings)
     runner._report_metadata = _build_report_metadata(
         run_key=identity.run_key,
         run_date_label=identity.run_date_label,
         aos_applied=runner._aos_applied,
         execution_config=runner._execution_config,
     )
+    runner._run_request_config = _build_run_request_config_snapshot(request)
 
     deps.logger.info(f"Started run {identity.run_key} with {len(bars)} bars")
 
@@ -957,7 +1101,8 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
             "complete": bool(getattr(runner, "_progressive_loading_complete", True)),
             "last_error": getattr(runner, "_progressive_loading_last_error", None),
         },
-        "strategy_state_reset": bootstrap.orchestrator_reset,
+        "strategy_state_reset": _strategy_reset_success(bootstrap.orchestrator_reset),
+        "strategy_state_reset_detail": _strategy_reset_detail(bootstrap.orchestrator_reset),
         "orchestrator_reset_scope": bootstrap.effective_reset_scope,
         "checkpoint_loaded": bootstrap.checkpoint_loaded,
         "strategy_overrides_applied": bootstrap.strategy_overrides_applied,

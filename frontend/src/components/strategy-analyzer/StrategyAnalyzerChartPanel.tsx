@@ -67,11 +67,18 @@ export default function StrategyAnalyzerChartPanel({
   focusSelectedRangeOffset,
   moveSelectedRangeByStep,
 }: Props) {
+  const fallbackBars = (Array.isArray(chartBars) ? chartBars : []).filter(
+    (bar) => Number.isFinite(Number(bar?.time))
+  ) as StrategyAnalyzerPreviewBar[];
+  const selectionBars = bars.length > 0 ? bars : fallbackBars;
+  const hasRenderableBars = selectionBars.length > 0;
+  const renderBars = chartBars.length > 0 ? chartBars : selectionBars;
+
   return (
     <div className="card chart-container" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div className="card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span className="card-title">
-          {bars.length > 0 ? `${ticker} - ${dateFrom} \u2192 ${dateTo}` : "Strategy Analyzer"}
+          {hasRenderableBars ? `${ticker} - ${dateFrom} \u2192 ${dateTo}` : "Strategy Analyzer"}
         </span>
         <div className="chart-toolbar" style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
           {isAnalyzerAttachedRun && analyzerDisplayPhase ? (
@@ -104,11 +111,11 @@ export default function StrategyAnalyzerChartPanel({
       </div>
 
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
-        {bars.length > 0 ? (
+        {hasRenderableBars ? (
           <>
             <CandlestickChart
               ref={chartRef}
-              bars={chartBars}
+              bars={renderBars}
               markers={analyzerChartMarkers}
               icebergs={[]}
               onMarkerClick={onChartMarkerClick}
@@ -120,7 +127,7 @@ export default function StrategyAnalyzerChartPanel({
             <ChartRangeSelector
               enabled={rangeSelectMode}
               chartRef={chartRef}
-              bars={bars}
+              bars={selectionBars}
               onRangeSelected={onRangeSelected}
               onSelectionClear={onSelectionClear}
               selectedFrom={selectedRangeFrom}

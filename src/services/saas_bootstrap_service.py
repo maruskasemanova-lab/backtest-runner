@@ -214,14 +214,7 @@ def resolve_run_reports_store(
 ) -> tuple[Optional[Any], str]:
     if supabase_store is not None:
         return supabase_store, "supabase_run_reports"
-
-    local_enabled = parse_bool_value(
-        os.getenv("BACKTEST_LOCAL_RUN_REPORTS_ENABLED"),
-        True,
-    )
-    if local_enabled:
-        return state_store, "sqlite_run_reports"
-    return None, "filesystem_reports"
+    return state_store, "sqlite_run_reports"
 
 
 def bootstrap_saas_runtime(*, logger: Any, project_root: Path) -> SaaSBootstrapResult:

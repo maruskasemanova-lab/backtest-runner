@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from pathlib import Path
 from types import SimpleNamespace
 
 from src.services.run_control_service import RunControlDeps, delete_run
@@ -77,7 +76,6 @@ def test_delete_run_persists_summary_to_run_reports_store():
         active_runners=active_runners,
         marker_type_enum=None,
         logger=SimpleNamespace(error=lambda *args, **kwargs: None),
-        reports_dir=Path("."),
         save_remote_checkpoint=_noop,
         clear_remote_strategy_sessions=_clear_remote,
         configure_session=_noop,

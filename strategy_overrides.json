@@ -227,7 +227,9 @@
       "enabled": false
     },
     "pullback": {
-      "enabled": false
+      "enabled": false,
+      "liquidity_sweep_signal_enabled": true,
+      "liquidity_sweep_signal_priority": 100
     },
     "rotation": {
       "enabled": false
@@ -240,6 +242,9 @@
     },
     "gap_liquidity": {
       "enabled": false
+    },
+    "evidence_scalp": {
+      "liquidity_sweep_signal_enabled": false
     }
   },
   "MSFT": {

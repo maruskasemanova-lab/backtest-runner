@@ -1,0 +1,96 @@
+{
+  "ticker": "MU",
+  "start_date": "2026-02-02",
+  "end_date": "2026-02-13",
+  "run_timestamp": "2026-02-26T17:34:22.788396",
+  "total_days": 10,
+  "param_regime_detection_minutes": 15,
+  "total_trades": 12,
+  "total_pnl_dollars": 14.658900000000003,
+  "total_costs": 7.1154,
+  "winning_trades": 6,
+  "losing_trades": 6,
+  "daily_results": [
+    {
+      "date": "2026-02-02",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 0,
+      "pnl": 0,
+      "win_rate": 0
+    },
+    {
+      "date": "2026-02-03",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 2,
+      "pnl": 46.8258,
+      "win_rate": 100.0
+    },
+    {
+      "date": "2026-02-04",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 1,
+      "pnl": -24.5594,
+      "win_rate": 0.0
+    },
+    {
+      "date": "2026-02-05",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 2,
+      "pnl": 39.8442,
+      "win_rate": 100.0
+    },
+    {
+      "date": "2026-02-06",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 2,
+      "pnl": 10.8463,
+      "win_rate": 50.0
+    },
+    {
+      "date": "2026-02-09",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 0,
+      "pnl": 0,
+      "win_rate": 0
+    },
+    {
+      "date": "2026-02-10",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 2,
+      "pnl": -7.414,
+      "win_rate": 50.0
+    },
+    {
+      "date": "2026-02-11",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 0,
+      "pnl": 0,
+      "win_rate": 0
+    },
+    {
+      "date": "2026-02-12",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 0,
+      "pnl": 0,
+      "win_rate": 0
+    },
+    {
+      "date": "2026-02-13",
+      "regime": "CHOPPY",
+      "strategy": "adaptive",
+      "trades": 3,
+      "pnl": -50.884,
+      "win_rate": 0.0
+    }
+  ],
+  "errors": []
+}

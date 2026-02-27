@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from pathlib import Path
 from types import SimpleNamespace
 
 from src.services.run_control_service import RunControlDeps, play_run, step_run
@@ -52,7 +51,6 @@ def _build_deps(runner: _DummyRunner) -> RunControlDeps:
         active_runners={},
         marker_type_enum=None,
         logger=SimpleNamespace(error=lambda *args, **kwargs: None),
-        reports_dir=Path("."),
         save_remote_checkpoint=_noop,
         clear_remote_strategy_sessions=_noop,
         configure_session=_noop,

@@ -1,4 +1,6 @@
 import json
+import base64
+import gzip
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,6 +13,7 @@ from src.runtime_mode import is_serverless_environment, stateful_run_api_support
 
 router = APIRouter()
 _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_SAFE_RUN_KEY_RE = re.compile(r"^[A-Za-z0-9:_-]+$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _RANGE_DATE_RE = re.compile(
     r"^(?P<start>\d{4}-\d{2}-\d{2})_to_(?P<end>\d{4}-\d{2}-\d{2})$"
@@ -20,14 +23,6 @@ _PROFILE_PLACEHOLDER_TOKENS = {"none", "null", "n/a", "na", "undefined", "-"}
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
-
-
-def _diagnostic_cache_store(request: Request):
-    app = getattr(request, "app", None)
-    state = getattr(app, "state", None)
-    v2_services = getattr(state, "v2_services", None)
-    store = getattr(v2_services, "store", None)
-    return store
 
 
 def _run_reports_store(request: Request):
@@ -50,9 +45,6 @@ def _run_reports_source_mode(request: Request) -> str:
     explicit = str(getattr(state, "run_reports_source_mode", "") or "").strip()
     if explicit:
         return explicit
-    store = getattr(state, "run_reports_store", None) if state is not None else None
-    if store is None:
-        return "filesystem_reports"
     return "run_reports_store"
 
 
@@ -96,44 +88,22 @@ def _history_identity_key(payload: Dict[str, Any]) -> str:
     return f"{run_id}:{ticker}:{date_label}"
 
 
-def _build_diagnostic_summary(
-    *,
-    ticker: str,
-    profile: str,
-    phase: int,
-    payload: Dict[str, Any],
-    from_cache: bool,
-) -> Dict[str, Any]:
-    top_level_sizes: Dict[str, Optional[int]] = {}
-    for key, value in payload.items():
-        if isinstance(value, (list, dict)):
-            top_level_sizes[key] = len(value)
-        else:
-            top_level_sizes[key] = None
-
-    return {
-        "source": "diagnostic_summary",
-        "ticker": ticker,
-        "profile": profile,
-        "phase": int(phase),
-        "from_cache": bool(from_cache),
-        "keys": sorted(payload.keys()),
-        "top_level_sizes": top_level_sizes,
-        "day_results_count": (
-            len(payload.get("day_results", []))
-            if isinstance(payload.get("day_results"), list)
-            else 0
-        ),
-        "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-    }
-
-
 def _sanitize_segment(value: str, *, field: str) -> str:
     token = str(value or "").strip()
     if not token or not _SAFE_SEGMENT_RE.fullmatch(token):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid {field}. Allowed characters: letters, numbers, '_' and '-'.",
+        )
+    return token
+
+
+def _sanitize_run_key(value: str) -> str:
+    token = str(value or "").strip()
+    if not token or len(token) > 512 or not _SAFE_RUN_KEY_RE.fullmatch(token):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid run_key. Allowed characters: letters, numbers, ':', '_' and '-'.",
         )
     return token
 
@@ -420,6 +390,43 @@ def _expand_day_range(start: str, end: str) -> List[str]:
     return days
 
 
+def _split_run_key(run_key: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    token = str(run_key or "").strip()
+    if not token:
+        return (None, None, None)
+    parts = token.split(":")
+    if len(parts) < 3:
+        return (None, None, None)
+    date_label = parts[-1]
+    ticker = parts[-2]
+    run_id = ":".join(parts[:-2])
+    if not run_id or not ticker or not date_label:
+        return (None, None, None)
+    return (run_id, ticker, date_label)
+
+
+def _decode_playback_snapshot(summary_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    snapshot_meta = (
+        summary_payload.get("playback_snapshot", {})
+        if isinstance(summary_payload.get("playback_snapshot"), dict)
+        else {}
+    )
+    if not snapshot_meta:
+        return None
+    if str(snapshot_meta.get("encoding") or "").strip().lower() != "gzip+base64":
+        return None
+    payload_b64 = str(snapshot_meta.get("payload_b64") or "").strip()
+    if not payload_b64:
+        return None
+    try:
+        compressed = base64.b64decode(payload_b64, validate=True)
+        decoded = gzip.decompress(compressed)
+        payload = json.loads(decoded.decode("utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _extract_entry_reason(marker: Dict[str, Any]) -> Optional[str]:
     details = (
         marker.get("details", {}) if isinstance(marker.get("details"), dict) else {}
@@ -548,6 +555,7 @@ def _build_history_day_rows(
     *,
     report_dir_name: str,
     report_saved_at: Optional[str] = None,
+    run_key: Optional[str] = None,
     include_multi_day: bool,
     profile_match_mode: Optional[str],
 ) -> List[Dict[str, Any]]:
@@ -575,6 +583,22 @@ def _build_history_day_rows(
         if isinstance(payload.get("execution_config"), dict)
         else {}
     )
+    run_request_config = (
+        payload.get("run_request_config", {})
+        if isinstance(payload.get("run_request_config"), dict)
+        else {}
+    )
+    if not run_request_config:
+        report_metadata = (
+            payload.get("report_metadata", {})
+            if isinstance(payload.get("report_metadata"), dict)
+            else {}
+        )
+        run_request_config = (
+            report_metadata.get("run_request_config", {})
+            if isinstance(report_metadata.get("run_request_config"), dict)
+            else {}
+        )
     aos_applied = (
         payload.get("aos_applied", {})
         if isinstance(payload.get("aos_applied"), dict)
@@ -679,6 +703,7 @@ def _build_history_day_rows(
                 "success": True,
                 "ticker": ticker,
                 "run_id": run_id,
+                "run_key": str(run_key or "").strip() or _history_identity_key(payload),
                 "date_label": date_label,
                 "report_dir": report_dir_name,
                 "report_saved_at": saved_at,
@@ -700,6 +725,7 @@ def _build_history_day_rows(
                 "trade_details": day_trades,
                 "strategy_names": sorted(day_strategy_names),
                 "execution_config": execution_config,
+                "run_request_config": run_request_config,
                 "aos_applied": aos_applied,
                 "unified_profile_id": profile_meta.get("unified_profile_id"),
                 "unified_profile_name": profile_meta.get("unified_profile_name"),
@@ -804,6 +830,7 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
         bucket["runs"].append(
             {
                 "run_id": row.get("run_id"),
+                "run_key": row.get("run_key"),
                 "ticker": row.get("ticker"),
                 "date_label": row.get("date_label"),
                 "report_dir": row.get("report_dir"),
@@ -846,6 +873,11 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
                 "execution_config": (
                     row.get("execution_config")
                     if isinstance(row.get("execution_config"), dict)
+                    else {}
+                ),
+                "run_request_config": (
+                    row.get("run_request_config")
+                    if isinstance(row.get("run_request_config"), dict)
                     else {}
                 ),
             }
@@ -926,6 +958,7 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
         if len(runs) == 1:
             row["aos_applied"] = runs[0].get("aos_applied", {})
             row["execution_config"] = runs[0].get("execution_config", {})
+            row["run_request_config"] = runs[0].get("run_request_config", {})
             row["run_total_trades"] = _safe_optional_int(
                 runs[0].get("run_total_trades")
             )
@@ -946,6 +979,7 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
         else:
             row["aos_applied"] = {}
             row["execution_config"] = {}
+            row["run_request_config"] = {}
             row["run_total_trades"] = None
             row["run_total_pnl_pct"] = None
             row["run_total_pnl_dollars"] = None
@@ -1312,128 +1346,6 @@ async def list_data_files(services: ApiServices = Depends(get_api_services)):
     return services.data_loader.list_available_files()
 
 
-@router.get("/api/reports/diagnostic/{ticker}")
-async def get_diagnostic_report(
-    request: Request,
-    ticker: str,
-    phase: int = Query(default=0, ge=0, le=20),
-    profile: str = Query(default="diagnostic", min_length=1, max_length=64),
-    summary_only: bool = Query(default=False),
-    refresh_cache: bool = Query(default=False),
-) -> Any:
-    """
-    Read a diagnostic JSON report from reports/<ticker>_<profile>/phase<phase>_<profile>.json.
-    Missing files are surfaced as explicit errors (no fallback behavior).
-    When cache store is available in app state, payload is cached by file mtime.
-    """
-    safe_ticker = _sanitize_segment(ticker, field="ticker").upper()
-    safe_profile = _sanitize_segment(profile, field="profile").lower()
-    report_dir = _project_root() / "reports" / f"{safe_ticker.lower()}_{safe_profile}"
-    report_file = report_dir / f"phase{phase}_{safe_profile}.json"
-
-    if not report_file.exists():
-        relative = report_file.relative_to(_project_root())
-        raise HTTPException(
-            status_code=404, detail=f"Diagnostic report not found: {relative}"
-        )
-
-    if not report_file.is_file():
-        relative = report_file.relative_to(_project_root())
-        raise HTTPException(
-            status_code=400, detail=f"Diagnostic report path is not a file: {relative}"
-        )
-
-    store = _diagnostic_cache_store(request)
-    payload: Optional[Dict[str, Any]] = None
-    from_cache = False
-
-    source_path = str(report_file.resolve())
-    try:
-        source_mtime_ns = int(report_file.stat().st_mtime_ns)
-    except OSError:
-        source_mtime_ns = 0
-
-    cache_key: Optional[str] = None
-    if store is not None and not refresh_cache:
-        build_key = getattr(store, "diagnostic_cache_key", None)
-        read_cache = getattr(store, "get_diagnostic_payload_cache", None)
-        if callable(build_key) and callable(read_cache):
-            try:
-                cache_key = build_key(
-                    ticker=safe_ticker, profile=safe_profile, phase=phase
-                )
-                cached = read_cache(
-                    cache_key=cache_key,
-                    source_path=source_path,
-                    source_mtime_ns=source_mtime_ns,
-                )
-                if isinstance(cached, dict):
-                    payload = cached
-                    from_cache = True
-            except Exception:
-                payload = None
-                from_cache = False
-
-    if payload is None:
-        try:
-            raw = report_file.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise HTTPException(
-                status_code=500, detail=f"Failed to read diagnostic report: {exc}"
-            ) from exc
-
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(
-                status_code=500, detail=f"Diagnostic report is not valid JSON: {exc}"
-            ) from exc
-
-        if not isinstance(parsed, dict):
-            raise HTTPException(
-                status_code=500, detail="Diagnostic report root must be a JSON object."
-            )
-        payload = parsed
-
-        write_cache = (
-            getattr(store, "upsert_diagnostic_payload_cache", None)
-            if store is not None
-            else None
-        )
-        if callable(write_cache):
-            try:
-                if not cache_key:
-                    build_key = getattr(store, "diagnostic_cache_key", None)
-                    if callable(build_key):
-                        cache_key = build_key(
-                            ticker=safe_ticker, profile=safe_profile, phase=phase
-                        )
-                if cache_key:
-                    write_cache(
-                        cache_key=cache_key,
-                        ticker=safe_ticker,
-                        profile=safe_profile,
-                        phase=phase,
-                        source_path=source_path,
-                        source_mtime_ns=source_mtime_ns,
-                        payload=payload,
-                    )
-            except Exception:
-                # Cache write is best-effort only.
-                pass
-
-    if summary_only:
-        return _build_diagnostic_summary(
-            ticker=safe_ticker,
-            profile=safe_profile,
-            phase=phase,
-            payload=payload,
-            from_cache=from_cache,
-        )
-
-    return payload
-
-
 @router.get("/api/reports/history/{ticker}")
 async def get_saved_run_history(
     request: Request,
@@ -1449,10 +1361,6 @@ async def get_saved_run_history(
     """
     Read historical session summaries and aggregate day-level PnL/trade details
     for the diagnostics calendar.
-
-    Source selection:
-    - if run_reports_store is configured, use that store as authoritative source.
-    - otherwise read local reports/*/session_summary.json artifacts.
     """
     safe_ticker = _sanitize_segment(ticker, field="ticker").upper()
     run_id_exact_filter = str(run_id or "").strip().lower()
@@ -1474,6 +1382,7 @@ async def get_saved_run_history(
         payload: Dict[str, Any],
         report_dir_name: str,
         report_saved_at: Optional[str],
+        run_key: Optional[str],
     ) -> None:
         nonlocal matched_reports
         run_id_value = str(payload.get("run_id") or "").strip()
@@ -1528,6 +1437,7 @@ async def get_saved_run_history(
             payload,
             report_dir_name=report_dir_name,
             report_saved_at=normalized_saved_at,
+            run_key=run_key,
             include_multi_day=include_multi_day,
             profile_match_mode=profile_match_mode,
         )
@@ -1569,16 +1479,15 @@ async def get_saved_run_history(
             payload=payload,
             report_dir_name=_active_report_dir_name(run_key=str(run_key or "")),
             report_saved_at=active_seen_at,
+            run_key=str(run_key or ""),
         )
 
     source_mode = _run_reports_source_mode(request)
     source_path_hint = "run_reports_store"
     external_store = _run_reports_store(request)
     list_run_summaries = getattr(external_store, "list_run_summaries", None)
-    used_run_reports_store = False
 
     if callable(list_run_summaries):
-        used_run_reports_store = True
         try:
             rows = list_run_summaries(limit=limit)
         except Exception as exc:
@@ -1611,39 +1520,8 @@ async def get_saved_run_history(
                 payload=payload,
                 report_dir_name=report_dir_name,
                 report_saved_at=report_saved_at,
+                run_key=str(row.get("run_key") or ""),
             )
-
-    if not used_run_reports_store:
-        source_mode = "filesystem_reports"
-        source_path_hint = "reports/*/session_summary.json"
-        reports_root = _project_root() / "reports"
-        if reports_root.exists():
-            report_files = sorted(
-                reports_root.glob("*/session_summary.json"),
-                key=lambda path: path.parent.name,
-                reverse=True,
-            )
-            for report_file in report_files:
-                if matched_reports >= limit:
-                    break
-                scanned_reports += 1
-                report_dir_name = report_file.parent.name
-
-                try:
-                    raw = report_file.read_text(encoding="utf-8")
-                    payload = json.loads(raw)
-                except (OSError, json.JSONDecodeError):
-                    skipped_invalid += 1
-                    continue
-                if not isinstance(payload, dict):
-                    skipped_invalid += 1
-                    continue
-
-                _process_history_payload(
-                    payload=payload,
-                    report_dir_name=report_dir_name,
-                    report_saved_at=None,
-                )
 
     day_results = _aggregate_history_day_rows(day_rows)
     split: Dict[str, Optional[str]]
@@ -1713,4 +1591,180 @@ async def get_saved_run_history(
         "split": split,
         "metrics": _compute_calendar_metrics(day_results),
         "day_results": day_results,
+    }
+
+
+@router.get("/api/reports/run-snapshot")
+async def get_run_playback_snapshot(
+    request: Request,
+    run_key: str = Query(..., min_length=3, max_length=512),
+) -> Dict[str, Any]:
+    safe_run_key = _sanitize_run_key(run_key)
+    run_id, run_ticker, run_date_label = _split_run_key(safe_run_key)
+
+    active_runner = _active_runners(request).get(safe_run_key)
+    if active_runner is not None:
+        get_state = getattr(active_runner, "get_state", None)
+        get_summary = getattr(active_runner, "get_summary", None)
+        get_processed_bars = getattr(active_runner, "get_processed_bars", None)
+        get_markers = getattr(active_runner, "get_markers", None)
+
+        state_payload = get_state() if callable(get_state) else {}
+        summary_payload = get_summary() if callable(get_summary) else {}
+        bars_payload = (
+            get_processed_bars() if callable(get_processed_bars) else []
+        )
+        markers_payload = get_markers() if callable(get_markers) else []
+
+        if not isinstance(state_payload, dict):
+            state_payload = {}
+        if not isinstance(summary_payload, dict):
+            summary_payload = {}
+        if not isinstance(bars_payload, list):
+            bars_payload = []
+        if not isinstance(markers_payload, list):
+            markers_payload = []
+
+        summary_for_client = dict(summary_payload)
+        playback_meta = summary_for_client.get("playback_snapshot")
+        if isinstance(playback_meta, dict) and "payload_b64" in playback_meta:
+            playback_meta = dict(playback_meta)
+            playback_meta.pop("payload_b64", None)
+            summary_for_client["playback_snapshot"] = playback_meta
+
+        return {
+            "run_key": safe_run_key,
+            "source": "active_runner",
+            "state": state_payload,
+            "bars": bars_payload,
+            "markers": markers_payload,
+            "summary": summary_for_client,
+            "snapshot_meta": summary_for_client.get("playback_snapshot", {}),
+        }
+
+    source_mode = _run_reports_source_mode(request)
+    report_store = _run_reports_store(request)
+
+    summary_row: Optional[Dict[str, Any]] = None
+    get_run_summary = getattr(report_store, "get_run_summary", None)
+    if callable(get_run_summary):
+        try:
+            row = get_run_summary(run_key=safe_run_key)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to read run snapshot from report store: {exc}",
+            ) from exc
+        if isinstance(row, dict):
+            summary_row = row
+    else:
+        list_run_summaries = getattr(report_store, "list_run_summaries", None)
+        if callable(list_run_summaries):
+            try:
+                rows = list_run_summaries(limit=5000)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to scan run snapshot from report store: {exc}",
+                ) from exc
+            if isinstance(rows, list):
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get("run_key") or "").strip() != safe_run_key:
+                        continue
+                    summary_row = row
+                    break
+
+    if not isinstance(summary_row, dict):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Run snapshot not found for run_key={safe_run_key}",
+        )
+
+    summary_payload = (
+        summary_row.get("summary", {})
+        if isinstance(summary_row.get("summary"), dict)
+        else {}
+    )
+    decoded_snapshot = _decode_playback_snapshot(summary_payload)
+    bars_payload = (
+        decoded_snapshot.get("bars", [])
+        if isinstance(decoded_snapshot, dict)
+        and isinstance(decoded_snapshot.get("bars"), list)
+        else []
+    )
+    markers_payload = (
+        decoded_snapshot.get("markers", [])
+        if isinstance(decoded_snapshot, dict)
+        and isinstance(decoded_snapshot.get("markers"), list)
+        else (
+            summary_payload.get("markers", [])
+            if isinstance(summary_payload.get("markers"), list)
+            else []
+        )
+    )
+    if not bars_payload:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Playback snapshot is not available for this run. "
+                "Run it again once with snapshot persistence enabled."
+            ),
+        )
+
+    total_bars = _safe_optional_int(summary_payload.get("total_bars"))
+    if total_bars is None:
+        total_bars = len(bars_payload)
+    processed_bars = _safe_optional_int(summary_payload.get("processed_bars"))
+    if processed_bars is None:
+        processed_bars = len(bars_payload)
+    total_bars = max(0, int(total_bars))
+    processed_bars = max(0, min(int(processed_bars), total_bars or len(bars_payload)))
+    progress_pct = (
+        (float(processed_bars) / float(total_bars)) * 100.0 if total_bars > 0 else 0.0
+    )
+
+    request_config = (
+        summary_payload.get("run_request_config", {})
+        if isinstance(summary_payload.get("run_request_config"), dict)
+        else {}
+    )
+    date_from = _normalize_iso_date(request_config.get("date_from"))
+    date_to = _normalize_iso_date(request_config.get("date_to"))
+    state_payload: Dict[str, Any] = {
+        "run_id": run_id or str(summary_payload.get("run_id") or "").strip(),
+        "ticker": (run_ticker or str(summary_payload.get("ticker") or "").strip()).upper(),
+        "date": run_date_label or str(summary_payload.get("date") or "").strip(),
+        "date_from": date_from,
+        "date_to": date_to,
+        "current_bar_index": processed_bars,
+        "total_bars": total_bars,
+        "progress_pct": progress_pct,
+        "phase": str(summary_payload.get("phase") or "COMPLETED"),
+        "is_running": False,
+        "is_paused": False,
+        "markers_count": len(markers_payload),
+        "is_snapshot": True,
+        "snapshot_source_mode": source_mode,
+        "report_saved_at": summary_row.get("updated_at"),
+    }
+
+    summary_for_client = dict(summary_payload)
+    playback_meta = summary_for_client.get("playback_snapshot")
+    if isinstance(playback_meta, dict):
+        playback_meta = dict(playback_meta)
+        playback_meta.pop("payload_b64", None)
+        summary_for_client["playback_snapshot"] = playback_meta
+
+    return {
+        "run_key": safe_run_key,
+        "source": "run_reports_store",
+        "source_mode": source_mode,
+        "state": state_payload,
+        "bars": bars_payload,
+        "markers": markers_payload,
+        "summary": summary_for_client,
+        "snapshot_meta": summary_for_client.get("playback_snapshot", {}),
+        "report_saved_at": summary_row.get("updated_at"),
     }

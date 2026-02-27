@@ -4,6 +4,7 @@ export type ExecutionModuleFieldOption = {
 };
 
 export type ExecutionModuleField = {
+  moduleKey?: string;
   key: string;
   label: string;
   type?: string;
@@ -11,6 +12,7 @@ export type ExecutionModuleField = {
   max?: number;
   step?: number;
   fallback?: unknown;
+  integer?: boolean;
   options?: ExecutionModuleFieldOption[];
   disabledWhen?: (snapshot: Record<string, unknown>) => boolean;
 };

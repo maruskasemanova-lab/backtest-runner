@@ -2,6 +2,25 @@ export type AdaptiveStudioObjectRecord = Record<string, unknown>;
 
 export type AdaptiveStudioUnifiedViewTab = "strategy" | "execution";
 export type AdaptiveStudioActionLoadingToken = string | null;
+export type AdaptiveStudioStrategySelectionMode = "all_enabled" | "adaptive_top_n";
+export type AdaptiveStudioPriorityScope = "regime_preferences" | "micro_regime_preferences";
+export type AdaptiveStudioPriorityMap = Record<string, string[]>;
+
+export type AdaptiveStudioFormState = {
+  strategy_selection_mode: AdaptiveStudioStrategySelectionMode;
+  max_active_strategies: number;
+  flow_bias_enabled: boolean;
+  use_ohlcv_fallbacks: boolean;
+  min_active_bars_before_switch: number;
+  switch_cooldown_bars: number;
+  flow_bias_strategies: string[];
+  regime_preferences: AdaptiveStudioPriorityMap;
+  micro_regime_preferences: AdaptiveStudioPriorityMap;
+};
+
+export type AdaptiveStudioFormUpdater =
+  | AdaptiveStudioFormState
+  | ((prev: AdaptiveStudioFormState) => AdaptiveStudioFormState);
 
 export type AdaptiveStudioUnifiedProfileRow = {
   profile_id: string;

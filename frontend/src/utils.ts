@@ -197,6 +197,27 @@ export const defaultPlaybackApiBaseUrl = (() => {
 })();
 
 const STATEFUL_RUN_API_PREFIXES = ["/api/run", "/api/runs"];
+const WS_LIVE_PATH = "/ws/live";
+
+const buildWsLiveUrlFromHttpBase = (base: string) => {
+  const normalized = trimTrailingSlashes(base);
+  if (!normalized) return "";
+  try {
+    const parsed = new URL(normalized);
+    const wsProto = parsed.protocol === "https:" ? "wss:" : "ws:";
+    return `${wsProto}//${parsed.host}${WS_LIVE_PATH}`;
+  } catch (_err) {
+    return "";
+  }
+};
+
+const pushUniqueUrl = (target: string[], value: string) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return;
+  if (!target.includes(normalized)) {
+    target.push(normalized);
+  }
+};
 
 export const isStatefulRunApiPath = (path: string) => {
   const normalized = String(path || "").trim().toLowerCase();
@@ -218,6 +239,10 @@ export const resolveApiRequestUrl = (input: string) => {
   if (!base) return raw;
   return `${trimTrailingSlashes(base)}${raw}`;
 };
+
+export const hasConfiguredApiRequestRewrite = Boolean(
+  defaultRunnerApiBaseUrl || defaultPlaybackApiBaseUrl,
+);
 
 export const wsFeatureEnabled = (() => {
   const raw = String(import.meta.env.VITE_WS_ENABLED || "").trim().toLowerCase();
@@ -253,35 +278,57 @@ export const resolveRunnerApiBaseUrl = (strategyApiUrl?: string) => {
 };
 
 export const resolveWsLiveUrl = () => {
-  const configuredWsBase = trimTrailingSlashes(import.meta.env.VITE_WS_BASE_URL || "");
-  if (configuredWsBase) {
-    return `${configuredWsBase}/ws/live`;
+  const candidates = resolveWsLiveUrlCandidates();
+  if (candidates.length > 0) {
+    return candidates[0];
   }
 
-  if (defaultPlaybackApiBaseUrl) {
-    try {
-      const parsed = new URL(defaultPlaybackApiBaseUrl);
-      const wsProto = parsed.protocol === "https:" ? "wss:" : "ws:";
-      return `${wsProto}//${parsed.host}/ws/live`;
-    } catch (_err) {
-      // Fall through to runner host and host-based defaults.
-    }
-  }
-
-  if (defaultRunnerApiBaseUrl) {
-    try {
-      const parsed = new URL(defaultRunnerApiBaseUrl);
-      const wsProto = parsed.protocol === "https:" ? "wss:" : "ws:";
-      return `${wsProto}//${parsed.host}/ws/live`;
-    } catch (_err) {
-      // Fall through to host-based defaults.
-    }
+  if (typeof window === "undefined") {
+    return `ws://127.0.0.1:8002${WS_LIVE_PATH}`;
   }
 
   const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-  if (isLocal) {
-    return `${wsProtocol}://127.0.0.1:8002/ws/live`;
+  return `${wsProtocol}://${window.location.host}${WS_LIVE_PATH}`;
+};
+
+export const resolveWsLiveUrlCandidates = () => {
+  const candidates: string[] = [];
+  const configuredWsBase = trimTrailingSlashes(import.meta.env.VITE_WS_BASE_URL || "");
+  if (configuredWsBase) {
+    pushUniqueUrl(candidates, `${configuredWsBase}${WS_LIVE_PATH}`);
+    return candidates;
   }
-  return `${wsProtocol}://${window.location.host}/ws/live`;
+
+  if (defaultPlaybackApiBaseUrl) {
+    pushUniqueUrl(candidates, buildWsLiveUrlFromHttpBase(defaultPlaybackApiBaseUrl));
+  }
+
+  if (defaultRunnerApiBaseUrl) {
+    pushUniqueUrl(candidates, buildWsLiveUrlFromHttpBase(defaultRunnerApiBaseUrl));
+  }
+
+  if (typeof window === "undefined") {
+    return candidates;
+  }
+
+  const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const browserHost = String(window.location.host || "").trim();
+  if (browserHost) {
+    pushUniqueUrl(candidates, `${wsProtocol}://${browserHost}${WS_LIVE_PATH}`);
+  }
+
+  if (isLocalBrowserHost()) {
+    const browserHostname = String(window.location.hostname || "").trim().toLowerCase();
+    if (browserHostname) {
+      pushUniqueUrl(candidates, `${wsProtocol}://${browserHostname}:8002${WS_LIVE_PATH}`);
+    }
+    if (browserHostname !== "localhost") {
+      pushUniqueUrl(candidates, `${wsProtocol}://localhost:8002${WS_LIVE_PATH}`);
+    }
+    if (browserHostname !== "127.0.0.1") {
+      pushUniqueUrl(candidates, `${wsProtocol}://127.0.0.1:8002${WS_LIVE_PATH}`);
+    }
+  }
+
+  return candidates;
 };

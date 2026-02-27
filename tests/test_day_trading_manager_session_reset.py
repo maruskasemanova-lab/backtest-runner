@@ -10,6 +10,9 @@ sys.modules.pop("src", None)
 
 from src.day_trading_manager import DayTradingManager  # noqa: E402
 
+sys.path = [entry for entry in sys.path if entry != str(STRATEGY_ROOT)]
+sys.modules.pop("src", None)
+
 
 def test_clear_session_removes_cooldown_state() -> None:
     manager = DayTradingManager(regime_detection_minutes=5)

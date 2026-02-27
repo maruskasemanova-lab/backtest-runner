@@ -275,6 +275,10 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
     assert rows[0]["run_key"] == "run-1:MU:2026-02-03"
     assert rows[0]["summary"]["run_id"] == "run-1"
     assert rows[0]["summary"]["ticker"] == "MU"
+    single = store.get_run_summary(run_key="run-1:MU:2026-02-03")
+    assert single is not None
+    assert single["run_key"] == "run-1:MU:2026-02-03"
+    assert single["summary"]["run_id"] == "run-1"
 
     created_user = state["users"]["runner-user"]
     assert created_user["tenant_id"]
@@ -305,3 +309,7 @@ def test_sqlite_run_reports_store_upsert_and_list(tmp_path):
     assert rows[0]["run_key"] == "run-2:MU:2026-02-12"
     assert rows[0]["summary"]["run_id"] == "run-2"
     assert rows[0]["summary"]["session_summary"]["total_trades"] == 4
+    single = store.get_run_summary(run_key="run-2:MU:2026-02-12")
+    assert single is not None
+    assert single["run_key"] == "run-2:MU:2026-02-12"
+    assert single["summary"]["session_summary"]["total_trades"] == 4

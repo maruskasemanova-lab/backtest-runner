@@ -94,6 +94,19 @@ function DataManager({ downloadProgress }) {
         fetchSettings();
     }, [fetchCatalog, fetchSettings]);
 
+    useEffect(() => {
+        setForm((prev) => {
+            if (prev.schema === 'tcbbo') {
+                if (prev.dataset === 'OPRA.PILLAR') return prev;
+                return { ...prev, dataset: 'OPRA.PILLAR' };
+            }
+            if (prev.dataset === 'OPRA.PILLAR') {
+                return { ...prev, dataset: 'XNAS.ITCH' };
+            }
+            return prev;
+        });
+    }, [form.schema]);
+
     // Refresh catalog when download completes
     useEffect(() => {
         if (downloadProgress?.status === 'ready' || downloadProgress?.status === 'error') {
@@ -293,6 +306,7 @@ function DataManager({ downloadProgress }) {
         const labels = {
             'mbp-10': 'L2 Depth',
             'ohlcv-1m': 'OHLCV 1m',
+            tcbbo: 'Options TCBBO',
             trades: 'Trades',
         };
         return labels[schema] || schema;
@@ -302,6 +316,7 @@ function DataManager({ downloadProgress }) {
         const icons = {
             'mbp-10': '📊',
             'ohlcv-1m': '📈',
+            tcbbo: '🧩',
             trades: '⚡',
         };
         return icons[schema] || '📁';
@@ -416,6 +431,7 @@ function DataManager({ downloadProgress }) {
                                     >
                                         <option value="mbp-10">📊 L2 Depth (MBP-10)</option>
                                         <option value="ohlcv-1m">📈 OHLCV 1-Min</option>
+                                        <option value="tcbbo">🧩 Options TCBBO (OPRA)</option>
                                         <option value="trades">⚡ Raw Trades</option>
                                     </select>
                                 </div>
@@ -425,8 +441,14 @@ function DataManager({ downloadProgress }) {
                                         value={form.dataset}
                                         onChange={(e) => setForm({ ...form, dataset: e.target.value })}
                                     >
-                                        <option value="XNAS.ITCH">Nasdaq TotalView</option>
-                                        <option value="XNAS.BASIC">Nasdaq Basic</option>
+                                        {form.schema === 'tcbbo' ? (
+                                            <option value="OPRA.PILLAR">OPRA Pillar</option>
+                                        ) : (
+                                            <>
+                                                <option value="XNAS.ITCH">Nasdaq TotalView</option>
+                                                <option value="XNAS.BASIC">Nasdaq Basic</option>
+                                            </>
+                                        )}
                                     </select>
                                 </div>
                                 <div className="dm-form-field">
@@ -447,7 +469,7 @@ function DataManager({ downloadProgress }) {
                                 </div>
                             </div>
 
-                            {form.schema !== 'ohlcv-1m' && (
+                            {form.schema !== 'ohlcv-1m' && form.schema !== 'tcbbo' && (
                                 <div className="dm-checkbox-row">
                                     <label>
                                         <input

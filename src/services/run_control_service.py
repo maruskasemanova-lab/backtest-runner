@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import gzip
+import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Awaitable, Dict, Optional, Union
 
 import aiohttp
@@ -23,7 +26,6 @@ class RunControlDeps:
     active_runners: Dict[str, Any]
     marker_type_enum: Any
     logger: Any
-    reports_dir: Path
     save_remote_checkpoint: Any
     clear_remote_strategy_sessions: Any
     configure_session: Any
@@ -109,6 +111,126 @@ def _resolve_requested_trade_eval_mode(
     return normalize_trade_eval_mode(raw_trade_mode)
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    token = str(os.getenv(name, "")).strip().lower()
+    if not token:
+        return bool(default)
+    return token in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, *, minimum: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return max(minimum, int(default))
+    try:
+        parsed = int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return max(minimum, int(default))
+    return max(minimum, parsed)
+
+
+def _safe_runner_processed_bars(runner: Any) -> list[Dict[str, Any]]:
+    getter = getattr(runner, "get_processed_bars", None)
+    if not callable(getter):
+        return []
+    try:
+        bars = getter()
+    except Exception:
+        return []
+    return [item for item in bars if isinstance(item, dict)] if isinstance(bars, list) else []
+
+
+def _safe_runner_markers(runner: Any) -> list[Dict[str, Any]]:
+    getter = getattr(runner, "get_markers", None)
+    if not callable(getter):
+        return []
+    try:
+        markers = getter()
+    except Exception:
+        return []
+    return (
+        [item for item in markers if isinstance(item, dict)]
+        if isinstance(markers, list)
+        else []
+    )
+
+
+def _build_playback_snapshot_metadata(
+    *,
+    runner: Any,
+    run_key: str,
+) -> Optional[Dict[str, Any]]:
+    if not _env_flag("BACKTEST_RUN_REPORT_SNAPSHOT_ENABLED", True):
+        return None
+
+    bars = _safe_runner_processed_bars(runner)
+    if not bars:
+        return None
+    markers = _safe_runner_markers(runner)
+
+    snapshot_payload: Dict[str, Any] = {
+        "schema_version": 1,
+        "run_key": str(run_key),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "bars": bars,
+        "markers": markers,
+    }
+
+    try:
+        serialized = json.dumps(snapshot_payload, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return None
+
+    max_uncompressed_bytes = _env_int(
+        "BACKTEST_RUN_REPORT_SNAPSHOT_MAX_UNCOMPRESSED_BYTES",
+        120_000_000,
+        minimum=1_000_000,
+    )
+    uncompressed_bytes = len(serialized.encode("utf-8"))
+    if uncompressed_bytes > max_uncompressed_bytes:
+        return {
+            "schema_version": 1,
+            "encoding": None,
+            "bars_count": len(bars),
+            "markers_count": len(markers),
+            "payload_b64": None,
+            "uncompressed_bytes": uncompressed_bytes,
+            "compressed_bytes": None,
+            "skip_reason": "snapshot_too_large_uncompressed",
+        }
+
+    compressed = gzip.compress(serialized.encode("utf-8"), compresslevel=6)
+    max_compressed_bytes = _env_int(
+        "BACKTEST_RUN_REPORT_SNAPSHOT_MAX_COMPRESSED_BYTES",
+        25_000_000,
+        minimum=250_000,
+    )
+    compressed_bytes = len(compressed)
+    if compressed_bytes > max_compressed_bytes:
+        return {
+            "schema_version": 1,
+            "encoding": None,
+            "bars_count": len(bars),
+            "markers_count": len(markers),
+            "payload_b64": None,
+            "uncompressed_bytes": uncompressed_bytes,
+            "compressed_bytes": compressed_bytes,
+            "skip_reason": "snapshot_too_large_compressed",
+        }
+
+    payload_b64 = base64.b64encode(compressed).decode("ascii")
+    return {
+        "schema_version": 1,
+        "encoding": "gzip+base64",
+        "bars_count": len(bars),
+        "markers_count": len(markers),
+        "payload_b64": payload_b64,
+        "uncompressed_bytes": uncompressed_bytes,
+        "compressed_bytes": compressed_bytes,
+        "skip_reason": None,
+    }
+
+
 async def _persist_runner_summary_to_store(runner: Any, deps: RunControlDeps) -> bool:
     report_store = getattr(deps, "run_reports_store", None)
     upsert = getattr(report_store, "upsert_run_summary", None)
@@ -119,7 +241,13 @@ async def _persist_runner_summary_to_store(runner: Any, deps: RunControlDeps) ->
     if not run_key:
         return False
     summary_payload = runner.get_summary()
-    payload = summary_payload if isinstance(summary_payload, dict) else {}
+    payload = dict(summary_payload) if isinstance(summary_payload, dict) else {}
+    playback_snapshot = _build_playback_snapshot_metadata(
+        runner=runner,
+        run_key=run_key,
+    )
+    if isinstance(playback_snapshot, dict):
+        payload["playback_snapshot"] = playback_snapshot
     await asyncio.to_thread(
         upsert,
         run_key=run_key,
@@ -226,18 +354,6 @@ async def play_run(
 
     async def _run_and_maybe_save():
         await runner.run_all(speed_ms=raw_speed)
-
-        try:
-            deps.reports_dir.mkdir(parents=True, exist_ok=True)
-            run_date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_run_id = str(runner.config.run_id).replace(":", "_")
-            out_dir = (
-                deps.reports_dir
-                / f"{run_date_str}_{runner.config.ticker}_{safe_run_id}"
-            )
-            runner.save_reports(str(out_dir))
-        except Exception as exc:
-            deps.logger.error("Failed to auto-save reports: %s", exc)
 
         try:
             await _persist_runner_summary_to_store(runner, deps)

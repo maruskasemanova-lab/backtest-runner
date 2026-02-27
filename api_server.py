@@ -390,7 +390,7 @@ if _run_reports_source_mode == "supabase_run_reports":
 elif _run_reports_source_mode == "sqlite_run_reports":
     logger.info("run reports store: SQLite (local)")
 else:
-    logger.info("run reports store: Filesystem only")
+    logger.info("run reports store: custom adapter")
 
 app.state.v2_services = v2_services
 app.state.run_reports_store = _run_reports_store
@@ -445,7 +445,6 @@ def _build_run_control_deps() -> RunControlDeps:
         active_runners=active_runners,
         marker_type_enum=MarkerType,
         logger=logger,
-        reports_dir=Path(__file__).parent / "reports",
         run_reports_store=_run_reports_store,
         save_remote_checkpoint=_save_remote_checkpoint,
         clear_remote_strategy_sessions=_clear_remote_strategy_sessions,
@@ -565,9 +564,9 @@ def _build_start_run_deps() -> StartRunDeps:
         databento_svc=databento_svc,
         l2_manager=l2_manager,
         get_discovery=get_discovery,
-        reset_remote_orchestrator_state_scoped=_reset_remote_orchestrator_state_scoped,
+        reset_remote_orchestrator_state_scoped=_reset_remote_orchestrator_state_scoped_detail,
         load_remote_checkpoint=_load_remote_checkpoint,
-        reset_remote_orchestrator_state=_reset_remote_orchestrator_state,
+        reset_remote_orchestrator_state=_reset_remote_orchestrator_state_detail,
         clear_remote_strategy_sessions=_clear_remote_strategy_sessions,
         apply_strategy_overrides=_apply_strategy_overrides,
         apply_aos_optimizations=_apply_aos_optimizations,
@@ -1062,21 +1061,37 @@ async def _clear_remote_strategy_sessions(
     )
 
 
-async def _reset_remote_orchestrator_state(strategy_api_url: str) -> bool:
+async def _reset_remote_orchestrator_state_detail(strategy_api_url: str) -> Dict[str, Any]:
     return await service_reset_remote_orchestrator_state(
         strategy_api_url,
         _build_strategy_api_integration_deps(),
     )
 
 
-async def _reset_remote_orchestrator_state_scoped(
+async def _reset_remote_orchestrator_state_scoped_detail(
     strategy_api_url: str, scope: str = "session"
-) -> bool:
+) -> Dict[str, Any]:
     return await service_reset_remote_orchestrator_state_scoped(
         strategy_api_url,
         scope,
         _build_strategy_api_integration_deps(),
     )
+
+
+async def _reset_remote_orchestrator_state(strategy_api_url: str) -> bool:
+    result = await _reset_remote_orchestrator_state_detail(strategy_api_url)
+    if isinstance(result, dict):
+        return bool(result.get("success"))
+    return bool(result)
+
+
+async def _reset_remote_orchestrator_state_scoped(
+    strategy_api_url: str, scope: str = "session"
+) -> bool:
+    result = await _reset_remote_orchestrator_state_scoped_detail(strategy_api_url, scope)
+    if isinstance(result, dict):
+        return bool(result.get("success"))
+    return bool(result)
 
 
 async def _apply_orchestrator_config(
