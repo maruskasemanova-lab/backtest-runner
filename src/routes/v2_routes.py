@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 from datetime import date, datetime
@@ -38,6 +39,7 @@ from src.services.adaptive_tuner_orchestration_service import (
 
 router = APIRouter(prefix="/api/v2")
 HEAVY_JOB_TYPES = ("run", "adaptive_tuner", "download")
+logger = logging.getLogger(__name__)
 
 
 class BillingCheckoutRequest(BaseModel):
@@ -333,6 +335,125 @@ def _schedule_job_task(
                 services.active_dispatch_job_ids.discard(job_id)
 
     asyncio.create_task(_run())
+
+
+def _mirror_job_record(*, services: V2Services, job_id: str) -> None:
+    mirror = getattr(services, "run_state_mirror", None)
+    if mirror is None:
+        return
+    job = services.store.get_job(job_id=job_id)
+    if not isinstance(job, dict):
+        return
+    try:
+        mirror.upsert_job_record(job=job)
+    except Exception as exc:
+        logger.warning("Failed to mirror v2 job %s to Supabase: %s", job_id, exc)
+
+
+def _create_job_record(
+    *,
+    services: V2Services,
+    job_id: str,
+    user_id: str,
+    tenant_id: str,
+    job_type: str,
+    payload: Optional[Dict[str, Any]],
+    status: str = "queued",
+    idempotency_key: Optional[str] = None,
+    max_attempts: int = 1,
+) -> None:
+    services.store.create_job(
+        job_id=job_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        job_type=job_type,
+        payload=payload,
+        status=status,
+        idempotency_key=idempotency_key,
+        max_attempts=max_attempts,
+    )
+    _mirror_job_record(services=services, job_id=job_id)
+
+
+def _begin_job_attempt(*, services: V2Services, job_id: str) -> Tuple[int, int]:
+    attempts, max_attempts = services.store.begin_job_attempt(job_id=job_id)
+    _mirror_job_record(services=services, job_id=job_id)
+    return attempts, max_attempts
+
+
+def _update_job_record(
+    *,
+    services: V2Services,
+    job_id: str,
+    status: str,
+    result: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
+    run_key: Optional[str] = None,
+) -> None:
+    services.store.update_job(
+        job_id=job_id,
+        status=status,
+        result=result,
+        error=error,
+        run_key=run_key,
+    )
+    _mirror_job_record(services=services, job_id=job_id)
+
+
+def _upsert_run_record(
+    *,
+    services: V2Services,
+    run_key: str,
+    user_id: str,
+    tenant_id: str,
+    run_id: str,
+    ticker: str,
+    date_label: str,
+    status: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    services.store.upsert_run(
+        run_key=run_key,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        run_id=run_id,
+        ticker=ticker,
+        date_label=date_label,
+        status=status,
+        metadata=metadata,
+    )
+    mirror = getattr(services, "run_state_mirror", None)
+    if mirror is None:
+        return
+    try:
+        mirror.upsert_run_record(
+            run_key=run_key,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            run_id=run_id,
+            ticker=ticker,
+            date_label=date_label,
+            status=status,
+            metadata=metadata,
+        )
+    except Exception as exc:
+        logger.warning("Failed to mirror run %s to Supabase: %s", run_key, exc)
+
+
+def _update_run_status(
+    *,
+    services: V2Services,
+    run_key: str,
+    status: str,
+) -> None:
+    services.store.update_run_status(run_key=run_key, status=status)
+    mirror = getattr(services, "run_state_mirror", None)
+    if mirror is None:
+        return
+    try:
+        mirror.update_run_status(run_key=run_key, status=status)
+    except Exception as exc:
+        logger.warning("Failed to mirror run status for %s to Supabase: %s", run_key, exc)
 
 
 def _dispatch_queued_job_if_needed(
@@ -803,7 +924,7 @@ def _sync_user_run_statuses(
     )
     for run_key in tracked:
         if run_key not in active_keys:
-            services.store.update_run_status(run_key=run_key, status="completed")
+            _update_run_status(services=services, run_key=run_key, status="completed")
 
 
 def _active_heavy_jobs(*, auth: AuthContext, services: V2Services) -> int:
@@ -870,8 +991,8 @@ async def _execute_run_job(
     provisional_run_key = f"{run_id}:{ticker}:{date_label}"
 
     while True:
-        attempts, max_attempts = services.store.begin_job_attempt(job_id=job_id)
-        services.store.update_run_status(run_key=provisional_run_key, status="running")
+        attempts, max_attempts = _begin_job_attempt(services=services, job_id=job_id)
+        _update_run_status(services=services, run_key=provisional_run_key, status="running")
         run_key: Optional[str] = None
 
         try:
@@ -883,7 +1004,8 @@ async def _execute_run_job(
             resolved_run_id, resolved_ticker, resolved_date_label = _parse_run_key(
                 effective_run_key
             )
-            services.store.upsert_run(
+            _upsert_run_record(
+                services=services,
                 run_key=effective_run_key,
                 user_id=auth.user_id,
                 tenant_id=auth.tenant_id,
@@ -897,7 +1019,8 @@ async def _execute_run_job(
                     "attempts": attempts,
                 },
             )
-            services.store.update_job(
+            _update_job_record(
+                services=services,
                 job_id=job_id,
                 status="completed",
                 result=result if isinstance(result, dict) else {"result": result},
@@ -908,18 +1031,32 @@ async def _execute_run_job(
             error = _error_text(exc)
             should_retry = attempts < max_attempts and _should_retry_exception(exc)
             if should_retry:
-                services.store.update_run_status(
-                    run_key=provisional_run_key, status="queued"
+                _update_run_status(
+                    services=services,
+                    run_key=provisional_run_key,
+                    status="queued",
                 )
-                services.store.update_job(job_id=job_id, status="queued", error=error)
+                _update_job_record(
+                    services=services,
+                    job_id=job_id,
+                    status="queued",
+                    error=error,
+                )
                 await asyncio.sleep(
                     _retry_delay_seconds(services=services, attempt=attempts)
                 )
                 continue
-            services.store.update_run_status(
-                run_key=provisional_run_key, status="failed"
+            _update_run_status(
+                services=services,
+                run_key=provisional_run_key,
+                status="failed",
             )
-            services.store.update_job(job_id=job_id, status="failed", error=error)
+            _update_job_record(
+                services=services,
+                job_id=job_id,
+                status="failed",
+                error=error,
+            )
             return
 
 
@@ -933,7 +1070,7 @@ async def _execute_adaptive_tuner_job(
 ) -> None:
     request_obj = AdaptiveTunerRequest(**request_payload)
     while True:
-        attempts, max_attempts = services.store.begin_job_attempt(job_id=job_id)
+        attempts, max_attempts = _begin_job_attempt(services=services, job_id=job_id)
         try:
             custom = getattr(api_services, "v2_run_adaptive_tuner", None)
             if callable(custom):
@@ -943,7 +1080,8 @@ async def _execute_adaptive_tuner_job(
                     request_obj,
                     api_services.build_adaptive_tuner_deps(),
                 )
-            services.store.update_job(
+            _update_job_record(
+                services=services,
                 job_id=job_id,
                 status="completed",
                 result=result if isinstance(result, dict) else {"result": result},
@@ -953,12 +1091,22 @@ async def _execute_adaptive_tuner_job(
             error = _error_text(exc)
             should_retry = attempts < max_attempts and _should_retry_exception(exc)
             if should_retry:
-                services.store.update_job(job_id=job_id, status="queued", error=error)
+                _update_job_record(
+                    services=services,
+                    job_id=job_id,
+                    status="queued",
+                    error=error,
+                )
                 await asyncio.sleep(
                     _retry_delay_seconds(services=services, attempt=attempts)
                 )
                 continue
-            services.store.update_job(job_id=job_id, status="failed", error=error)
+            _update_job_record(
+                services=services,
+                job_id=job_id,
+                status="failed",
+                error=error,
+            )
             return
 
 
@@ -974,7 +1122,7 @@ async def _execute_download_job(
     ticker = str(req.ticker or "").upper().strip()
 
     while True:
-        attempts, max_attempts = services.store.begin_job_attempt(job_id=job_id)
+        attempts, max_attempts = _begin_job_attempt(services=services, job_id=job_id)
         try:
             custom = getattr(api_services, "v2_run_download", None)
             if callable(custom):
@@ -1015,7 +1163,8 @@ async def _execute_download_job(
                         "ticker": ticker,
                         "schema": req.data_schema,
                     }
-            services.store.update_job(
+            _update_job_record(
+                services=services,
                 job_id=job_id,
                 status="completed",
                 result=result if isinstance(result, dict) else {"result": result},
@@ -1025,12 +1174,22 @@ async def _execute_download_job(
             error = _error_text(exc)
             should_retry = attempts < max_attempts and _should_retry_exception(exc)
             if should_retry:
-                services.store.update_job(job_id=job_id, status="queued", error=error)
+                _update_job_record(
+                    services=services,
+                    job_id=job_id,
+                    status="queued",
+                    error=error,
+                )
                 await asyncio.sleep(
                     _retry_delay_seconds(services=services, attempt=attempts)
                 )
                 continue
-            services.store.update_job(job_id=job_id, status="failed", error=error)
+            _update_job_record(
+                services=services,
+                job_id=job_id,
+                status="failed",
+                error=error,
+            )
             return
 
 
@@ -1766,7 +1925,8 @@ async def v2_create_run(
     body["strategy_api_url"] = resolved_strategy_url
 
     job_id = f"job_{uuid4().hex}"
-    services.store.create_job(
+    _create_job_record(
+        services=services,
         job_id=job_id,
         user_id=auth.user_id,
         tenant_id=auth.tenant_id,
@@ -1776,7 +1936,8 @@ async def v2_create_run(
         idempotency_key=idempotency_key,
         max_attempts=_resolve_job_max_attempts(services=services, job_type="run"),
     )
-    services.store.upsert_run(
+    _upsert_run_record(
+        services=services,
         run_key=provisional_run_key,
         user_id=auth.user_id,
         tenant_id=auth.tenant_id,
@@ -1875,7 +2036,8 @@ async def v2_run_adaptive_tuner(
     body["strategy_api_url"] = resolved_strategy_url
 
     job_id = f"job_{uuid4().hex}"
-    services.store.create_job(
+    _create_job_record(
+        services=services,
         job_id=job_id,
         user_id=auth.user_id,
         tenant_id=auth.tenant_id,
@@ -1965,7 +2127,8 @@ async def v2_download_data(
 
     body = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
     job_id = f"job_{uuid4().hex}"
-    services.store.create_job(
+    _create_job_record(
+        services=services,
         job_id=job_id,
         user_id=auth.user_id,
         tenant_id=auth.tenant_id,

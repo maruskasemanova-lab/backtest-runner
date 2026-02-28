@@ -38,6 +38,7 @@ from src.services.saas_query_utils import (
 )
 from src.services.saas_supabase_store import (
     SupabaseRunReportsStore,
+    SupabaseRunStateMirror,
     SupabaseStoreRequestError,
     SupabaseUserSettingsStore,
 )
@@ -74,6 +75,25 @@ class RunReportsStore(Protocol):
         *,
         limit: int = 300,
     ) -> list[Dict[str, Any]]: ...
+
+
+class RunStateMirror(Protocol):
+    def upsert_job_record(self, *, job: Dict[str, Any]) -> None: ...
+
+    def upsert_run_record(
+        self,
+        *,
+        run_key: str,
+        user_id: str,
+        tenant_id: str,
+        run_id: str,
+        ticker: str,
+        date_label: str,
+        status: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None: ...
+
+    def update_run_status(self, *, run_key: str, status: str) -> None: ...
 
 
 class SaaSStateStore:
@@ -1295,6 +1315,7 @@ class V2Services:
     ads_provider: str
     ads_placements: list[str]
     user_settings_store: Optional[UserSettingsStore] = None
+    run_state_mirror: Optional[RunStateMirror] = None
     job_semaphore: Any = None
     max_queue_backlog: int = 200
     default_job_max_attempts: int = 2
@@ -1307,8 +1328,10 @@ class V2Services:
 
 __all__ = [
     "RunReportsStore",
+    "RunStateMirror",
     "SaaSStateStore",
     "SupabaseRunReportsStore",
+    "SupabaseRunStateMirror",
     "SupabaseStoreRequestError",
     "SupabaseUserSettingsStore",
     "UserSettingsStore",

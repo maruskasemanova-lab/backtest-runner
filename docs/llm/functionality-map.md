@@ -40,6 +40,7 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 16. Frontend can persist user-scoped UI draft settings (for example run ticker/date/profile draft) via `/api/v2/user/settings` (`GET`/`PUT`) when authenticated; backend stores them in SQLite by default or Supabase Postgres when external settings adapter is enabled.
 17. Optional remote market-data manifest (`BACKTEST_REMOTE_MANIFEST_URL`) can hydrate catalog entries from object storage (e.g. R2) via `https://...` or `s3://...`; remote files are pulled lazily to `BACKTEST_REMOTE_CACHE_DIR` when selected for run data resolution.
 18. Run-report history is store-backed in both prod and local runtimes: Supabase `run_summaries` when configured, otherwise local SQLite `run_summaries` (no filesystem `reports/` fallback).
+19. Optional v2 run-state mirror (`BACKTEST_SUPABASE_RUN_STATE_MIRROR_ENABLED=1`) mirrors queued/running/completed job state into Supabase `run_jobs` and `runs`; frontend clients can use Supabase Realtime on those tables while the local SQLite queue remains the worker authority.
 
 ## Session And State Model
 

@@ -37,6 +37,7 @@ DB decision (cheapest practical):
    - `SUPABASE_JWT_SECRET=<supabase-jwt-secret>`
    - `DATABENTO_API_KEY=<key>`
    - `BACKTEST_SUPABASE_USER_SETTINGS_ENABLED=1`
+   - `BACKTEST_SUPABASE_RUN_STATE_MIRROR_ENABLED=1`
    - `BACKTEST_SUPABASE_URL=https://<your-project-ref>.supabase.co`
    - `BACKTEST_SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-secret>`
 
@@ -88,6 +89,7 @@ Use Supabase for JWT/Auth + Postgres project bootstrap:
    - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/db/supabase/001_initial_saas.sql`
    - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/db/supabase/002_adaptive_and_diagnostics.sql`
    - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/db/supabase/004_user_settings.sql`
+   - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/db/supabase/005_run_jobs_retry_metadata.sql`
 3. Put JWT secret in backend env:
    - `SUPABASE_JWT_SECRET=<supabase-jwt-secret>`
 4. Do not expose service role key to frontend (`VITE_*` env). Keep it backend-only.
@@ -99,6 +101,7 @@ Use Supabase for JWT/Auth + Postgres project bootstrap:
 6. In `Authentication -> Providers -> Google`, enable provider and set OAuth client credentials.
    - Google Cloud OAuth redirect URI must be:
      - `https://<your-project-ref>.supabase.co/auth/v1/callback`
+7. If you want frontend push updates instead of polling for v2 job state, enable Realtime on `public.run_jobs`/`public.runs` and subscribe from the client with the authenticated Supabase JWT; the backend mirror keeps those rows in sync when `BACKTEST_SUPABASE_RUN_STATE_MIRROR_ENABLED=1`.
 
 ## 5. Minimal smoke check
 

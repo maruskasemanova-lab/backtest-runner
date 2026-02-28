@@ -17,9 +17,7 @@ class SupabaseStoreRequestError(RuntimeError):
         self.status_code = int(status_code)
         self.body = str(body or "")
         snippet = self.body.strip()[:400]
-        super().__init__(
-            f"Supabase user_settings request failed [{self.status_code}]: {snippet}"
-        )
+        super().__init__(f"Supabase store request failed [{self.status_code}]: {snippet}")
 
 
 class SupabaseUserSettingsStore:
@@ -583,8 +581,257 @@ class SupabaseRunReportsStore:
         return payload_rows
 
 
+class SupabaseRunStateMirror:
+    def __init__(
+        self,
+        *,
+        supabase_url: str,
+        service_role_key: str,
+        jobs_table_name: str = "run_jobs",
+        runs_table_name: str = "runs",
+        timeout_seconds: float = 8.0,
+    ):
+        base_url = str(supabase_url or "").strip().rstrip("/")
+        api_key = str(service_role_key or "").strip()
+        if not base_url:
+            raise ValueError("supabase_url is required")
+        if not api_key:
+            raise ValueError("service_role_key is required")
+        safe_jobs_table = str(jobs_table_name or "run_jobs").strip() or "run_jobs"
+        safe_runs_table = str(runs_table_name or "runs").strip() or "runs"
+        self._jobs_table_name = safe_jobs_table
+        self._runs_table_name = safe_runs_table
+        self._jobs_endpoint = f"{base_url}/rest/v1/{safe_jobs_table}"
+        self._runs_endpoint = f"{base_url}/rest/v1/{safe_runs_table}"
+        self._users_endpoint = f"{base_url}/rest/v1/users"
+        self._tenants_endpoint = f"{base_url}/rest/v1/tenants"
+        self._api_key = api_key
+        self._timeout = max(1.0, float(timeout_seconds))
+
+    def _headers(self, *, prefer: Optional[str] = None) -> Dict[str, str]:
+        headers = {
+            "apikey": self._api_key,
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        if prefer:
+            headers["Prefer"] = prefer
+        return headers
+
+    def _request_json(
+        self,
+        *,
+        method: str,
+        params: Optional[Dict[str, str]] = None,
+        payload: Optional[Any] = None,
+        prefer: Optional[str] = None,
+        endpoint: str,
+    ) -> Any:
+        response = requests.request(
+            method=str(method or "GET").strip().upper(),
+            url=endpoint,
+            params=params or None,
+            json=payload,
+            headers=self._headers(prefer=prefer),
+            timeout=self._timeout,
+        )
+        if response.status_code >= 400:
+            raise SupabaseStoreRequestError(
+                status_code=response.status_code,
+                body=str(response.text or ""),
+            )
+        text = str(response.text or "").strip()
+        if not text:
+            return None
+        return response.json()
+
+    def _coerce_tenant_uuid(self, *, tenant_id: str, user_id: str) -> str:
+        normalized = str(tenant_id or "").strip()
+        if normalized:
+            try:
+                return str(UUID(normalized))
+            except ValueError:
+                pass
+        seed = normalized or str(user_id or "").strip()
+        return str(uuid5(NAMESPACE_URL, f"tenant:{seed}"))
+
+    def _resolve_existing_tenant_uuid(self, *, user_id: str) -> Optional[str]:
+        rows = self._request_json(
+            method="GET",
+            endpoint=self._users_endpoint,
+            params={
+                "select": "tenant_id",
+                "id": f"eq.{user_id}",
+                "limit": "1",
+            },
+        )
+        if not isinstance(rows, list) or not rows:
+            return None
+        row = rows[0] if isinstance(rows[0], dict) else {}
+        tenant_id = str(row.get("tenant_id") or "").strip()
+        if not tenant_id:
+            return None
+        try:
+            return str(UUID(tenant_id))
+        except ValueError:
+            return None
+
+    def _ensure_identity(self, *, user_id: str, tenant_id: str) -> str:
+        tenant_uuid = self._resolve_existing_tenant_uuid(user_id=user_id)
+        if not tenant_uuid:
+            tenant_uuid = self._coerce_tenant_uuid(tenant_id=tenant_id, user_id=user_id)
+        now = utc_now_iso()
+
+        self._request_json(
+            method="POST",
+            endpoint=self._tenants_endpoint,
+            params={
+                "on_conflict": "id",
+                "select": "id",
+            },
+            payload=[
+                {
+                    "id": tenant_uuid,
+                    "owner_user_id": user_id,
+                    "name": f"tenant_{user_id[:24]}",
+                    "updated_at": now,
+                }
+            ],
+            prefer="resolution=merge-duplicates,return=representation",
+        )
+        self._request_json(
+            method="POST",
+            endpoint=self._users_endpoint,
+            params={
+                "on_conflict": "id",
+                "select": "id,tenant_id",
+            },
+            payload=[
+                {
+                    "id": user_id,
+                    "tenant_id": tenant_uuid,
+                    "role": "free",
+                    "updated_at": now,
+                }
+            ],
+            prefer="resolution=merge-duplicates,return=representation",
+        )
+        return tenant_uuid
+
+    def upsert_job_record(self, *, job: Dict[str, Any]) -> None:
+        normalized_job_id = str(job.get("job_id") or "").strip()
+        user_id = str(job.get("user_id") or "").strip()
+        if not normalized_job_id:
+            raise ValueError("job.job_id is required")
+        if not user_id:
+            raise ValueError("job.user_id is required")
+        tenant_uuid = self._ensure_identity(
+            user_id=user_id,
+            tenant_id=str(job.get("tenant_id") or "").strip(),
+        )
+        created_at = str(job.get("created_at") or "").strip() or utc_now_iso()
+
+        self._request_json(
+            method="POST",
+            endpoint=self._jobs_endpoint,
+            params={
+                "on_conflict": "id",
+                "select": "id,updated_at",
+            },
+            payload=[
+                {
+                    "id": normalized_job_id,
+                    "tenant_id": tenant_uuid,
+                    "user_id": user_id,
+                    "job_type": str(job.get("job_type") or "").strip() or "run",
+                    "status": str(job.get("status") or "").strip() or "queued",
+                    "payload": (
+                        job.get("payload") if isinstance(job.get("payload"), dict) else {}
+                    ),
+                    "result": (
+                        job.get("result") if isinstance(job.get("result"), dict) else None
+                    ),
+                    "error": str(job.get("error") or "").strip() or None,
+                    "run_key": str(job.get("run_key") or "").strip() or None,
+                    "idempotency_key": (
+                        str(job.get("idempotency_key") or "").strip() or None
+                    ),
+                    "attempts": max(0, int(job.get("attempts") or 0)),
+                    "max_attempts": max(1, int(job.get("max_attempts") or 1)),
+                    "created_at": created_at,
+                    "updated_at": str(job.get("updated_at") or "").strip()
+                    or utc_now_iso(),
+                }
+            ],
+            prefer="resolution=merge-duplicates,return=representation",
+        )
+
+    def upsert_run_record(
+        self,
+        *,
+        run_key: str,
+        user_id: str,
+        tenant_id: str,
+        run_id: str,
+        ticker: str,
+        date_label: str,
+        status: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        normalized_run_key = str(run_key or "").strip()
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_run_key:
+            raise ValueError("run_key is required")
+        if not normalized_user_id:
+            raise ValueError("user_id is required")
+        tenant_uuid = self._ensure_identity(
+            user_id=normalized_user_id,
+            tenant_id=str(tenant_id or "").strip(),
+        )
+        self._request_json(
+            method="POST",
+            endpoint=self._runs_endpoint,
+            params={
+                "on_conflict": "run_key",
+                "select": "run_key,updated_at",
+            },
+            payload=[
+                {
+                    "run_key": normalized_run_key,
+                    "tenant_id": tenant_uuid,
+                    "user_id": normalized_user_id,
+                    "run_id": str(run_id or "").strip(),
+                    "ticker": str(ticker or "").strip().upper(),
+                    "date_label": str(date_label or "").strip(),
+                    "status": str(status or "").strip().lower() or "queued",
+                    "metadata": metadata if isinstance(metadata, dict) else {},
+                    "updated_at": utc_now_iso(),
+                }
+            ],
+            prefer="resolution=merge-duplicates,return=representation",
+        )
+
+    def update_run_status(self, *, run_key: str, status: str) -> None:
+        normalized_run_key = str(run_key or "").strip()
+        if not normalized_run_key:
+            raise ValueError("run_key is required")
+        self._request_json(
+            method="PATCH",
+            endpoint=self._runs_endpoint,
+            params={
+                "run_key": f"eq.{normalized_run_key}",
+            },
+            payload={
+                "status": str(status or "").strip().lower() or "queued",
+                "updated_at": utc_now_iso(),
+            },
+            prefer="return=representation",
+        )
+
+
 __all__ = [
     "SupabaseRunReportsStore",
+    "SupabaseRunStateMirror",
     "SupabaseStoreRequestError",
     "SupabaseUserSettingsStore",
 ]

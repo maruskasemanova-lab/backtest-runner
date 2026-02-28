@@ -11,6 +11,7 @@ from src.observability.runtime_metrics import RuntimeMetrics
 from src.services.saas_primitives import InMemorySlidingWindowLimiter
 from src.services.saas_supabase_store import (
     SupabaseRunReportsStore,
+    SupabaseRunStateMirror,
     SupabaseUserSettingsStore,
 )
 from src.services.saas_service import (
@@ -27,6 +28,7 @@ class SaaSBootstrapResult:
     runtime_metrics: RuntimeMetrics
     supabase_user_settings_store: Optional[SupabaseUserSettingsStore]
     supabase_run_reports_store: Optional[SupabaseRunReportsStore]
+    supabase_run_state_mirror: Optional[SupabaseRunStateMirror]
 
 
 def safe_env_int(name: str, default: int, *, min_value: int = 1) -> int:
@@ -192,6 +194,60 @@ def build_supabase_run_reports_store(
         )
         return None
 
+
+def build_supabase_run_state_mirror(
+    *,
+    logger: Any,
+) -> Optional[SupabaseRunStateMirror]:
+    enabled = parse_bool_value(
+        os.getenv("BACKTEST_SUPABASE_RUN_STATE_MIRROR_ENABLED"),
+        False,
+    )
+    if not enabled:
+        return None
+
+    supabase_url = str(
+        os.getenv("BACKTEST_SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "",
+    ).strip()
+    service_role_key = str(
+        os.getenv("BACKTEST_SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or "",
+    ).strip()
+    jobs_table_name = (
+        str(os.getenv("BACKTEST_SUPABASE_RUN_JOBS_TABLE") or "run_jobs").strip()
+        or "run_jobs"
+    )
+    runs_table_name = (
+        str(os.getenv("BACKTEST_SUPABASE_RUNS_TABLE") or "runs").strip() or "runs"
+    )
+    timeout_seconds = safe_env_float(
+        "BACKTEST_SUPABASE_RUN_STATE_TIMEOUT_SEC",
+        8.0,
+        min_value=1.0,
+    )
+
+    if not supabase_url or not service_role_key:
+        logger.warning(
+            "Supabase run-state mirror enabled but missing url/service key; continuing without external job mirror."
+        )
+        return None
+
+    try:
+        return SupabaseRunStateMirror(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            jobs_table_name=jobs_table_name,
+            runs_table_name=runs_table_name,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize Supabase run-state mirror; continuing without external job mirror: %s",
+            exc,
+        )
+        return None
+
     try:
         return SupabaseRunReportsStore(
             supabase_url=supabase_url,
@@ -244,6 +300,7 @@ def bootstrap_saas_runtime(*, logger: Any, project_root: Path) -> SaaSBootstrapR
         project_root=project_root,
         logger=logger,
     )
+    supabase_run_state_mirror = build_supabase_run_state_mirror(logger=logger)
     saas_state_store = SaaSStateStore(
         os.getenv("BACKTEST_SAAS_DB_PATH", "data/saas_state.db")
     )
@@ -273,6 +330,7 @@ def bootstrap_saas_runtime(*, logger: Any, project_root: Path) -> SaaSBootstrapR
             if item.strip()
         ],
         user_settings_store=supabase_user_settings_store,
+        run_state_mirror=supabase_run_state_mirror,
         job_semaphore=asyncio.Semaphore(v2_worker_concurrency),
         max_queue_backlog=v2_max_queue_backlog,
         default_job_max_attempts=v2_default_job_max_attempts,
@@ -291,4 +349,5 @@ def bootstrap_saas_runtime(*, logger: Any, project_root: Path) -> SaaSBootstrapR
         runtime_metrics=runtime_metrics,
         supabase_user_settings_store=supabase_user_settings_store,
         supabase_run_reports_store=supabase_run_reports_store,
+        supabase_run_state_mirror=supabase_run_state_mirror,
     )

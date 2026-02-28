@@ -39,6 +39,7 @@ def _build_client(
     start_run_impl=None,
     max_queue_backlog: int = 200,
     user_settings_store=None,
+    run_state_mirror=None,
 ):
     store = SaaSStateStore(str(tmp_path / "saas_state.db"))
     limiter = InMemorySlidingWindowLimiter(default_window_seconds=60)
@@ -75,6 +76,7 @@ def _build_client(
         ads_provider="test",
         ads_placements=["dashboard"],
         user_settings_store=user_settings_store,
+        run_state_mirror=run_state_mirror,
         max_queue_backlog=max_queue_backlog,
         job_retry_base_seconds=0.01,
         job_retry_max_delay_seconds=0.02,
@@ -366,6 +368,69 @@ def test_v2_run_retries_transient_failure(tmp_path, monkeypatch):
     assert final_payload["status"] == "completed"
     assert final_payload["attempts"] == 2
     assert len(calls["run_urls"]) == 2
+
+
+def test_v2_run_mirrors_job_and_run_state_updates(tmp_path, monkeypatch):
+    class _StubRunStateMirror:
+        def __init__(self):
+            self.job_records = []
+            self.run_records = []
+            self.run_status_updates = []
+
+        def upsert_job_record(self, *, job):
+            self.job_records.append(dict(job))
+
+        def upsert_run_record(self, **kwargs):
+            self.run_records.append(dict(kwargs))
+
+        def update_run_status(self, *, run_key: str, status: str):
+            self.run_status_updates.append({"run_key": run_key, "status": status})
+
+    mirror = _StubRunStateMirror()
+    client, _calls = _build_client(tmp_path, run_state_mirror=mirror)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+
+    token = _make_jwt(
+        {
+            "sub": "user-mirror",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+    response = client.post(
+        "/api/v2/runs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "run_id": "mirror-run",
+            "ticker": "MU",
+            "date": "2026-02-03",
+            "strategy_api_url": "http://localhost:8001",
+        },
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    run_key = response.json()["run_key"]
+
+    for _ in range(40):
+        polled = client.get(
+            f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert polled.status_code == 200
+        if polled.json()["job"]["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.05)
+
+    job_statuses = [str(row.get("status") or "") for row in mirror.job_records]
+    assert job_statuses
+    assert job_statuses[0] == "queued"
+    assert "running" in job_statuses
+    assert job_statuses[-1] == "completed"
+
+    run_statuses = [str(row.get("status") or "") for row in mirror.run_records]
+    assert "queued" in run_statuses
+    assert "ready" in run_statuses
+    assert {"run_key": run_key, "status": "running"} in mirror.run_status_updates
 
 
 def test_v2_backlog_limit_blocks_new_heavy_jobs(tmp_path, monkeypatch):

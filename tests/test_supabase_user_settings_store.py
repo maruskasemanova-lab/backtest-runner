@@ -5,6 +5,7 @@ from uuid import UUID
 from src.services.saas_service import (
     SaaSStateStore,
     SupabaseRunReportsStore,
+    SupabaseRunStateMirror,
     SupabaseUserSettingsStore,
 )
 
@@ -292,6 +293,137 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
     created_user = state["users"]["runner-user"]
     assert created_user["tenant_id"]
     UUID(created_user["tenant_id"])
+
+
+def test_supabase_run_state_mirror_upserts_job_and_run(monkeypatch):
+    state = {
+        "tenants": {},
+        "users": {},
+        "run_jobs": {},
+        "runs": {},
+    }
+
+    def _fake_request(
+        method, url, params=None, json=None, headers=None, timeout=None, **kwargs
+    ):
+        method = str(method or "").upper()
+        path = str(url or "")
+        _ = headers, timeout, kwargs
+
+        if path.endswith("/users"):
+            if method == "GET":
+                user_id = _eq(params, "id")
+                row = state["users"].get(user_id)
+                return _StubResponse(
+                    200, [{"tenant_id": row["tenant_id"]}] if row else []
+                )
+            if method == "POST":
+                rows = []
+                for row in json or []:
+                    user_id = str(row.get("id") or "").strip()
+                    merged = dict(state["users"].get(user_id) or {})
+                    merged.update(row or {})
+                    state["users"][user_id] = merged
+                    rows.append({"id": user_id, "tenant_id": merged.get("tenant_id")})
+                return _StubResponse(201, rows)
+
+        if path.endswith("/tenants"):
+            if method == "POST":
+                rows = []
+                for row in json or []:
+                    tenant_id = str(row.get("id") or "").strip()
+                    merged = dict(state["tenants"].get(tenant_id) or {})
+                    merged.update(row or {})
+                    state["tenants"][tenant_id] = merged
+                    rows.append({"id": tenant_id})
+                return _StubResponse(201, rows)
+
+        if path.endswith("/run_jobs"):
+            if method == "POST":
+                rows = []
+                for row in json or []:
+                    job_id = str(row.get("id") or "").strip()
+                    merged = dict(state["run_jobs"].get(job_id) or {})
+                    merged.update(row or {})
+                    state["run_jobs"][job_id] = merged
+                    rows.append({"id": job_id, "updated_at": merged.get("updated_at")})
+                return _StubResponse(201, rows)
+
+        if path.endswith("/runs"):
+            if method == "POST":
+                rows = []
+                for row in json or []:
+                    run_key = str(row.get("run_key") or "").strip()
+                    merged = dict(state["runs"].get(run_key) or {})
+                    merged.update(row or {})
+                    state["runs"][run_key] = merged
+                    rows.append(
+                        {"run_key": run_key, "updated_at": merged.get("updated_at")}
+                    )
+                return _StubResponse(201, rows)
+            if method == "PATCH":
+                run_key = _eq(params, "run_key")
+                merged = dict(state["runs"].get(run_key) or {})
+                merged.update(json or {})
+                state["runs"][run_key] = merged
+                return _StubResponse(
+                    200, [{"run_key": run_key, "updated_at": merged.get("updated_at")}]
+                )
+
+        raise AssertionError(
+            f"Unexpected request: {method} {url} params={params} json={json}"
+        )
+
+    monkeypatch.setattr(
+        "src.services.saas_supabase_store.requests.request",
+        _fake_request,
+    )
+
+    mirror = SupabaseRunStateMirror(
+        supabase_url="https://example.supabase.co",
+        service_role_key="service-role-key",
+    )
+
+    mirror.upsert_job_record(
+        job={
+            "job_id": "job-1",
+            "user_id": "user-c",
+            "tenant_id": "tenant_user-c",
+            "job_type": "run",
+            "status": "queued",
+            "payload": {"request": {"ticker": "MU"}},
+            "attempts": 0,
+            "max_attempts": 2,
+            "idempotency_key": "idem-1",
+            "created_at": "2026-02-28T12:00:00Z",
+            "updated_at": "2026-02-28T12:00:00Z",
+        }
+    )
+    mirror.upsert_run_record(
+        run_key="run-1:MU:2026-02-28",
+        user_id="user-c",
+        tenant_id="tenant_user-c",
+        run_id="run-1",
+        ticker="MU",
+        date_label="2026-02-28",
+        status="queued",
+        metadata={"job_id": "job-1"},
+    )
+    mirror.update_run_status(run_key="run-1:MU:2026-02-28", status="running")
+
+    created_user = state["users"]["user-c"]
+    assert created_user["tenant_id"]
+    UUID(created_user["tenant_id"])
+
+    job_row = state["run_jobs"]["job-1"]
+    assert job_row["idempotency_key"] == "idem-1"
+    assert job_row["attempts"] == 0
+    assert job_row["max_attempts"] == 2
+    assert job_row["payload"]["request"]["ticker"] == "MU"
+
+    run_row = state["runs"]["run-1:MU:2026-02-28"]
+    assert run_row["status"] == "running"
+    assert run_row["metadata"]["job_id"] == "job-1"
 
 
 def test_sqlite_run_reports_store_upsert_and_list(tmp_path):

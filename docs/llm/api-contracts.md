@@ -79,6 +79,7 @@ Behavioral notes:
 - non-admin callers cannot steer runner egress: `strategy_api_url` is forced to internal URL (`BACKTEST_INTERNAL_STRATEGY_API_URL`).
 - admin callers may override `strategy_api_url` only when URL is in allowlist (`BACKTEST_STRATEGY_API_ALLOWLIST`).
 - `GET /api/v2/jobs/{job_id}` includes `attempts`, `max_attempts`, and `idempotency_key` in the job payload.
+- when `BACKTEST_SUPABASE_RUN_STATE_MIRROR_ENABLED=1`, the same job lifecycle is mirrored best-effort into Supabase `run_jobs`/`runs` for Realtime subscribers; API responses and SQLite dispatch semantics stay unchanged.
 
 ### `POST /api/v2/adaptive-tuner/run` / `POST /api/v2/data/download`
 
