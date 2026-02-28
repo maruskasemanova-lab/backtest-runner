@@ -21,9 +21,9 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 1271 | `97fd90d 2026-02-25` |
-| `../market_regime_detection/src/api_models.py` | yes | 266 | `562a066 2026-02-25` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 1382 | `1f7a1f5 2026-02-25` |
+| `../market_regime_detection/api_server.py` | yes | 987 | `97fd90d 2026-02-25` |
+| `../market_regime_detection/src/api_models.py` | yes | 278 | `562a066 2026-02-25` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 1034 | `1f7a1f5 2026-02-25` |
 | `../market_regime_detection/src/intraday_levels.py` | yes | 814 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 41 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/trading_orchestrator.py` | yes | 473 | `562a066 2026-02-25` |
@@ -71,18 +71,18 @@ Own regime detection, signal generation, position management, learning component
 ## Key Symbols
 
 ### `../market_regime_detection/api_server.py`
-- `function` `_apply_cors_headers_for_error` (line 124)
-- `async_function` `_internal_api_token_guard` (line 148)
-- `async_function` `root` (line 182)
-- `async_function` `get_state` (line 187)
-- `async_function` `get_regime` (line 193)
-- `async_function` `get_strategies` (line 213)
-- `async_function` `toggle_strategy` (line 229)
-- `async_function` `update_strategy` (line 249)
-- `async_function` `get_signals` (line 368)
-- `async_function` `get_positions` (line 378)
-- `async_function` `get_trades` (line 389)
-- `async_function` `get_performance` (line 399)
+- `function` `_apply_cors_headers_for_error` (line 128)
+- `async_function` `_internal_api_token_guard` (line 152)
+- `async_function` `root` (line 186)
+- `async_function` `get_state` (line 191)
+- `async_function` `get_regime` (line 197)
+- `async_function` `get_strategies` (line 217)
+- `async_function` `toggle_strategy` (line 233)
+- `async_function` `update_strategy` (line 253)
+- `async_function` `get_signals` (line 284)
+- `async_function` `get_positions` (line 294)
+- `async_function` `get_trades` (line 305)
+- `async_function` `get_performance` (line 315)
 - ... 27 more symbols
 
 ### `../market_regime_detection/src/api_models.py`
@@ -94,7 +94,7 @@ Own regime detection, signal generation, position management, learning component
 - `class` `TradingConfig` (line 98)
 
 ### `../market_regime_detection/src/day_trading_manager.py`
-- `class` `DayTradingManager` (line 90)
+- `class` `DayTradingManager` (line 92)
 
 ### `../market_regime_detection/src/intraday_levels.py`
 - `function` `_level_tolerance` (line 16)

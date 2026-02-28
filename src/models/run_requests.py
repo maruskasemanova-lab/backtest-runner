@@ -195,7 +195,7 @@ class StartRunRequest(BaseModel):
     # Context-aware risk: dynamically adjust SL/TP based on intraday levels
     context_aware_risk_enabled: bool = False
     context_risk_sl_buffer_pct: float = 0.10
-    context_risk_min_sl_pct: float = 0.30
+    context_risk_min_sl_pct: float = 0.50
     context_risk_min_room_pct: float = 0.08
     context_risk_min_effective_rr: float = 0.5
     context_risk_trailing_tighten_zone: float = 0.2

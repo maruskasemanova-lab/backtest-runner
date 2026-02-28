@@ -1,117 +1,46 @@
 from __future__ import annotations
 
-import gzip
-import hashlib
-import json
 import os
 import sqlite3
 import threading
-import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Protocol, Tuple
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-import requests
-
-
-@dataclass(frozen=True)
-class PlanLimits:
-    plan_tier: str
-    concurrent_runs: int
-    max_range_days: int
-    req_per_min: int
-    retention_days: int
-    ads_enabled: bool
-
-
-FREE_LIMITS = PlanLimits(
-    plan_tier="free",
-    concurrent_runs=1,
-    max_range_days=5,
-    req_per_min=30,
-    retention_days=7,
-    ads_enabled=True,
+from src.services.saas_adaptive_profile_utils import (
+    build_adaptive_strategy_profile_record,
+    build_list_adaptive_strategy_profiles_query,
+    normalize_profile_scope as normalize_adaptive_profile_scope,
 )
-
-PREMIUM_LIMITS = PlanLimits(
-    plan_tier="premium",
-    concurrent_runs=5,
-    max_range_days=60,
-    req_per_min=300,
-    retention_days=180,
-    ads_enabled=False,
+from src.services.saas_primitives import (
+    InMemorySlidingWindowLimiter,
+    PlanLimits,
+    PLAN_LIMITS,
+    normalize_run_summary_payload,
+    normalize_user_settings_payload,
+    resolve_plan_limits,
+    utc_day_key,
+    utc_now_iso,
 )
-
-ADMIN_LIMITS = PlanLimits(
-    plan_tier="admin",
-    concurrent_runs=20,
-    max_range_days=365,
-    req_per_min=2000,
-    retention_days=365,
-    ads_enabled=False,
+from src.services.saas_plan_resolution_utils import resolve_effective_plan
+from src.services.saas_payload_utils import (
+    build_diagnostic_payload_blob as payload_build_diagnostic_payload_blob,
+    decode_diagnostic_payload_blob as payload_decode_diagnostic_payload_blob,
+    decode_json_object as payload_decode_json_object,
+    json_dumps_compact as payload_json_dumps_compact,
+    row_to_adaptive_profile_payload as payload_row_to_adaptive_profile_payload,
+    row_to_job_payload as payload_row_to_job_payload,
 )
-
-PLAN_LIMITS: Dict[str, PlanLimits] = {
-    "free": FREE_LIMITS,
-    "premium": PREMIUM_LIMITS,
-    "admin": ADMIN_LIMITS,
-}
-MAX_USER_SETTINGS_BYTES = 262_144
-
-
-def resolve_plan_limits(plan_tier: str) -> PlanLimits:
-    normalized = str(plan_tier or "free").strip().lower()
-    return PLAN_LIMITS.get(normalized, FREE_LIMITS)
-
-
-def utc_now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
-
-
-def utc_day_key(day: Optional[date] = None) -> str:
-    if isinstance(day, date):
-        return day.isoformat()
-    return datetime.now(tz=timezone.utc).date().isoformat()
-
-
-def parse_utc_datetime(value: Any) -> Optional[datetime]:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    normalized = raw.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        try:
-            as_float = float(raw)
-        except Exception:
-            return None
-        try:
-            return datetime.fromtimestamp(as_float, tz=timezone.utc)
-        except Exception:
-            return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def normalize_user_settings_payload(settings: Any) -> Dict[str, Any]:
-    if settings is None:
-        return {}
-    if not isinstance(settings, dict):
-        raise ValueError("settings must be a JSON object")
-    try:
-        serialized = json.dumps(settings, separators=(",", ":"), sort_keys=True)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("settings must be JSON-serializable") from exc
-    if len(serialized.encode("utf-8")) > MAX_USER_SETTINGS_BYTES:
-        raise ValueError(f"settings payload exceeds {MAX_USER_SETTINGS_BYTES} bytes")
-    parsed = json.loads(serialized)
-    if not isinstance(parsed, dict):
-        raise ValueError("settings must be a JSON object")
-    return parsed
+from src.services.saas_query_utils import (
+    build_jobs_count_query,
+    build_run_keys_by_user_query,
+)
+from src.services.saas_supabase_store import (
+    SupabaseRunReportsStore,
+    SupabaseStoreRequestError,
+    SupabaseUserSettingsStore,
+)
 
 
 class UserSettingsStore(Protocol):
@@ -145,617 +74,6 @@ class RunReportsStore(Protocol):
         *,
         limit: int = 300,
     ) -> list[Dict[str, Any]]: ...
-
-
-class SupabaseStoreRequestError(RuntimeError):
-    def __init__(self, *, status_code: int, body: str):
-        self.status_code = int(status_code)
-        self.body = str(body or "")
-        snippet = self.body.strip()[:400]
-        super().__init__(
-            f"Supabase user_settings request failed [{self.status_code}]: {snippet}"
-        )
-
-
-def normalize_run_summary_payload(summary: Any) -> Dict[str, Any]:
-    if summary is None:
-        return {}
-    if not isinstance(summary, dict):
-        raise ValueError("run summary must be a JSON object")
-    try:
-        serialized = json.dumps(summary, separators=(",", ":"), default=str)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("run summary must be JSON-serializable") from exc
-    parsed = json.loads(serialized)
-    if not isinstance(parsed, dict):
-        raise ValueError("run summary must be a JSON object")
-    return parsed
-
-
-class SupabaseUserSettingsStore:
-    def __init__(
-        self,
-        *,
-        supabase_url: str,
-        service_role_key: str,
-        table_name: str = "user_settings",
-        timeout_seconds: float = 8.0,
-    ):
-        base_url = str(supabase_url or "").strip().rstrip("/")
-        api_key = str(service_role_key or "").strip()
-        if not base_url:
-            raise ValueError("supabase_url is required")
-        if not api_key:
-            raise ValueError("service_role_key is required")
-        safe_table = str(table_name or "user_settings").strip() or "user_settings"
-        self._base_url = base_url
-        self._table_name = safe_table
-        self._endpoint = f"{base_url}/rest/v1/{safe_table}"
-        self._run_summaries_endpoint = f"{base_url}/rest/v1/run_summaries"
-        self._users_endpoint = f"{base_url}/rest/v1/users"
-        self._tenants_endpoint = f"{base_url}/rest/v1/tenants"
-        self._api_key = api_key
-        self._timeout = max(1.0, float(timeout_seconds))
-        self._fallback_mode = False
-
-    def _headers(self, *, prefer: Optional[str] = None) -> Dict[str, str]:
-        headers = {
-            "apikey": self._api_key,
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        if prefer:
-            headers["Prefer"] = prefer
-        return headers
-
-    def _request_json(
-        self,
-        *,
-        method: str,
-        params: Optional[Dict[str, str]] = None,
-        payload: Optional[Any] = None,
-        prefer: Optional[str] = None,
-        endpoint: Optional[str] = None,
-    ) -> Any:
-        response = requests.request(
-            method=str(method or "GET").strip().upper(),
-            url=str(endpoint or self._endpoint),
-            params=params or None,
-            json=payload,
-            headers=self._headers(prefer=prefer),
-            timeout=self._timeout,
-        )
-        if response.status_code >= 400:
-            raise SupabaseStoreRequestError(
-                status_code=response.status_code,
-                body=str(response.text or ""),
-            )
-        text = str(response.text or "").strip()
-        if not text:
-            return None
-        parsed = response.json()
-        return parsed
-
-    def _is_missing_primary_table(self, exc: Exception) -> bool:
-        if not isinstance(exc, SupabaseStoreRequestError):
-            return False
-        if int(exc.status_code) != 404:
-            return False
-        body = str(exc.body or "").lower()
-        if "pgrst205" not in body:
-            return False
-        expected = f"public.{self._table_name.lower()}"
-        return expected in body
-
-    def _settings_run_key(self, user_id: str) -> str:
-        return f"__user_settings__:{str(user_id or '').strip()}"
-
-    def _coerce_tenant_uuid(self, *, tenant_id: str, user_id: str) -> str:
-        normalized = str(tenant_id or "").strip()
-        if normalized:
-            try:
-                return str(UUID(normalized))
-            except ValueError:
-                pass
-        seed = normalized or str(user_id or "").strip()
-        return str(uuid5(NAMESPACE_URL, f"tenant:{seed}"))
-
-    def _extract_settings_from_summary(self, summary: Any) -> Dict[str, Any]:
-        if isinstance(summary, dict):
-            if isinstance(summary.get("settings_json"), dict):
-                return normalize_user_settings_payload(summary.get("settings_json"))
-            return normalize_user_settings_payload(summary)
-        return {}
-
-    def _resolve_existing_tenant_uuid(self, *, user_id: str) -> Optional[str]:
-        rows = self._request_json(
-            method="GET",
-            endpoint=self._users_endpoint,
-            params={
-                "select": "tenant_id",
-                "id": f"eq.{user_id}",
-                "limit": "1",
-            },
-        )
-        if not isinstance(rows, list) or not rows:
-            return None
-        row = rows[0] if isinstance(rows[0], dict) else {}
-        tenant_id = str(row.get("tenant_id") or "").strip()
-        if not tenant_id:
-            return None
-        try:
-            return str(UUID(tenant_id))
-        except ValueError:
-            return None
-
-    def _ensure_identity(self, *, user_id: str, tenant_id: str) -> str:
-        tenant_uuid = self._resolve_existing_tenant_uuid(user_id=user_id)
-        if not tenant_uuid:
-            tenant_uuid = self._coerce_tenant_uuid(tenant_id=tenant_id, user_id=user_id)
-        now = utc_now_iso()
-
-        self._request_json(
-            method="POST",
-            endpoint=self._tenants_endpoint,
-            params={
-                "on_conflict": "id",
-                "select": "id",
-            },
-            payload=[
-                {
-                    "id": tenant_uuid,
-                    "owner_user_id": user_id,
-                    "name": f"tenant_{user_id[:24]}",
-                    "updated_at": now,
-                }
-            ],
-            prefer="resolution=merge-duplicates,return=representation",
-        )
-        self._request_json(
-            method="POST",
-            endpoint=self._users_endpoint,
-            params={
-                "on_conflict": "id",
-                "select": "id,tenant_id",
-            },
-            payload=[
-                {
-                    "id": user_id,
-                    "tenant_id": tenant_uuid,
-                    "role": "free",
-                    "updated_at": now,
-                }
-            ],
-            prefer="resolution=merge-duplicates,return=representation",
-        )
-        return tenant_uuid
-
-    def _get_user_settings_run_summary_fallback(
-        self, *, user_id: str
-    ) -> Dict[str, Any]:
-        run_key = self._settings_run_key(user_id)
-        rows = self._request_json(
-            method="GET",
-            endpoint=self._run_summaries_endpoint,
-            params={
-                "select": "summary",
-                "run_key": f"eq.{run_key}",
-                "user_id": f"eq.{user_id}",
-                "limit": "1",
-            },
-        )
-        if not isinstance(rows, list) or not rows:
-            return {}
-        row = rows[0] if isinstance(rows[0], dict) else {}
-        return self._extract_settings_from_summary(row.get("summary"))
-
-    def _upsert_user_settings_run_summary_fallback(
-        self,
-        *,
-        user_id: str,
-        tenant_id: str,
-        settings: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        normalized_settings = normalize_user_settings_payload(settings)
-        resolved_tenant_id = self._ensure_identity(user_id=user_id, tenant_id=tenant_id)
-        run_key = self._settings_run_key(user_id)
-
-        rows = self._request_json(
-            method="POST",
-            endpoint=self._run_summaries_endpoint,
-            params={
-                "on_conflict": "run_key",
-                "select": "summary",
-            },
-            payload=[
-                {
-                    "run_key": run_key,
-                    "tenant_id": resolved_tenant_id,
-                    "user_id": user_id,
-                    "summary": {
-                        "settings_json": normalized_settings,
-                    },
-                    "updated_at": utc_now_iso(),
-                }
-            ],
-            prefer="resolution=merge-duplicates,return=representation",
-        )
-        if isinstance(rows, list) and rows:
-            row = rows[0] if isinstance(rows[0], dict) else {}
-            return self._extract_settings_from_summary(row.get("summary"))
-        return normalized_settings
-
-    def get_user_settings(self, *, user_id: str) -> Dict[str, Any]:
-        normalized_user_id = str(user_id or "").strip()
-        if not normalized_user_id:
-            return {}
-        if self._fallback_mode:
-            return self._get_user_settings_run_summary_fallback(
-                user_id=normalized_user_id
-            )
-
-        try:
-            rows = self._request_json(
-                method="GET",
-                params={
-                    "select": "settings_json",
-                    "user_id": f"eq.{normalized_user_id}",
-                    "limit": "1",
-                },
-            )
-        except Exception as exc:
-            if self._is_missing_primary_table(exc):
-                self._fallback_mode = True
-                return self._get_user_settings_run_summary_fallback(
-                    user_id=normalized_user_id
-                )
-            raise
-        if not isinstance(rows, list) or not rows:
-            return {}
-        row = rows[0] if isinstance(rows[0], dict) else {}
-        return normalize_user_settings_payload(row.get("settings_json") or {})
-
-    def upsert_user_settings(
-        self,
-        *,
-        user_id: str,
-        tenant_id: str,
-        settings: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        normalized_user_id = str(user_id or "").strip()
-        if not normalized_user_id:
-            raise ValueError("user_id is required")
-        normalized_tenant_id = (
-            str(tenant_id or "").strip() or f"tenant_{normalized_user_id}"
-        )
-        normalized_settings = normalize_user_settings_payload(settings)
-        if self._fallback_mode:
-            return self._upsert_user_settings_run_summary_fallback(
-                user_id=normalized_user_id,
-                tenant_id=normalized_tenant_id,
-                settings=normalized_settings,
-            )
-
-        try:
-            rows = self._request_json(
-                method="POST",
-                params={
-                    "on_conflict": "user_id",
-                    "select": "settings_json",
-                },
-                payload=[
-                    {
-                        "user_id": normalized_user_id,
-                        "tenant_id": normalized_tenant_id,
-                        "settings_json": normalized_settings,
-                        "updated_at": utc_now_iso(),
-                    }
-                ],
-                prefer="resolution=merge-duplicates,return=representation",
-            )
-        except Exception as exc:
-            if self._is_missing_primary_table(exc):
-                self._fallback_mode = True
-                return self._upsert_user_settings_run_summary_fallback(
-                    user_id=normalized_user_id,
-                    tenant_id=normalized_tenant_id,
-                    settings=normalized_settings,
-                )
-            raise
-
-        if isinstance(rows, list) and rows:
-            row = rows[0] if isinstance(rows[0], dict) else {}
-            return normalize_user_settings_payload(row.get("settings_json") or {})
-        return normalized_settings
-
-    def merge_user_settings(
-        self,
-        *,
-        user_id: str,
-        tenant_id: str,
-        patch: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        normalized_patch = normalize_user_settings_payload(patch)
-        merged = self.get_user_settings(user_id=user_id)
-        merged.update(normalized_patch)
-        return self.upsert_user_settings(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            settings=merged,
-        )
-
-
-class SupabaseRunReportsStore:
-    def __init__(
-        self,
-        *,
-        supabase_url: str,
-        service_role_key: str,
-        table_name: str = "run_summaries",
-        timeout_seconds: float = 8.0,
-        default_user_id: str = "backtest-runner",
-        default_tenant_id: str = "",
-    ):
-        base_url = str(supabase_url or "").strip().rstrip("/")
-        api_key = str(service_role_key or "").strip()
-        if not base_url:
-            raise ValueError("supabase_url is required")
-        if not api_key:
-            raise ValueError("service_role_key is required")
-        safe_table = str(table_name or "run_summaries").strip() or "run_summaries"
-        safe_user_id = str(default_user_id or "").strip() or "backtest-runner"
-        self._base_url = base_url
-        self._table_name = safe_table
-        self._endpoint = f"{base_url}/rest/v1/{safe_table}"
-        self._users_endpoint = f"{base_url}/rest/v1/users"
-        self._tenants_endpoint = f"{base_url}/rest/v1/tenants"
-        self._api_key = api_key
-        self._timeout = max(1.0, float(timeout_seconds))
-        self._default_user_id = safe_user_id
-        self._default_tenant_id = str(default_tenant_id or "").strip()
-
-    def _headers(self, *, prefer: Optional[str] = None) -> Dict[str, str]:
-        headers = {
-            "apikey": self._api_key,
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        if prefer:
-            headers["Prefer"] = prefer
-        return headers
-
-    def _request_json(
-        self,
-        *,
-        method: str,
-        params: Optional[Dict[str, str]] = None,
-        payload: Optional[Any] = None,
-        prefer: Optional[str] = None,
-        endpoint: Optional[str] = None,
-    ) -> Any:
-        response = requests.request(
-            method=str(method or "GET").strip().upper(),
-            url=str(endpoint or self._endpoint),
-            params=params or None,
-            json=payload,
-            headers=self._headers(prefer=prefer),
-            timeout=self._timeout,
-        )
-        if response.status_code >= 400:
-            raise SupabaseStoreRequestError(
-                status_code=response.status_code,
-                body=str(response.text or ""),
-            )
-        text = str(response.text or "").strip()
-        if not text:
-            return None
-        parsed = response.json()
-        return parsed
-
-    def _coerce_tenant_uuid(self, *, tenant_id: str, user_id: str) -> str:
-        normalized = str(tenant_id or "").strip()
-        if normalized:
-            try:
-                return str(UUID(normalized))
-            except ValueError:
-                pass
-        seed = normalized or str(user_id or "").strip()
-        return str(uuid5(NAMESPACE_URL, f"tenant:{seed}"))
-
-    def _resolve_existing_tenant_uuid(self, *, user_id: str) -> Optional[str]:
-        rows = self._request_json(
-            method="GET",
-            endpoint=self._users_endpoint,
-            params={
-                "select": "tenant_id",
-                "id": f"eq.{user_id}",
-                "limit": "1",
-            },
-        )
-        if not isinstance(rows, list) or not rows:
-            return None
-        row = rows[0] if isinstance(rows[0], dict) else {}
-        tenant_id = str(row.get("tenant_id") or "").strip()
-        if not tenant_id:
-            return None
-        try:
-            return str(UUID(tenant_id))
-        except ValueError:
-            return None
-
-    def _ensure_identity(self, *, user_id: str, tenant_id: str) -> str:
-        tenant_uuid = self._resolve_existing_tenant_uuid(user_id=user_id)
-        if not tenant_uuid:
-            tenant_uuid = self._coerce_tenant_uuid(tenant_id=tenant_id, user_id=user_id)
-        now = utc_now_iso()
-
-        self._request_json(
-            method="POST",
-            endpoint=self._tenants_endpoint,
-            params={
-                "on_conflict": "id",
-                "select": "id",
-            },
-            payload=[
-                {
-                    "id": tenant_uuid,
-                    "owner_user_id": user_id,
-                    "name": f"tenant_{user_id[:24]}",
-                    "updated_at": now,
-                }
-            ],
-            prefer="resolution=merge-duplicates,return=representation",
-        )
-        self._request_json(
-            method="POST",
-            endpoint=self._users_endpoint,
-            params={
-                "on_conflict": "id",
-                "select": "id,tenant_id",
-            },
-            payload=[
-                {
-                    "id": user_id,
-                    "tenant_id": tenant_uuid,
-                    "role": "free",
-                    "updated_at": now,
-                }
-            ],
-            prefer="resolution=merge-duplicates,return=representation",
-        )
-        return tenant_uuid
-
-    def upsert_run_summary(
-        self,
-        *,
-        run_key: str,
-        summary: Dict[str, Any],
-    ) -> None:
-        normalized_run_key = str(run_key or "").strip()
-        if not normalized_run_key:
-            raise ValueError("run_key is required")
-        normalized_summary = normalize_run_summary_payload(summary)
-        user_id = self._default_user_id
-        tenant_uuid = self._ensure_identity(
-            user_id=user_id, tenant_id=self._default_tenant_id
-        )
-        self._request_json(
-            method="POST",
-            endpoint=self._endpoint,
-            params={
-                "on_conflict": "run_key",
-                "select": "run_key,updated_at",
-            },
-            payload=[
-                {
-                    "run_key": normalized_run_key,
-                    "tenant_id": tenant_uuid,
-                    "user_id": user_id,
-                    "summary": normalized_summary,
-                    "updated_at": utc_now_iso(),
-                }
-            ],
-            prefer="resolution=merge-duplicates,return=representation",
-        )
-
-    def get_run_summary(
-        self,
-        *,
-        run_key: str,
-    ) -> Optional[Dict[str, Any]]:
-        normalized_run_key = str(run_key or "").strip()
-        if not normalized_run_key:
-            return None
-
-        params: Dict[str, str] = {
-            "select": "run_key,summary,updated_at",
-            "run_key": f"eq.{normalized_run_key}",
-            "limit": "1",
-        }
-        if self._default_user_id:
-            params["user_id"] = f"eq.{self._default_user_id}"
-
-        rows = self._request_json(
-            method="GET",
-            endpoint=self._endpoint,
-            params=params,
-        )
-        if not isinstance(rows, list) or not rows:
-            return None
-        row = rows[0] if isinstance(rows[0], dict) else {}
-        summary_payload = row.get("summary")
-        if not isinstance(summary_payload, dict):
-            summary_payload = {}
-        return {
-            "run_key": str(row.get("run_key") or normalized_run_key),
-            "summary": summary_payload,
-            "updated_at": row.get("updated_at"),
-        }
-
-    def list_run_summaries(
-        self,
-        *,
-        limit: int = 300,
-    ) -> list[Dict[str, Any]]:
-        query_limit = max(1, min(int(limit or 300), 5000))
-        params: Dict[str, str] = {
-            "select": "run_key,summary,updated_at",
-            "order": "updated_at.desc",
-            "limit": str(query_limit),
-        }
-        if self._default_user_id:
-            params["user_id"] = f"eq.{self._default_user_id}"
-        rows = self._request_json(
-            method="GET",
-            endpoint=self._endpoint,
-            params=params,
-        )
-        if not isinstance(rows, list):
-            return []
-
-        payload_rows: list[Dict[str, Any]] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            run_key = str(row.get("run_key") or "").strip()
-            summary = row.get("summary")
-            if isinstance(summary, dict):
-                summary_payload = summary
-            else:
-                summary_payload = {}
-            payload_rows.append(
-                {
-                    "run_key": run_key,
-                    "summary": summary_payload,
-                    "updated_at": row.get("updated_at"),
-                }
-            )
-        return payload_rows
-
-
-class InMemorySlidingWindowLimiter:
-    def __init__(self, *, default_window_seconds: int = 60):
-        self.default_window_seconds = max(1, int(default_window_seconds))
-        self._events: Dict[str, list[float]] = {}
-        self._lock = threading.Lock()
-
-    def consume(
-        self, key: str, *, limit: int, window_seconds: Optional[int] = None
-    ) -> Tuple[bool, int]:
-        max_allowed = max(1, int(limit))
-        window = max(1, int(window_seconds or self.default_window_seconds))
-        now = time.time()
-        floor = now - window
-
-        with self._lock:
-            bucket = self._events.get(key, [])
-            bucket = [ts for ts in bucket if ts >= floor]
-            if len(bucket) >= max_allowed:
-                self._events[key] = bucket
-                return False, len(bucket)
-            bucket.append(now)
-            self._events[key] = bucket
-            return True, len(bucket)
 
 
 class SaaSStateStore:
@@ -972,10 +290,6 @@ class SaaSStateStore:
     def get_effective_plan(
         self, *, user_id: str, claim_plan_tier: str, role: str
     ) -> str:
-        role_norm = str(role or "").strip().lower()
-        if role_norm == "admin":
-            return "admin"
-
         with self._lock:
             cur = self._conn.cursor()
             row = cur.execute(
@@ -993,41 +307,11 @@ class SaaSStateStore:
                 (user_id,),
             ).fetchone()
 
-        now = datetime.now(tz=timezone.utc)
-        if row:
-            plan = str(row["plan_tier"] or "").strip().lower()
-            status = str(row["status"] or "").strip().lower()
-            period_end = parse_utc_datetime(row["current_period_end"])
-            grace_until = parse_utc_datetime(row["grace_until"])
-            cancel_at_period_end = bool(int(row["cancel_at_period_end"] or 0))
-            scheduled_plan = str(row["scheduled_plan_tier"] or "").strip().lower()
-            if scheduled_plan not in PLAN_LIMITS:
-                scheduled_plan = "free"
-
-            if status == "active" and plan in PLAN_LIMITS:
-                if (
-                    cancel_at_period_end
-                    and period_end is not None
-                    and now >= period_end
-                ):
-                    return scheduled_plan
-                return plan
-
-            if status in {"grace", "past_due", "incomplete"} and plan in PLAN_LIMITS:
-                if grace_until is not None and now < grace_until:
-                    return plan
-                if period_end is not None and now < period_end:
-                    return plan
-
-            if status in {"canceled", "paused"}:
-                if plan == "premium" and period_end is not None and now < period_end:
-                    return "premium"
-                return scheduled_plan or "free"
-
-        claim = str(claim_plan_tier or "free").strip().lower()
-        if claim in PLAN_LIMITS:
-            return claim
-        return "free"
+        return resolve_effective_plan(
+            role=role,
+            claim_plan_tier=claim_plan_tier,
+            subscription=dict(row) if row else None,
+        )
 
     def get_subscription(self, *, user_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -1074,7 +358,7 @@ class SaaSStateStore:
         settings: Dict[str, Any],
     ) -> Dict[str, Any]:
         normalized = self._normalize_settings_payload(settings)
-        serialized = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
+        serialized = payload_json_dumps_compact(normalized)
         now = utc_now_iso()
         with self._lock:
             cur = self._conn.cursor()
@@ -1118,9 +402,7 @@ class SaaSStateStore:
         if not normalized_run_key:
             raise ValueError("run_key is required")
         normalized_summary = normalize_run_summary_payload(summary)
-        serialized = json.dumps(
-            normalized_summary, separators=(",", ":"), sort_keys=True
-        )
+        serialized = payload_json_dumps_compact(normalized_summary)
         now = utc_now_iso()
         with self._lock:
             cur = self._conn.cursor()
@@ -1452,7 +734,7 @@ class SaaSStateStore:
                     normalized_idempotency_key,
                     0,
                     normalized_max_attempts,
-                    json.dumps(payload or {}, separators=(",", ":"), sort_keys=True),
+                    payload_json_dumps_compact(payload or {}),
                     now,
                     now,
                 ),
@@ -1509,7 +791,7 @@ class SaaSStateStore:
                 (
                     status,
                     (
-                        json.dumps(result or {}, separators=(",", ":"), sort_keys=True)
+                        payload_json_dumps_compact(result or {})
                         if result is not None
                         else None
                     ),
@@ -1573,38 +855,15 @@ class SaaSStateStore:
         job_types: Optional[Iterable[str]] = None,
         user_id: Optional[str] = None,
     ) -> int:
-        args: list[Any] = []
-        clauses: list[str] = []
-
-        if user_id is not None:
-            clauses.append("user_id = ?")
-            args.append(str(user_id))
-
-        if statuses:
-            normalized_statuses = [
-                str(item).strip().lower() for item in statuses if str(item).strip()
-            ]
-            if normalized_statuses:
-                placeholders = ",".join("?" for _ in normalized_statuses)
-                clauses.append(f"lower(status) IN ({placeholders})")
-                args.extend(normalized_statuses)
-
-        if job_types:
-            normalized_types = [
-                str(item).strip() for item in job_types if str(item).strip()
-            ]
-            if normalized_types:
-                placeholders = ",".join("?" for _ in normalized_types)
-                clauses.append(f"job_type IN ({placeholders})")
-                args.extend(normalized_types)
-
-        query = "SELECT COUNT(*) AS c FROM jobs"
-        if clauses:
-            query += " WHERE " + " AND ".join(clauses)
+        query, args = build_jobs_count_query(
+            statuses=statuses,
+            job_types=job_types,
+            user_id=user_id,
+        )
 
         with self._lock:
             cur = self._conn.cursor()
-            row = cur.execute(query, tuple(args)).fetchone()
+            row = cur.execute(query, args).fetchone()
         return int(row["c"] or 0) if row else 0
 
     def upsert_run(
@@ -1650,7 +909,7 @@ class SaaSStateStore:
                     ticker,
                     date_label,
                     status,
-                    json.dumps(metadata or {}, separators=(",", ":"), sort_keys=True),
+                    payload_json_dumps_compact(metadata or {}),
                     now,
                     now,
                 ),
@@ -1683,19 +942,16 @@ class SaaSStateStore:
     def list_run_keys_by_user(
         self, *, user_id: str, statuses: Iterable[str]
     ) -> list[str]:
-        normalized = [
-            str(item).strip().lower() for item in statuses if str(item).strip()
-        ]
-        if not normalized:
+        query_payload = build_run_keys_by_user_query(
+            user_id=user_id,
+            statuses=statuses,
+        )
+        if query_payload is None:
             return []
-        placeholders = ",".join("?" for _ in normalized)
-        args = [user_id, *normalized]
+        query, args = query_payload
         with self._lock:
             cur = self._conn.cursor()
-            rows = cur.execute(
-                f"SELECT run_key FROM runs WHERE user_id = ? AND lower(status) IN ({placeholders})",
-                tuple(args),
-            ).fetchall()
+            rows = cur.execute(query, args).fetchall()
         return [str(row["run_key"]) for row in rows if row and row["run_key"]]
 
     def mark_webhook_event_processed(
@@ -1722,7 +978,7 @@ class SaaSStateStore:
                 (
                     event_id,
                     str(provider or "stripe").strip().lower(),
-                    json.dumps(payload or {}, separators=(",", ":"), sort_keys=True),
+                    payload_json_dumps_compact(payload or {}),
                     now,
                 ),
             )
@@ -1773,7 +1029,7 @@ class SaaSStateStore:
                     str(previous_status or "").strip().lower() or None,
                     str(next_status or "").strip().lower() or None,
                     str(note or "").strip() or None,
-                    json.dumps(payload or {}, separators=(",", ":"), sort_keys=True),
+                    payload_json_dumps_compact(payload or {}),
                     now,
                 ),
             )
@@ -1785,10 +1041,7 @@ class SaaSStateStore:
 
     @staticmethod
     def _normalize_profile_scope(scope: str) -> str:
-        normalized = str(scope or "").strip().lower()
-        if normalized not in {"user", "global"}:
-            raise ValueError("scope must be 'user' or 'global'")
-        return normalized
+        return normalize_adaptive_profile_scope(scope)
 
     def upsert_adaptive_strategy_profile(
         self,
@@ -1803,31 +1056,18 @@ class SaaSStateStore:
         candidate: Optional[Dict[str, Any]],
         metadata: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        normalized_scope = self._normalize_profile_scope(scope)
-        normalized_ticker = str(ticker or "").strip().upper()
-        normalized_name = str(profile_name or "").strip()
-        normalized_id = str(profile_id or "").strip() or f"asp_{uuid4().hex[:16]}"
-        normalized_version = max(1, int(adaptive_version or 1))
-
-        if not normalized_ticker:
-            raise ValueError("ticker is required")
-        if not normalized_name:
-            raise ValueError("profile_name is required")
-
-        if normalized_scope == "global":
-            normalized_owner_user = None
-            normalized_owner_tenant = None
-        else:
-            normalized_owner_user = str(owner_user_id or "").strip()
-            normalized_owner_tenant = str(owner_tenant_id or "").strip()
-            if not normalized_owner_user or not normalized_owner_tenant:
-                raise ValueError(
-                    "user scope profile requires owner_user_id and owner_tenant_id"
-                )
-
+        record = build_adaptive_strategy_profile_record(
+            profile_id=profile_id,
+            scope=scope,
+            owner_user_id=owner_user_id,
+            owner_tenant_id=owner_tenant_id,
+            ticker=ticker,
+            profile_name=profile_name,
+            adaptive_version=adaptive_version,
+            candidate=candidate,
+            metadata=metadata,
+        )
         now = utc_now_iso()
-        candidate_payload = candidate if isinstance(candidate, dict) else {}
-        metadata_payload = metadata if isinstance(metadata, dict) else {}
 
         with self._lock:
             cur = self._conn.cursor()
@@ -1859,24 +1099,22 @@ class SaaSStateStore:
                     updated_at=excluded.updated_at
                 """,
                 (
-                    normalized_id,
-                    normalized_scope,
-                    normalized_owner_user,
-                    normalized_owner_tenant,
-                    normalized_ticker,
-                    normalized_name,
-                    normalized_version,
-                    json.dumps(
-                        candidate_payload, separators=(",", ":"), sort_keys=True
-                    ),
-                    json.dumps(metadata_payload, separators=(",", ":"), sort_keys=True),
+                    record["profile_id"],
+                    record["scope"],
+                    record["owner_user_id"],
+                    record["owner_tenant_id"],
+                    record["ticker"],
+                    record["profile_name"],
+                    record["adaptive_version"],
+                    payload_json_dumps_compact(record["candidate"]),
+                    payload_json_dumps_compact(record["metadata"]),
                     now,
                     now,
                 ),
             )
             self._conn.commit()
 
-        result = self.get_adaptive_strategy_profile(profile_id=normalized_id)
+        result = self.get_adaptive_strategy_profile(profile_id=record["profile_id"])
         if not result:
             raise RuntimeError("Failed to load saved adaptive strategy profile")
         return result
@@ -1906,34 +1144,20 @@ class SaaSStateStore:
         include_user: bool = True,
         include_global: bool = True,
     ) -> list[Dict[str, Any]]:
-        visibility_clauses: list[str] = []
-        args: list[Any] = []
-        normalized_user = str(user_id or "").strip()
-        normalized_tenant = str(tenant_id or "").strip()
-
-        if include_user and normalized_user and normalized_tenant:
-            visibility_clauses.append(
-                "(scope = 'user' AND owner_user_id = ? AND owner_tenant_id = ?)"
-            )
-            args.extend([normalized_user, normalized_tenant])
-        if include_global:
-            visibility_clauses.append("(scope = 'global')")
-        if not visibility_clauses:
-            return []
-
-        clauses = ["(" + " OR ".join(visibility_clauses) + ")"]
-        if ticker:
-            clauses.append("ticker = ?")
-            args.append(str(ticker).strip().upper())
-
-        query = "SELECT * FROM adaptive_strategy_profiles WHERE " + " AND ".join(
-            clauses
+        query_payload = build_list_adaptive_strategy_profiles_query(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            ticker=ticker,
+            include_user=include_user,
+            include_global=include_global,
         )
-        query += " ORDER BY CASE WHEN scope = 'global' THEN 0 ELSE 1 END, updated_at DESC, profile_id ASC"
+        if query_payload is None:
+            return []
+        query, args = query_payload
 
         with self._lock:
             cur = self._conn.cursor()
-            rows = cur.execute(query, tuple(args)).fetchall()
+            rows = cur.execute(query, args).fetchall()
 
         return [self._row_to_adaptive_profile_payload(row) for row in rows]
 
@@ -1965,13 +1189,9 @@ class SaaSStateStore:
         key = str(cache_key or "").strip()
         if not key:
             raise ValueError("cache_key is required")
-        serialized = json.dumps(
-            payload if isinstance(payload, dict) else {},
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-        compressed = gzip.compress(serialized, compresslevel=6)
-        checksum = hashlib.sha256(serialized).hexdigest()
+        compressed, checksum, payload_size_bytes, compressed_size_bytes = (
+            payload_build_diagnostic_payload_blob(payload)
+        )
         now = utc_now_iso()
 
         with self._lock:
@@ -2012,7 +1232,7 @@ class SaaSStateStore:
                     int(source_mtime_ns),
                     compressed,
                     checksum,
-                    int(len(serialized)),
+                    payload_size_bytes,
                     now,
                     now,
                 ),
@@ -2022,8 +1242,8 @@ class SaaSStateStore:
         return {
             "cache_key": key,
             "payload_sha256": checksum,
-            "payload_size_bytes": int(len(serialized)),
-            "compressed_size_bytes": int(len(compressed)),
+            "payload_size_bytes": payload_size_bytes,
+            "compressed_size_bytes": compressed_size_bytes,
         }
 
     def get_diagnostic_payload_cache(
@@ -2053,40 +1273,17 @@ class SaaSStateStore:
         if not row:
             return None
 
-        raw_blob = row["payload_gzip"]
-        if raw_blob is None:
-            return None
-        try:
-            compressed = bytes(raw_blob)
-            decoded = gzip.decompress(compressed).decode("utf-8")
-            parsed = json.loads(decoded)
-        except Exception:
-            return None
-        return parsed if isinstance(parsed, dict) else None
+        return payload_decode_diagnostic_payload_blob(row["payload_gzip"])
 
     @staticmethod
     def _decode_json(raw: Optional[str]) -> Dict[str, Any]:
-        if not raw:
-            return {}
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
+        return payload_decode_json_object(raw)
 
     def _row_to_job_payload(self, row: sqlite3.Row) -> Dict[str, Any]:
-        payload = dict(row)
-        payload["payload"] = self._decode_json(payload.pop("payload_json", None))
-        payload["result"] = self._decode_json(payload.pop("result_json", None))
-        return payload
+        return payload_row_to_job_payload(dict(row))
 
     def _row_to_adaptive_profile_payload(self, row: sqlite3.Row) -> Dict[str, Any]:
-        payload = dict(row)
-        payload["candidate"] = self._decode_json(payload.pop("candidate_json", None))
-        payload["metadata"] = self._decode_json(payload.pop("metadata_json", None))
-        payload["adaptive_version"] = max(1, int(payload.get("adaptive_version") or 1))
-        payload["scope"] = str(payload.get("scope") or "user").strip().lower()
-        return payload
+        return payload_row_to_adaptive_profile_payload(dict(row))
 
 
 @dataclass
@@ -2106,3 +1303,15 @@ class V2Services:
     active_dispatch_job_ids: set[str] = field(default_factory=set)
     dispatch_lock: Any = None
     retention_cleanup_markers: Dict[str, str] = field(default_factory=dict)
+
+
+__all__ = [
+    "RunReportsStore",
+    "SaaSStateStore",
+    "SupabaseRunReportsStore",
+    "SupabaseStoreRequestError",
+    "SupabaseUserSettingsStore",
+    "UserSettingsStore",
+    "V2Services",
+    "resolve_plan_limits",
+]

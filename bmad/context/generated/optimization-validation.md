@@ -28,10 +28,10 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 | `oos_validator.py` | yes | 223 | `1273b21 2026-02-23` |
 | `monte_carlo.py` | yes | 193 | `1273b21 2026-02-23` |
 | `tuning_runner.py` | yes | 359 | `1273b21 2026-02-23` |
-| `aos_walk_forward.py` | yes | 633 | `1273b21 2026-02-23` |
-| `aos_optimizer.py` | yes | 422 | `1273b21 2026-02-23` |
-| `run_strategy_test.py` | yes | 644 | `1273b21 2026-02-23` |
-| `batch_runner.py` | yes | 214 | `1273b21 2026-02-23` |
+| `aos_optimization/aos_walk_forward.py` | yes | 641 | `-` |
+| `aos_optimization/aos_optimizer.py` | yes | 425 | `-` |
+| `run_strategy_test.py` | yes | 644 | `58ebada 2026-02-27` |
+| `batch_runner.py` | yes | 214 | `58ebada 2026-02-27` |
 
 ## Change Checks
 
@@ -113,16 +113,16 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 - `function` `evaluate_test_week` (line 210)
 - ... 1 more symbols
 
-### `aos_walk_forward.py`
-- `class` `AOSConfig` (line 40)
-- `class` `DailyAOSResult` (line 50)
-- `class` `AOSWalkForwardRunner` (line 70)
-- `async_function` `main` (line 591)
+### `aos_optimization/aos_walk_forward.py`
+- `class` `AOSConfig` (line 45)
+- `class` `DailyAOSResult` (line 55)
+- `class` `AOSWalkForwardRunner` (line 75)
+- `async_function` `main` (line 596)
 
-### `aos_optimizer.py`
-- `class` `OptimizationResult` (line 37)
-- `class` `TickerProfile` (line 53)
-- `class` `AOSOptimizer` (line 67)
+### `aos_optimization/aos_optimizer.py`
+- `class` `OptimizationResult` (line 40)
+- `class` `TickerProfile` (line 56)
+- `class` `AOSOptimizer` (line 70)
 
 ### `run_strategy_test.py`
 - `class` `TradeResult` (line 19)

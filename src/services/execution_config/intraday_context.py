@@ -422,8 +422,8 @@ def resolve_context_risk_config(request: Any) -> Dict[str, Any]:
             min_value=0.0,
         ),
         "context_risk_min_sl_pct": _float_clamp(
-            getattr(request, "context_risk_min_sl_pct", 0.30),
-            default=0.30,
+            getattr(request, "context_risk_min_sl_pct", 0.50),
+            default=0.50,
             min_value=0.0,
         ),
         "context_risk_min_room_pct": _float_clamp(

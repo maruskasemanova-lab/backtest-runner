@@ -712,7 +712,7 @@ class SessionRunner:
                 if isinstance(intrabar_eval_trace, dict)
                 else 0
             )
-            logger.warning(
+            logger.debug(
                 "[INTRABAR-DEBUG] bar=%s has_trace=%s checkpoints=%s "
                 "has_layer_scores=%s warmup=%s",
                 processed_bar_index,
@@ -906,7 +906,7 @@ class SessionRunner:
                 api_response,
                 processed_bar_index=processed_bar_index,
                 warmup_only=bool(result.get("warmup_only", False)),
-                include_debug_log=True,
+                include_debug_log=False,
             )
 
         # Notify callbacks if requested

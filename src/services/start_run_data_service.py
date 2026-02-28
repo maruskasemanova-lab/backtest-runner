@@ -9,10 +9,32 @@ import os
 from pathlib import Path
 import pickle
 from threading import RLock
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import pandas as pd
 from fastapi import HTTPException
+
+from src.services.start_run_cache_key_utils import (
+    base_cache_meta_matches as cache_base_cache_meta_matches,
+    build_base_bars_cache_key as cache_build_base_bars_cache_key,
+    build_base_bars_meta as cache_build_base_bars_meta,
+    build_l2_enrich_cache_key as cache_build_l2_enrich_cache_key,
+    build_reference_bars_cache_key as cache_build_reference_bars_cache_key,
+    build_reference_bars_meta as cache_build_reference_bars_meta,
+    compute_l2_day_coverage as cache_compute_l2_day_coverage,
+    file_identity as cache_file_identity,
+    reference_cache_meta_matches as cache_reference_cache_meta_matches,
+    select_best_superset_entry as cache_select_best_superset_entry,
+)
+from src.services.start_run_range_utils import (
+    slice_bars_for_day_range as _slice_bars_for_day_range,
+    slice_reference_map_for_day_range as _slice_reference_map_for_day_range,
+    summarize_days_compact as _summarize_days,
+)
+from src.services.start_run_time_filter_utils import (
+    canonical_trading_hours as _canonical_trading_hours,
+    coerce_include_extended_hours as _coerce_include_extended_hours,
+)
 
 
 def _parse_positive_int_env(name: str, default: int) -> int:
@@ -299,39 +321,6 @@ def set_prewarm_result(key: str, payload: Dict[str, Any]) -> None:
     _disk_cache_set(_PREWARM_RESULT_DISK_DIR, key, payload)
 
 
-def _canonical_trading_hours(raw_hours: Any) -> Tuple[int, ...]:
-    if not isinstance(raw_hours, list):
-        return tuple()
-    normalized: List[int] = []
-    seen = set()
-    for item in raw_hours:
-        try:
-            hour = int(item)
-        except (TypeError, ValueError):
-            continue
-        if hour < 0 or hour > 23 or hour in seen:
-            continue
-        seen.add(hour)
-        normalized.append(hour)
-    return tuple(sorted(normalized))
-
-
-def _coerce_include_extended_hours(value: Any) -> Optional[bool]:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        normalized = str(value).strip().lower()
-        if normalized in {"1", "true", "yes", "y", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "n", "off"}:
-            return False
-    return None
-
-
 def _filter_regular_session_only(*, df: pd.DataFrame, data_loader: Any) -> pd.DataFrame:
     """
     Restrict bars to regular market hours (ET 09:30-16:00 inclusive close print).
@@ -368,12 +357,7 @@ def _filter_regular_session_only(*, df: pd.DataFrame, data_loader: Any) -> pd.Da
 
 
 def _file_identity(path_value: str) -> Tuple[str, int, int]:
-    resolved = str(Path(path_value).resolve())
-    try:
-        stat = Path(resolved).stat()
-        return resolved, int(stat.st_mtime_ns), int(stat.st_size)
-    except OSError:
-        return resolved, -1, -1
+    return cache_file_identity(path_value)
 
 
 def _build_base_bars_cache_key(
@@ -386,17 +370,15 @@ def _build_base_bars_cache_key(
     trading_hours: Tuple[int, ...],
     regular_session_only: bool,
 ) -> str:
-    file_identities = tuple(_file_identity(file) for file in data_files)
-    key_payload = (
-        ticker.upper(),
-        str(range_start),
-        str(range_end),
-        bool(time_filter_enabled),
-        trading_hours,
-        bool(regular_session_only),
-        file_identities,
+    return cache_build_base_bars_cache_key(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        data_files=data_files,
+        time_filter_enabled=time_filter_enabled,
+        trading_hours=trading_hours,
+        regular_session_only=regular_session_only,
     )
-    return repr(key_payload)
 
 
 def _build_reference_bars_cache_key(
@@ -406,45 +388,12 @@ def _build_reference_bars_cache_key(
     range_end: str,
     ref_files: List[str],
 ) -> str:
-    file_identities = tuple(_file_identity(file) for file in ref_files)
-    key_payload = (
-        ticker.upper(),
-        str(range_start),
-        str(range_end),
-        file_identities,
+    return cache_build_reference_bars_cache_key(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        ref_files=ref_files,
     )
-    return repr(key_payload)
-
-
-def _bar_time_token(value: Any) -> str:
-    if hasattr(value, "isoformat"):
-        try:
-            return str(value.isoformat())
-        except Exception:
-            return str(value)
-    return str(value)
-
-
-def _iso_day_token(value: Any) -> str:
-    if hasattr(value, "date"):
-        try:
-            return str(value.date().isoformat())
-        except Exception:
-            pass
-    text = str(value or "")
-    if len(text) >= 10:
-        return text[:10]
-    return text
-
-
-def _summarize_days(days: List[str], *, max_days: int = 8) -> str:
-    ordered = [str(day) for day in days if str(day).strip()]
-    if not ordered:
-        return ""
-    if len(ordered) <= max_days:
-        return ",".join(ordered)
-    preview = ",".join(ordered[:max_days])
-    return f"{preview},...(+{len(ordered) - max_days} more)"
 
 
 def _compute_l2_day_coverage(
@@ -453,86 +402,11 @@ def _compute_l2_day_coverage(
     feature_map: Dict[int, Dict[str, Any]],
     to_utc_datetime: Any,
 ) -> Dict[str, Any]:
-    bar_day_counts: Dict[str, int] = {}
-    l2_day_counts: Dict[str, int] = {}
-    for bar in bars:
-        ts_value = bar.get("timestamp")
-        if ts_value is None:
-            continue
-        try:
-            ts_utc = to_utc_datetime(ts_value)
-        except Exception:
-            continue
-        day = ts_utc.strftime("%Y-%m-%d")
-        bar_day_counts[day] = int(bar_day_counts.get(day, 0)) + 1
-        minute_key = int(ts_utc.timestamp() // 60)
-        if feature_map.get(minute_key):
-            l2_day_counts[day] = int(l2_day_counts.get(day, 0)) + 1
-
-    bar_days = sorted(bar_day_counts.keys())
-    l2_days = sorted(l2_day_counts.keys())
-    missing_days = sorted(day for day in bar_days if day not in l2_day_counts)
-    return {
-        "bar_days": bar_days,
-        "l2_days": l2_days,
-        "missing_days": missing_days,
-        "bar_day_counts": bar_day_counts,
-        "l2_day_counts": l2_day_counts,
-    }
-
-
-def _iso_day_ordinal(day: Any) -> int | None:
-    try:
-        return int(datetime.strptime(str(day), "%Y-%m-%d").toordinal())
-    except Exception:
-        return None
-
-
-def _is_day_range_superset(
-    cached_start: str,
-    cached_end: str,
-    requested_start: str,
-    requested_end: str,
-) -> bool:
-    return str(cached_start) <= str(requested_start) and str(cached_end) >= str(
-        requested_end
+    return cache_compute_l2_day_coverage(
+        bars=bars,
+        feature_map=feature_map,
+        to_utc_datetime=to_utc_datetime,
     )
-
-
-def _range_span_days(start: str, end: str) -> int:
-    start_ord = _iso_day_ordinal(start)
-    end_ord = _iso_day_ordinal(end)
-    if start_ord is None or end_ord is None:
-        return 10**9
-    return max(0, end_ord - start_ord)
-
-
-def _slice_bars_for_day_range(
-    bars: List[Dict[str, Any]],
-    *,
-    range_start: str,
-    range_end: str,
-) -> List[Dict[str, Any]]:
-    selected: List[Dict[str, Any]] = []
-    for bar in bars:
-        day_token = _iso_day_token(bar.get("timestamp"))
-        if day_token and str(range_start) <= day_token <= str(range_end):
-            selected.append(bar)
-    return selected
-
-
-def _slice_reference_map_for_day_range(
-    ref_map: Dict[str, Any],
-    *,
-    range_start: str,
-    range_end: str,
-) -> Dict[str, Any]:
-    selected: Dict[str, Any] = {}
-    for ts_key, ref_bar in ref_map.items():
-        day_token = _iso_day_token(ts_key)
-        if day_token and str(range_start) <= day_token <= str(range_end):
-            selected[str(ts_key)] = ref_bar
-    return selected
 
 
 def _build_l2_enrich_cache_key(
@@ -546,43 +420,16 @@ def _build_l2_enrich_cache_key(
     is_multi_day_request: bool,
     bars: List[Dict[str, Any]],
 ) -> str:
-    bars_count = len(bars)
-    first_ts = _bar_time_token(bars[0].get("timestamp")) if bars else ""
-    last_ts = _bar_time_token(bars[-1].get("timestamp")) if bars else ""
-
-    sample_tokens: List[Tuple[int, str, float, float, float]] = []
-    if bars_count:
-        candidate_indices = [0, 1, bars_count // 2, bars_count - 2, bars_count - 1]
-        seen_indices = set()
-        for idx in candidate_indices:
-            if idx < 0 or idx >= bars_count or idx in seen_indices:
-                continue
-            seen_indices.add(idx)
-            bar = bars[idx] or {}
-            sample_tokens.append(
-                (
-                    idx,
-                    _bar_time_token(bar.get("timestamp")),
-                    float(bar.get("open", 0.0) or 0.0),
-                    float(bar.get("close", 0.0) or 0.0),
-                    float(bar.get("volume", 0.0) or 0.0),
-                )
-            )
-
-    key_payload = (
-        ticker.upper(),
-        str(range_start),
-        str(range_end),
-        bool(requested_l2_only),
-        bool(requested_l2_confirm),
-        bool(comparable_mode),
-        bool(is_multi_day_request),
-        bars_count,
-        first_ts,
-        last_ts,
-        tuple(sample_tokens),
+    return cache_build_l2_enrich_cache_key(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        requested_l2_only=requested_l2_only,
+        requested_l2_confirm=requested_l2_confirm,
+        comparable_mode=comparable_mode,
+        is_multi_day_request=is_multi_day_request,
+        bars=bars,
     )
-    return repr(key_payload)
 
 
 def _build_base_bars_meta(
@@ -595,15 +442,15 @@ def _build_base_bars_meta(
     regular_session_only: bool,
     file_identities: Tuple[Tuple[str, int, int], ...],
 ) -> Dict[str, Any]:
-    return {
-        "ticker": str(ticker).upper(),
-        "range_start": str(range_start),
-        "range_end": str(range_end),
-        "time_filter_enabled": bool(time_filter_enabled),
-        "trading_hours": tuple(trading_hours),
-        "regular_session_only": bool(regular_session_only),
-        "file_identities": tuple(file_identities),
-    }
+    return cache_build_base_bars_meta(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        time_filter_enabled=time_filter_enabled,
+        trading_hours=trading_hours,
+        regular_session_only=regular_session_only,
+        file_identities=file_identities,
+    )
 
 
 def _build_reference_bars_meta(
@@ -613,12 +460,12 @@ def _build_reference_bars_meta(
     range_end: str,
     file_identities: Tuple[Tuple[str, int, int], ...],
 ) -> Dict[str, Any]:
-    return {
-        "ticker": str(ticker).upper(),
-        "range_start": str(range_start),
-        "range_end": str(range_end),
-        "file_identities": tuple(file_identities),
-    }
+    return cache_build_reference_bars_meta(
+        ticker=ticker,
+        range_start=range_start,
+        range_end=range_end,
+        file_identities=file_identities,
+    )
 
 
 def _select_best_superset_entry(
@@ -629,34 +476,13 @@ def _select_best_superset_entry(
     range_end: str,
     meta_matches: Callable[[Dict[str, Any]], bool],
 ) -> Tuple[str, Any, str, str] | None:
-    best_key: str | None = None
-    best_payload: Any = None
-    best_span: int | None = None
-    best_start = ""
-    best_end = ""
-    for key, meta in meta_store.items():
-        if not isinstance(meta, dict) or not meta_matches(meta):
-            continue
-        cached_start = str(meta.get("range_start", ""))
-        cached_end = str(meta.get("range_end", ""))
-        if not cached_start or not cached_end:
-            continue
-        if not _is_day_range_superset(cached_start, cached_end, range_start, range_end):
-            continue
-        payload = payload_store.get(key)
-        if payload is None:
-            continue
-        span = _range_span_days(cached_start, cached_end)
-        if best_span is not None and span >= best_span:
-            continue
-        best_key = key
-        best_payload = payload
-        best_span = span
-        best_start = cached_start
-        best_end = cached_end
-    if best_key is None or best_payload is None:
-        return None
-    return best_key, best_payload, best_start, best_end
+    return cache_select_best_superset_entry(
+        payload_store=payload_store,
+        meta_store=meta_store,
+        range_start=range_start,
+        range_end=range_end,
+        meta_matches=meta_matches,
+    )
 
 
 def _base_cache_meta_matches(
@@ -668,12 +494,13 @@ def _base_cache_meta_matches(
     regular_session_only: bool,
     file_identities: Tuple[Tuple[str, int, int], ...],
 ) -> bool:
-    return (
-        str(meta.get("ticker", "")).upper() == str(ticker).upper()
-        and bool(meta.get("time_filter_enabled")) == bool(time_filter_enabled)
-        and tuple(meta.get("trading_hours", ())) == tuple(trading_hours)
-        and bool(meta.get("regular_session_only", False)) == bool(regular_session_only)
-        and tuple(meta.get("file_identities", ())) == tuple(file_identities)
+    return cache_base_cache_meta_matches(
+        meta=meta,
+        ticker=ticker,
+        time_filter_enabled=time_filter_enabled,
+        trading_hours=trading_hours,
+        regular_session_only=regular_session_only,
+        file_identities=file_identities,
     )
 
 
@@ -683,9 +510,11 @@ def _reference_cache_meta_matches(
     ticker: str,
     file_identities: Tuple[Tuple[str, int, int], ...],
 ) -> bool:
-    return str(meta.get("ticker", "")).upper() == str(ticker).upper() and tuple(
-        meta.get("file_identities", ())
-    ) == tuple(file_identities)
+    return cache_reference_cache_meta_matches(
+        meta=meta,
+        ticker=ticker,
+        file_identities=file_identities,
+    )
 
 
 def _find_base_bars_superset_in_memory(

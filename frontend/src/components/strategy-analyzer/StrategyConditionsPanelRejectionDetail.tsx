@@ -24,6 +24,28 @@ const CHECK_EXPLANATIONS: Record<string, string> = {
   gap_fill_bias_aligned: "Smerovanie k vyplneniu gapu súhlasí so signálom",
 };
 
+function resolveDirectionToken(raw: unknown): "bullish" | "bearish" | null {
+  if (raw == null) return null;
+  const token = String(raw).trim().toLowerCase();
+  if (!token) return null;
+  if (token === "buy" || token === "long" || token === "bullish" || token.includes("bullish")) return "bullish";
+  if (token === "sell" || token === "short" || token === "bearish" || token.includes("bearish")) return "bearish";
+  return null;
+}
+
+function resolveDirectionFromRejection(d: any): "bullish" | "bearish" | null {
+  return (
+    resolveDirectionToken(d?.resolved_signal_direction) ||
+    resolveDirectionToken(d?.signal_type) ||
+    resolveDirectionToken(d?.signal_direction) ||
+    resolveDirectionToken(d?.direction) ||
+    resolveDirectionToken(d?.decision_direction) ||
+    resolveDirectionToken(d?.cross_asset_headwind?.decision_direction) ||
+    resolveDirectionToken(d?.reasoning) ||
+    null
+  );
+}
+
 export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
   if (!d || typeof d !== "object" || !d.gate) return null;
   const gate = String(d.gate);
@@ -259,6 +281,11 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
     const hwBoost = safeNum(d.headwind_threshold_boost);
     const thrReason = typeof d.threshold_used_reason === "string" ? d.threshold_used_reason : null;
     const isHeadwind = gate === "cross_asset_headwind";
+    const direction = resolveDirectionFromRejection(d);
+    const isLong = direction === "bullish";
+    const scoreGap = score != null && thr != null ? score - thr : null;
+    const gapAbs = scoreGap != null ? Math.abs(scoreGap) : null;
+    const progressPct = score != null && thr != null && thr > 0 ? Math.max(0, Math.min(120, (score / thr) * 100)) : null;
 
     const scorePassed = score != null && thr != null && score >= thr;
     const scoreColor = scorePassed ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)";
@@ -266,6 +293,65 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
     return (
       <div style={{ marginTop: 4 }}>
         <SectionLabel icon={<BarChart2 size={10} />}>Bodové Hodnotenie (Score)</SectionLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, marginBottom: 6 }}>
+          <div style={{ background: "rgba(148, 163, 184, 0.08)", border: "1px solid rgba(148, 163, 184, 0.2)", borderRadius: 4, padding: "4px 6px" }}>
+            <div style={{ fontSize: "0.5rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Potrebné</div>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>
+              {thr != null ? thr.toFixed(1) : "—"}
+            </div>
+          </div>
+          <div style={{ background: "rgba(148, 163, 184, 0.08)", border: "1px solid rgba(148, 163, 184, 0.2)", borderRadius: 4, padding: "4px 6px" }}>
+            <div style={{ fontSize: "0.5rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Mal som</div>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: scoreColor, fontVariantNumeric: "tabular-nums" }}>
+              {score != null ? score.toFixed(1) : "—"}
+            </div>
+          </div>
+          <div style={{ background: "rgba(148, 163, 184, 0.08)", border: "1px solid rgba(148, 163, 184, 0.2)", borderRadius: 4, padding: "4px 6px" }}>
+            <div style={{ fontSize: "0.5rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{scoreGap != null && scoreGap >= 0 ? "Nad prahom" : "Chýba"}</div>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: scoreGap != null && scoreGap >= 0 ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)", fontVariantNumeric: "tabular-nums" }}>
+              {gapAbs != null ? `${scoreGap != null && scoreGap >= 0 ? "+" : "-"}${gapAbs.toFixed(1)}` : "—"}
+            </div>
+          </div>
+        </div>
+        {(progressPct != null || direction != null) && (
+          <div style={{ marginBottom: 6 }}>
+            {progressPct != null && (
+              <div style={{ position: "relative", height: 6, borderRadius: 4, background: "var(--bg-tertiary, rgba(255,255,255,0.06))", overflow: "hidden", marginBottom: 4 }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.min(100, progressPct)}%`,
+                    background: scorePassed ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)",
+                    opacity: 0.85,
+                  }}
+                />
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: "0.52rem", color: "var(--text-muted)" }}>
+                Plnenie vstupného prahu: {progressPct != null ? `${progressPct.toFixed(0)}%` : "—"}
+              </span>
+              {direction && (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "1px 6px",
+                    borderRadius: 3,
+                    fontSize: "0.55rem",
+                    fontWeight: 700,
+                    background: isLong ? "rgba(34, 197, 94, 0.12)" : "rgba(239, 68, 68, 0.12)",
+                    color: isLong ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)",
+                    border: `1px solid ${isLong ? "rgba(34, 197, 94, 0.25)" : "rgba(239, 68, 68, 0.25)"}`,
+                  }}
+                >
+                  {isLong ? "▲ LONG" : "▼ SHORT"}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "2px 0", marginBottom: 6 }}>
           {score != null && thr != null && (
             <MiniBar

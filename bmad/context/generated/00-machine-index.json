@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-27T08:05:00.773262+00:00",
+  "generated_at": "2026-02-28T14:19:42.016993+00:00",
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -62,7 +62,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/api_server.py",
           "exists": true,
           "lines": 1526,
-          "last_commit": "8f49f06 2026-02-23",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "function",
@@ -475,26 +475,10 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/session_runner.py",
           "exists": true,
           "lines": 1850,
-          "last_commit": "c70aa9e 2026-02-24",
-          "symbols": [
-            {
-              "kind": "function",
-              "name": "_normalize_profile_token",
-              "line": 97
-            },
-            {
-              "kind": "class",
-              "name": "RunConfig",
-              "line": 107
-            },
-            {
-              "kind": "class",
-              "name": "SessionRunner",
-              "line": 126
-            }
-          ],
+          "last_commit": "58ebada 2026-02-27",
+          "symbols": [],
           "routes": [],
-          "parse_error": null
+          "parse_error": "invalid syntax @ line 1000"
         },
         {
           "path": "data_loader.py",
@@ -626,7 +610,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/system_routes.py",
           "exists": true,
           "lines": 1770,
-          "last_commit": "fdba1f6 2026-02-25",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "function",
@@ -2636,7 +2620,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/run_control_service.py",
           "exists": true,
           "lines": 639,
-          "last_commit": "c70aa9e 2026-02-24",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "class",
@@ -2786,83 +2770,28 @@
           "path": "src/services/saas_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/saas_service.py",
           "exists": true,
-          "lines": 2108,
-          "last_commit": "1273b21 2026-02-23",
+          "lines": 1317,
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "class",
-              "name": "PlanLimits",
-              "line": 20
-            },
-            {
-              "kind": "function",
-              "name": "resolve_plan_limits",
-              "line": 64
-            },
-            {
-              "kind": "function",
-              "name": "utc_now_iso",
-              "line": 69
-            },
-            {
-              "kind": "function",
-              "name": "utc_day_key",
-              "line": 73
-            },
-            {
-              "kind": "function",
-              "name": "parse_utc_datetime",
-              "line": 79
-            },
-            {
-              "kind": "function",
-              "name": "normalize_user_settings_payload",
-              "line": 100
-            },
-            {
-              "kind": "class",
               "name": "UserSettingsStore",
-              "line": 117
+              "line": 46
             },
             {
               "kind": "class",
               "name": "RunReportsStore",
-              "line": 129
-            },
-            {
-              "kind": "class",
-              "name": "SupabaseStoreRequestError",
-              "line": 150
-            },
-            {
-              "kind": "function",
-              "name": "normalize_run_summary_payload",
-              "line": 160
-            },
-            {
-              "kind": "class",
-              "name": "SupabaseUserSettingsStore",
-              "line": 175
-            },
-            {
-              "kind": "class",
-              "name": "SupabaseRunReportsStore",
-              "line": 488
-            },
-            {
-              "kind": "class",
-              "name": "InMemorySlidingWindowLimiter",
-              "line": 736
+              "line": 58
             },
             {
               "kind": "class",
               "name": "SaaSStateStore",
-              "line": 761
+              "line": 79
             },
             {
               "kind": "class",
               "name": "V2Services",
-              "line": 2093
+              "line": 1290
             }
           ],
           "routes": [],
@@ -3322,7 +3251,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_session_service.py",
           "exists": true,
           "lines": 511,
-          "last_commit": "03b4ad8 2026-02-25",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "function",
@@ -3377,178 +3306,173 @@
           "path": "src/services/start_run_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_service.py",
           "exists": true,
-          "lines": 1374,
-          "last_commit": "8f49f06 2026-02-23",
+          "lines": 1151,
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "function",
               "name": "_parse_non_negative_int_env",
-              "line": 59
+              "line": 81
             },
             {
               "kind": "function",
               "name": "_parse_bool_env",
-              "line": 69
+              "line": 91
             },
             {
               "kind": "function",
               "name": "_strategy_reset_success",
-              "line": 123
+              "line": 144
             },
             {
               "kind": "function",
               "name": "_strategy_reset_detail",
-              "line": 129
+              "line": 150
             },
             {
               "kind": "function",
               "name": "_acquire_prewarm_inflight",
-              "line": 135
+              "line": 156
             },
             {
               "kind": "function",
               "name": "_release_prewarm_inflight",
-              "line": 148
+              "line": 169
             },
             {
               "kind": "function",
               "name": "_is_prewarm_inflight",
-              "line": 155
+              "line": 176
             },
             {
               "kind": "class",
               "name": "StartRunDeps",
-              "line": 167
+              "line": 188
             },
             {
               "kind": "function",
               "name": "_resolve_request_range",
-              "line": 198
+              "line": 219
             },
             {
               "kind": "function",
               "name": "_normalize_profile_ref_token",
-              "line": 206
+              "line": 227
             },
             {
               "kind": "function",
               "name": "_first_profile_ref_token",
-              "line": 215
+              "line": 231
             },
             {
               "kind": "function",
               "name": "_extract_effective_profile_metadata",
-              "line": 223
+              "line": 235
             },
             {
               "kind": "function",
               "name": "_summarize_days_preview",
-              "line": 278
+              "line": 246
             },
             {
               "kind": "function",
               "name": "_build_data_availability_warnings",
-              "line": 289
+              "line": 250
             },
             {
               "kind": "async_function",
               "name": "_force_enable_all_remote_strategies",
-              "line": 372
+              "line": 261
             },
             {
               "kind": "function",
               "name": "_build_report_metadata",
-              "line": 409
+              "line": 298
             },
             {
               "kind": "function",
               "name": "_build_run_request_config_snapshot",
-              "line": 432
-            },
-            {
-              "kind": "function",
-              "name": "_canonical_trading_hours",
-              "line": 452
+              "line": 313
             },
             {
               "kind": "function",
               "name": "_build_prewarm_cache_key",
-              "line": 469
+              "line": 317
             },
             {
               "kind": "function",
               "name": "_resolve_prewarm_scope_range",
-              "line": 502
+              "line": 350
             },
             {
               "kind": "function",
               "name": "_inclusive_day_span",
-              "line": 552
+              "line": 400
             },
             {
               "kind": "function",
               "name": "_run_l2_guard_reason",
-              "line": 562
+              "line": 404
             },
             {
               "kind": "function",
               "name": "_prewarm_l2_guard_reason",
-              "line": 583
+              "line": 421
             },
             {
               "kind": "function",
               "name": "_parse_iso_day",
-              "line": 622
+              "line": 442
             },
             {
               "kind": "function",
               "name": "_format_iso_day",
-              "line": 629
+              "line": 446
             },
             {
               "kind": "function",
               "name": "_add_days_iso",
-              "line": 633
+              "line": 450
             },
             {
               "kind": "function",
               "name": "_build_progressive_chunks",
-              "line": 640
+              "line": 454
             },
             {
               "kind": "function",
               "name": "_resolve_progressive_plan",
-              "line": 665
+              "line": 469
             },
             {
               "kind": "function",
               "name": "_normalize_reset_scope",
-              "line": 712
+              "line": 489
             },
             {
               "kind": "class",
               "name": "StartRunIdentity",
-              "line": 720
+              "line": 497
             },
             {
               "kind": "function",
               "name": "_resolve_start_run_identity",
-              "line": 736
+              "line": 513
             },
             {
               "kind": "async_function",
               "name": "start_run",
-              "line": 788
+              "line": 565
             },
             {
               "kind": "async_function",
               "name": "prewarm_run_data",
-              "line": 1119
+              "line": 896
             },
             {
               "kind": "async_function",
               "name": "get_prewarm_status",
-              "line": 1285
+              "line": 1062
             }
           ],
           "routes": [],
@@ -3558,298 +3482,248 @@
           "path": "src/services/start_run_data_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_data_service.py",
           "exists": true,
-          "lines": 1607,
-          "last_commit": "1273b21 2026-02-23",
+          "lines": 1436,
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "function",
               "name": "_parse_positive_int_env",
-              "line": 18
+              "line": 40
             },
             {
               "kind": "class",
               "name": "BaseBarsCacheContext",
-              "line": 63
+              "line": 85
             },
             {
               "kind": "class",
               "name": "ReferenceBarsCacheContext",
-              "line": 70
+              "line": 92
             },
             {
               "kind": "function",
               "name": "clear_start_run_data_caches",
-              "line": 76
+              "line": 98
             },
             {
               "kind": "function",
               "name": "_cache_get",
-              "line": 101
+              "line": 123
             },
             {
               "kind": "function",
               "name": "_cache_set",
-              "line": 110
+              "line": 132
             },
             {
               "kind": "function",
               "name": "_disk_cache_path",
-              "line": 130
+              "line": 152
             },
             {
               "kind": "function",
               "name": "_ensure_disk_cache_dir",
-              "line": 135
+              "line": 157
             },
             {
               "kind": "function",
               "name": "_prune_disk_cache",
-              "line": 139
+              "line": 161
             },
             {
               "kind": "function",
               "name": "_disk_cache_get",
-              "line": 175
+              "line": 197
             },
             {
               "kind": "function",
               "name": "_disk_cache_set",
-              "line": 192
+              "line": 214
             },
             {
               "kind": "function",
               "name": "_count_disk_cache_entries",
-              "line": 205
+              "line": 227
             },
             {
               "kind": "function",
               "name": "_disk_cache_total_bytes",
-              "line": 212
+              "line": 234
             },
             {
               "kind": "function",
               "name": "_prune_all_disk_caches",
-              "line": 226
+              "line": 248
             },
             {
               "kind": "function",
               "name": "get_start_run_data_cache_stats",
-              "line": 239
+              "line": 261
             },
             {
               "kind": "function",
               "name": "flush_start_run_data_cache",
-              "line": 262
+              "line": 284
             },
             {
               "kind": "function",
               "name": "get_prewarm_result",
-              "line": 274
+              "line": 296
             },
             {
               "kind": "function",
               "name": "set_prewarm_result",
-              "line": 290
-            },
-            {
-              "kind": "function",
-              "name": "_canonical_trading_hours",
-              "line": 302
-            },
-            {
-              "kind": "function",
-              "name": "_coerce_include_extended_hours",
-              "line": 319
+              "line": 312
             },
             {
               "kind": "function",
               "name": "_filter_regular_session_only",
-              "line": 335
+              "line": 324
             },
             {
               "kind": "function",
               "name": "_file_identity",
-              "line": 370
+              "line": 359
             },
             {
               "kind": "function",
               "name": "_build_base_bars_cache_key",
-              "line": 379
+              "line": 363
             },
             {
               "kind": "function",
               "name": "_build_reference_bars_cache_key",
-              "line": 402
-            },
-            {
-              "kind": "function",
-              "name": "_bar_time_token",
-              "line": 419
-            },
-            {
-              "kind": "function",
-              "name": "_iso_day_token",
-              "line": 428
-            },
-            {
-              "kind": "function",
-              "name": "_summarize_days",
-              "line": 440
+              "line": 384
             },
             {
               "kind": "function",
               "name": "_compute_l2_day_coverage",
-              "line": 450
-            },
-            {
-              "kind": "function",
-              "name": "_iso_day_ordinal",
-              "line": 484
-            },
-            {
-              "kind": "function",
-              "name": "_is_day_range_superset",
-              "line": 491
-            },
-            {
-              "kind": "function",
-              "name": "_range_span_days",
-              "line": 502
-            },
-            {
-              "kind": "function",
-              "name": "_slice_bars_for_day_range",
-              "line": 510
-            },
-            {
-              "kind": "function",
-              "name": "_slice_reference_map_for_day_range",
-              "line": 524
+              "line": 399
             },
             {
               "kind": "function",
               "name": "_build_l2_enrich_cache_key",
-              "line": 538
+              "line": 412
             },
             {
               "kind": "function",
               "name": "_build_base_bars_meta",
-              "line": 588
+              "line": 435
             },
             {
               "kind": "function",
               "name": "_build_reference_bars_meta",
-              "line": 609
+              "line": 456
             },
             {
               "kind": "function",
               "name": "_select_best_superset_entry",
-              "line": 624
+              "line": 471
             },
             {
               "kind": "function",
               "name": "_base_cache_meta_matches",
-              "line": 662
+              "line": 488
             },
             {
               "kind": "function",
               "name": "_reference_cache_meta_matches",
-              "line": 680
+              "line": 507
             },
             {
               "kind": "function",
               "name": "_find_base_bars_superset_in_memory",
-              "line": 691
+              "line": 520
             },
             {
               "kind": "function",
               "name": "_find_reference_bars_superset_in_memory",
-              "line": 732
+              "line": 561
             },
             {
               "kind": "function",
               "name": "_resolve_run_data_files",
-              "line": 765
+              "line": 594
             },
             {
               "kind": "function",
               "name": "_resolve_run_time_filter_state",
-              "line": 800
+              "line": 629
             },
             {
               "kind": "function",
               "name": "_build_base_bars_cache_context",
-              "line": 820
+              "line": 649
             },
             {
               "kind": "function",
               "name": "_store_base_bars_cache",
-              "line": 858
+              "line": 687
             },
             {
               "kind": "function",
               "name": "_try_load_cached_base_bars",
-              "line": 879
+              "line": 708
             },
             {
               "kind": "function",
               "name": "_load_dataframe_from_files",
-              "line": 951
+              "line": 780
             },
             {
               "kind": "function",
               "name": "_build_available_ohlcv_hint",
-              "line": 999
+              "line": 828
             },
             {
               "kind": "function",
               "name": "_load_dataframe_without_files",
-              "line": 1017
+              "line": 846
             },
             {
               "kind": "function",
               "name": "load_run_bars",
-              "line": 1042
+              "line": 871
             },
             {
               "kind": "function",
               "name": "enrich_bars_with_l2",
-              "line": 1124
+              "line": 953
             },
             {
               "kind": "function",
               "name": "_resolve_reference_data_files",
-              "line": 1289
+              "line": 1118
             },
             {
               "kind": "function",
               "name": "_build_reference_cache_context",
-              "line": 1309
+              "line": 1138
             },
             {
               "kind": "function",
               "name": "_store_reference_bars_cache",
-              "line": 1336
+              "line": 1165
             },
             {
               "kind": "function",
               "name": "_try_load_cached_reference_bars",
-              "line": 1356
+              "line": 1185
             },
             {
               "kind": "function",
               "name": "_load_reference_map_from_files",
-              "line": 1421
+              "line": 1250
             },
             {
               "kind": "function",
               "name": "enrich_bars_with_tcbbo",
-              "line": 1456
+              "line": 1285
             },
             {
               "kind": "function",
               "name": "load_reference_bars_map",
-              "line": 1558
+              "line": 1387
             }
           ],
           "routes": [],
@@ -3859,98 +3733,78 @@
           "path": "src/services/start_run_execution_config_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_execution_config_service.py",
           "exists": true,
-          "lines": 1696,
+          "lines": 893,
           "last_commit": "03b4ad8 2026-02-25",
           "symbols": [
             {
-              "kind": "class",
-              "name": "FloatPositioningSpec",
-              "line": 25
-            },
-            {
-              "kind": "class",
-              "name": "IntPositioningSpec",
-              "line": 38
-            },
-            {
-              "kind": "class",
-              "name": "BoolPositioningSpec",
-              "line": 51
-            },
-            {
-              "kind": "class",
-              "name": "StringPositioningSpec",
-              "line": 61
-            },
-            {
               "kind": "function",
               "name": "_resolve_strategy_selection",
-              "line": 832
+              "line": 29
             },
             {
               "kind": "function",
               "name": "_resolve_positioning_config",
-              "line": 889
+              "line": 86
             },
             {
               "kind": "function",
               "name": "_resolve_l2_lookback_bars",
-              "line": 907
+              "line": 104
             },
             {
               "kind": "function",
               "name": "_resolve_l2_config",
-              "line": 916
+              "line": 113
             },
             {
               "kind": "function",
               "name": "_resolve_positioning_fields",
-              "line": 990
+              "line": 187
             },
             {
               "kind": "function",
               "name": "_apply_intraday_profile_overrides",
-              "line": 1113
+              "line": 310
             },
             {
               "kind": "function",
               "name": "_apply_context_risk_profile_overrides",
-              "line": 1197
+              "line": 394
             },
             {
               "kind": "function",
               "name": "_parse_clamped_int",
-              "line": 1254
+              "line": 451
             },
             {
               "kind": "function",
               "name": "_request_fields_set",
-              "line": 1262
+              "line": 459
             },
             {
               "kind": "function",
               "name": "_resolve_regime_runtime_value",
-              "line": 1272
+              "line": 469
             },
             {
               "kind": "function",
               "name": "_resolve_runtime_basics",
-              "line": 1303
+              "line": 500
             },
             {
               "kind": "function",
               "name": "_resolve_runtime_stop_loss",
-              "line": 1340
+              "line": 537
             },
             {
               "kind": "function",
               "name": "_build_trading_config_payload",
-              "line": 1379
+              "line": 576
             },
             {
               "kind": "function",
               "name": "resolve_execution_config",
-              "line": 1588
+              "line": 785
             }
           ],
           "routes": [],
@@ -4047,38 +3901,28 @@
           "path": "src/services/start_run_load_phase_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_load_phase_service.py",
           "exists": true,
-          "lines": 241,
-          "last_commit": "1273b21 2026-02-23",
+          "lines": 180,
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "class",
               "name": "LoadPhaseInputs",
-              "line": 14
+              "line": 19
             },
             {
               "kind": "class",
               "name": "LoadPhaseDeps",
-              "line": 30
+              "line": 35
             },
             {
               "kind": "class",
               "name": "LoadPhaseResult",
-              "line": 45
-            },
-            {
-              "kind": "function",
-              "name": "_is_options_flow_alpha_enabled",
-              "line": 60
-            },
-            {
-              "kind": "function",
-              "name": "_resolve_tcbbo_enrichment_reasons",
-              "line": 69
+              "line": 50
             },
             {
               "kind": "async_function",
               "name": "run_start_load_phase",
-              "line": 88
+              "line": 64
             }
           ],
           "routes": [],
@@ -4120,7 +3964,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_execution_payload_service.py",
           "exists": true,
           "lines": 960,
-          "last_commit": "fdba1f6 2026-02-25",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "class",
@@ -4195,48 +4039,48 @@
           "path": "src/services/start_run_runner_setup_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_runner_setup_service.py",
           "exists": true,
-          "lines": 385,
-          "last_commit": "8f49f06 2026-02-23",
+          "lines": 397,
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "class",
               "name": "RunnerSetupInputs",
-              "line": 14
+              "line": 19
             },
             {
               "kind": "class",
               "name": "RunnerSetupDeps",
-              "line": 39
+              "line": 44
             },
             {
               "kind": "function",
               "name": "_register_runner_callbacks",
-              "line": 58
+              "line": 63
             },
             {
               "kind": "function",
               "name": "_apply_runner_runtime_metadata",
-              "line": 95
+              "line": 100
             },
             {
               "kind": "function",
               "name": "_load_chunk_payload",
-              "line": 139
+              "line": 144
             },
             {
               "kind": "function",
               "name": "_append_deduped_chunk_bars",
-              "line": 202
+              "line": 207
             },
             {
               "kind": "async_function",
               "name": "_append_remaining_chunks",
-              "line": 231
+              "line": 236
             },
             {
               "kind": "function",
               "name": "setup_runner_with_progressive_loading",
-              "line": 334
+              "line": 346
             }
           ],
           "routes": [],
@@ -4396,7 +4240,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/databento_service.py",
           "exists": true,
           "lines": 2046,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "class",
@@ -4461,203 +4305,203 @@
           "path": "../market_regime_detection/api_server.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/api_server.py",
           "exists": true,
-          "lines": 1271,
+          "lines": 987,
           "last_commit": "97fd90d 2026-02-25",
           "symbols": [
             {
               "kind": "function",
               "name": "_apply_cors_headers_for_error",
-              "line": 124
+              "line": 128
             },
             {
               "kind": "async_function",
               "name": "_internal_api_token_guard",
-              "line": 148
+              "line": 152
             },
             {
               "kind": "async_function",
               "name": "root",
-              "line": 182
+              "line": 186
             },
             {
               "kind": "async_function",
               "name": "get_state",
-              "line": 187
+              "line": 191
             },
             {
               "kind": "async_function",
               "name": "get_regime",
-              "line": 193
+              "line": 197
             },
             {
               "kind": "async_function",
               "name": "get_strategies",
-              "line": 213
+              "line": 217
             },
             {
               "kind": "async_function",
               "name": "toggle_strategy",
-              "line": 229
+              "line": 233
             },
             {
               "kind": "async_function",
               "name": "update_strategy",
-              "line": 249
+              "line": 253
             },
             {
               "kind": "async_function",
               "name": "get_signals",
-              "line": 368
+              "line": 284
             },
             {
               "kind": "async_function",
               "name": "get_positions",
-              "line": 378
+              "line": 294
             },
             {
               "kind": "async_function",
               "name": "get_trades",
-              "line": 389
+              "line": 305
             },
             {
               "kind": "async_function",
               "name": "get_performance",
-              "line": 399
+              "line": 315
             },
             {
               "kind": "async_function",
               "name": "step_backtest",
-              "line": 405
+              "line": 321
             },
             {
               "kind": "async_function",
               "name": "run_backtest",
-              "line": 412
+              "line": 328
             },
             {
               "kind": "async_function",
               "name": "reset_engine",
-              "line": 428
+              "line": 344
             },
             {
               "kind": "async_function",
               "name": "get_current_price",
-              "line": 436
+              "line": 352
             },
             {
               "kind": "async_function",
               "name": "get_history",
-              "line": 443
+              "line": 359
             },
             {
               "kind": "async_function",
               "name": "get_all_indicators",
-              "line": 450
+              "line": 366
             },
             {
               "kind": "async_function",
               "name": "evaluate_intrabar_slice",
-              "line": 458
+              "line": 374
             },
             {
               "kind": "async_function",
               "name": "process_bar",
-              "line": 521
+              "line": 399
             },
             {
               "kind": "async_function",
               "name": "get_session",
-              "line": 616
+              "line": 456
             },
             {
               "kind": "async_function",
               "name": "get_session_signals",
-              "line": 627
+              "line": 467
             },
             {
               "kind": "async_function",
               "name": "get_session_trades",
-              "line": 641
+              "line": 481
             },
             {
               "kind": "async_function",
               "name": "end_session",
-              "line": 656
+              "line": 496
             },
             {
               "kind": "async_function",
               "name": "list_sessions",
-              "line": 671
+              "line": 511
             },
             {
               "kind": "async_function",
               "name": "clear_session",
-              "line": 677
+              "line": 517
             },
             {
               "kind": "async_function",
               "name": "clear_run_sessions",
-              "line": 688
+              "line": 528
             },
             {
               "kind": "async_function",
               "name": "get_trading_config",
-              "line": 701
+              "line": 541
             },
             {
               "kind": "async_function",
               "name": "update_trading_config",
-              "line": 709
+              "line": 549
             },
             {
               "kind": "async_function",
               "name": "configure_session",
-              "line": 724
+              "line": 564
             },
             {
               "kind": "async_function",
               "name": "reset_orchestrator_state",
-              "line": 1013
+              "line": 785
             },
             {
               "kind": "async_function",
               "name": "get_system_health",
-              "line": 1037
+              "line": 809
             },
             {
               "kind": "async_function",
               "name": "get_orchestrator_config",
-              "line": 1046
+              "line": 818
             },
             {
               "kind": "async_function",
               "name": "update_orchestrator_config",
-              "line": 1073
+              "line": 827
             },
             {
               "kind": "async_function",
               "name": "save_checkpoint",
-              "line": 1124
+              "line": 840
             },
             {
               "kind": "async_function",
               "name": "load_checkpoint_endpoint",
-              "line": 1146
+              "line": 862
             },
             {
               "kind": "async_function",
               "name": "list_checkpoints",
-              "line": 1161
+              "line": 877
             },
             {
               "kind": "async_function",
               "name": "warmup_feature_store",
-              "line": 1184
+              "line": 900
             },
             {
               "kind": "async_function",
               "name": "websocket_endpoint",
-              "line": 1204
+              "line": 920
             }
           ],
           "routes": [
@@ -4665,223 +4509,223 @@
               "method": "GET",
               "path": "/",
               "handler": "root",
-              "line": 182
+              "line": 186
             },
             {
               "method": "GET",
               "path": "/api/state",
               "handler": "get_state",
-              "line": 187
+              "line": 191
             },
             {
               "method": "GET",
               "path": "/api/regime",
               "handler": "get_regime",
-              "line": 193
+              "line": 197
             },
             {
               "method": "GET",
               "path": "/api/strategies",
               "handler": "get_strategies",
-              "line": 213
+              "line": 217
             },
             {
               "method": "POST",
               "path": "/api/strategies/toggle",
               "handler": "toggle_strategy",
-              "line": 229
+              "line": 233
             },
             {
               "method": "POST",
               "path": "/api/strategies/update",
               "handler": "update_strategy",
-              "line": 249
+              "line": 253
             },
             {
               "method": "GET",
               "path": "/api/signals",
               "handler": "get_signals",
-              "line": 368
+              "line": 284
             },
             {
               "method": "GET",
               "path": "/api/positions",
               "handler": "get_positions",
-              "line": 378
+              "line": 294
             },
             {
               "method": "GET",
               "path": "/api/trades",
               "handler": "get_trades",
-              "line": 389
+              "line": 305
             },
             {
               "method": "GET",
               "path": "/api/performance",
               "handler": "get_performance",
-              "line": 399
+              "line": 315
             },
             {
               "method": "POST",
               "path": "/api/step",
               "handler": "step_backtest",
-              "line": 405
+              "line": 321
             },
             {
               "method": "POST",
               "path": "/api/run",
               "handler": "run_backtest",
-              "line": 412
+              "line": 328
             },
             {
               "method": "POST",
               "path": "/api/reset",
               "handler": "reset_engine",
-              "line": 428
+              "line": 344
             },
             {
               "method": "GET",
               "path": "/api/current",
               "handler": "get_current_price",
-              "line": 436
+              "line": 352
             },
             {
               "method": "GET",
               "path": "/api/history",
               "handler": "get_history",
-              "line": 443
+              "line": 359
             },
             {
               "method": "GET",
               "path": "/api/indicators",
               "handler": "get_all_indicators",
-              "line": 450
+              "line": 366
             },
             {
               "method": "POST",
               "path": "/api/session/intrabar_eval",
               "handler": "evaluate_intrabar_slice",
-              "line": 458
+              "line": 374
             },
             {
               "method": "POST",
               "path": "/api/session/bar",
               "handler": "process_bar",
-              "line": 521
+              "line": 399
             },
             {
               "method": "GET",
               "path": "/api/session",
               "handler": "get_session",
-              "line": 616
+              "line": 456
             },
             {
               "method": "GET",
               "path": "/api/session/signals",
               "handler": "get_session_signals",
-              "line": 627
+              "line": 467
             },
             {
               "method": "GET",
               "path": "/api/session/trades",
               "handler": "get_session_trades",
-              "line": 641
+              "line": 481
             },
             {
               "method": "POST",
               "path": "/api/session/end",
               "handler": "end_session",
-              "line": 656
+              "line": 496
             },
             {
               "method": "GET",
               "path": "/api/sessions",
               "handler": "list_sessions",
-              "line": 671
+              "line": 511
             },
             {
               "method": "DELETE",
               "path": "/api/session",
               "handler": "clear_session",
-              "line": 677
+              "line": 517
             },
             {
               "method": "DELETE",
               "path": "/api/session/run",
               "handler": "clear_run_sessions",
-              "line": 688
+              "line": 528
             },
             {
               "method": "GET",
               "path": "/api/config/trading",
               "handler": "get_trading_config",
-              "line": 701
+              "line": 541
             },
             {
               "method": "POST",
               "path": "/api/config/trading",
               "handler": "update_trading_config",
-              "line": 709
+              "line": 549
             },
             {
               "method": "POST",
               "path": "/api/session/config",
               "handler": "configure_session",
-              "line": 724
+              "line": 564
             },
             {
               "method": "POST",
               "path": "/api/orchestrator/reset",
               "handler": "reset_orchestrator_state",
-              "line": 1013
+              "line": 785
             },
             {
               "method": "GET",
               "path": "/api/system/health",
               "handler": "get_system_health",
-              "line": 1037
+              "line": 809
             },
             {
               "method": "GET",
               "path": "/api/orchestrator/config",
               "handler": "get_orchestrator_config",
-              "line": 1046
+              "line": 818
             },
             {
               "method": "POST",
               "path": "/api/orchestrator/config",
               "handler": "update_orchestrator_config",
-              "line": 1073
+              "line": 827
             },
             {
               "method": "POST",
               "path": "/api/orchestrator/checkpoint/save",
               "handler": "save_checkpoint",
-              "line": 1124
+              "line": 840
             },
             {
               "method": "POST",
               "path": "/api/orchestrator/checkpoint/load",
               "handler": "load_checkpoint_endpoint",
-              "line": 1146
+              "line": 862
             },
             {
               "method": "GET",
               "path": "/api/orchestrator/checkpoints",
               "handler": "list_checkpoints",
-              "line": 1161
+              "line": 877
             },
             {
               "method": "POST",
               "path": "/api/orchestrator/warmup",
               "handler": "warmup_feature_store",
-              "line": 1184
+              "line": 900
             },
             {
               "method": "WEBSOCKET",
               "path": "/ws",
               "handler": "websocket_endpoint",
-              "line": 1204
+              "line": 920
             }
           ],
           "parse_error": null
@@ -4890,7 +4734,7 @@
           "path": "../market_regime_detection/src/api_models.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/api_models.py",
           "exists": true,
-          "lines": 266,
+          "lines": 278,
           "last_commit": "562a066 2026-02-25",
           "symbols": [
             {
@@ -4931,13 +4775,13 @@
           "path": "../market_regime_detection/src/day_trading_manager.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/day_trading_manager.py",
           "exists": true,
-          "lines": 1382,
+          "lines": 1034,
           "last_commit": "1f7a1f5 2026-02-25",
           "symbols": [
             {
               "kind": "class",
               "name": "DayTradingManager",
-              "line": 90
+              "line": 92
             }
           ],
           "routes": [],
@@ -5549,7 +5393,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/databento_service.py",
           "exists": true,
           "lines": 2046,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "class",
@@ -5966,57 +5810,57 @@
           "parse_error": null
         },
         {
-          "path": "aos_walk_forward.py",
-          "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/aos_walk_forward.py",
+          "path": "aos_optimization/aos_walk_forward.py",
+          "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/aos_optimization/aos_walk_forward.py",
           "exists": true,
-          "lines": 633,
-          "last_commit": "1273b21 2026-02-23",
+          "lines": 641,
+          "last_commit": "-",
           "symbols": [
             {
               "kind": "class",
               "name": "AOSConfig",
-              "line": 40
+              "line": 45
             },
             {
               "kind": "class",
               "name": "DailyAOSResult",
-              "line": 50
+              "line": 55
             },
             {
               "kind": "class",
               "name": "AOSWalkForwardRunner",
-              "line": 70
+              "line": 75
             },
             {
               "kind": "async_function",
               "name": "main",
-              "line": 591
+              "line": 596
             }
           ],
           "routes": [],
           "parse_error": null
         },
         {
-          "path": "aos_optimizer.py",
-          "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/aos_optimizer.py",
+          "path": "aos_optimization/aos_optimizer.py",
+          "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/aos_optimization/aos_optimizer.py",
           "exists": true,
-          "lines": 422,
-          "last_commit": "1273b21 2026-02-23",
+          "lines": 425,
+          "last_commit": "-",
           "symbols": [
             {
               "kind": "class",
               "name": "OptimizationResult",
-              "line": 37
+              "line": 40
             },
             {
               "kind": "class",
               "name": "TickerProfile",
-              "line": 53
+              "line": 56
             },
             {
               "kind": "class",
               "name": "AOSOptimizer",
-              "line": 67
+              "line": 70
             }
           ],
           "routes": [],
@@ -6027,7 +5871,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/run_strategy_test.py",
           "exists": true,
           "lines": 644,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "class",
@@ -6058,7 +5902,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/batch_runner.py",
           "exists": true,
           "lines": 214,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [
             {
               "kind": "class",
@@ -6114,7 +5958,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/main.tsx",
           "exists": true,
           "lines": 58,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6123,8 +5967,8 @@
           "path": "frontend/src/App.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/App.tsx",
           "exists": true,
-          "lines": 797,
-          "last_commit": "03b4ad8 2026-02-25",
+          "lines": 669,
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6154,7 +5998,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/decision-panel/DecisionPanel.tsx",
           "exists": true,
           "lines": 296,
-          "last_commit": "-",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6164,7 +6008,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/SessionSummary.tsx",
           "exists": true,
           "lines": 327,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6193,8 +6037,8 @@
           "path": "frontend/src/components/DataManager.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/DataManager.tsx",
           "exists": true,
-          "lines": 786,
-          "last_commit": "b9accc6 2026-02-18",
+          "lines": 345,
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6204,7 +6048,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/AdaptiveStrategyStudio.tsx",
           "exists": true,
           "lines": 345,
-          "last_commit": "8892e7b 2026-02-25",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6214,7 +6058,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/diagnostic-calendar/DiagnosticCalendar.tsx",
           "exists": true,
           "lines": 100,
-          "last_commit": "-",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6223,7 +6067,7 @@
           "path": "frontend/src/components/StrategySettings.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/StrategySettings.tsx",
           "exists": true,
-          "lines": 928,
+          "lines": 492,
           "last_commit": "1273b21 2026-02-23",
           "symbols": [],
           "routes": [],
@@ -6234,7 +6078,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/AOSOptimizations.tsx",
           "exists": true,
           "lines": 404,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "58ebada 2026-02-27",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6915,7 +6759,7 @@
       "method": "DELETE",
       "path": "/api/session",
       "handler": "clear_session",
-      "line": 677
+      "line": 517
     },
     {
       "domain": "strategy-engine",
@@ -6923,7 +6767,7 @@
       "method": "DELETE",
       "path": "/api/session/run",
       "handler": "clear_run_sessions",
-      "line": 688
+      "line": 528
     },
     {
       "domain": "strategy-engine",
@@ -6931,7 +6775,7 @@
       "method": "GET",
       "path": "/",
       "handler": "root",
-      "line": 182
+      "line": 186
     },
     {
       "domain": "strategy-engine",
@@ -6939,7 +6783,7 @@
       "method": "GET",
       "path": "/api/config/trading",
       "handler": "get_trading_config",
-      "line": 701
+      "line": 541
     },
     {
       "domain": "strategy-engine",
@@ -6947,7 +6791,7 @@
       "method": "GET",
       "path": "/api/current",
       "handler": "get_current_price",
-      "line": 436
+      "line": 352
     },
     {
       "domain": "strategy-engine",
@@ -6955,7 +6799,7 @@
       "method": "GET",
       "path": "/api/history",
       "handler": "get_history",
-      "line": 443
+      "line": 359
     },
     {
       "domain": "strategy-engine",
@@ -6963,7 +6807,7 @@
       "method": "GET",
       "path": "/api/indicators",
       "handler": "get_all_indicators",
-      "line": 450
+      "line": 366
     },
     {
       "domain": "strategy-engine",
@@ -6971,7 +6815,7 @@
       "method": "GET",
       "path": "/api/orchestrator/checkpoints",
       "handler": "list_checkpoints",
-      "line": 1161
+      "line": 877
     },
     {
       "domain": "strategy-engine",
@@ -6979,7 +6823,7 @@
       "method": "GET",
       "path": "/api/orchestrator/config",
       "handler": "get_orchestrator_config",
-      "line": 1046
+      "line": 818
     },
     {
       "domain": "strategy-engine",
@@ -6987,7 +6831,7 @@
       "method": "GET",
       "path": "/api/performance",
       "handler": "get_performance",
-      "line": 399
+      "line": 315
     },
     {
       "domain": "strategy-engine",
@@ -6995,7 +6839,7 @@
       "method": "GET",
       "path": "/api/positions",
       "handler": "get_positions",
-      "line": 378
+      "line": 294
     },
     {
       "domain": "strategy-engine",
@@ -7003,7 +6847,7 @@
       "method": "GET",
       "path": "/api/regime",
       "handler": "get_regime",
-      "line": 193
+      "line": 197
     },
     {
       "domain": "strategy-engine",
@@ -7011,7 +6855,7 @@
       "method": "GET",
       "path": "/api/session",
       "handler": "get_session",
-      "line": 616
+      "line": 456
     },
     {
       "domain": "strategy-engine",
@@ -7019,7 +6863,7 @@
       "method": "GET",
       "path": "/api/session/signals",
       "handler": "get_session_signals",
-      "line": 627
+      "line": 467
     },
     {
       "domain": "strategy-engine",
@@ -7027,7 +6871,7 @@
       "method": "GET",
       "path": "/api/session/trades",
       "handler": "get_session_trades",
-      "line": 641
+      "line": 481
     },
     {
       "domain": "strategy-engine",
@@ -7035,7 +6879,7 @@
       "method": "GET",
       "path": "/api/sessions",
       "handler": "list_sessions",
-      "line": 671
+      "line": 511
     },
     {
       "domain": "strategy-engine",
@@ -7043,7 +6887,7 @@
       "method": "GET",
       "path": "/api/signals",
       "handler": "get_signals",
-      "line": 368
+      "line": 284
     },
     {
       "domain": "strategy-engine",
@@ -7051,7 +6895,7 @@
       "method": "GET",
       "path": "/api/state",
       "handler": "get_state",
-      "line": 187
+      "line": 191
     },
     {
       "domain": "strategy-engine",
@@ -7059,7 +6903,7 @@
       "method": "GET",
       "path": "/api/strategies",
       "handler": "get_strategies",
-      "line": 213
+      "line": 217
     },
     {
       "domain": "strategy-engine",
@@ -7067,7 +6911,7 @@
       "method": "GET",
       "path": "/api/system/health",
       "handler": "get_system_health",
-      "line": 1037
+      "line": 809
     },
     {
       "domain": "strategy-engine",
@@ -7075,7 +6919,7 @@
       "method": "GET",
       "path": "/api/trades",
       "handler": "get_trades",
-      "line": 389
+      "line": 305
     },
     {
       "domain": "strategy-engine",
@@ -7083,7 +6927,7 @@
       "method": "POST",
       "path": "/api/config/trading",
       "handler": "update_trading_config",
-      "line": 709
+      "line": 549
     },
     {
       "domain": "strategy-engine",
@@ -7091,7 +6935,7 @@
       "method": "POST",
       "path": "/api/orchestrator/checkpoint/load",
       "handler": "load_checkpoint_endpoint",
-      "line": 1146
+      "line": 862
     },
     {
       "domain": "strategy-engine",
@@ -7099,7 +6943,7 @@
       "method": "POST",
       "path": "/api/orchestrator/checkpoint/save",
       "handler": "save_checkpoint",
-      "line": 1124
+      "line": 840
     },
     {
       "domain": "strategy-engine",
@@ -7107,7 +6951,7 @@
       "method": "POST",
       "path": "/api/orchestrator/config",
       "handler": "update_orchestrator_config",
-      "line": 1073
+      "line": 827
     },
     {
       "domain": "strategy-engine",
@@ -7115,7 +6959,7 @@
       "method": "POST",
       "path": "/api/orchestrator/reset",
       "handler": "reset_orchestrator_state",
-      "line": 1013
+      "line": 785
     },
     {
       "domain": "strategy-engine",
@@ -7123,7 +6967,7 @@
       "method": "POST",
       "path": "/api/orchestrator/warmup",
       "handler": "warmup_feature_store",
-      "line": 1184
+      "line": 900
     },
     {
       "domain": "strategy-engine",
@@ -7131,7 +6975,7 @@
       "method": "POST",
       "path": "/api/reset",
       "handler": "reset_engine",
-      "line": 428
+      "line": 344
     },
     {
       "domain": "strategy-engine",
@@ -7139,7 +6983,7 @@
       "method": "POST",
       "path": "/api/run",
       "handler": "run_backtest",
-      "line": 412
+      "line": 328
     },
     {
       "domain": "strategy-engine",
@@ -7147,7 +6991,7 @@
       "method": "POST",
       "path": "/api/session/bar",
       "handler": "process_bar",
-      "line": 521
+      "line": 399
     },
     {
       "domain": "strategy-engine",
@@ -7155,7 +6999,7 @@
       "method": "POST",
       "path": "/api/session/config",
       "handler": "configure_session",
-      "line": 724
+      "line": 564
     },
     {
       "domain": "strategy-engine",
@@ -7163,7 +7007,7 @@
       "method": "POST",
       "path": "/api/session/end",
       "handler": "end_session",
-      "line": 656
+      "line": 496
     },
     {
       "domain": "strategy-engine",
@@ -7171,7 +7015,7 @@
       "method": "POST",
       "path": "/api/session/intrabar_eval",
       "handler": "evaluate_intrabar_slice",
-      "line": 458
+      "line": 374
     },
     {
       "domain": "strategy-engine",
@@ -7179,7 +7023,7 @@
       "method": "POST",
       "path": "/api/step",
       "handler": "step_backtest",
-      "line": 405
+      "line": 321
     },
     {
       "domain": "strategy-engine",
@@ -7187,7 +7031,7 @@
       "method": "POST",
       "path": "/api/strategies/toggle",
       "handler": "toggle_strategy",
-      "line": 229
+      "line": 233
     },
     {
       "domain": "strategy-engine",
@@ -7195,7 +7039,7 @@
       "method": "POST",
       "path": "/api/strategies/update",
       "handler": "update_strategy",
-      "line": 249
+      "line": 253
     },
     {
       "domain": "strategy-engine",
@@ -7203,7 +7047,7 @@
       "method": "WEBSOCKET",
       "path": "/ws",
       "handler": "websocket_endpoint",
-      "line": 1204
+      "line": 920
     }
   ]
 }

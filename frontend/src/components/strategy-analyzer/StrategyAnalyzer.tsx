@@ -32,6 +32,7 @@ import { useStrategyAnalyzerRunOrchestration } from "./useStrategyAnalyzerRunOrc
 import { useStrategyAnalyzerTickerCatalog } from "./useStrategyAnalyzerTickerCatalog";
 import { useStrategyAnalyzerTimelineCache } from "./useStrategyAnalyzerTimelineCache";
 import { useStrategyAnalyzerRangeScrub } from "./useStrategyAnalyzerRangeScrub";
+import { useStrategyAnalyzerWfo } from "./useStrategyAnalyzerWfo";
 
 const handledOpenDayAutoLoadRequestIds = new Set<number>();
 
@@ -247,6 +248,31 @@ export default function StrategyAnalyzer({
     setAnalyzerRunKey,
   });
   const {
+    wfoEnabled,
+    setWfoEnabled,
+    wfoGridConfig,
+    updateWfoGridConfig,
+    estimatedCombinationCount,
+    wfoIsRunning,
+    wfoProgressLabel,
+    rankedWfoResults,
+    selectedWfoVariantId,
+    bestWfoVariantId,
+    handleRunWfo,
+    handleSelectWfoVariant,
+  } = useStrategyAnalyzerWfo({
+    selectedRangeFrom,
+    selectedRangeTo,
+    ticker,
+    strategyApiUrl,
+    analyzerTradeEvalMode,
+    rangePlaybackMeta,
+    onOpenStoredRunSnapshot,
+    setError,
+    setRangeScrubOffset,
+    setAnalyzerRunKey,
+  });
+  const {
     isScrubbingLiveEval,
     scrubbedConditionsActive,
     effectiveConditionsMarker,
@@ -430,6 +456,14 @@ export default function StrategyAnalyzer({
     setRangeScrubOffset(0);
   }, []);
 
+  const handleStartAction = useCallback(() => {
+    if (wfoEnabled) {
+      void handleRunWfo();
+      return;
+    }
+    void handleStartTest();
+  }, [wfoEnabled, handleRunWfo, handleStartTest]);
+
   const detachedToggleButtonStyle = {
     padding: "2px 8px",
     borderRadius: "var(--radius-sm)",
@@ -476,7 +510,7 @@ export default function StrategyAnalyzer({
         isAnalyzerAttachedRun={isAnalyzerAttachedRun}
         analyzerTradeEvalMode={analyzerTradeEvalMode}
         onAnalyzerTradeEvalModeChange={setAnalyzerTradeEvalMode}
-        runLoading={runLoading}
+        runLoading={runLoading || wfoIsRunning}
         isPlayingRun={isPlayingRun}
         analyzerRunFinished={analyzerRunFinished}
         onPlayRun={onPlayRun}
@@ -485,6 +519,10 @@ export default function StrategyAnalyzer({
         onClearAnalyzerRun={handleClearAnalyzerRun}
         analyzerPlaybackProgress={analyzerPlaybackProgress}
         attachedRunState={attachedRunState}
+        rankedWfoResults={rankedWfoResults}
+        selectedWfoVariantId={selectedWfoVariantId}
+        bestWfoVariantId={bestWfoVariantId}
+        onSelectWfoVariant={handleSelectWfoVariant}
       />
 
       {/* ── Error ──────────────────────────────────────────────── */}
@@ -552,8 +590,20 @@ export default function StrategyAnalyzer({
             setSelectedRangeTo={setSelectedRangeTo}
             onClearRange={handleClearRange}
             onOpenStrategyEditor={() => setShowStrategyEditor(true)}
-            onStartTest={handleStartTest}
-            runLoading={runLoading}
+            onStartTest={handleStartAction}
+            onRunWfo={handleRunWfo}
+            runLoading={runLoading || wfoIsRunning}
+            wfoEnabled={wfoEnabled}
+            onWfoEnabledChange={setWfoEnabled}
+            wfoGridConfig={wfoGridConfig}
+            onWfoGridConfigChange={updateWfoGridConfig}
+            wfoEstimatedCombinations={estimatedCombinationCount}
+            wfoIsRunning={wfoIsRunning}
+            wfoProgressLabel={wfoProgressLabel}
+            rankedWfoResults={rankedWfoResults}
+            selectedWfoVariantId={selectedWfoVariantId}
+            bestWfoVariantId={bestWfoVariantId}
+            onSelectWfoVariant={handleSelectWfoVariant}
           />
         </div>
 

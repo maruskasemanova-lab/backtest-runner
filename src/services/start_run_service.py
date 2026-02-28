@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -29,6 +29,28 @@ from src.services.start_run_execution_config_service import resolve_execution_co
 from src.services.start_run_execution_payload_service import (
     ExecutionPayloadInputs,
     build_execution_payload,
+)
+from src.services.start_run_planning_utils import (
+    add_days_iso as planning_add_days_iso,
+    build_progressive_chunks as planning_build_progressive_chunks,
+    format_iso_day as planning_format_iso_day,
+    inclusive_day_span as planning_inclusive_day_span,
+    parse_iso_day as planning_parse_iso_day,
+    prewarm_l2_guard_reason as planning_prewarm_l2_guard_reason,
+    resolve_progressive_plan as planning_resolve_progressive_plan,
+    run_l2_guard_reason as planning_run_l2_guard_reason,
+)
+from src.services.start_run_report_utils import (
+    build_data_availability_warnings as report_build_data_availability_warnings,
+    build_report_metadata as report_build_report_metadata,
+    build_run_request_config_snapshot as report_build_run_request_config_snapshot,
+    extract_effective_profile_metadata as report_extract_effective_profile_metadata,
+    first_profile_ref_token as report_first_profile_ref_token,
+    normalize_profile_ref_token as report_normalize_profile_ref_token,
+    summarize_days_preview as report_summarize_days_preview,
+)
+from src.services.start_run_time_filter_utils import (
+    canonical_trading_hours as _canonical_trading_hours,
 )
 from src.services.start_run_local_aos_service import resolve_local_aos_applied
 from src.services.start_run_bootstrap_phase_service import (
@@ -117,7 +139,6 @@ PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS = _parse_non_negative_int_env(
 )
 _PREWARM_INFLIGHT: Dict[str, concurrent.futures.Future] = {}
 _PREWARM_INFLIGHT_LOCK = threading.Lock()
-_PROFILE_PLACEHOLDER_TOKENS = {"none", "null", "n/a", "na", "undefined", "-"}
 
 
 def _strategy_reset_success(value: Any) -> bool:
@@ -204,20 +225,11 @@ def _resolve_request_range(request: Any) -> tuple[str, str]:
 
 
 def _normalize_profile_ref_token(value: Any) -> Optional[str]:
-    token = str(value).strip() if value is not None else ""
-    if not token:
-        return None
-    if token.lower() in _PROFILE_PLACEHOLDER_TOKENS:
-        return None
-    return token
+    return report_normalize_profile_ref_token(value)
 
 
 def _first_profile_ref_token(*values: Any) -> Optional[str]:
-    for value in values:
-        token = _normalize_profile_ref_token(value)
-        if token:
-            return token
-    return None
+    return report_first_profile_ref_token(*values)
 
 
 def _extract_effective_profile_metadata(
@@ -225,65 +237,14 @@ def _extract_effective_profile_metadata(
     aos_applied: Dict[str, Any],
     execution_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Optional[str]]:
-    execution_payload = execution_config if isinstance(execution_config, dict) else {}
-    unified_meta = (
-        aos_applied.get("unified_profile", {})
-        if isinstance(aos_applied.get("unified_profile"), dict)
-        else {}
+    return report_extract_effective_profile_metadata(
+        aos_applied=aos_applied,
+        execution_config=execution_config,
     )
-    adaptive_meta = (
-        aos_applied.get("adaptive_profile", {})
-        if isinstance(aos_applied.get("adaptive_profile"), dict)
-        else {}
-    )
-    strategy_combo_meta = (
-        aos_applied.get("strategy_combo", {})
-        if isinstance(aos_applied.get("strategy_combo"), dict)
-        else {}
-    )
-    return {
-        "unified_profile_id": _first_profile_ref_token(
-            execution_payload.get("unified_profile_id"),
-            execution_payload.get("active_unified_profile_id"),
-            unified_meta.get("active_profile_id"),
-            unified_meta.get("profile_id"),
-        ),
-        "unified_profile_name": _first_profile_ref_token(
-            execution_payload.get("unified_profile_name"),
-            unified_meta.get("profile_name"),
-        ),
-        "adaptive_profile_id": _first_profile_ref_token(
-            execution_payload.get("adaptive_profile_id"),
-            execution_payload.get("active_adaptive_tuner_profile_id"),
-            adaptive_meta.get("active_profile_id"),
-            adaptive_meta.get("profile_id"),
-        ),
-        "adaptive_profile_name": _first_profile_ref_token(
-            execution_payload.get("adaptive_profile_name"),
-            adaptive_meta.get("profile_name"),
-        ),
-        "strategy_combo_profile_id": _first_profile_ref_token(
-            execution_payload.get("strategy_combo_profile_id"),
-            execution_payload.get("active_strategy_combo_profile_id"),
-            strategy_combo_meta.get("active_profile_id"),
-            strategy_combo_meta.get("profile_id"),
-        ),
-        "strategy_combo_profile_name": _first_profile_ref_token(
-            execution_payload.get("strategy_combo_profile_name"),
-            strategy_combo_meta.get("profile_name"),
-        ),
-    }
 
 
 def _summarize_days_preview(days: Any, limit: int = 3) -> str:
-    if not isinstance(days, list):
-        return ""
-    normalized = [str(day).strip() for day in days if str(day or "").strip()]
-    if not normalized:
-        return ""
-    if len(normalized) <= limit:
-        return ", ".join(normalized)
-    return f"{', '.join(normalized[:limit])}, ..."
+    return report_summarize_days_preview(days, limit)
 
 
 def _build_data_availability_warnings(
@@ -291,82 +252,10 @@ def _build_data_availability_warnings(
     execution_config: Dict[str, Any],
     l2_applied: Dict[str, Any],
 ) -> List[str]:
-    warnings: List[str] = []
-
-    l2_required = bool(
-        l2_applied.get("effective_l2_confirm_enabled", False)
-        or l2_applied.get("l2_requested", False)
+    return report_build_data_availability_warnings(
+        execution_config=execution_config,
+        l2_applied=l2_applied,
     )
-    missing_l2_days = (
-        list(l2_applied.get("missing_l2_days", []))
-        if isinstance(l2_applied.get("missing_l2_days"), list)
-        else []
-    )
-    missing_l2_days_count = int(
-        l2_applied.get("missing_l2_days_count", len(missing_l2_days)) or 0
-    )
-    has_l2 = bool(l2_applied.get("has_l2", False))
-    if l2_required and (missing_l2_days_count > 0 or not has_l2):
-        if missing_l2_days_count > 0:
-            preview = _summarize_days_preview(missing_l2_days)
-            suffix = f" ({preview})" if preview else ""
-            warnings.append(
-                f"[Data] L2 coverage missing for {missing_l2_days_count} day(s){suffix}."
-            )
-        elif not has_l2:
-            warnings.append("[Data] L2 requested, but no L2 data was loaded for this run.")
-
-    tcbbo_enabled = bool(
-        l2_applied.get("tcbbo_gate_enabled", execution_config.get("tcbbo_gate_enabled"))
-    )
-    tcbbo_required_by = (
-        list(l2_applied.get("tcbbo_feature_required_by", []))
-        if isinstance(l2_applied.get("tcbbo_feature_required_by"), list)
-        else []
-    )
-    tcbbo_feature_required = bool(
-        l2_applied.get("tcbbo_feature_required", tcbbo_enabled)
-    )
-    tcbbo_available = bool(l2_applied.get("tcbbo_available", False))
-    if tcbbo_feature_required and not tcbbo_available:
-        reason = str(l2_applied.get("tcbbo_missing_reason") or "").strip()
-        reason_map = {
-            "tcbbo_file_not_found": "TCBBO parquet file not found",
-            "tcbbo_build_failed": "TCBBO parse/build failed",
-            "tcbbo_no_feature_rows": "TCBBO file loaded but produced no minute features",
-            "tcbbo_no_bar_overlap": "TCBBO data does not overlap loaded bars",
-        }
-        reason_text = reason_map.get(reason, "TCBBO data unavailable")
-        files_found = int(l2_applied.get("tcbbo_files_found", 0) or 0)
-        roots = (
-            list(l2_applied.get("tcbbo_search_roots", []))
-            if isinstance(l2_applied.get("tcbbo_search_roots"), list)
-            else []
-        )
-        roots_preview = ", ".join(str(r) for r in roots[:2]) if roots else ""
-        extra = []
-        if files_found:
-            extra.append(f"files_found={files_found}")
-        if roots_preview:
-            extra.append(f"search_roots={roots_preview}")
-        extra_suffix = f" ({'; '.join(extra)})" if extra else ""
-        message = f"[Data] {reason_text}.{extra_suffix}"
-        if "options_flow_alpha" in tcbbo_required_by and not tcbbo_enabled:
-            message += " OptionsFlowAlpha is enabled, but it will run without TCBBO flow inputs."
-        elif "options_flow_alpha" in tcbbo_required_by and tcbbo_enabled:
-            message += " OptionsFlowAlpha and TCBBO gate are both enabled."
-        warnings.append(message)
-
-    # De-duplicate while preserving order.
-    deduped: List[str] = []
-    seen = set()
-    for item in warnings:
-        text = str(item or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        deduped.append(text)
-    return deduped
 
 
 async def _force_enable_all_remote_strategies(
@@ -413,57 +302,16 @@ def _build_report_metadata(
     aos_applied: Dict[str, Any],
     execution_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    profile_meta = _extract_effective_profile_metadata(
+    return report_build_report_metadata(
+        run_key=run_key,
+        run_date_label=run_date_label,
         aos_applied=aos_applied,
         execution_config=execution_config,
     )
-    return {
-        "run_key": str(run_key),
-        "run_date_label": str(run_date_label),
-        "unified_profile_id": profile_meta.get("unified_profile_id"),
-        "unified_profile_name": profile_meta.get("unified_profile_name"),
-        "adaptive_profile_id": profile_meta.get("adaptive_profile_id"),
-        "adaptive_profile_name": profile_meta.get("adaptive_profile_name"),
-        "strategy_combo_profile_id": profile_meta.get("strategy_combo_profile_id"),
-        "strategy_combo_profile_name": profile_meta.get("strategy_combo_profile_name"),
-    }
 
 
 def _build_run_request_config_snapshot(request: StartRunRequest) -> Dict[str, Any]:
-    """
-    Capture the full run/start request payload for diagnostics replay visibility.
-
-    The snapshot is JSON-normalized so it can be persisted inside run summaries
-    and rendered safely in frontend read-only forms.
-    """
-    payload: Dict[str, Any]
-    try:
-        payload = request.dict()
-    except Exception:
-        payload = {}
-    if not isinstance(payload, dict):
-        return {}
-    try:
-        return json.loads(json.dumps(payload, default=str))
-    except Exception:
-        return payload
-
-
-def _canonical_trading_hours(raw_hours: Any) -> tuple[int, ...]:
-    if not isinstance(raw_hours, list):
-        return tuple()
-    normalized = []
-    seen = set()
-    for item in raw_hours:
-        try:
-            hour = int(item)
-        except (TypeError, ValueError):
-            continue
-        if hour < 0 or hour > 23 or hour in seen:
-            continue
-        seen.add(hour)
-        normalized.append(hour)
-    return tuple(sorted(normalized))
+    return report_build_run_request_config_snapshot(request)
 
 
 def _build_prewarm_cache_key(
@@ -550,13 +398,7 @@ def _resolve_prewarm_scope_range(
 
 
 def _inclusive_day_span(start_iso: str, end_iso: str) -> int:
-    try:
-        start_dt = datetime.strptime(str(start_iso), "%Y-%m-%d")
-        end_dt = datetime.strptime(str(end_iso), "%Y-%m-%d")
-    except Exception:
-        return 0
-    delta_days = (end_dt - start_dt).days
-    return max(0, delta_days + 1)
+    return planning_inclusive_day_span(start_iso, end_iso)
 
 
 def _run_l2_guard_reason(
@@ -566,17 +408,13 @@ def _run_l2_guard_reason(
     range_start: str,
     range_end: str,
 ) -> Optional[str]:
-    if not bool(requested_l2_only or requested_l2_confirm):
-        return None
-    day_span = _inclusive_day_span(range_start, range_end)
-    if RUN_L2_FORCE or RUN_L2_MAX_DAYS <= 0 or day_span <= RUN_L2_MAX_DAYS:
-        return None
-    return (
-        "L2 request rejected: requested range "
-        f"{range_start}..{range_end} covers {day_span} day(s), which exceeds "
-        f"BACKTEST_RUN_L2_MAX_DAYS={RUN_L2_MAX_DAYS}. "
-        "Set BACKTEST_RUN_L2_FORCE=1 or increase BACKTEST_RUN_L2_MAX_DAYS "
-        "to allow full-range L2."
+    return planning_run_l2_guard_reason(
+        requested_l2_only=requested_l2_only,
+        requested_l2_confirm=requested_l2_confirm,
+        range_start=range_start,
+        range_end=range_end,
+        run_l2_force=RUN_L2_FORCE,
+        run_l2_max_days=RUN_L2_MAX_DAYS,
     )
 
 
@@ -588,53 +426,29 @@ def _prewarm_l2_guard_reason(
     range_start: str,
     range_end: str,
 ) -> Optional[str]:
-    if not bool(requested_l2_only or requested_l2_confirm):
-        return None
-    day_span = _inclusive_day_span(range_start, range_end)
-    scope = str(prewarm_scope or "range").strip().lower()
-    if scope == "ticker":
-        if (
-            PREWARM_TICKER_SCOPE_L2_FORCE
-            or PREWARM_TICKER_SCOPE_L2_MAX_DAYS <= 0
-            or day_span <= PREWARM_TICKER_SCOPE_L2_MAX_DAYS
-        ):
-            return None
-        return (
-            "L2 prewarm rejected for ticker scope: requested range "
-            f"{range_start}..{range_end} covers {day_span} day(s), which exceeds "
-            "BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS="
-            f"{PREWARM_TICKER_SCOPE_L2_MAX_DAYS}. "
-            "Set BACKTEST_PREWARM_TICKER_SCOPE_L2_FORCE=1 or increase "
-            "BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS to allow full-range L2 prewarm."
-        )
-
-    if RUN_L2_FORCE or RUN_L2_MAX_DAYS <= 0 or day_span <= RUN_L2_MAX_DAYS:
-        return None
-    return (
-        "L2 prewarm rejected for range scope: requested range "
-        f"{range_start}..{range_end} covers {day_span} day(s), which exceeds "
-        f"BACKTEST_RUN_L2_MAX_DAYS={RUN_L2_MAX_DAYS}. "
-        "Set BACKTEST_RUN_L2_FORCE=1 or increase BACKTEST_RUN_L2_MAX_DAYS "
-        "to allow full-range L2 prewarm."
+    return planning_prewarm_l2_guard_reason(
+        prewarm_scope=prewarm_scope,
+        requested_l2_only=requested_l2_only,
+        requested_l2_confirm=requested_l2_confirm,
+        range_start=range_start,
+        range_end=range_end,
+        prewarm_ticker_scope_l2_force=PREWARM_TICKER_SCOPE_L2_FORCE,
+        prewarm_ticker_scope_l2_max_days=PREWARM_TICKER_SCOPE_L2_MAX_DAYS,
+        run_l2_force=RUN_L2_FORCE,
+        run_l2_max_days=RUN_L2_MAX_DAYS,
     )
 
 
 def _parse_iso_day(value: Any) -> Optional[datetime]:
-    try:
-        return datetime.strptime(str(value), "%Y-%m-%d")
-    except Exception:
-        return None
+    return planning_parse_iso_day(value)
 
 
 def _format_iso_day(value: datetime) -> str:
-    return value.strftime("%Y-%m-%d")
+    return planning_format_iso_day(value)
 
 
 def _add_days_iso(value: str, days: int) -> Optional[str]:
-    base = _parse_iso_day(value)
-    if base is None:
-        return None
-    return _format_iso_day(base + timedelta(days=int(days)))
+    return planning_add_days_iso(value, days)
 
 
 def _build_progressive_chunks(
@@ -644,22 +458,12 @@ def _build_progressive_chunks(
     initial_days: int,
     chunk_days: int,
 ) -> list[tuple[str, str]]:
-    start_dt = _parse_iso_day(range_start)
-    end_dt = _parse_iso_day(range_end)
-    if start_dt is None or end_dt is None or start_dt > end_dt:
-        return []
-
-    initial_span = max(1, int(initial_days))
-    chunk_span = max(1, int(chunk_days))
-    initial_end_dt = min(end_dt, start_dt + timedelta(days=initial_span - 1))
-    next_start_dt = initial_end_dt + timedelta(days=1)
-
-    chunks: list[tuple[str, str]] = []
-    while next_start_dt <= end_dt:
-        chunk_end_dt = min(end_dt, next_start_dt + timedelta(days=chunk_span - 1))
-        chunks.append((_format_iso_day(next_start_dt), _format_iso_day(chunk_end_dt)))
-        next_start_dt = chunk_end_dt + timedelta(days=1)
-    return chunks
+    return planning_build_progressive_chunks(
+        range_start=range_start,
+        range_end=range_end,
+        initial_days=initial_days,
+        chunk_days=chunk_days,
+    )
 
 
 def _resolve_progressive_plan(
@@ -668,45 +472,18 @@ def _resolve_progressive_plan(
     range_end: str,
     comparable_mode: bool,
 ) -> Optional[Dict[str, Any]]:
-    if not PROGRESSIVE_LOAD_ENABLED:
-        return None
-    if comparable_mode and not PROGRESSIVE_LOAD_ALLOW_COMPARABLE_MODE:
-        return None
-
-    day_span = _inclusive_day_span(range_start, range_end)
-    min_days = max(1, int(PROGRESSIVE_LOAD_MIN_DAYS))
-    if day_span <= min_days:
-        return None
-
-    if comparable_mode:
-        initial_days = max(1, int(PROGRESSIVE_LOAD_COMPARABLE_INITIAL_DAYS))
-        chunk_days = max(1, int(PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS))
-    else:
-        initial_days = max(1, int(PROGRESSIVE_LOAD_INITIAL_DAYS))
-        chunk_days = max(1, int(PROGRESSIVE_LOAD_CHUNK_DAYS))
-
-    initial_end = _add_days_iso(range_start, initial_days - 1) or range_end
-    if initial_end > range_end:
-        initial_end = range_end
-
-    chunks = _build_progressive_chunks(
+    return planning_resolve_progressive_plan(
         range_start=range_start,
         range_end=range_end,
-        initial_days=initial_days,
-        chunk_days=chunk_days,
+        comparable_mode=comparable_mode,
+        progressive_load_enabled=PROGRESSIVE_LOAD_ENABLED,
+        progressive_load_allow_comparable_mode=PROGRESSIVE_LOAD_ALLOW_COMPARABLE_MODE,
+        progressive_load_min_days=PROGRESSIVE_LOAD_MIN_DAYS,
+        progressive_load_initial_days=PROGRESSIVE_LOAD_INITIAL_DAYS,
+        progressive_load_chunk_days=PROGRESSIVE_LOAD_CHUNK_DAYS,
+        progressive_load_comparable_initial_days=PROGRESSIVE_LOAD_COMPARABLE_INITIAL_DAYS,
+        progressive_load_comparable_chunk_days=PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS,
     )
-    if not chunks:
-        return None
-
-    return {
-        "initial_start": range_start,
-        "initial_end": initial_end,
-        "target_end": range_end,
-        "chunks": chunks,
-        "day_span": day_span,
-        "initial_days": initial_days,
-        "chunk_days": chunk_days,
-    }
 
 
 def _normalize_reset_scope(value: Any) -> str:

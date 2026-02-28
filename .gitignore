@@ -32,6 +32,7 @@ aos_optimization/.adaptive_tuner_aos/
 data/
 audit_*.json
 batch_report.json
+batch_results_*.json
 nvda_report.json
 performance_data.json
 test_report.json
@@ -41,6 +42,15 @@ wfo_results.json
 aos_walk_forward_results/
 walk_forward_results/
 temp_test_sweep*.json
+results*.json
+results*.csv
+response.json
+trade.json
+googl_results.json
+start_result.json
+last_4_runs.json
+debug_output.txt
+intrabar_usages.txt
 
 # Specific run artifacts
 mu_*.json
@@ -48,6 +58,14 @@ mu_*.csv
 mu_oos_trades_*.csv
 mu_phase_*.json
 mu_phase_*.csv
+codex_mu_fullwidth_nocarry_fix_trades_90.json
+
+# Local runtime/process markers
+.pid*
+runner.pid
+
+# Local sqlite runtime state
+saas_state.db
 
 # Frontend build output
 frontend/dist/

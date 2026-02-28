@@ -30,9 +30,9 @@
     "min_directional_consistency": 0.3,
     "min_signed_aggression": 0.03
   },
-  "notes": "Evidence-based GOOGL profile with flow-only strategy stack and default L2-only gating.",
+  "notes": "Evidence-based GOOGL profile with flow-only strategy stack and ctx050 runtime preset.",
   "trailing_stop_pct": 0.9,
-  "strategy_selection_mode": "adaptive_top_n",
+  "strategy_selection_mode": "all_enabled",
   "max_active_strategies": 1,
   "trading_hours": [
     9,
@@ -41,6 +41,9 @@
     12
   ],
   "time_filter_enabled": true,
+  "include_extended_hours": false,
+  "context_aware_risk_enabled": true,
+  "context_risk_min_sl_pct": 0.5,
   "adaptive": {
     "version": 2,
     "flow_bias_enabled": true,

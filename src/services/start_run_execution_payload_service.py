@@ -751,7 +751,7 @@ def _build_context_risk_payload(execution_cfg: Dict[str, Any]) -> Dict[str, Any]
             execution_cfg.get("context_risk_sl_buffer_pct", 0.10)
         ),
         "context_risk_min_sl_pct": float(
-            execution_cfg.get("context_risk_min_sl_pct", 0.30)
+            execution_cfg.get("context_risk_min_sl_pct", 0.50)
         ),
         "context_risk_min_room_pct": float(
             execution_cfg.get("context_risk_min_room_pct", 0.08)

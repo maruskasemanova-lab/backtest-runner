@@ -20,19 +20,19 @@ Own playback UI, chart rendering, and operational diagnostics.
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `frontend/src/main.tsx` | yes | 58 | `b9accc6 2026-02-18` |
-| `frontend/src/App.tsx` | yes | 797 | `03b4ad8 2026-02-25` |
+| `frontend/src/main.tsx` | yes | 58 | `58ebada 2026-02-27` |
+| `frontend/src/App.tsx` | yes | 669 | `58ebada 2026-02-27` |
 | `frontend/src/auth/supabaseAuth.ts` | yes | 385 | `b9accc6 2026-02-18` |
 | `frontend/src/components/CandlestickChart.tsx` | yes | 346 | `8892e7b 2026-02-25` |
-| `frontend/src/components/decision-panel/DecisionPanel.tsx` | yes | 296 | `-` |
-| `frontend/src/components/SessionSummary.tsx` | yes | 327 | `1273b21 2026-02-23` |
+| `frontend/src/components/decision-panel/DecisionPanel.tsx` | yes | 296 | `58ebada 2026-02-27` |
+| `frontend/src/components/SessionSummary.tsx` | yes | 327 | `58ebada 2026-02-27` |
 | `frontend/src/components/RunConfig.tsx` | yes | 299 | `1273b21 2026-02-23` |
 | `frontend/src/components/PlaybackControls.tsx` | yes | 262 | `b9accc6 2026-02-18` |
-| `frontend/src/components/DataManager.tsx` | yes | 786 | `b9accc6 2026-02-18` |
-| `frontend/src/components/AdaptiveStrategyStudio.tsx` | yes | 345 | `8892e7b 2026-02-25` |
-| `frontend/src/components/diagnostic-calendar/DiagnosticCalendar.tsx` | yes | 100 | `-` |
-| `frontend/src/components/StrategySettings.tsx` | yes | 928 | `1273b21 2026-02-23` |
-| `frontend/src/components/AOSOptimizations.tsx` | yes | 404 | `b9accc6 2026-02-18` |
+| `frontend/src/components/DataManager.tsx` | yes | 345 | `58ebada 2026-02-27` |
+| `frontend/src/components/AdaptiveStrategyStudio.tsx` | yes | 345 | `58ebada 2026-02-27` |
+| `frontend/src/components/diagnostic-calendar/DiagnosticCalendar.tsx` | yes | 100 | `58ebada 2026-02-27` |
+| `frontend/src/components/StrategySettings.tsx` | yes | 492 | `1273b21 2026-02-23` |
+| `frontend/src/components/AOSOptimizations.tsx` | yes | 404 | `58ebada 2026-02-27` |
 | `frontend/src/components/IntrabarPanel.tsx` | yes | 186 | `b9accc6 2026-02-18` |
 
 ## Change Checks

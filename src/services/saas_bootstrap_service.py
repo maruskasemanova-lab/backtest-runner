@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.observability.runtime_metrics import RuntimeMetrics
-from src.services.saas_service import (
-    InMemorySlidingWindowLimiter,
-    SaaSStateStore,
+from src.services.saas_primitives import InMemorySlidingWindowLimiter
+from src.services.saas_supabase_store import (
     SupabaseRunReportsStore,
     SupabaseUserSettingsStore,
+)
+from src.services.saas_service import (
+    SaaSStateStore,
     V2Services,
 )
 

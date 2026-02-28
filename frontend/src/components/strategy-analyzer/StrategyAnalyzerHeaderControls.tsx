@@ -5,6 +5,7 @@ import type {
   StrategyAnalyzerPlaybackProgress,
   StrategyAnalyzerOnClearRun,
   StrategyAnalyzerTradeEvalMode,
+  StrategyAnalyzerWfoVariantResult,
 } from "./types";
 
 type Props = {
@@ -32,6 +33,10 @@ type Props = {
   onClearAnalyzerRun: StrategyAnalyzerOnClearRun;
   analyzerPlaybackProgress: StrategyAnalyzerPlaybackProgress;
   attachedRunState: StrategyAnalyzerAttachedRunState | null | undefined;
+  rankedWfoResults: StrategyAnalyzerWfoVariantResult[];
+  selectedWfoVariantId: string | null;
+  bestWfoVariantId: string | null;
+  onSelectWfoVariant: (variantId: string) => void;
 };
 
 export default function StrategyAnalyzerHeaderControls({
@@ -59,6 +64,10 @@ export default function StrategyAnalyzerHeaderControls({
   onClearAnalyzerRun,
   analyzerPlaybackProgress,
   attachedRunState,
+  rankedWfoResults,
+  selectedWfoVariantId,
+  bestWfoVariantId,
+  onSelectWfoVariant,
 }: Props) {
   return (
     <div className="card" style={{ padding: "0.75rem 1rem" }}>
@@ -207,6 +216,35 @@ export default function StrategyAnalyzerHeaderControls({
             >
               Clear
             </button>
+            {rankedWfoResults.length > 0 ? (
+              <>
+                <label style={{ fontWeight: 600, fontSize: "0.78rem", color: "var(--text-secondary)" }}>
+                  WFO
+                </label>
+                <select
+                  className="chart-timeframe"
+                  value={selectedWfoVariantId || bestWfoVariantId || rankedWfoResults[0]?.id || ""}
+                  onChange={(e) => void onSelectWfoVariant(e.target.value)}
+                  disabled={runLoading || isPlayingRun}
+                  style={{ minWidth: 220, fontSize: "0.74rem", padding: "4px 8px" }}
+                  title="Select evaluated WFO variant"
+                >
+                  {rankedWfoResults.map((variant) => {
+                    const pnl = Number(variant.metrics?.totalPnlDollars || 0);
+                    const wr = Number(variant.metrics?.winRate || 0);
+                    const suffix = ` | $${pnl.toFixed(2)} | ${wr.toFixed(1)}%`;
+                    const best = variant.id === bestWfoVariantId ? " ★" : "";
+                    return (
+                      <option key={variant.id} value={variant.id}>
+                        {variant.label}
+                        {suffix}
+                        {best}
+                      </option>
+                    );
+                  })}
+                </select>
+              </>
+            ) : null}
             {analyzerPlaybackProgress ? (
               <span
                 style={{

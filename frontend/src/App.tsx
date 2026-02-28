@@ -17,6 +17,7 @@ import {
   type CandlestickChartPriceRange,
   type CandlestickChartVisibleRange,
 } from './components/CandlestickChart';
+import AppSidebar from './components/AppSidebar';
 import AppTopbar from './components/AppTopbar';
 import AppViewRouter from './components/AppViewRouter';
 import type {
@@ -26,12 +27,6 @@ import type {
   StrategyAnalyzerRunBarLike,
 } from './components/strategy-analyzer/types';
 import {
-  signInWithGoogle,
-  signOutSupabase,
-  subscribeAuthSnapshot,
-  type AuthSnapshot,
-} from './auth/supabaseAuth';
-import {
   ACTIVE_RUNS_POLL_BACKTEST_VISIBLE_MS,
   ACTIVE_RUNS_POLL_OTHER_VISIBLE_MS,
   buildEffectiveExecutionConfigSnapshot,
@@ -40,7 +35,6 @@ import {
   buildStrategyAnalyzerDayUrl,
   clampSidebarWidth,
   DEFAULT_FEATURE_FLAGS,
-  EMPTY_AUTH_SNAPSHOT,
   extractLiveBarAnalysis,
   ICEBERG_FETCH_LIMIT,
   ICEBERG_FETCH_MIN_HIDDEN_SIZE,
@@ -65,12 +59,16 @@ import {
   toChartBar,
   upsertDecisionMarker,
   upsertStreamChartBar,
-  VIEW_TABS,
   WS_CONNECT_ATTEMPTS_BEFORE_FALLBACK,
   WS_FALLBACK_NOTICE,
   WS_RECONNECT_BASE_MS,
   WS_RECONNECT_MAX_MS,
 } from './app/appShared';
+import {
+  isRunStreamMessageRelevant,
+  shouldQueueVisibilitySyncMessage,
+} from './app/appWebSocketShared';
+import { useAppAuthState } from './hooks/useAppAuthState';
 import {
   useActiveRunsQuery,
   useIcebergsQuery,
@@ -137,8 +135,12 @@ function App() {
   const [speed, setSpeed] = useState('10hz'); // Default: 10 updates per second (string for hz, number for ms)
   const [tradeEvaluationMode, setTradeEvaluationMode] = useState('standard'); // Faster default: minute-bar eval even during open trades
   const [runtimeNotice, setRuntimeNotice] = useState('');
-  const [authSnapshot, setAuthSnapshot] = useState<AuthSnapshot>(EMPTY_AUTH_SNAPSHOT);
-  const [authActionBusy, setAuthActionBusy] = useState(false);
+  const {
+    authActionBusy,
+    authSnapshot,
+    handleAuthSignIn,
+    handleAuthSignOut,
+  } = useAppAuthState({ setRuntimeNotice });
   
   // WebSocket
   const barsLengthRef = useRef(0);
@@ -289,15 +291,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = subscribeAuthSnapshot((snapshot) => {
-      setAuthSnapshot(snapshot);
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
     if (!activeRunsQuery.error) return;
     console.debug('Failed to refresh active runs:', activeRunsQuery.error);
   }, [activeRunsQuery.error]);
@@ -317,48 +310,19 @@ function App() {
     console.error('Iceberg fetch error:', icebergsQuery.error);
   }, [icebergsQuery.error]);
 
-  const handleAuthSignIn = useCallback(async () => {
-    if (authActionBusy) return;
-    setAuthActionBusy(true);
-    setRuntimeNotice('');
-    try {
-      await signInWithGoogle();
-    } catch (error) {
-      console.error('Google sign-in failed:', error);
-      setRuntimeNotice('Google sign-in failed.');
-    } finally {
-      setAuthActionBusy(false);
-    }
-  }, [authActionBusy]);
-
-  const handleAuthSignOut = useCallback(async () => {
-    if (authActionBusy) return;
-    setAuthActionBusy(true);
-    setRuntimeNotice('');
-    try {
-      await signOutSupabase();
-    } catch (error) {
-      console.error('Sign-out failed:', error);
-      setRuntimeNotice('Sign-out failed.');
-    } finally {
-      setAuthActionBusy(false);
-    }
-  }, [authActionBusy]);
-
   const handleWsMessage = useCallback((data) => {
-    const msgRunKey = data?.run_key ? String(data.run_key) : null;
-    const msgRunId = data?.run_id ? String(data.run_id) : null;
-    const msgTicker = data?.ticker ? String(data.ticker).toUpperCase() : null;
-    const msgDate = data?.date ? String(data.date) : null;
-    const currentTicker = activeRunTicker ? String(activeRunTicker).toUpperCase() : null;
+    if (
+      !isRunStreamMessageRelevant(data, {
+        runKey,
+        runId: activeRunId,
+        ticker: activeRunTicker,
+        date: activeRunDate,
+      })
+    ) {
+      return;
+    }
 
-    // Backend broadcasts all runs; ignore frames that do not belong to the active run.
-    if (runKey && msgRunKey && msgRunKey !== runKey) return;
-    if (activeRunId && msgRunId && msgRunId !== activeRunId) return;
-    if (currentTicker && msgTicker && msgTicker !== currentTicker) return;
-    if (activeRunDate && msgDate && msgDate !== activeRunDate) return;
-
-    if (!isPageVisibleRef.current && (data.type === 'bar' || data.type === 'decision')) {
+    if (shouldQueueVisibilitySyncMessage(data, isPageVisibleRef.current)) {
       pendingVisibilitySyncRef.current = true;
       return;
     }
@@ -611,113 +575,21 @@ function App() {
   
   return (
     <div className="app-container">
-      {/* Dark Sidebar */}
-      <aside
-        className={`app-sidebar ${isNavOpen ? 'mobile-open' : ''}`}
-        style={{ width: `${clampSidebarWidth(sidebarWidth)}px`, minWidth: `${clampSidebarWidth(sidebarWidth)}px` }}
-      >
-        <div className="sidebar-brand">
-          <span className="sidebar-brand-icon">📈</span>
-          <div className="sidebar-brand-text">
-            <span className="sidebar-brand-name">Backtest Runner</span>
-            <span className="sidebar-brand-tagline">Trading Workspace</span>
-          </div>
-        </div>
-
-        <nav className="sidebar-main-nav">
-          {VIEW_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              className={`sidebar-nav-btn ${activeView === tab.id ? 'active' : ''}`}
-              onClick={() => { setActiveView(tab.id); setIsNavOpen(false); }}
-              title={tab.label}
-            >
-              <span className="sidebar-nav-icon">{tab.icon}</span>
-              <span className="sidebar-nav-label">{tab.label}</span>
-            </button>
-          ))}
-        </nav>
-
-        {activeView === 'backtest' && sidebarNavItems.length > 0 && (
-          <>
-            <div className="sidebar-divider" />
-            <div className="sidebar-section-nav" ref={sidebarRailRef}>
-              {runtimeNotice && (
-                <div className="sidebar-notice">
-                  {runtimeNotice}
-                </div>
-              )}
-
-              {sidebarNavItems.map((item, itemIndex) => {
-                const section = sidebarSectionsById.get(item.sectionId);
-                if (!section) return null;
-                const isActiveItem = activeSidebarNavItem === item.id;
-                const isRunConfigItem = section.id === 'run-config';
-
-                return (
-                  <div
-                    key={item.id}
-                    className={`sidebar-section-entry ${!isRunConfigItem && isActiveItem ? 'open' : ''}`}
-                    style={{ order: itemIndex * 2 }}
-                  >
-                    <button
-                      id={`sidebar-nav-${item.id}`}
-                      type="button"
-                      className={`sidebar-section-btn ${isActiveItem ? 'active' : ''}`}
-                      onClick={() => handleSidebarNavToggle(item)}
-                      aria-expanded={isActiveItem}
-                      title={`${item.label} (${item.rangeLabel})`}
-                    >
-                      <span className="sidebar-section-icon">{item.icon}</span>
-                      <span className="sidebar-section-label">{item.label}</span>
-                      <span className="sidebar-section-badge">{item.rangeLabel}</span>
-                      <span className={`sidebar-section-caret ${isActiveItem ? 'open' : ''}`}>▾</span>
-                    </button>
-                    {/* Non-run-config items render their panel inline */}
-                    {!isRunConfigItem && isActiveItem && (
-                      <div className="sidebar-panel">
-                        <div className="sidebar-panel-content">
-                          {section.content}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {/* Shared run-config panel: always at same tree position to prevent remount,
-                  CSS order places it visually after the active run-config nav item */}
-              {activeSidebarSectionId === 'run-config' && (() => {
-                const section = sidebarSectionsById.get('run-config');
-                if (!section) return null;
-                const activeIdx = sidebarNavItems.findIndex((i) => i.id === activeSidebarNavItem);
-                return (
-                  <div
-                    className="sidebar-section-entry open"
-                    style={{ order: activeIdx >= 0 ? activeIdx * 2 + 1 : 999 }}
-                  >
-                    <div className="sidebar-panel">
-                      <div className="sidebar-panel-content">
-                        {section.content}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          </>
-        )}
-        <div
-          className="sidebar-resize-handle"
-          onMouseDown={handleSidebarResizeMouseDown}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sidebar"
-          title="Drag to resize sidebar"
-        />
-      </aside>
-
-      {/* Mobile overlay */}
-      {isNavOpen && <div className="sidebar-overlay" onClick={() => setIsNavOpen(false)} />}
+      <AppSidebar
+        activeSidebarNavItem={activeSidebarNavItem}
+        activeSidebarSectionId={activeSidebarSectionId}
+        activeView={activeView}
+        isNavOpen={isNavOpen}
+        onSetActiveView={setActiveView}
+        onSetNavOpen={setIsNavOpen}
+        onSidebarNavToggle={handleSidebarNavToggle}
+        onSidebarResizeMouseDown={handleSidebarResizeMouseDown}
+        runtimeNotice={runtimeNotice}
+        sidebarNavItems={sidebarNavItems}
+        sidebarRailRef={sidebarRailRef}
+        sidebarSectionsById={sidebarSectionsById}
+        sidebarWidth={sidebarWidth}
+      />
 
       {/* Main Content Area */}
       <div className="app-main">

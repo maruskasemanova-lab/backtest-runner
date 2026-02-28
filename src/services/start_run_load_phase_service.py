@@ -8,6 +8,11 @@ from fastapi import HTTPException
 from src.services.start_run_time_window_service import (
     filter_bars_for_requested_time_window,
 )
+from src.services.start_run_load_phase_utils import (
+    load_initial_bars_with_progressive_retry,
+    merge_tcbbo_stats,
+    resolve_tcbbo_enrichment_reasons,
+)
 
 
 @dataclass(frozen=True)
@@ -56,35 +61,6 @@ class LoadPhaseResult:
     load_range_end: str
     progressive_plan: Optional[Dict[str, Any]]
 
-
-def _is_options_flow_alpha_enabled(aos_applied: Dict[str, Any]) -> bool:
-    if not isinstance(aos_applied, dict):
-        return False
-    positioning = aos_applied.get("positioning")
-    if isinstance(positioning, dict):
-        return bool(positioning.get("options_flow_alpha_enabled", False))
-    return bool(aos_applied.get("options_flow_alpha_enabled", False))
-
-
-def _resolve_tcbbo_enrichment_reasons(
-    *,
-    execution_cfg: Dict[str, Any],
-    aos_applied: Dict[str, Any],
-) -> list[str]:
-    reasons: list[str] = []
-    print(f"DEBUG: execution_cfg effective_tcbbo_gate_enabled={execution_cfg.get('effective_tcbbo_gate_enabled')}")
-    if bool(execution_cfg.get("effective_tcbbo_gate_enabled", False)):
-        reasons.append("tcbbo_gate")
-    
-    alpha_enabled = _is_options_flow_alpha_enabled(aos_applied)
-    print(f"DEBUG: is_options_flow_alpha_enabled={alpha_enabled}")
-    if alpha_enabled:
-        reasons.append("options_flow_alpha")
-    
-    print(f"DEBUG: tcbbo_enrichment_reasons={reasons}")
-    return reasons
-
-
 async def run_start_load_phase(
     *,
     inputs: LoadPhaseInputs,
@@ -94,51 +70,17 @@ async def run_start_load_phase(
     request = inputs.request
     ticker = inputs.ticker
 
-    load_range_end = str(inputs.load_range_end)
-    progressive_pending_chunks = list(inputs.progressive_pending_chunks)
-    progressive_plan = (
-        dict(inputs.progressive_plan)
-        if isinstance(inputs.progressive_plan, dict)
-        else None
-    )
-
     phase_started = perf_counter()
-    while True:
-        try:
-            bars, data_files = deps.load_run_bars(
-                request=request,
-                ticker=ticker,
-                range_start=inputs.load_range_start,
-                range_end=load_range_end,
-                data_loader=deps.data_loader,
-                databento_svc=deps.databento_svc,
-                get_discovery=deps.get_discovery,
-                aos_applied=inputs.aos_applied,
-                logger=deps.logger,
-            )
-            break
-        except HTTPException as exc:
-            detail = str(getattr(exc, "detail", ""))
-            status_code = int(getattr(exc, "status_code", 0) or 0)
-            no_data_window = status_code in {400, 404} and (
-                "No data available for the specified date/range" in detail
-                or "No data files found" in detail
-            )
-            if not (
-                bool(progressive_plan) and no_data_window and progressive_pending_chunks
-            ):
-                raise
-            _, next_chunk_end = progressive_pending_chunks.pop(0)
-            load_range_end = str(next_chunk_end)
-            if isinstance(progressive_plan, dict):
-                progressive_plan["initial_end"] = load_range_end
-                progressive_plan["chunks"] = list(progressive_pending_chunks)
-            deps.logger.info(
-                "Progressive initial range expanded for %s to %s..%s after no-data window.",
-                inputs.run_key,
-                inputs.load_range_start,
-                load_range_end,
-            )
+    (
+        bars,
+        data_files,
+        load_range_end,
+        progressive_plan,
+        _progressive_pending_chunks,
+    ) = load_initial_bars_with_progressive_retry(
+        inputs=inputs,
+        deps=deps,
+    )
     record_phase_ms("load_run_bars", phase_started)
 
     requested_l2_only_raw = bool(inputs.execution_cfg["requested_l2_only"])
@@ -194,7 +136,7 @@ async def run_start_load_phase(
 
     # TCBBO options flow enrichment (optional, non-blocking)
     tcbbo_stats: Dict[str, Any] = {}
-    tcbbo_enrichment_reasons = _resolve_tcbbo_enrichment_reasons(
+    tcbbo_enrichment_reasons = resolve_tcbbo_enrichment_reasons(
         execution_cfg=inputs.execution_cfg,
         aos_applied=inputs.aos_applied,
     )
@@ -210,14 +152,11 @@ async def run_start_load_phase(
             logger=deps.logger,
         )
         record_phase_ms("enrich_bars_with_tcbbo", phase_started)
-        if not isinstance(tcbbo_stats, dict):
-            tcbbo_stats = {}
-        tcbbo_stats.setdefault("tcbbo_enrichment_required", True)
-        tcbbo_stats.setdefault(
-            "tcbbo_enrichment_reasons", list(tcbbo_enrichment_reasons)
-        )
-    if tcbbo_stats:
-        l2_stats.update(tcbbo_stats)
+    l2_stats = merge_tcbbo_stats(
+        l2_stats=l2_stats,
+        tcbbo_stats=tcbbo_stats,
+        tcbbo_enrichment_reasons=tcbbo_enrichment_reasons,
+    )
 
     bars = filter_bars_for_requested_time_window(
         bars=bars,

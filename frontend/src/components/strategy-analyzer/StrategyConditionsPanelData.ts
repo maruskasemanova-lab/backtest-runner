@@ -47,6 +47,41 @@ export interface StrategyConditionsPanelDataValue {
   liveAnalysisSource: any | null;
 }
 
+function normalizeSignalDirection(raw: unknown): "bullish" | "bearish" | null {
+  if (raw == null) return null;
+  const token = String(raw).trim().toLowerCase();
+  if (!token) return null;
+  if (
+    token === "buy" ||
+    token === "long" ||
+    token === "bullish" ||
+    token.includes(" buy") ||
+    token.includes("long") ||
+    token.includes("bullish")
+  ) {
+    return "bullish";
+  }
+  if (
+    token === "sell" ||
+    token === "short" ||
+    token === "bearish" ||
+    token.includes(" sell") ||
+    token.includes("short") ||
+    token.includes("bearish")
+  ) {
+    return "bearish";
+  }
+  return null;
+}
+
+function resolveSignalDirection(...candidates: unknown[]): "bullish" | "bearish" | null {
+  for (const candidate of candidates) {
+    const resolved = normalizeSignalDirection(candidate);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
 export function extractStrategyConditionsPanelData(
   marker: any,
   liveAnalysis: any,
@@ -70,6 +105,24 @@ export function extractStrategyConditionsPanelData(
       details?.signal_metadata?.tcbbo_confirmation ||
       {};
     const levelCtx = details?.level_context || metadata?.level_context || details?.signal_metadata?.level_context || {};
+    const resolvedSignalDirection = resolveSignalDirection(
+      signalRejected?.signal_type,
+      signalRejected?.signal_direction,
+      signalRejected?.direction,
+      signalRejected?.decision_direction,
+      signalRejected?.cross_asset_headwind?.decision_direction,
+      details?.decision_direction,
+      details?.direction,
+      marker?.side,
+      details?.side,
+      cd?.signal_type,
+      cd?.direction,
+      signalRejected?.reasoning,
+    );
+    const rejectionDetails =
+      signalRejected && typeof signalRejected === "object" && signalRejected.gate
+        ? { ...signalRejected, resolved_signal_direction: resolvedSignalDirection }
+        : null;
 
     return {
       source: "marker" as const,
@@ -96,10 +149,10 @@ export function extractStrategyConditionsPanelData(
       selectedStrategy: cd.strategy_name || marker?.strategy || null,
       sweepDetected: typeof ls.sweep_detected === "boolean" ? ls.sweep_detected : null,
       tcbboPassed: typeof tcbbo?.passed === "boolean" ? tcbbo.passed : null,
-      signalDirection: signalRejected?.signal_type || marker?.side || details?.side || cd?.signal_type || null,
+      signalDirection: resolvedSignalDirection,
       rejectionGate: signalRejected?.gate || null,
       rejectionReason: signalRejected?.reason || null,
-      rejectionDetails: signalRejected && typeof signalRejected === "object" && signalRejected.gate ? signalRejected : null,
+      rejectionDetails,
       contextRisk: details?.context_risk && typeof details.context_risk === "object" ? details.context_risk : null,
       levelQuality: safeNum(levelCtx?.quality_score ?? levelCtx?.entry_quality),
       intrabarCoverage: safeNum(intrabarSnapshot?.coverage_points),
@@ -127,6 +180,21 @@ export function extractStrategyConditionsPanelData(
     const intrabar = liveAnalysis?.intrabar_1s || {};
     const tcbbo = liveAnalysis?.tcbbo_confirmation || {};
     const intrabarOnlyCheckpoint = Boolean(liveAnalysis?.checkpoint_mode && liveAnalysis?.intrabar_only_checkpoint);
+    const resolvedSignalDirection = resolveSignalDirection(
+      sr?.signal_type,
+      sr?.signal_direction,
+      sr?.direction,
+      sr?.decision_direction,
+      sr?.cross_asset_headwind?.decision_direction,
+      liveAnalysis?.decision_direction,
+      liveAnalysis?.direction,
+      cd?.signal_type,
+      cd?.direction,
+      sr?.reasoning,
+    );
+    const rejectionDetails = sr && typeof sr === "object" && sr.gate
+      ? { ...sr, resolved_signal_direction: resolvedSignalDirection }
+      : null;
 
     return {
       source: "live" as const,
@@ -153,10 +221,10 @@ export function extractStrategyConditionsPanelData(
       selectedStrategy: cd.strategy_name || null,
       sweepDetected: typeof ls.sweep_detected === "boolean" ? ls.sweep_detected : null,
       tcbboPassed: tcbbo?.enabled === true ? (typeof tcbbo?.passed === "boolean" ? tcbbo.passed : null) : null,
-      signalDirection: sr?.signal_type || cd?.signal_type || null,
+      signalDirection: resolvedSignalDirection,
       rejectionGate: sr?.gate || null,
       rejectionReason: sr?.reason || null,
-      rejectionDetails: sr && typeof sr === "object" && sr.gate ? sr : null,
+      rejectionDetails,
       contextRisk:
         liveAnalysis?.context_risk && typeof liveAnalysis.context_risk === "object" ? liveAnalysis.context_risk : null,
       levelQuality: null,

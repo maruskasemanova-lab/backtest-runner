@@ -112,7 +112,10 @@ def test_supabase_user_settings_store_fallback_to_run_summaries(monkeypatch):
             f"Unexpected request: {method} {url} params={params} json={json}"
         )
 
-    monkeypatch.setattr("src.services.saas_service.requests.request", _fake_request)
+    monkeypatch.setattr(
+        "src.services.saas_supabase_store.requests.request",
+        _fake_request,
+    )
 
     store = SupabaseUserSettingsStore(
         supabase_url="https://example.supabase.co",
@@ -163,7 +166,10 @@ def test_supabase_user_settings_store_primary_table(monkeypatch):
 
         raise AssertionError(f"Unexpected method {method}")
 
-    monkeypatch.setattr("src.services.saas_service.requests.request", _fake_request)
+    monkeypatch.setattr(
+        "src.services.saas_supabase_store.requests.request",
+        _fake_request,
+    )
 
     store = SupabaseUserSettingsStore(
         supabase_url="https://example.supabase.co",
@@ -252,7 +258,10 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
             f"Unexpected request: {method} {url} params={params} json={json}"
         )
 
-    monkeypatch.setattr("src.services.saas_service.requests.request", _fake_request)
+    monkeypatch.setattr(
+        "src.services.saas_supabase_store.requests.request",
+        _fake_request,
+    )
 
     store = SupabaseRunReportsStore(
         supabase_url="https://example.supabase.co",

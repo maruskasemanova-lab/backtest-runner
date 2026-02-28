@@ -236,8 +236,8 @@
         "oos_validator.py",
         "monte_carlo.py",
         "tuning_runner.py",
-        "aos_walk_forward.py",
-        "aos_optimizer.py",
+        "aos_optimization/aos_walk_forward.py",
+        "aos_optimization/aos_optimizer.py",
         "run_strategy_test.py",
         "batch_runner.py"
       ],

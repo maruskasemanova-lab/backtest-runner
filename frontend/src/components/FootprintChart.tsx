@@ -1,6 +1,18 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { createChart, ColorType } from "lightweight-charts";
-import { toUnixSeconds, toIsoTimestamp } from "../utils";
+import { toUnixSeconds } from "../utils";
+import FootprintChartToolbar from "./FootprintChartToolbar";
+import {
+  buildChartMarkers,
+  buildCvdData,
+  buildMarkersByTime,
+  buildValidChartBars,
+  findFirstBarIndex,
+  normalizeDecisionMarkers,
+  normalizeIcebergMarkers,
+  resolveClickedMarkerCandidate,
+  resolveMarkerFocusedVisibleRange,
+} from "./footprintChartUtils";
 
 
 function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker, l2Data, chartState, onChartStateChange, priceRange, onPriceRangeChange }) {
@@ -33,65 +45,12 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
     }
   }, [bars, l2Data]);
 
-  // Binary search to find first bar >= target time
-  const findFirstBarIndex = useCallback((bars, targetTime) => {
-    let lo = 0, hi = bars.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (bars[mid].time < targetTime) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
-  }, []);
-
   const normalizedDecisionMarkers = useMemo(() => {
-    return (markers || [])
-      .map((marker, index) => {
-        const time = toUnixSeconds(marker?.time ?? marker?.timestamp);
-        if (!Number.isFinite(time)) return null;
-        return {
-          ...marker,
-          id: marker.id || `${marker.marker_type || "marker"}-${Math.floor(time)}-${index}`,
-          time: Math.floor(time),
-          timestamp: marker.timestamp || toIsoTimestamp(time),
-        };
-      })
-      .filter(Boolean);
+    return normalizeDecisionMarkers(markers || []);
   }, [markers]);
 
   const normalizedIcebergMarkers = useMemo(() => {
-    return (icebergs || [])
-      .map((iceberg, index) => {
-        const time = toUnixSeconds(iceberg?.time ?? iceberg?.timestamp);
-        if (!Number.isFinite(time)) return null;
-
-        const side = typeof iceberg.side === "string" ? iceberg.side.toLowerCase() : null;
-        const price = Number(iceberg.price);
-        const tradeSize = Number(iceberg.trade_size ?? 0);
-        const hiddenSize = Number(iceberg.hidden_size ?? 0);
-        const totalSize = tradeSize + hiddenSize;
-
-        return {
-          ...iceberg,
-          id: iceberg.id || `iceberg-${Math.floor(time)}-${index}`,
-          marker_type: "iceberg_detected",
-          time: Math.floor(time),
-          timestamp: iceberg.timestamp || toIsoTimestamp(time),
-          side,
-          price: Number.isFinite(price) ? price : null,
-          title: iceberg.title || `Iceberg ${side ? side.toUpperCase() : "UNKNOWN"}`,
-          description: iceberg.description || `Detected ${side || "unknown"} iceberg`,
-          details: {
-            ...(iceberg.details || {}),
-            iceberg_side: side,
-            iceberg_price: Number.isFinite(price) ? price : null,
-            trade_size: tradeSize,
-            hidden_size: hiddenSize,
-            total_size: Number.isFinite(totalSize) ? totalSize : 0,
-          },
-        };
-      })
-      .filter(Boolean);
+    return normalizeIcebergMarkers(icebergs || []);
   }, [icebergs]);
 
   const clickableMarkers = useMemo(
@@ -185,7 +144,7 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
           }
         }
       }
-  }, [findFirstBarIndex]); // Stable callback
+  }, []); // Stable callback
 
   // Initialize Chart
   useEffect(() => {
@@ -425,39 +384,28 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
       }
   }, [chartState]);
 
+  useEffect(() => {
+      if (!chartRef.current || !priceRange) return;
+      const top = Number(priceRange.top);
+      const bottom = Number(priceRange.bottom);
+      if (!Number.isFinite(top) || !Number.isFinite(bottom)) return;
+      chartRef.current.priceScale('right').applyOptions({
+          scaleMargins: { top, bottom }
+      });
+  }, [priceRange]);
+
   // Update Chart Data
   useEffect(() => {
       if(!candleSeriesRef.current || !bars) return;
-      
-      // Dedupe and sort
-      const seenTimes = new Set();
-      const validBars = bars.filter((bar) => {
-        if (!bar || typeof bar.time !== "number" || isNaN(bar.time)) return false;
-        if (seenTimes.has(bar.time)) return false;
-        seenTimes.add(bar.time);
-        return true;
-      }).sort((a, b) => a.time - b.time);
+      const validBars = buildValidChartBars(bars);
 
       if(validBars.length === 0) return;
       
       candleSeriesRef.current.setData(validBars);
       
       // Calculate and Set CVD Data
-      if (cvdSeriesRef.current && l2Data && l2Data.bars) {
-          let cumDelta = 0;
-          // Sort L2 bars
-          const sortedL2 = [...l2Data.bars].sort((a,b) => a.time - b.time);
-          
-          const cvdData = sortedL2.map(b => {
-             cumDelta += (b.delta || 0);
-             return {
-                 time: b.time,
-                 value: cumDelta,
-                 color: cumDelta >= 0 ? 'rgba(38, 166, 154, 0.4)' : 'rgba(239, 83, 80, 0.4)'
-             };
-          });
-          
-          cvdSeriesRef.current.setData(cvdData);
+      if (cvdSeriesRef.current) {
+          cvdSeriesRef.current.setData(buildCvdData(l2Data));
       }
       
       requestAnimationFrame(drawFootprint);
@@ -475,75 +423,26 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
           return;
       }
 
-      const targetTime = toUnixSeconds(selectedMarker.time ?? selectedMarker.timestamp);
-      if (!Number.isFinite(targetTime)) return;
-
-      let closestIndex = -1;
-      let closestDiff = Number.POSITIVE_INFINITY;
-      for (let i = 0; i < bars.length; i += 1) {
-          const barTime = bars[i]?.time;
-          if (!Number.isFinite(barTime)) continue;
-          const diff = Math.abs(barTime - targetTime);
-          if (diff < closestDiff) {
-              closestDiff = diff;
-              closestIndex = i;
-          }
-      }
-
-      if (closestIndex === -1) return;
-
-      const windowSize = 40;
-      const fromIndex = Math.max(0, closestIndex - windowSize);
-      const toIndex = Math.min(bars.length - 1, closestIndex + windowSize);
-      const fromTime = bars[fromIndex]?.time;
-      const toTime = bars[toIndex]?.time;
-      if (Number.isFinite(fromTime) && Number.isFinite(toTime)) {
-          chartRef.current.timeScale().setVisibleRange({
-              from: fromTime,
-              to: toTime,
-          });
-      }
+      const visibleRange = resolveMarkerFocusedVisibleRange(bars, selectedMarker);
+      if (!visibleRange) return;
+      chartRef.current.timeScale().setVisibleRange(visibleRange);
   }, [selectedMarker, bars]);
 
   // Click marker in footprint chart -> select corresponding decision detail.
   useEffect(() => {
       if (!chartRef.current) return;
 
-      const markersByTime = new Map();
-      clickableMarkers.forEach((marker) => {
-          const key = Math.floor(Number(marker.time));
-          if (!Number.isFinite(key)) return;
-          const existing = markersByTime.get(key) || [];
-          existing.push(marker);
-          markersByTime.set(key, existing);
-      });
-
-      const resolveMarkerForClick = (param) => {
-          const clickedTime = toUnixSeconds(param?.time);
-          if (!Number.isFinite(clickedTime)) return null;
-
-          const candidates = markersByTime.get(Math.floor(clickedTime));
-          if (!candidates || candidates.length === 0) return null;
-          if (candidates.length === 1) return candidates[0];
-
-          const clickedPrice = param?.point && candleSeriesRef.current?.coordinateToPrice
-              ? candleSeriesRef.current.coordinateToPrice(param.point.y)
-              : null;
-          if (!Number.isFinite(clickedPrice)) return candidates[0];
-
-          const pricedCandidates = candidates.filter((candidate) => Number.isFinite(Number(candidate.price)));
-          if (!pricedCandidates.length) return candidates[0];
-
-          return pricedCandidates.reduce((best, candidate) => {
-              const bestDiff = Math.abs(Number(best.price) - clickedPrice);
-              const candidateDiff = Math.abs(Number(candidate.price) - clickedPrice);
-              return candidateDiff < bestDiff ? candidate : best;
-          }, pricedCandidates[0]);
-      };
+      const markersByTime = buildMarkersByTime(clickableMarkers);
 
       const handleClick = (param) => {
           if (!param?.time || markersByTime.size === 0) return;
-          const marker = resolveMarkerForClick(param);
+          const clickedTime = toUnixSeconds(param.time);
+          if (!Number.isFinite(clickedTime)) return;
+          const candidates = markersByTime.get(Math.floor(clickedTime)) || [];
+          const clickedPrice = param?.point && candleSeriesRef.current?.coordinateToPrice
+              ? candleSeriesRef.current.coordinateToPrice(param.point.y)
+              : null;
+          const marker = resolveClickedMarkerCandidate(candidates, Number.isFinite(clickedPrice) ? clickedPrice : null);
           if (!marker) return;
           if (onMarkerClick) {
               onMarkerClick(marker);
@@ -566,82 +465,7 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
   useEffect(() => {
       if(!candleSeriesRef.current) return;
       try {
-      const getCssVar = (name, fallback) => {
-        const value = getComputedStyle(document.documentElement)
-          .getPropertyValue(name)
-          .trim();
-        return value || fallback;
-      };
-      const palette = {
-        long: getCssVar("--accent-green", "#0f766e"),
-        short: getCssVar("--accent-red", "#dc2626"),
-        neutral: "#475569",
-        blue: getCssVar("--accent-blue", "#1d4ed8"),
-        amber: getCssVar("--accent-amber", "#f59e0b"),
-        ice: "#00dbe3", // Iceberg Cyan
-      };
-      
-       const validMarkerTypes = [
-        "entry_executed", "exit_executed", "stop_loss_hit", "take_profit_hit", "regime_detected", "strategy_selected", "iceberg_detected"
-      ];
-
-      const chartMarkers = clickableMarkers
-        .filter((m) => m && validMarkerTypes.includes(m.marker_type))
-        .map((m) => {
-          const time = Math.floor(Number(m.time));
-          if (!Number.isFinite(time)) return null;
-          let position = "aboveBar", color = "#3b82f6", shape = "circle", text = "";
-          
-            switch (m.marker_type) {
-            case "entry_executed":
-              if (m.side === "long") { position = "belowBar"; color = palette.long; shape = "arrowUp"; text = "BUY"; } 
-              else { position = "aboveBar"; color = palette.short; shape = "arrowDown"; text = "SELL"; }
-              break;
-            case "exit_executed":
-            case "stop_loss_hit":
-              if (m.side === "long") { position = "aboveBar"; color = m.marker_type === "stop_loss_hit" ? palette.short : palette.neutral; shape = "arrowDown"; text = m.marker_type === "stop_loss_hit" ? "SL" : "SELL"; } 
-              else { position = "belowBar"; color = m.marker_type === "stop_loss_hit" ? palette.short : palette.neutral; shape = "arrowUp"; text = m.marker_type === "stop_loss_hit" ? "SL" : "BUY"; }
-              break;
-            case "take_profit_hit":
-               position = m.side === "long" ? "aboveBar" : "belowBar"; color = palette.long; shape = m.side === "long" ? "arrowDown" : "arrowUp"; text = "TP";
-              break;
-            case "regime_detected":
-              position = "aboveBar"; color = palette.blue; shape = "circle"; text = m.regime || "R";
-              break;
-            case "strategy_selected":
-              position = "belowBar"; shape = "square"; text = (m.strategy || "UNK").substring(0,3).toUpperCase();
-               const hash = (m.strategy || "").split("").reduce((a,c)=>a+c.charCodeAt(0),0);
-               color = `hsl(${hash % 360}, 70%, 50%)`;
-              break;
-            case "iceberg_detected":
-              // Icebergs: Show near price. LightWeightCharts markers are 'aboveBar', 'belowBar', or 'inBar'.
-              // 'inBar' is not standard.
-              // We'll use above/below based on side.
-              // Buying Iceberg (Aggressor Buy hidden?) - Wait, logic:
-              // Side A (Ask) -> Buyer hit Sell Iceberg.
-              // Side B (Bid) -> Seller hit Buy Iceberg.
-              
-              if (m.side === "buy") { 
-                  // Buyer hit Ask. Iceberg was on Ask (Sell side).
-                  position = "aboveBar"; 
-                  color = palette.ice; 
-                  shape = "arrowDown"; 
-                  text = "❄️"; 
-              } else { 
-                  // Seller hit Bid. Iceberg was on Bid (Buy side).
-                  position = "belowBar"; 
-                  color = palette.ice; 
-                  shape = "arrowUp"; 
-                  text = "❄️"; 
-              }
-              break;
-          }
-           return { time, position, color, shape, text, id: m.id || `${m.time}-${m.price}` };
-        })
-        .filter((m) => m && Number.isFinite(m.time))
-        .sort((a, b) => a.time - b.time);
-
-      candleSeriesRef.current.setMarkers(chartMarkers);
+      candleSeriesRef.current.setMarkers(buildChartMarkers(clickableMarkers));
     } catch (err) {
       console.error("Chart markers update error:", err);
     }
@@ -676,46 +500,11 @@ function FootprintChart({ bars, markers, icebergs, onMarkerClick, selectedMarker
                 willChange: 'transform'
             }}
         />
-        <div style={{
-            position: 'absolute',
-            top: '10px',
-            right: '60px',
-            zIndex: 20,
-            display: 'flex',
-            gap: '8px'
-        }}>
-             <button
-                onClick={() => setShowCVD(!showCVD)}
-                style={{
-                    background: showCVD ? 'rgba(38, 166, 154, 0.6)' : 'rgba(255, 255, 255, 0.1)',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    color: '#fff',
-                    borderRadius: '4px',
-                    padding: '4px 8px',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    fontWeight: 'bold'
-                }}
-                title="Toggle Accum. Delta (CVD)"
-            >
-                CVD
-            </button>
-            <button
-                onClick={toggleFullScreen}
-                style={{
-                    background: 'rgba(255, 255, 255, 0.1)',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    color: '#fff',
-                    borderRadius: '4px',
-                    padding: '4px 8px',
-                    cursor: 'pointer',
-                    fontSize: '16px',
-                }}
-                title="Toggle Fullscreen"
-            >
-                ⛶
-            </button>
-        </div>
+        <FootprintChartToolbar
+            showCVD={showCVD}
+            onToggleCvd={() => setShowCVD((current) => !current)}
+            onToggleFullscreen={toggleFullScreen}
+        />
     </div>
   );
 }

@@ -42,14 +42,14 @@ Navigate to: **http://localhost:5173**
 Recommended production stack (stateful + low latency):
 
 - Cloudflare Pages frontend + Fly.io APIs:
-  - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/DEPLOY_CLOUDFLARE_STACK.md`
+  - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/docs/deploy/DEPLOY_CLOUDFLARE_STACK.md`
 
 Alternative:
 
 - Fly stack guide:
-  - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/DEPLOY_FLY_STACK.md`
+  - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/docs/deploy/DEPLOY_FLY_STACK.md`
 - Free-stack variant (Netlify + Render + Supabase):
-  - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/DEPLOY_FREE_STACK.md`
+  - `/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/docs/deploy/DEPLOY_FREE_STACK.md`
 
 Frontend split routing supports serverless + persistent hybrid:
 

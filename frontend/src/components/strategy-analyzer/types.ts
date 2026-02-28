@@ -219,3 +219,40 @@ export type StrategyAnalyzerTimelineCacheState = {
 export type StrategyAnalyzerTimelineCacheRef = MutableRefObject<StrategyAnalyzerTimelineCacheState>;
 
 export type BooleanStateSetter = Dispatch<SetStateAction<boolean>>;
+
+export type StrategyAnalyzerWfoGridConfig = {
+  contextRiskMinSlValues: string;
+  timeExitBarsValues: string;
+  breakEvenMinRValues: string;
+  breakEvenProofBookPressureValues: string;
+  evRelaxationThresholdValues: string;
+  signedAggressionBlockZValues: string;
+  includeBaseline: boolean;
+  maxCombinations: number;
+  parallelWorkers: number;
+};
+
+export type StrategyAnalyzerWfoMetrics = {
+  totalTrades: number;
+  winRate: number;
+  totalPnlDollars: number;
+  maxDrawdownDollars: number;
+  profitFactor: number | null;
+};
+
+export type StrategyAnalyzerWfoVariantStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed";
+
+export type StrategyAnalyzerWfoVariantResult = {
+  id: string;
+  label: string;
+  status: StrategyAnalyzerWfoVariantStatus;
+  overrides: Record<string, number>;
+  runKey: string | null;
+  metrics: StrategyAnalyzerWfoMetrics | null;
+  objectiveScore: number;
+  error: string | null;
+};

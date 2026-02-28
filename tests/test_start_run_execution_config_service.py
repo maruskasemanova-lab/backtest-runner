@@ -630,7 +630,7 @@ def test_resolve_execution_config_uses_positioning_profile_for_context_risk_and_
         ticker="MU",
         date="2026-02-10",
         context_aware_risk_enabled=False,
-        context_risk_min_sl_pct=0.30,
+        context_risk_min_sl_pct=0.50,
         break_even_activation_use_levels=True,
         break_even_activation_use_l2=True,
     )

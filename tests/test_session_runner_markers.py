@@ -349,6 +349,46 @@ def test_strategy_bar_payload_validator_accepts_explicit_payload_and_rejects_unk
             raise AssertionError("Expected payload validator to reject unknown fields")
 
 
+def test_strategy_bar_payload_validator_normalizes_array_like_values() -> None:
+    class _FakeArray:
+        def __init__(self, values):
+            self._values = values
+
+        def tolist(self):
+            return list(self._values)
+
+    class _FakeScalar:
+        def __init__(self, value):
+            self._value = value
+
+        def item(self):
+            return self._value
+
+    validator = StrategyBarPayloadValidator()
+    accepted = validator.validate(
+        {
+            "run_id": "r0",
+            "ticker": "MU",
+            "timestamp": "2026-02-06T14:30:00+00:00",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.5,
+            "close": 100.5,
+            "volume": 10,
+            "l2_quality": {
+                "depth_curve": _FakeArray([0.1, 0.2, 0.3]),
+                "coverage": _FakeScalar(0.82),
+            },
+        }
+    )
+    match accepted:
+        case Ok(value=payload):
+            assert payload["l2_quality"]["depth_curve"] == [0.1, 0.2, 0.3]
+            assert payload["l2_quality"]["coverage"] == 0.82
+        case _:
+            raise AssertionError("Expected payload validator to normalize array-like values")
+
+
 def test_process_decision_markers_accepts_typed_response_model() -> None:
     config = RunConfig(run_id="r0typed", ticker="MU", date="2026-02-06")
     runner = SessionRunner(config)

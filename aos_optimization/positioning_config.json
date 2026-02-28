@@ -182,7 +182,8 @@
       "break_even_l2_proof_book_pressure_threshold": 0.06,
       "min_effective_rr": 2.2,
       "min_room_pct": 0.45,
-      "partial_protect_min_mfe_r": 1.0
+      "partial_protect_min_mfe_r": 1.0,
+      "options_flow_alpha_enabled": false
     }
   }
 }

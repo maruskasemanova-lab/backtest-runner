@@ -8,6 +8,11 @@ from src.services.start_run_time_window_service import (
     filter_bars_for_requested_time_window,
     filter_reference_map_for_requested_time_window,
 )
+from src.services.start_run_progressive_utils import (
+    finalize_progressive_loading,
+    is_active_runner,
+    update_progressive_chunk_state,
+)
 
 
 @dataclass(frozen=True)
@@ -249,7 +254,11 @@ async def _append_remaining_chunks(
     abort_reason: Optional[str] = None
     try:
         for idx, (chunk_start, chunk_end) in enumerate(pending_chunks, start=1):
-            if deps.active_runners.get(inputs.run_key) is not runner:
+            if not is_active_runner(
+                active_runners=deps.active_runners,
+                run_key=inputs.run_key,
+                runner=runner,
+            ):
                 completion_status = "aborted"
                 remaining_chunks = max(0, len(pending_chunks) - idx + 1)
                 abort_reason = "progressive_loading_aborted_runner_not_active"
@@ -274,9 +283,12 @@ async def _append_remaining_chunks(
             if chunk_ref_map:
                 runner.ref_bars_map.update(chunk_ref_map)
 
-            runner._progressive_loading_loaded_until = chunk_end
             remaining_chunks = max(0, len(pending_chunks) - idx)
-            runner._progressive_loading_pending_chunks = remaining_chunks
+            update_progressive_chunk_state(
+                runner=runner,
+                chunk_end=chunk_end,
+                remaining_chunks=remaining_chunks,
+            )
 
             deps.logger.info(
                 "Progressive chunk loaded for %s: %s..%s (+%d bars, total=%d, pending=%d)",
@@ -315,13 +327,13 @@ async def _append_remaining_chunks(
         runner._progressive_loading_last_error = str(exc)
         deps.logger.exception("Progressive loading failed for %s", inputs.run_key)
     finally:
-        fully_loaded = completion_status == "completed" and remaining_chunks == 0
-        runner._progressive_loading_complete = fully_loaded
-        runner._progressive_loading_pending_chunks = 0 if fully_loaded else remaining_chunks
-        if fully_loaded and not runner._progressive_loading_last_error:
-            runner._progressive_loading_loaded_until = inputs.full_range_end
-        elif abort_reason and not runner._progressive_loading_last_error:
-            runner._progressive_loading_last_error = abort_reason
+        finalize_progressive_loading(
+            runner=runner,
+            completion_status=completion_status,
+            remaining_chunks=remaining_chunks,
+            full_range_end=inputs.full_range_end,
+            abort_reason=abort_reason,
+        )
         deps.logger.info(
             "Progressive loading finished for %s (status=%s, pending=%d, error=%s)",
             inputs.run_key,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+import os
 from typing import Any, Callable, Dict, List, MutableMapping, Optional
 
 try:
@@ -27,6 +28,16 @@ class IntrabarQuoteProvider:
         self._ticker = str(ticker)
         self._to_utc_datetime = to_utc_datetime
         self._logger = logger
+        self._deep_debug = self._read_deep_debug_flag()
+
+    @staticmethod
+    def _read_deep_debug_flag() -> bool:
+        raw = str(os.getenv("BACKTEST_INTRABAR_DEEP_DEBUG", "")).strip().lower()
+        return raw in {"1", "true", "yes", "on", "debug"}
+
+    def _log_deep_debug(self, message: str, *args: Any) -> None:
+        if self._deep_debug:
+            self._logger.warning(message, *args)
 
     @staticmethod
     def resolve_eval_step_seconds(raw_step_seconds: Any) -> int:
@@ -106,43 +117,46 @@ class IntrabarQuoteProvider:
                 start_time=minute_start,
                 end_time=minute_end,
             )
-            self._logger.warning(
+            self._log_deep_debug(
                 "[INTRABAR-DEEP-DEBUG] get_intrabar_frames returned %s frames. type=%s",
                 self._frame_len_token(frames),
                 type(frames),
             )
             if not self._frame_is_empty(frames):
-                self._logger.warning(
+                self._log_deep_debug(
                     "[INTRABAR-DEEP-DEBUG] first row has_book_coverage=%s",
                     self._first_row_book_coverage(frames),
                 )
         except Exception as exc:
-            import traceback
-
             self._logger.warning(
-                "[INTRABAR-DEEP-DEBUG] Intrabar quote load exc for %s @ %s: %s\n%s",
+                "Intrabar quote load failed for %s @ %s: %s",
                 self._ticker,
                 minute_start,
                 exc,
-                traceback.format_exc(),
             )
+            if self._deep_debug:
+                self._logger.exception(
+                    "[INTRABAR-DEEP-DEBUG] Intrabar quote load traceback for %s @ %s",
+                    self._ticker,
+                    minute_start,
+                )
             cache[minute_key] = None
             return None
 
         if self._frame_is_empty(frames):
-            self._logger.warning("[INTRABAR-DEEP-DEBUG] Frames empty or None!")
+            self._log_deep_debug("[INTRABAR-DEEP-DEBUG] Frames empty or None!")
             cache[minute_key] = None
             return None
 
         quote_rows = self._extract_quote_rows(frames, minute_start=minute_start)
         cached = quote_rows if quote_rows else None
 
-        self._logger.warning(
+        self._log_deep_debug(
             "[INTRABAR-DEEP-DEBUG] quote_rows built: %s quotes.",
             len(quote_rows),
         )
         if not quote_rows:
-            self._logger.warning(
+            self._log_deep_debug(
                 "[INTRABAR-DEEP-DEBUG] Why empty? Sample row: %s",
                 self._sample_row(frames),
             )
@@ -240,7 +254,7 @@ class IntrabarQuoteProvider:
                 ]
                 used_polars = True
             except Exception as exc:
-                self._logger.warning(
+                self._log_deep_debug(
                     "[INTRABAR-DEEP-DEBUG] polars parse fallback for %s @ %s: %s",
                     self._ticker,
                     minute_start,

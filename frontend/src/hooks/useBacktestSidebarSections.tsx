@@ -6,13 +6,13 @@ import StrategyModuleToggles from '../components/StrategyModuleToggles';
 import ExecutionModuleToggles from '../components/ExecutionModuleToggles';
 import type { StrategyAnalyzerDecisionMarker } from '../components/strategy-analyzer/types';
 
-type SidebarNavConfigItem = {
+export type SidebarNavConfigItem = {
   id: string;
   sectionId: string;
   runConfigMode?: 'all' | 'dates' | 'profiles' | 'start';
 };
 
-type SidebarSection = {
+export type SidebarSection = {
   id: string;
   title: string;
   rangeLabel: string;

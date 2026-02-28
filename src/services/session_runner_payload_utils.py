@@ -220,7 +220,7 @@ class StrategyBarPayloadBuilder:
             not build_context.should_attach_intrabar_quotes
             and payload_input.current_bar_index <= 3
         ):
-            self._logger.warning(
+            self._logger.debug(
                 "[INTRABAR-DEBUG] bar=%s should_attach=False intrabar_recalc=%s l2_manager=%s",
                 payload_input.current_bar_index,
                 build_context.intrabar_recalc_enabled,
@@ -240,7 +240,7 @@ class StrategyBarPayloadBuilder:
             if dumped_intrabar_quotes:
                 payload["intrabar_quotes_1s"] = dumped_intrabar_quotes
             elif payload_input.current_bar_index <= 3:
-                self._logger.warning(
+                self._logger.debug(
                     "[INTRABAR-DEBUG] bar=%s quotes=None for %s",
                     payload_input.current_bar_index,
                     payload_input.timestamp,
