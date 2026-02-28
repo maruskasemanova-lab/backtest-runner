@@ -40,6 +40,7 @@ from src.services.saas_supabase_store import (
     SupabaseRunReportsStore,
     SupabaseRunStateMirror,
     SupabaseStoreRequestError,
+    SupabaseUserDatasetsStore,
     SupabaseUserSettingsStore,
 )
 
@@ -96,6 +97,38 @@ class RunStateMirror(Protocol):
     def update_run_status(self, *, run_key: str, status: str) -> None: ...
 
 
+class UserDatasetsStore(Protocol):
+    def list_user_datasets(
+        self,
+        *,
+        user_id: str,
+        limit: int = 100,
+        status: Optional[str] = None,
+    ) -> list[Dict[str, Any]]: ...
+
+    def get_user_dataset(self, *, dataset_id: str) -> Optional[Dict[str, Any]]: ...
+
+    def upsert_user_dataset(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        tenant_id: str,
+        dataset_name: str,
+        source_filename: Optional[str],
+        s3_path: str,
+        status: str,
+        file_format: str,
+        source_format: Optional[str] = None,
+        row_count: Optional[int] = None,
+        size_bytes: Optional[int] = None,
+        schema_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]: ...
+
+    def delete_user_dataset(self, *, dataset_id: str, user_id: str) -> bool: ...
+
+
 class SaaSStateStore:
     def __init__(self, db_path: str):
         resolved = Path(str(db_path or "").strip() or "data/saas_state.db")
@@ -149,6 +182,24 @@ class SaaSStateStore:
                     user_id TEXT PRIMARY KEY,
                     tenant_id TEXT NOT NULL,
                     settings_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS user_datasets (
+                    dataset_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    dataset_name TEXT NOT NULL,
+                    source_filename TEXT,
+                    s3_path TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    file_format TEXT NOT NULL,
+                    source_format TEXT,
+                    row_count INTEGER,
+                    size_bytes INTEGER,
+                    schema_name TEXT,
+                    metadata_json TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -255,6 +306,10 @@ class SaaSStateStore:
                     ON jobs(user_id, status, created_at);
                 CREATE INDEX IF NOT EXISTS idx_user_settings_tenant_updated
                     ON user_settings(tenant_id, updated_at);
+                CREATE INDEX IF NOT EXISTS idx_user_datasets_user_updated
+                    ON user_datasets(user_id, updated_at);
+                CREATE INDEX IF NOT EXISTS idx_user_datasets_user_status
+                    ON user_datasets(user_id, status, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_run_summaries_updated
                     ON run_summaries(updated_at);
                 CREATE INDEX IF NOT EXISTS idx_billing_audit_user_created
@@ -411,6 +466,186 @@ class SaaSStateStore:
             tenant_id=tenant_id,
             settings=merged,
         )
+
+    def list_user_datasets(
+        self,
+        *,
+        user_id: str,
+        limit: int = 100,
+        status: Optional[str] = None,
+    ) -> list[Dict[str, Any]]:
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id:
+            return []
+        query_limit = max(1, min(int(limit or 100), 500))
+        status_token = str(status or "").strip().lower()
+
+        with self._lock:
+            cur = self._conn.cursor()
+            if status_token:
+                rows = cur.execute(
+                    """
+                    SELECT *
+                    FROM user_datasets
+                    WHERE user_id = ? AND lower(status) = ?
+                    ORDER BY updated_at DESC, created_at DESC
+                    LIMIT ?
+                    """,
+                    (normalized_user_id, status_token, query_limit),
+                ).fetchall()
+            else:
+                rows = cur.execute(
+                    """
+                    SELECT *
+                    FROM user_datasets
+                    WHERE user_id = ?
+                    ORDER BY updated_at DESC, created_at DESC
+                    LIMIT ?
+                    """,
+                    (normalized_user_id, query_limit),
+                ).fetchall()
+        return [self._row_to_user_dataset_payload(row) for row in rows]
+
+    def get_user_dataset(self, *, dataset_id: str) -> Optional[Dict[str, Any]]:
+        normalized_dataset_id = str(dataset_id or "").strip()
+        if not normalized_dataset_id:
+            return None
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute(
+                "SELECT * FROM user_datasets WHERE dataset_id = ? LIMIT 1",
+                (normalized_dataset_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_user_dataset_payload(row)
+
+    def upsert_user_dataset(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        tenant_id: str,
+        dataset_name: str,
+        source_filename: Optional[str],
+        s3_path: str,
+        status: str,
+        file_format: str,
+        source_format: Optional[str] = None,
+        row_count: Optional[int] = None,
+        size_bytes: Optional[int] = None,
+        schema_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        normalized_dataset_id = str(dataset_id or "").strip()
+        normalized_user_id = str(user_id or "").strip()
+        normalized_tenant_id = str(tenant_id or "").strip()
+        normalized_name = str(dataset_name or "").strip()
+        normalized_s3_path = str(s3_path or "").strip()
+        if not normalized_dataset_id:
+            raise ValueError("dataset_id is required")
+        if not normalized_user_id:
+            raise ValueError("user_id is required")
+        if not normalized_tenant_id:
+            raise ValueError("tenant_id is required")
+        if not normalized_name:
+            raise ValueError("dataset_name is required")
+        if not normalized_s3_path:
+            raise ValueError("s3_path is required")
+
+        now = utc_now_iso()
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute(
+                "SELECT created_at FROM user_datasets WHERE dataset_id = ?",
+                (normalized_dataset_id,),
+            ).fetchone()
+            created_at = (
+                str(row["created_at"]).strip()
+                if row is not None and row["created_at"]
+                else now
+            )
+            cur.execute(
+                """
+                INSERT INTO user_datasets(
+                    dataset_id,
+                    user_id,
+                    tenant_id,
+                    dataset_name,
+                    source_filename,
+                    s3_path,
+                    status,
+                    file_format,
+                    source_format,
+                    row_count,
+                    size_bytes,
+                    schema_name,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(dataset_id) DO UPDATE SET
+                    user_id=excluded.user_id,
+                    tenant_id=excluded.tenant_id,
+                    dataset_name=excluded.dataset_name,
+                    source_filename=excluded.source_filename,
+                    s3_path=excluded.s3_path,
+                    status=excluded.status,
+                    file_format=excluded.file_format,
+                    source_format=excluded.source_format,
+                    row_count=excluded.row_count,
+                    size_bytes=excluded.size_bytes,
+                    schema_name=excluded.schema_name,
+                    metadata_json=excluded.metadata_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    normalized_dataset_id,
+                    normalized_user_id,
+                    normalized_tenant_id,
+                    normalized_name,
+                    str(source_filename or "").strip() or None,
+                    normalized_s3_path,
+                    str(status or "").strip().lower() or "ready",
+                    str(file_format or "").strip().lower() or "parquet",
+                    str(source_format or "").strip().lower() or None,
+                    (
+                        None
+                        if row_count is None
+                        else max(0, int(row_count))
+                    ),
+                    (
+                        None
+                        if size_bytes is None
+                        else max(0, int(size_bytes))
+                    ),
+                    str(schema_name or "").strip() or None,
+                    payload_json_dumps_compact(metadata or {}),
+                    created_at,
+                    now,
+                ),
+            )
+            self._conn.commit()
+        result = self.get_user_dataset(dataset_id=normalized_dataset_id)
+        if result is None:
+            raise RuntimeError("Failed to load saved user dataset")
+        return result
+
+    def delete_user_dataset(self, *, dataset_id: str, user_id: str) -> bool:
+        normalized_dataset_id = str(dataset_id or "").strip()
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_dataset_id or not normalized_user_id:
+            return False
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "DELETE FROM user_datasets WHERE dataset_id = ? AND user_id = ?",
+                (normalized_dataset_id, normalized_user_id),
+            )
+            deleted = int(cur.rowcount or 0)
+            self._conn.commit()
+        return deleted > 0
 
     def upsert_run_summary(
         self,
@@ -1302,6 +1537,34 @@ class SaaSStateStore:
     def _row_to_job_payload(self, row: sqlite3.Row) -> Dict[str, Any]:
         return payload_row_to_job_payload(dict(row))
 
+    def _row_to_user_dataset_payload(self, row: sqlite3.Row) -> Dict[str, Any]:
+        payload = dict(row)
+        return {
+            "dataset_id": str(payload.get("dataset_id") or ""),
+            "user_id": str(payload.get("user_id") or ""),
+            "tenant_id": str(payload.get("tenant_id") or ""),
+            "dataset_name": str(payload.get("dataset_name") or ""),
+            "source_filename": str(payload.get("source_filename") or "") or None,
+            "s3_path": str(payload.get("s3_path") or ""),
+            "status": str(payload.get("status") or ""),
+            "file_format": str(payload.get("file_format") or ""),
+            "source_format": str(payload.get("source_format") or "") or None,
+            "row_count": (
+                None
+                if payload.get("row_count") is None
+                else int(payload.get("row_count") or 0)
+            ),
+            "size_bytes": (
+                None
+                if payload.get("size_bytes") is None
+                else int(payload.get("size_bytes") or 0)
+            ),
+            "schema_name": str(payload.get("schema_name") or "") or None,
+            "metadata": self._decode_json(payload.get("metadata_json")),
+            "created_at": payload.get("created_at"),
+            "updated_at": payload.get("updated_at"),
+        }
+
     def _row_to_adaptive_profile_payload(self, row: sqlite3.Row) -> Dict[str, Any]:
         return payload_row_to_adaptive_profile_payload(dict(row))
 
@@ -1315,6 +1578,7 @@ class V2Services:
     ads_provider: str
     ads_placements: list[str]
     user_settings_store: Optional[UserSettingsStore] = None
+    user_datasets_store: Optional[UserDatasetsStore] = None
     run_state_mirror: Optional[RunStateMirror] = None
     job_semaphore: Any = None
     max_queue_backlog: int = 200
@@ -1333,7 +1597,9 @@ __all__ = [
     "SupabaseRunReportsStore",
     "SupabaseRunStateMirror",
     "SupabaseStoreRequestError",
+    "SupabaseUserDatasetsStore",
     "SupabaseUserSettingsStore",
+    "UserDatasetsStore",
     "UserSettingsStore",
     "V2Services",
     "resolve_plan_limits",

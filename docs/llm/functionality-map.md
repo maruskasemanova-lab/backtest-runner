@@ -10,15 +10,25 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 
 ## Core Runtime Flow
 
-1. Client calls `POST /api/run/start` on runner.
+1. Client calls `POST /api/run/start` on runner for unauthenticated/local playback, or `POST /api/v2/runs` when authenticated in SaaS mode.
 2. Runner resolves data, conditionally applies ticker strategy overrides (`apply_ticker_overrides_on_start`), applies AOS config (including per-ticker strategy-selection mode plus active unified profile when present, otherwise legacy strategy-combo + adaptive profile paths), applies optional run-level session scope override (`include_extended_hours`), optional L2 enrichment.
+   Parquet-backed OHLCV files are loaded through `src/parquet_compat.py` using a Polars lazy scan path before the existing pandas/list-of-bars compatibility boundary.
+   When the requested run range is backed only by parquet files, `start_run_data_service` now materializes bars directly from Polars into runner bar dicts without first building a pandas DataFrame.
+   L2 precomputed feature files and TCBBO options-flow parquet ingestion also use projected Polars-backed reads now; the old full-file parquet fallback path was removed for those runtime reads.
 3. Runner configures strategy session via `POST /api/session/config` (risk/L2 + strategy-selection settings, plus optional profile runtime overrides like daily-trade cap and MU choppy hard-block switch).
 4. Runner creates `SessionRunner` and stores it in active run registry.
+   Strategy-analyzer market context precomputes scalar metrics once per run, stores them as compact tuple rows, and assembles `recent_bars` lazily per requested bar instead of pre-materializing snapshots for the full session.
 5. On `step/play`, runner sends each bar to strategy `POST /api/session/bar`.
 6. When intrabar execution mode is enabled, runner may attach 1-second intrabar top-of-book quotes for that minute (`intrabar_quotes_1s`) on each processed bar to support entry/exit logic.
 7. Strategy returns decision payload; runner maps it to markers and summary state.
 8. Runner broadcasts bar + decision updates over `/ws/live`.
 9. Frontend consumes updates and renders timeline/summary.
+
+Authenticated FE start behavior:
+
+- `frontend/src/hooks/useRunSnapshotActions.ts` submits `POST /api/v2/runs` with Bearer JWT when an auth token is available.
+- FE waits for job completion through `/api/v2/jobs/{job_id}` polling, with optional Supabase Realtime acceleration on mirrored `public.run_jobs`.
+- After job completion, FE hydrates the live run through the existing `/api/run/{run_key}/state|bars` playback endpoints.
 
 ## SaaS V2 Flow (Auth + Quotas)
 
@@ -41,6 +51,9 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 17. Optional remote market-data manifest (`BACKTEST_REMOTE_MANIFEST_URL`) can hydrate catalog entries from object storage (e.g. R2) via `https://...` or `s3://...`; remote files are pulled lazily to `BACKTEST_REMOTE_CACHE_DIR` when selected for run data resolution.
 18. Run-report history is store-backed in both prod and local runtimes: Supabase `run_summaries` when configured, otherwise local SQLite `run_summaries` (no filesystem `reports/` fallback).
 19. Optional v2 run-state mirror (`BACKTEST_SUPABASE_RUN_STATE_MIRROR_ENABLED=1`) mirrors queued/running/completed job state into Supabase `run_jobs` and `runs`; frontend clients can use Supabase Realtime on those tables while the local SQLite queue remains the worker authority.
+20. Authenticated users can register personal dataset metadata via `/api/v2/datasets`; dataset rows are user-scoped and default object paths follow `users/{user_id}/datasets/{dataset_id}.parquet` (optionally prefixed by `BACKTEST_USER_DATASETS_BUCKET`).
+21. `POST /api/v2/datasets/upload/csv` provides the first integrated user-data ingest path: raw CSV upload is converted to parquet, cached locally, and optionally pushed to S3/R2 before `user_datasets` is updated.
+22. Authenticated `POST /api/v2/runs` can target a registered private dataset via `dataset_id`; in `auto` storage mode the runner prefers local parquet cache on localhost/dev, non-local hosts use remote hydration only when a bucket is configured, and otherwise stay on local cache semantics.
 
 ## Session And State Model
 

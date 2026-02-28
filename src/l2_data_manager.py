@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from collections import OrderedDict
 from datetime import datetime, timedelta
@@ -8,7 +10,12 @@ import numpy as np
 import pandas as pd
 
 from .system_settings import SystemSettings
-from .parquet_compat import read_parquet_compat
+from .parquet_compat import read_parquet_compat, scan_parquet_compat
+
+try:
+    import polars as pl
+except Exception:  # pragma: no cover - import guard for misconfigured runtimes
+    pl = None
 
 
 class L2DataManager:
@@ -26,6 +33,74 @@ class L2DataManager:
         cols.extend([f"bid_sz_{idx:02d}" for idx in range(10)])
         cols.extend([f"ask_sz_{idx:02d}" for idx in range(10)])
         return cols
+
+    @staticmethod
+    def _collect_polars_frame(lazy_frame):
+        try:
+            return lazy_frame.collect(engine="streaming")
+        except TypeError:
+            try:
+                return lazy_frame.collect(streaming=True)
+            except TypeError:
+                return lazy_frame.collect()
+
+    @staticmethod
+    def _parquet_schema_columns(file_path: str | Path) -> List[str]:
+        schema = scan_parquet_compat(file_path).collect_schema()
+        try:
+            return [str(name) for name in schema.names()]
+        except Exception:
+            return [str(name) for name in dict(schema).keys()]
+
+    @classmethod
+    def _existing_parquet_columns(
+        cls,
+        file_path: str | Path,
+        columns: Optional[List[str]],
+    ) -> List[str]:
+        requested = [str(col) for col in (columns or []) if str(col).strip()]
+        if not requested:
+            return []
+        available = set(cls._parquet_schema_columns(file_path))
+        return [col for col in requested if col in available]
+
+    def _read_projected_parquet(
+        self,
+        file_path: str | Path,
+        *,
+        preferred_columns: Optional[List[str]] = None,
+    ) -> pd.DataFrame:
+        selected_columns = self._existing_parquet_columns(file_path, preferred_columns)
+        if preferred_columns and not selected_columns:
+            raise ValueError(
+                f"No preferred parquet columns found in {file_path}; expected a subset of "
+                f"{preferred_columns}"
+            )
+        return read_parquet_compat(file_path, columns=selected_columns or None)
+
+    def _load_precomputed_rows_for_window(
+        self,
+        file_path: Path,
+        *,
+        minute_start: int,
+        minute_end: int,
+    ) -> Tuple[bool, List[Dict[str, Any]]]:
+        if pl is None:
+            raise RuntimeError("polars is required for precomputed L2 parquet reads")
+        available = set(self._parquet_schema_columns(file_path))
+        if "minute_key" not in available:
+            return False, []
+
+        lazy_frame = scan_parquet_compat(file_path).with_columns(
+            pl.col("minute_key").cast(pl.Int64, strict=False).alias("minute_key")
+        )
+        lazy_frame = lazy_frame.filter(pl.col("minute_key").is_not_null())
+        lazy_frame = lazy_frame.filter(
+            (pl.col("minute_key") >= minute_start) & (pl.col("minute_key") <= minute_end)
+        )
+        lazy_frame = lazy_frame.sort("minute_key")
+        frame = self._collect_polars_frame(lazy_frame)
+        return True, list(frame.iter_rows(named=True))
 
     @staticmethod
     def _parse_positive_int_env(name: str, default: int) -> int:
@@ -355,12 +430,10 @@ class L2DataManager:
             for file_path in matched_files:
                 print(f"  - {file_path}")
                 if file_path.endswith(".parquet"):
-                    preferred_columns = self._preferred_parquet_columns()
-                    try:
-                        df = read_parquet_compat(file_path, columns=preferred_columns)
-                    except Exception:
-                        # Fallback for files that miss one of the preferred columns.
-                        df = read_parquet_compat(file_path)
+                    df = self._read_projected_parquet(
+                        file_path,
+                        preferred_columns=self._preferred_parquet_columns(),
+                    )
                 else:
                     try:
                         import databento as db  # type: ignore
@@ -553,27 +626,44 @@ class L2DataManager:
             stats["reason"] = "empty_day_range"
             return None, stats
 
-        frames: List[pd.DataFrame] = []
         missing_days: List[str] = []
+        loaded_days = 0
+        minute_start = int(start_ts.floor("min").timestamp() // 60)
+        minute_end = int(end_ts.floor("min").timestamp() // 60)
+        merged_rows: Dict[int, Dict[str, Any]] = {}
         for day_token in day_tokens:
             file_path = self._precomputed_file_path(ticker, day_token)
             if not file_path.exists():
                 missing_days.append(day_token)
                 continue
             try:
-                day_df = read_parquet_compat(file_path)
+                has_minute_key, rows = self._load_precomputed_rows_for_window(
+                    file_path,
+                    minute_start=minute_start,
+                    minute_end=minute_end,
+                )
             except Exception:
                 missing_days.append(day_token)
                 continue
-            if day_df is None or day_df.empty:
-                continue
-            frames.append(day_df)
+            if not has_minute_key:
+                stats["reason"] = "missing_minute_key_column"
+                return None, stats
+            loaded_days += 1
+            for record in rows:
+                minute_key = record.get("minute_key")
+                if minute_key is None:
+                    continue
+                try:
+                    minute_key_int = int(minute_key)
+                except (TypeError, ValueError):
+                    continue
+                merged_rows[minute_key_int] = dict(record)
 
-        stats["loaded_days"] = len(frames)
+        stats["loaded_days"] = loaded_days
         stats["missing_days"] = list(missing_days)
         stats["missing_days_count"] = len(missing_days)
 
-        if not frames:
+        if loaded_days == 0:
             stats["reason"] = "no_precomputed_files"
             return None, stats
 
@@ -581,35 +671,14 @@ class L2DataManager:
             stats["reason"] = "partial_coverage_requires_fallback"
             return None, stats
 
-        merged = pd.concat(frames, axis=0, ignore_index=True)
-        if "minute_key" not in merged.columns:
-            stats["reason"] = "missing_minute_key_column"
-            return None, stats
-
-        minute_series = pd.to_numeric(merged["minute_key"], errors="coerce")
-        merged = merged.loc[minute_series.notna()].copy()
-        if merged.empty:
-            stats["reason"] = "empty_after_minute_key_filter"
-            return None, stats
-        merged["minute_key"] = minute_series.loc[minute_series.notna()].astype(np.int64)
-
-        minute_start = int(start_ts.floor("min").timestamp() // 60)
-        minute_end = int(end_ts.floor("min").timestamp() // 60)
-        merged = merged.loc[
-            (merged["minute_key"] >= minute_start)
-            & (merged["minute_key"] <= minute_end)
-        ].copy()
-        if merged.empty:
+        if not merged_rows:
             stats["reason"] = "empty_after_window_filter"
             return None, stats
 
-        merged.sort_values("minute_key", inplace=True)
-        merged = merged.drop_duplicates(subset=["minute_key"], keep="last")
-
         feature_map: Dict[int, Dict[str, Any]] = {}
         base_defaults = self._feature_defaults()
-        for record in merged.to_dict(orient="records"):
-            minute_key = int(record.get("minute_key"))
+        for minute_key in sorted(merged_rows):
+            record = merged_rows[minute_key]
             row_features: Dict[str, Any] = {}
             for key, value in record.items():
                 if key == "minute_key":

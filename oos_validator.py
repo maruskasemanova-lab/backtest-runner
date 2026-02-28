@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
-from available_data import get_discovery
+from src.services.data_discovery import get_discovery
 from data_loader import DataLoader
 from wfo_optimizer import (
     PARAM_GRIDS,

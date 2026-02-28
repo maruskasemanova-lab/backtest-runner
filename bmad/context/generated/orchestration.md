@@ -22,11 +22,11 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
 | `api_server.py` | yes | 1526 | `58ebada 2026-02-27` |
-| `session_runner.py` | yes | 1850 | `58ebada 2026-02-27` |
-| `data_loader.py` | yes | 312 | `1273b21 2026-02-23` |
-| `available_data.py` | yes | 221 | `1273b21 2026-02-23` |
+| `session_runner.py` | yes | 1850 | `0248cab 2026-02-28` |
+| `data_loader.py` | yes | 492 | `1273b21 2026-02-23` |
+| `src/services/data_discovery.py` | yes | 221 | `-` |
 | `decision_tracker.py` | yes | 499 | `1273b21 2026-02-23` |
-| `performance_tracker.py` | yes | 876 | `1273b21 2026-02-23` |
+| `performance_tracker.py` | yes | 878 | `1273b21 2026-02-23` |
 | `src/routes/context.py` | yes | 46 | `1273b21 2026-02-23` |
 | `src/routes/system_routes.py` | yes | 1770 | `58ebada 2026-02-27` |
 | `src/routes/l2_routes.py` | yes | 122 | `1273b21 2026-02-23` |
@@ -37,9 +37,9 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/routes/run_routes.py` | yes | 216 | `c70aa9e 2026-02-24` |
 | `src/routes/adaptive_tuner_routes.py` | yes | 38 | `da07c20 2026-02-12` |
 | `src/routes/run_start_routes.py` | yes | 345 | `1273b21 2026-02-23` |
-| `src/routes/v2_routes.py` | yes | 2046 | `1273b21 2026-02-23` |
+| `src/routes/v2_routes.py` | yes | 3195 | `5d8bbaa 2026-02-28` |
 | `src/models/config_requests.py` | yes | 47 | `b9accc6 2026-02-18` |
-| `src/models/run_requests.py` | yes | 274 | `03b4ad8 2026-02-25` |
+| `src/models/run_requests.py` | yes | 274 | `0248cab 2026-02-28` |
 | `src/models/tuner_requests.py` | yes | 95 | `1273b21 2026-02-23` |
 | `src/security/auth.py` | yes | 279 | `1273b21 2026-02-23` |
 | `src/security/network_policy.py` | yes | 135 | `1273b21 2026-02-23` |
@@ -48,7 +48,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/services/run_registry.py` | yes | 28 | `b9accc6 2026-02-18` |
 | `src/services/config_write_service.py` | yes | 707 | `1273b21 2026-02-23` |
 | `src/services/run_control_service.py` | yes | 639 | `58ebada 2026-02-27` |
-| `src/services/saas_service.py` | yes | 1317 | `58ebada 2026-02-27` |
+| `src/services/saas_service.py` | yes | 1606 | `5d8bbaa 2026-02-28` |
 | `src/services/adaptive_tuner_orchestration_service.py` | yes | 177 | `1273b21 2026-02-23` |
 | `src/services/adaptive_tuner_worker_service.py` | yes | 672 | `1273b21 2026-02-23` |
 | `src/services/adaptive_tuner_core_service.py` | yes | 533 | `1273b21 2026-02-23` |
@@ -59,17 +59,17 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/services/strategy_api_updates_service.py` | yes | 253 | `1273b21 2026-02-23` |
 | `src/services/strategy_api_profiles_service.py` | yes | 933 | `1273b21 2026-02-23` |
 | `src/services/strategy_api_session_service.py` | yes | 511 | `58ebada 2026-02-27` |
-| `src/services/start_run_service.py` | yes | 1151 | `58ebada 2026-02-27` |
-| `src/services/start_run_data_service.py` | yes | 1436 | `58ebada 2026-02-27` |
-| `src/services/start_run_execution_config_service.py` | yes | 893 | `03b4ad8 2026-02-25` |
+| `src/services/start_run_service.py` | yes | 1151 | `0248cab 2026-02-28` |
+| `src/services/start_run_data_service.py` | yes | 1494 | `0248cab 2026-02-28` |
+| `src/services/start_run_execution_config_service.py` | yes | 893 | `0248cab 2026-02-28` |
 | `src/services/start_run_local_aos_service.py` | yes | 90 | `1273b21 2026-02-23` |
 | `src/services/start_run_bootstrap_phase_service.py` | yes | 275 | `1273b21 2026-02-23` |
-| `src/services/start_run_load_phase_service.py` | yes | 180 | `58ebada 2026-02-27` |
+| `src/services/start_run_load_phase_service.py` | yes | 180 | `0248cab 2026-02-28` |
 | `src/services/start_run_session_phase_service.py` | yes | 131 | `8f49f06 2026-02-23` |
-| `src/services/start_run_execution_payload_service.py` | yes | 960 | `58ebada 2026-02-27` |
-| `src/services/start_run_runner_setup_service.py` | yes | 397 | `58ebada 2026-02-27` |
+| `src/services/start_run_execution_payload_service.py` | yes | 960 | `0248cab 2026-02-28` |
+| `src/services/start_run_runner_setup_service.py` | yes | 397 | `0248cab 2026-02-28` |
 | `src/services/execution_config/helpers.py` | yes | 310 | `1273b21 2026-02-23` |
-| `src/services/execution_config/intraday_context.py` | yes | 466 | `1273b21 2026-02-23` |
+| `src/services/execution_config/intraday_context.py` | yes | 466 | `0248cab 2026-02-28` |
 | `src/config_io.py` | yes | 29 | `1273b21 2026-02-23` |
 | `src/system_settings.py` | yes | 179 | `1273b21 2026-02-23` |
 | `src/databento_service.py` | yes | 2046 | `58ebada 2026-02-27` |
@@ -114,9 +114,9 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - ... 67 more symbols
 
 ### `data_loader.py`
-- `class` `DataLoader` (line 17)
+- `class` `DataLoader` (line 22)
 
-### `available_data.py`
+### `src/services/data_discovery.py`
 - `class` `TickerData` (line 22)
 - `class` `DataDiscovery` (line 32)
 - `function` `get_discovery` (line 210)
@@ -231,19 +231,19 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `async_function` `flush_run_cache_endpoint` (line 341)
 
 ### `src/routes/v2_routes.py`
-- `class` `BillingCheckoutRequest` (line 43)
-- `class` `BillingPortalRequest` (line 50)
-- `class` `V2UserSettingsUpdateRequest` (line 54)
-- `class` `V2RunRequest` (line 58)
-- `class` `V2AdaptiveTunerRequest` (line 63)
-- `class` `V2DownloadRequest` (line 67)
-- `class` `V2AdaptiveStrategyProfileRequest` (line 76)
-- `function` `_request_id` (line 86)
-- `function` `_detail` (line 91)
-- `function` `_raise` (line 108)
-- `function` `_parse_iso_day` (line 124)
-- `function` `_normalize_ticker` (line 133)
-- ... 64 more symbols
+- `class` `BillingCheckoutRequest` (line 49)
+- `class` `BillingPortalRequest` (line 56)
+- `class` `V2UserSettingsUpdateRequest` (line 60)
+- `class` `V2UserDatasetRequest` (line 64)
+- `class` `V2RunRequest` (line 78)
+- `class` `V2AdaptiveTunerRequest` (line 83)
+- `class` `V2DownloadRequest` (line 87)
+- `class` `V2AdaptiveStrategyProfileRequest` (line 96)
+- `function` `_request_id` (line 106)
+- `function` `_detail` (line 111)
+- `function` `_raise` (line 128)
+- `function` `_parse_iso_day` (line 144)
+- ... 97 more symbols
 
 ### `src/models/config_requests.py`
 - `class` `AdaptiveTunerProfileApplyRequest` (line 6)
@@ -339,10 +339,12 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - ... 16 more symbols
 
 ### `src/services/saas_service.py`
-- `class` `UserSettingsStore` (line 46)
-- `class` `RunReportsStore` (line 58)
-- `class` `SaaSStateStore` (line 79)
-- `class` `V2Services` (line 1290)
+- `class` `UserSettingsStore` (line 48)
+- `class` `RunReportsStore` (line 60)
+- `class` `RunStateMirror` (line 81)
+- `class` `UserDatasetsStore` (line 100)
+- `class` `SaaSStateStore` (line 132)
+- `class` `V2Services` (line 1573)
 
 ### `src/services/adaptive_tuner_orchestration_service.py`
 - `class` `AdaptiveTunerOrchestrationDeps` (line 11)
@@ -462,7 +464,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `function` `_disk_cache_get` (line 197)
 - `function` `_disk_cache_set` (line 214)
 - `function` `_count_disk_cache_entries` (line 227)
-- ... 36 more symbols
+- ... 38 more symbols
 
 ### `src/services/start_run_execution_config_service.py`
 - `function` `_resolve_strategy_selection` (line 29)
@@ -642,6 +644,11 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `GET` | `/usage` | `v2_usage` | `src/routes/v2_routes.py` |
 | `GET` | `/user/settings` | `v2_user_settings` | `src/routes/v2_routes.py` |
 | `PUT` | `/user/settings` | `v2_upsert_user_settings` | `src/routes/v2_routes.py` |
+| `GET` | `/datasets` | `v2_list_user_datasets` | `src/routes/v2_routes.py` |
+| `GET` | `/datasets/{dataset_id}` | `v2_get_user_dataset` | `src/routes/v2_routes.py` |
+| `POST` | `/datasets` | `v2_upsert_user_dataset` | `src/routes/v2_routes.py` |
+| `DELETE` | `/datasets/{dataset_id}` | `v2_delete_user_dataset` | `src/routes/v2_routes.py` |
+| `POST` | `/datasets/upload/csv` | `v2_upload_user_dataset_csv` | `src/routes/v2_routes.py` |
 | `GET` | `/ops/metrics` | `v2_ops_metrics` | `src/routes/v2_routes.py` |
 | `GET` | `/strategies/adaptive` | `v2_list_adaptive_strategies` | `src/routes/v2_routes.py` |
 | `POST` | `/strategies/adaptive` | `v2_upsert_adaptive_strategy` | `src/routes/v2_routes.py` |

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   type Dispatch,
   type MutableRefObject,
   type SetStateAction,
@@ -10,10 +11,21 @@ import type {
   CandlestickChartPriceRange,
   CandlestickChartVisibleRange,
 } from '../components/CandlestickChart';
+import {
+  applyFetchedRunSnapshotState,
+  applyStoredRunSnapshotState,
+  buildQueuedRunResultPayload,
+  buildStoredSnapshotState,
+  mapSnapshotChartBars,
+  normalizeToken,
+  primeStartedRunState,
+  waitForQueuedV2RunJob,
+} from './runSnapshotActionShared';
 
 type UseRunSnapshotActionsArgs = {
   runKey: string | null;
   activeRunApiBase: string | null;
+  authToken: string;
   isPageVisible: boolean;
   clearActiveRunState: (notice?: string) => void;
   refreshActiveRuns: () => void;
@@ -48,6 +60,7 @@ type UseRunSnapshotActionsArgs = {
 export const useRunSnapshotActions = ({
   runKey,
   activeRunApiBase,
+  authToken,
   isPageVisible,
   clearActiveRunState,
   refreshActiveRuns,
@@ -78,6 +91,41 @@ export const useRunSnapshotActions = ({
   setTradeEvaluationMode,
   setRuntimeNotice,
 }: UseRunSnapshotActionsArgs) => {
+  const normalizedAuthToken = normalizeToken(authToken);
+  const runSnapshotStateSetters = useMemo(
+    () => ({
+      setRunKey,
+      setRunState,
+      setEffectiveExecutionConfig,
+      setChartState,
+      setPriceRange,
+      setBars,
+      setMarkers,
+      setSelectedMarker,
+      setCurrentBar,
+      setSelectedIntrabar,
+      setSelectedIntradayLevels,
+      setSelectedTicker,
+      setIsPlaying,
+      setTradeEvaluationMode,
+    }),
+    [
+      setBars,
+      setChartState,
+      setCurrentBar,
+      setEffectiveExecutionConfig,
+      setIsPlaying,
+      setMarkers,
+      setPriceRange,
+      setRunKey,
+      setRunState,
+      setSelectedIntrabar,
+      setSelectedIntradayLevels,
+      setSelectedMarker,
+      setSelectedTicker,
+      setTradeEvaluationMode,
+    ],
+  );
   const hydrateRunSnapshot = useCallback(
     async (targetRunKey: string, options: { showBusy?: boolean } = {}) => {
       const { showBusy = true } = options;
@@ -110,29 +158,19 @@ export const useRunSnapshotActions = ({
         const nextExecutionConfig = buildEffectiveExecutionConfigSnapshot(summaryPayload);
 
         const rawBars = Array.isArray(barsPayload?.bars) ? barsPayload.bars : [];
-        const chartBars = rawBars
-          .map((bar: any) => toChartBar(bar))
-          .filter(Boolean)
-          .sort((a: CandlestickChartBar, b: CandlestickChartBar) => a.time - b.time);
+        const chartBars = mapSnapshotChartBars(rawBars, toChartBar);
         const nextMarkers = Array.isArray(markersPayload) ? markersPayload : [];
-
-        setRunKey(targetRunKey);
-        setRunState(statePayload && typeof statePayload === 'object' ? statePayload : null);
-        setEffectiveExecutionConfig(nextExecutionConfig);
-        setChartState(null);
-        setPriceRange(null);
-        setBars(chartBars);
-        setMarkers(nextMarkers);
-        setCurrentBar(rawBars.length ? rawBars[rawBars.length - 1] : null);
-        setSelectedIntrabar(null);
-        setSelectedIntradayLevels(null);
-        setSelectedMarker((prevSelected: any) => {
-          if (!prevSelected?.id) return null;
-          return nextMarkers.find((candidate: any) => candidate?.id === prevSelected.id) || null;
+        applyFetchedRunSnapshotState({
+          targetRunKey,
+          statePayload,
+          nextExecutionConfig,
+          rawBars,
+          chartBars,
+          nextMarkers,
+          parsedTicker: parsed.ticker || null,
+          resolveTradeModeFromExecutionConfig,
+          setters: runSnapshotStateSetters,
         });
-        setSelectedTicker(parsed.ticker || null);
-        setIsPlaying(Boolean(statePayload?.is_running && !statePayload?.is_paused));
-        setTradeEvaluationMode((prev) => resolveTradeModeFromExecutionConfig(nextExecutionConfig, prev));
         return true;
       } catch (error) {
         console.error('Snapshot reload failed:', error);
@@ -148,23 +186,88 @@ export const useRunSnapshotActions = ({
       buildRunApiBase,
       parseRunKey,
       resolveTradeModeFromExecutionConfig,
-      setBars,
-      setChartState,
-      setCurrentBar,
-      setEffectiveExecutionConfig,
-      setIsPlaying,
       setIsReloadingSnapshot,
-      setMarkers,
-      setPriceRange,
-      setRunKey,
-      setRunState,
-      setSelectedIntrabar,
-      setSelectedIntradayLevels,
-      setSelectedMarker,
-      setSelectedTicker,
-      setTradeEvaluationMode,
+      runSnapshotStateSetters,
       toChartBar,
     ],
+  );
+
+  const applyStartedRun = useCallback(
+    async (data: any, config: any) => {
+      const key = String(data?.run_key || '').trim();
+      const parsedRun = parseRunKey(key);
+      if (!parsedRun) {
+        throw new Error('Invalid run key returned by backend.');
+      }
+
+      const nextExecutionConfig = buildEffectiveExecutionConfigSnapshot(data);
+      primeStartedRunState({
+        key,
+        nextExecutionConfig,
+        pendingVisibilitySyncRef,
+        refreshActiveRuns,
+        resolveTradeModeFromExecutionConfig,
+        setters: runSnapshotStateSetters,
+      });
+
+      const runApiBase = buildRunApiBase(parsedRun);
+      if (!runApiBase) {
+        throw new Error('Invalid run path returned by backend.');
+      }
+      const stateResp = await fetch(`${runApiBase}/state`);
+      if (!stateResp.ok) {
+        const detail = await readErrorDetail(stateResp, `HTTP ${stateResp.status}`);
+        throw new Error(`Failed to load run state: ${detail}`);
+      }
+      const state = await stateResp.json();
+      setRunState(state);
+
+      try {
+        const barsResp = await fetch(`${runApiBase}/bars`);
+        if (barsResp.ok) {
+          const barsPayload = await barsResp.json();
+          const rawBars = Array.isArray(barsPayload?.bars) ? barsPayload.bars : [];
+          const chartBars = mapSnapshotChartBars(rawBars, toChartBar);
+          if (chartBars.length > 0) {
+            setBars(chartBars);
+            setCurrentBar(rawBars[rawBars.length - 1] || null);
+          }
+        }
+      } catch (barsError) {
+        console.debug('Initial bars snapshot load failed:', barsError);
+      }
+
+      if (String(config?.ticker || '').trim()) {
+        setSelectedTicker(String(config.ticker || '').trim().toUpperCase());
+      }
+      return data;
+    },
+    [
+      buildEffectiveExecutionConfigSnapshot,
+      buildRunApiBase,
+      parseRunKey,
+      pendingVisibilitySyncRef,
+      readErrorDetail,
+      refreshActiveRuns,
+      resolveTradeModeFromExecutionConfig,
+      runSnapshotStateSetters,
+      setBars,
+      setCurrentBar,
+      setRunState,
+      setSelectedTicker,
+      toChartBar,
+    ],
+  );
+
+  const waitForV2RunJob = useCallback(
+    async (jobId: string) =>
+      waitForQueuedV2RunJob({
+        jobId,
+        normalizedAuthToken,
+        readErrorDetail,
+        setRuntimeNotice,
+      }),
+    [normalizedAuthToken, readErrorDetail, setRuntimeNotice],
   );
 
   useEffect(() => {
@@ -182,6 +285,32 @@ export const useRunSnapshotActions = ({
         setRuntimeNotice('');
         setSelectedTicker(config.ticker || null);
         setStrategyApiUrl(config.strategy_api_url || defaultStrategyApiUrl);
+        if (normalizedAuthToken) {
+          const queuedResponse = await fetch('/api/v2/runs', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${normalizedAuthToken}`,
+            },
+            body: JSON.stringify(config),
+          });
+
+          if (!queuedResponse.ok) {
+            const detail = await readErrorDetail(queuedResponse, `HTTP ${queuedResponse.status}`);
+            throw new Error(detail || 'Failed to queue run');
+          }
+
+          const queuedPayload = await queuedResponse.json();
+          const jobId = String(queuedPayload?.job_id || '').trim();
+          if (!jobId) {
+            throw new Error('Missing v2 job id returned by backend.');
+          }
+          setRuntimeNotice(`Backtest queued (${jobId.slice(0, 8)}). Waiting for worker slot...`);
+          const job = await waitForV2RunJob(jobId);
+          const resultPayload = buildQueuedRunResultPayload(job);
+          return await applyStartedRun(resultPayload, config);
+        }
+
         const response = await fetch('/api/run/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -194,57 +323,7 @@ export const useRunSnapshotActions = ({
         }
 
         const data = await response.json();
-        const key = String(data.run_key || '');
-        const parsedRun = parseRunKey(key);
-        if (!parsedRun) {
-          throw new Error('Invalid run key returned by backend.');
-        }
-
-        setRunKey(key);
-        refreshActiveRuns();
-        const nextExecutionConfig = buildEffectiveExecutionConfigSnapshot(data);
-        setEffectiveExecutionConfig(nextExecutionConfig);
-        setTradeEvaluationMode((prev) => resolveTradeModeFromExecutionConfig(nextExecutionConfig, prev));
-
-        setChartState(null);
-        setPriceRange(null);
-        setBars([]);
-        setMarkers([]);
-        setSelectedMarker(null);
-        setCurrentBar(null);
-        setSelectedIntrabar(null);
-        setSelectedIntradayLevels(null);
-        setIsPlaying(false);
-        pendingVisibilitySyncRef.current = false;
-
-        const runApiBase = buildRunApiBase(parsedRun);
-        const stateResp = await fetch(`${runApiBase}/state`);
-        if (!stateResp.ok) {
-          const detail = await readErrorDetail(stateResp, `HTTP ${stateResp.status}`);
-          throw new Error(`Failed to load run state: ${detail}`);
-        }
-        const state = await stateResp.json();
-        setRunState(state);
-
-        try {
-          const barsResp = await fetch(`${runApiBase}/bars`);
-          if (barsResp.ok) {
-            const barsPayload = await barsResp.json();
-            const rawBars = Array.isArray(barsPayload?.bars) ? barsPayload.bars : [];
-            const chartBars = rawBars
-              .map((bar: any) => toChartBar(bar))
-              .filter(Boolean)
-              .sort((a: CandlestickChartBar, b: CandlestickChartBar) => a.time - b.time);
-            if (chartBars.length > 0) {
-              setBars(chartBars);
-              setCurrentBar(rawBars[rawBars.length - 1] || null);
-            }
-          }
-        } catch (barsError) {
-          console.debug('Initial bars snapshot load failed:', barsError);
-        }
-
-        return data;
+        return await applyStartedRun(data, config);
       } catch (error) {
         const message = String(error instanceof Error ? error.message : '');
         if (!runIdCollisionPattern.test(message)) {
@@ -254,32 +333,15 @@ export const useRunSnapshotActions = ({
       }
     },
     [
-      buildEffectiveExecutionConfigSnapshot,
-      buildRunApiBase,
+      applyStartedRun,
       defaultStrategyApiUrl,
-      parseRunKey,
-      pendingVisibilitySyncRef,
+      normalizedAuthToken,
       readErrorDetail,
-      refreshActiveRuns,
-      resolveTradeModeFromExecutionConfig,
       runIdCollisionPattern,
-      setBars,
-      setChartState,
-      setCurrentBar,
-      setEffectiveExecutionConfig,
-      setIsPlaying,
-      setMarkers,
-      setPriceRange,
-      setRunKey,
-      setRunState,
       setRuntimeNotice,
-      setSelectedIntrabar,
-      setSelectedIntradayLevels,
-      setSelectedMarker,
       setSelectedTicker,
       setStrategyApiUrl,
-      setTradeEvaluationMode,
-      toChartBar,
+      waitForV2RunJob,
     ],
   );
 
@@ -393,51 +455,25 @@ export const useRunSnapshotActions = ({
         const statePayload = payload?.state && typeof payload.state === 'object' ? payload.state : {};
         const rawBars = Array.isArray(payload?.bars) ? payload.bars : [];
         const rawMarkers = Array.isArray(payload?.markers) ? payload.markers : [];
-        const chartBars = rawBars
-          .map((bar: any) => toChartBar(bar))
-          .filter(Boolean)
-          .sort((a: CandlestickChartBar, b: CandlestickChartBar) => a.time - b.time);
+        const chartBars = mapSnapshotChartBars(rawBars, toChartBar);
 
         const nextRunKey = String(payload?.run_key || normalizedRunKey).trim() || normalizedRunKey;
         const parsedRun = parseRunKey(nextRunKey) || parseRunKey(normalizedRunKey);
-        const snapshotState = {
-          ...statePayload,
-          is_running: false,
-          is_paused: false,
-          phase: statePayload?.phase || 'COMPLETED',
-          current_bar_index: Number.isFinite(Number(statePayload?.current_bar_index))
-            ? Number(statePayload.current_bar_index)
-            : rawBars.length,
-          total_bars: Number.isFinite(Number(statePayload?.total_bars))
-            ? Number(statePayload.total_bars)
-            : rawBars.length,
-        };
-        const totalBars = Number(snapshotState.total_bars || 0);
-        const currentBars = Number(snapshotState.current_bar_index || 0);
-        snapshotState.progress_pct =
-          totalBars > 0
-            ? Math.min(100, Math.max(0, (currentBars / totalBars) * 100))
-            : Number(snapshotState.progress_pct || 0);
+        const snapshotState = buildStoredSnapshotState(statePayload, rawBars);
 
         const nextExecutionConfig = buildEffectiveExecutionConfigSnapshot(summaryPayload);
-
-        setRunKey(nextRunKey);
-        setRunState(snapshotState);
-        setEffectiveExecutionConfig(nextExecutionConfig);
-        setTradeEvaluationMode((prev) => resolveTradeModeFromExecutionConfig(nextExecutionConfig, prev));
-        setChartState(null);
-        setPriceRange(null);
-        setBars(chartBars);
-        setMarkers(rawMarkers);
-        setSelectedMarker(null);
-        setCurrentBar(rawBars.length ? rawBars[rawBars.length - 1] : null);
-        setSelectedIntrabar(null);
-        setSelectedIntradayLevels(null);
-        setIsPlaying(false);
-        pendingVisibilitySyncRef.current = false;
-        if (parsedRun?.ticker) {
-          setSelectedTicker(parsedRun.ticker);
-        }
+        applyStoredRunSnapshotState({
+          nextRunKey,
+          snapshotState,
+          nextExecutionConfig,
+          rawBars,
+          chartBars,
+          rawMarkers,
+          parsedTicker: parsedRun?.ticker || null,
+          pendingVisibilitySyncRef,
+          resolveTradeModeFromExecutionConfig,
+          setters: runSnapshotStateSetters,
+        });
         refreshActiveRuns();
         setRuntimeNotice('');
         return true;
@@ -457,22 +493,9 @@ export const useRunSnapshotActions = ({
       readErrorDetail,
       refreshActiveRuns,
       resolveTradeModeFromExecutionConfig,
-      setBars,
-      setChartState,
-      setCurrentBar,
-      setEffectiveExecutionConfig,
-      setIsPlaying,
       setIsReloadingSnapshot,
-      setMarkers,
-      setPriceRange,
-      setRunKey,
-      setRunState,
       setRuntimeNotice,
-      setSelectedIntrabar,
-      setSelectedIntradayLevels,
-      setSelectedMarker,
-      setSelectedTicker,
-      setTradeEvaluationMode,
+      runSnapshotStateSetters,
       toChartBar,
     ],
   );

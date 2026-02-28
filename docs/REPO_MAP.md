@@ -1,6 +1,6 @@
 # Repo Map
 
-Generated at: `2026-02-28T14:19:38Z`
+Generated at: `2026-02-28T14:54:41Z`
 
 ## Tree (depth 2)
 
@@ -56,6 +56,8 @@ Generated at: `2026-02-28T14:19:38Z`
 ./analysis/claude_handoff_2026-02-06
 ./analysis/claude_handoff_architecture_2026-02-13
 ./analysis/mu_tuning_summary_2026-01-20_2026-02-06.md
+./analysis/optimization
+./analysis/runtime
 ./aos_optimization
 ./aos_optimization/.adaptive_tuner_aos
 ./aos_optimization/aos_history.jsonl
@@ -72,7 +74,6 @@ Generated at: `2026-02-28T14:19:38Z`
 ./api/__pycache__
 ./api/index.py
 ./api_server.py
-./available_data.py
 ./batch_runner.py
 ./bmad
 ./bmad/README.md
@@ -92,6 +93,7 @@ Generated at: `2026-02-28T14:19:38Z`
 ./data/saas_state.db.corrupt_backup_20260227_210116
 ./data/saas_state.db.pre_repair_20260227_210116
 ./data/saas_state.recover_20260227_210116.sql
+./data/saas_state.root_snapshot.db
 ./data/saas_state_8012.db
 ./data_loader.py
 ./db
@@ -144,7 +146,6 @@ Generated at: `2026-02-28T14:19:38Z`
 ./render.yaml
 ./requirements.txt
 ./run_strategy_test.py
-./saas_state.db
 ./scripts
 ./scripts/__pycache__
 ./scripts/analyze_mu_four_phase.py

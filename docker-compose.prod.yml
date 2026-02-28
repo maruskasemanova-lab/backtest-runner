@@ -1,6 +1,6 @@
 services:
   strategy-api:
-    image: python:3.11-slim
+    image: python:3.12-slim
     working_dir: /app
     command: >
       sh -lc "pip install --no-cache-dir -r requirements.txt &&
@@ -15,7 +15,7 @@ services:
     restart: unless-stopped
 
   runner-api:
-    image: python:3.11-slim
+    image: python:3.12-slim
     working_dir: /app
     command: >
       sh -lc "pip install --no-cache-dir -r requirements.txt &&

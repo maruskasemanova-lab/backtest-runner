@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Default data directory
 DEFAULT_DATA_DIR = str(DEFAULT_EXTERNAL_DATA_DIR)
-LOCAL_DATA_DIR = str(Path(__file__).resolve().parent / "data")
+LOCAL_DATA_DIR = str(Path(__file__).resolve().parents[2] / "data")
 
 
 @dataclass

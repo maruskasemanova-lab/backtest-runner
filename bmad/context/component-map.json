@@ -40,7 +40,7 @@
         "api_server.py",
         "session_runner.py",
         "data_loader.py",
-        "available_data.py",
+        "src/services/data_discovery.py",
         "decision_tracker.py",
         "performance_tracker.py",
         "src/routes/context.py",

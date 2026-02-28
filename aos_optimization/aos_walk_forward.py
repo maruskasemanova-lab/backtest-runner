@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from run_strategy_test import StrategyTester, BacktestReport
 from performance_tracker import PerformanceTracker
-from available_data import get_discovery
+from src.services.data_discovery import get_discovery
 
 FLOW_PARAM_GRIDS: Dict[str, Dict[str, List[float]]] = {
     "momentum_flow": {

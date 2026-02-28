@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from .parquet_compat import read_parquet_compat
+from .parquet_compat import read_parquet_compat, scan_parquet_compat
 
 logger = logging.getLogger("TCBBOAnalyzer")
 
@@ -160,6 +160,39 @@ class TCBBOAnalyzer:
         self.sweep_min_premium_usd = sweep_min_premium_usd
         self.flow_bar_freq = flow_bar_freq
 
+    @staticmethod
+    def _preferred_parquet_columns() -> List[str]:
+        return [
+            "ts_event",
+            "symbol",
+            "price",
+            "size",
+            "bid_px_00",
+            "ask_px_00",
+            "publisher_id",
+        ]
+
+    @staticmethod
+    def _required_parquet_columns() -> set[str]:
+        return {"ts_event", "symbol", "price", "size", "bid_px_00", "ask_px_00"}
+
+    @staticmethod
+    def _parquet_schema_columns(path: str | Path) -> List[str]:
+        schema = scan_parquet_compat(path).collect_schema()
+        try:
+            return [str(name) for name in schema.names()]
+        except Exception:
+            return [str(name) for name in dict(schema).keys()]
+
+    @classmethod
+    def _existing_parquet_columns(
+        cls,
+        path: str | Path,
+        columns: List[str],
+    ) -> List[str]:
+        available = set(cls._parquet_schema_columns(path))
+        return [col for col in columns if col in available]
+
     # ------------------------------------------------------------------
     # Phase 1: Ingestion
     # ------------------------------------------------------------------
@@ -170,11 +203,23 @@ class TCBBOAnalyzer:
         if not p.exists():
             raise FileNotFoundError(f"TCBBO file not found: {p}")
 
-        df = read_parquet_compat(str(p))
+        selected_columns = self._existing_parquet_columns(
+            p, self._preferred_parquet_columns()
+        )
+        missing_required = self._required_parquet_columns() - set(selected_columns)
+        if missing_required:
+            raise ValueError(
+                f"TCBBO parquet missing required columns: {sorted(missing_required)}"
+            )
+
+        df = read_parquet_compat(str(p), columns=selected_columns)
         logger.info("Loaded %d rows from %s", len(df), p.name)
 
         # Parse timestamps
         df["ts_event"] = pd.to_datetime(df["ts_event"], utc=True)
+
+        if "publisher_id" not in df.columns:
+            df["publisher_id"] = 0
 
         # Parse OCC symbols
         df["underlying"] = df["symbol"].str[:6].str.strip()
@@ -375,23 +420,25 @@ class TCBBOAnalyzer:
                 contract_volume=("size", "sum"),
             )
             .sort_index()
+            .reset_index()
         )
 
-        cumulative = agg["net_premium"].cumsum()
+        cumulative = agg["net_premium"].cumsum().to_numpy()
 
         bars: List[FlowBar] = []
-        for ts, row in agg.iterrows():
+        for idx, row in enumerate(agg.itertuples(index=False)):
+            ts = row.bar
             bars.append(
                 FlowBar(
                     timestamp=ts.isoformat(),
-                    call_premium_buy=round(row["call_premium_buy"], 2),
-                    call_premium_sell=round(row["call_premium_sell"], 2),
-                    put_premium_buy=round(row["put_premium_buy"], 2),
-                    put_premium_sell=round(row["put_premium_sell"], 2),
-                    net_premium=round(row["net_premium"], 2),
-                    cumulative_net_premium=round(cumulative[ts], 2),
-                    trade_count=int(row["trade_count"]),
-                    contract_volume=int(row["contract_volume"]),
+                    call_premium_buy=round(row.call_premium_buy, 2),
+                    call_premium_sell=round(row.call_premium_sell, 2),
+                    put_premium_buy=round(row.put_premium_buy, 2),
+                    put_premium_sell=round(row.put_premium_sell, 2),
+                    net_premium=round(row.net_premium, 2),
+                    cumulative_net_premium=round(float(cumulative[idx]), 2),
+                    trade_count=int(row.trade_count),
+                    contract_volume=int(row.contract_volume),
                     sweep_count=sweep_bars.get(ts, 0),
                 )
             )

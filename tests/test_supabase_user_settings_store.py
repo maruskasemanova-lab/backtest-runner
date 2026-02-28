@@ -6,6 +6,7 @@ from src.services.saas_service import (
     SaaSStateStore,
     SupabaseRunReportsStore,
     SupabaseRunStateMirror,
+    SupabaseUserDatasetsStore,
     SupabaseUserSettingsStore,
 )
 
@@ -424,6 +425,133 @@ def test_supabase_run_state_mirror_upserts_job_and_run(monkeypatch):
     run_row = state["runs"]["run-1:MU:2026-02-28"]
     assert run_row["status"] == "running"
     assert run_row["metadata"]["job_id"] == "job-1"
+
+
+def test_supabase_user_datasets_store_roundtrip(monkeypatch):
+    state = {
+        "tenants": {},
+        "users": {},
+        "user_datasets": {},
+    }
+
+    def _fake_request(
+        method, url, params=None, json=None, headers=None, timeout=None, **kwargs
+    ):
+        method = str(method or "").upper()
+        path = str(url or "")
+        _ = headers, timeout, kwargs
+
+        if path.endswith("/users"):
+            if method == "GET":
+                user_id = _eq(params, "id")
+                row = state["users"].get(user_id)
+                return _StubResponse(
+                    200, [{"tenant_id": row["tenant_id"]}] if row else []
+                )
+            if method == "POST":
+                rows = []
+                for row in json or []:
+                    user_id = str(row.get("id") or "").strip()
+                    merged = dict(state["users"].get(user_id) or {})
+                    merged.update(row or {})
+                    state["users"][user_id] = merged
+                    rows.append({"id": user_id, "tenant_id": merged.get("tenant_id")})
+                return _StubResponse(201, rows)
+
+        if path.endswith("/tenants"):
+            if method == "POST":
+                rows = []
+                for row in json or []:
+                    tenant_id = str(row.get("id") or "").strip()
+                    merged = dict(state["tenants"].get(tenant_id) or {})
+                    merged.update(row or {})
+                    state["tenants"][tenant_id] = merged
+                    rows.append({"id": tenant_id})
+                return _StubResponse(201, rows)
+
+        if path.endswith("/user_datasets"):
+            if method == "GET":
+                dataset_id = _eq(params, "dataset_id")
+                user_id = _eq(params, "user_id")
+                status = _eq(params, "status")
+                if dataset_id:
+                    row = state["user_datasets"].get(dataset_id)
+                    return _StubResponse(200, [dict(row)] if row else [])
+                rows = [
+                    dict(row)
+                    for row in state["user_datasets"].values()
+                    if (not user_id or str(row.get("user_id") or "") == user_id)
+                    and (not status or str(row.get("status") or "") == status)
+                ]
+                return _StubResponse(200, rows)
+
+            if method == "POST":
+                rows = []
+                for row in json or []:
+                    dataset_id = str(row.get("dataset_id") or "").strip()
+                    merged = dict(state["user_datasets"].get(dataset_id) or {})
+                    merged.update(row or {})
+                    state["user_datasets"][dataset_id] = merged
+                    rows.append(dict(merged))
+                return _StubResponse(201, rows)
+
+            if method == "DELETE":
+                dataset_id = _eq(params, "dataset_id")
+                user_id = _eq(params, "user_id")
+                row = state["user_datasets"].get(dataset_id)
+                if row and str(row.get("user_id") or "") == user_id:
+                    del state["user_datasets"][dataset_id]
+                return _StubResponse(200, [])
+
+        raise AssertionError(
+            f"Unexpected request: {method} {url} params={params} json={json}"
+        )
+
+    monkeypatch.setattr(
+        "src.services.saas_supabase_store.requests.request",
+        _fake_request,
+    )
+
+    store = SupabaseUserDatasetsStore(
+        supabase_url="https://example.supabase.co",
+        service_role_key="service-role-key",
+        table_name="user_datasets",
+    )
+
+    saved = store.upsert_user_dataset(
+        dataset_id="ds-1",
+        user_id="user-d",
+        tenant_id="tenant_user-d",
+        dataset_name="Dataset One",
+        source_filename="raw.csv",
+        s3_path="s3://bucket/users/user-d/datasets/ds-1.parquet",
+        status="ready",
+        file_format="parquet",
+        source_format="csv",
+        row_count=123,
+        size_bytes=456,
+        schema_name="mbp-10",
+        metadata={"source": "upload"},
+    )
+    assert saved["dataset_id"] == "ds-1"
+    assert saved["metadata"]["source"] == "upload"
+
+    listed = store.list_user_datasets(user_id="user-d", limit=10)
+    assert len(listed) == 1
+    assert listed[0]["dataset_name"] == "Dataset One"
+
+    fetched = store.get_user_dataset(dataset_id="ds-1")
+    assert fetched is not None
+    assert fetched["source_format"] == "csv"
+    assert fetched["row_count"] == 123
+
+    deleted = store.delete_user_dataset(dataset_id="ds-1", user_id="user-d")
+    assert deleted is True
+    assert store.get_user_dataset(dataset_id="ds-1") is None
+
+    created_user = state["users"]["user-d"]
+    assert created_user["tenant_id"]
+    UUID(created_user["tenant_id"])
 
 
 def test_sqlite_run_reports_store_upsert_and_list(tmp_path):

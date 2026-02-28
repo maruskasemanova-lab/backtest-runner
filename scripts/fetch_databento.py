@@ -13,7 +13,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
-from available_data import DataDiscovery, DEFAULT_DATA_DIR
+from src.services.data_discovery import DataDiscovery, DEFAULT_DATA_DIR
 
 
 def parse_args() -> argparse.Namespace:

@@ -5,13 +5,18 @@ Data Loader - Loads trading day data from various sources.
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from zoneinfo import ZoneInfo
 import os
 
 from src.system_settings import DEFAULT_EXTERNAL_DATA_DIR, SystemSettings
-from src.parquet_compat import read_parquet_compat
+from src.parquet_compat import read_parquet_compat, scan_parquet_compat
+
+try:
+    import polars as pl
+except Exception:  # pragma: no cover - runtime requires polars, but keep import safe
+    pl = None
 
 
 class DataLoader:
@@ -20,6 +25,23 @@ class DataLoader:
     # Default data directory
     DEFAULT_DATA_DIR = str(DEFAULT_EXTERNAL_DATA_DIR)
     PROJECT_ROOT = Path(__file__).resolve().parent
+    TIMESTAMP_COLUMN_CANDIDATES = (
+        "timestamp",
+        "ts_event",
+        "ts_recv",
+        "time",
+        "datetime",
+        "date",
+    )
+    REQUIRED_OHLCV_COLUMNS = ("open", "high", "low", "close", "volume")
+    OPTIONAL_BAR_COLUMNS = ("vwap",)
+    OHLCV_ALT_NAMES = {
+        "open": ("Open", "OPEN", "o"),
+        "high": ("High", "HIGH", "h"),
+        "low": ("Low", "LOW", "l"),
+        "close": ("Close", "CLOSE", "c"),
+        "volume": ("Volume", "VOLUME", "v", "vol"),
+    }
 
     def __init__(
         self, data_dir: Optional[str] = None, data_dirs: Optional[List[str]] = None
@@ -79,26 +101,188 @@ class DataLoader:
         df = pd.read_csv(filepath)
         return self._prepare_dataframe(df)
 
-    def load_parquet(self, filename: str) -> pd.DataFrame:
+    def preferred_parquet_columns(self) -> List[str]:
+        """Column projection for analyzer/runtime OHLCV parquet loads."""
+        columns: List[str] = list(self.TIMESTAMP_COLUMN_CANDIDATES)
+        for col in self.REQUIRED_OHLCV_COLUMNS:
+            columns.append(col)
+            columns.extend(self.OHLCV_ALT_NAMES.get(col, ()))
+        columns.extend(self.OPTIONAL_BAR_COLUMNS)
+        return list(dict.fromkeys(columns))
+
+    @staticmethod
+    def _normalize_requested_columns(columns: Optional[List[str]]) -> List[str]:
+        return [str(col) for col in (columns or []) if str(col).strip()]
+
+    def _parquet_schema_columns(self, filepath: Path) -> List[str]:
+        if pl is None:
+            raise RuntimeError("polars is required for parquet loading")
+        schema = scan_parquet_compat(filepath).collect_schema()
+        try:
+            return [str(name) for name in schema.names()]
+        except Exception:
+            return [str(name) for name in dict(schema).keys()]
+
+    def _existing_requested_parquet_columns(
+        self, filepath: Path, columns: Optional[List[str]]
+    ) -> List[str]:
+        requested = self._normalize_requested_columns(columns)
+        if not requested:
+            return []
+        available = set(self._parquet_schema_columns(filepath))
+        return [col for col in requested if col in available]
+
+    def _resolve_parquet_timestamp_column(self, available: set[str]) -> str:
+        for col in self.TIMESTAMP_COLUMN_CANDIDATES:
+            if col in available:
+                return col
+        raise ValueError(
+            f"No timestamp column found. Available: {sorted(available)}"
+        )
+
+    def _resolve_parquet_value_column(self, target: str, available: set[str]) -> str:
+        if target in available:
+            return target
+        for alt in self.OHLCV_ALT_NAMES.get(target, ()):
+            if alt in available:
+                return alt
+        raise ValueError(f"Required column '{target}' not found in parquet data")
+
+    @staticmethod
+    def _polars_timestamp_expr(source_col: str):
+        if pl is None:
+            raise RuntimeError("polars is required for parquet loading")
+        expr = pl.col(source_col).cast(pl.Utf8).str
+        try:
+            parsed = expr.to_datetime(strict=False, exact=False, format="%+")
+        except TypeError:
+            try:
+                parsed = expr.to_datetime(strict=False, exact=False)
+            except TypeError:
+                parsed = expr.strptime(pl.Datetime, strict=False, exact=False, format="%+")
+        return parsed.alias("timestamp")
+
+    def _build_canonical_parquet_lazyframe(self, filepath: Path):
+        if pl is None:
+            raise RuntimeError("polars is required for parquet loading")
+        lazy_frame = scan_parquet_compat(filepath)
+        available = set(self._parquet_schema_columns(filepath))
+        timestamp_col = self._resolve_parquet_timestamp_column(available)
+        select_exprs = [self._polars_timestamp_expr(timestamp_col)]
+        for col in self.REQUIRED_OHLCV_COLUMNS:
+            source_col = self._resolve_parquet_value_column(col, available)
+            select_exprs.append(pl.col(source_col).alias(col))
+        if "vwap" in available:
+            select_exprs.append(pl.col("vwap").alias("vwap"))
+        return lazy_frame.select(select_exprs)
+
+    def _collect_polars_frame(self, lazy_frame):
+        try:
+            return lazy_frame.collect(engine="streaming")
+        except TypeError:
+            try:
+                return lazy_frame.collect(streaming=True)
+            except TypeError:
+                return lazy_frame.collect()
+
+    def load_parquet(
+        self, filename: str, *, columns: Optional[List[str]] = None
+    ) -> pd.DataFrame:
         """Load data from Parquet file."""
         filepath = self._resolve_file_path(filename)
-
-        df = read_parquet_compat(filepath)
+        selected_columns = self._existing_requested_parquet_columns(filepath, columns)
+        df = read_parquet_compat(filepath, columns=selected_columns or None)
         return self._prepare_dataframe(df)
+
+    def _timestamp_to_market(self, value: Any) -> datetime:
+        if isinstance(value, datetime):
+            ts = value
+        else:
+            ts = pd.Timestamp(value).to_pydatetime()
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(self.market_tz)
+
+    def load_parquet_bars_for_range(
+        self,
+        filenames: List[str],
+        *,
+        start_date: str,
+        end_date: str,
+        include_premarket: bool = True,
+        trading_hours: Optional[List[int]] = None,
+        regular_session_only: bool = False,
+    ) -> List[Dict[str, Any]]:
+        if pl is None:
+            raise RuntimeError("polars is required for parquet loading")
+        filepaths = [self._resolve_file_path(name) for name in filenames]
+        if not filepaths:
+            return []
+
+        frames = [
+            self._collect_polars_frame(self._build_canonical_parquet_lazyframe(filepath))
+            for filepath in filepaths
+        ]
+        combined = (
+            frames[0]
+            if len(frames) == 1
+            else pl.concat(frames, how="vertical_relaxed")
+        )
+        if combined.height == 0:
+            return []
+
+        combined = combined.unique(subset=["timestamp"], keep="first").sort("timestamp")
+        start = pd.to_datetime(start_date).date()
+        end = pd.to_datetime(end_date).date()
+        normalized_hours = {
+            int(hour)
+            for hour in (trading_hours or [])
+            if str(hour).strip() and str(hour).strip().lstrip("-").isdigit()
+        }
+        session_start = (
+            time(9, 30)
+            if regular_session_only or not include_premarket
+            else time(4, 0)
+        )
+        session_close = time(16, 0)
+
+        bars: List[Dict[str, Any]] = []
+        for row in combined.iter_rows(named=True):
+            market_ts = self._timestamp_to_market(row["timestamp"])
+            market_date = market_ts.date()
+            if market_date < start or market_date > end:
+                continue
+            market_time = market_ts.time()
+            if market_time < session_start or market_time > session_close:
+                continue
+            if (
+                normalized_hours
+                and not regular_session_only
+                and market_ts.hour not in normalized_hours
+            ):
+                continue
+            bars.append(
+                {
+                    "index": len(bars),
+                    "timestamp": row["timestamp"],
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row["volume"]),
+                    "vwap": (
+                        float(row["vwap"])
+                        if "vwap" in row and row["vwap"] is not None
+                        else None
+                    ),
+                }
+            )
+        return bars
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Prepare dataframe with required columns."""
         # Find and normalize timestamp column
-        timestamp_cols = [
-            "timestamp",
-            "ts_event",
-            "ts_recv",
-            "time",
-            "datetime",
-            "date",
-        ]
-
-        for col in timestamp_cols:
+        for col in self.TIMESTAMP_COLUMN_CANDIDATES:
             if col in df.columns:
                 df["timestamp"] = pd.to_datetime(df[col])
                 break
@@ -108,18 +292,9 @@ class DataLoader:
             )
 
         # Ensure OHLCV columns
-        required_cols = ["open", "high", "low", "close", "volume"]
-        for col in required_cols:
+        for col in self.REQUIRED_OHLCV_COLUMNS:
             if col not in df.columns:
-                # Try to find alternative names
-                alt_names = {
-                    "open": ["Open", "OPEN", "o"],
-                    "high": ["High", "HIGH", "h"],
-                    "low": ["Low", "LOW", "l"],
-                    "close": ["Close", "CLOSE", "c"],
-                    "volume": ["Volume", "VOLUME", "v", "vol"],
-                }
-                for alt in alt_names.get(col, []):
+                for alt in self.OHLCV_ALT_NAMES.get(col, ()):
                     if alt in df.columns:
                         df[col] = df[alt]
                         break
@@ -210,16 +385,21 @@ class DataLoader:
 
     def get_bars_iterator(self, df: pd.DataFrame):
         """Yield bars one by one for walk-forward simulation."""
-        for idx, row in df.iterrows():
+        has_vwap = "vwap" in df.columns
+        for idx, row in enumerate(df.itertuples(index=False)):
             yield {
                 "index": idx,
-                "timestamp": row["timestamp"],
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": float(row["volume"]),
-                "vwap": float(row.get("vwap", 0)) if "vwap" in row else None,
+                "timestamp": row.timestamp,
+                "open": float(row.open),
+                "high": float(row.high),
+                "low": float(row.low),
+                "close": float(row.close),
+                "volume": float(row.volume),
+                "vwap": (
+                    float(getattr(row, "vwap", 0.0))
+                    if has_vwap and getattr(row, "vwap", None) is not None
+                    else None
+                ),
             }
 
     def generate_mock_data(

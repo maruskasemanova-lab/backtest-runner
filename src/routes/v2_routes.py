@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
@@ -10,13 +11,16 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Awaitable, Dict, Optional, Tuple
+from urllib.parse import urlparse
 from uuid import uuid4
 
+import pandas as pd
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src.models.run_requests import StartRunRequest
+from src.parquet_compat import write_parquet_compat
 from src.models.tuner_requests import AdaptiveTunerRequest
 from src.security.auth import (
     AuthContext,
@@ -57,9 +61,23 @@ class V2UserSettingsUpdateRequest(BaseModel):
     settings: Dict[str, Any] = Field(default_factory=dict)
 
 
+class V2UserDatasetRequest(BaseModel):
+    dataset_id: Optional[str] = None
+    dataset_name: str
+    source_filename: Optional[str] = None
+    s3_path: Optional[str] = None
+    status: str = "ready"
+    file_format: str = "parquet"
+    source_format: Optional[str] = None
+    row_count: Optional[int] = None
+    size_bytes: Optional[int] = None
+    schema_name: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
 class V2RunRequest(StartRunRequest):
     # v2 preserves request shape but always enforces strategy URL policy.
-    pass
+    dataset_id: Optional[str] = None
 
 
 class V2AdaptiveTunerRequest(AdaptiveTunerRequest):
@@ -913,6 +931,570 @@ def _settings_store_for_user(services: V2Services):
     return services.store
 
 
+def _datasets_store_for_user(services: V2Services):
+    candidate = getattr(services, "user_datasets_store", None)
+    if candidate is not None:
+        return candidate
+    return services.store
+
+
+def _normalize_dataset_identifier(
+    value: Any,
+    *,
+    request_id: str,
+) -> Optional[str]:
+    token = str(value or "").strip()
+    if not token:
+        return None
+    if len(token) > 128:
+        _raise(
+            400,
+            code="invalid_dataset_id",
+            message="dataset_id must be <= 128 characters",
+            request_id=request_id,
+        )
+    for ch in token:
+        if ch.isalnum() or ch in {"-", "_", "."}:
+            continue
+        _raise(
+            400,
+            code="invalid_dataset_id",
+            message="dataset_id contains invalid characters",
+            request_id=request_id,
+        )
+    return token
+
+
+def _normalize_dataset_status(value: Any, *, request_id: str) -> str:
+    token = str(value or "").strip().lower() or "ready"
+    if len(token) > 32:
+        _raise(
+            400,
+            code="invalid_dataset_status",
+            message="status must be <= 32 characters",
+            request_id=request_id,
+        )
+    for ch in token:
+        if ch.isalnum() or ch in {"-", "_"}:
+            continue
+        _raise(
+            400,
+            code="invalid_dataset_status",
+            message="status contains invalid characters",
+            request_id=request_id,
+        )
+    return token
+
+
+def _normalize_dataset_format(
+    value: Any,
+    *,
+    request_id: str,
+    default: Optional[str] = "parquet",
+) -> Optional[str]:
+    token = str(value or "").strip().lower()
+    if not token:
+        token = str(default or "").strip().lower()
+    if not token:
+        return None
+    if len(token) > 32:
+        _raise(
+            400,
+            code="invalid_dataset_format",
+            message="file format must be <= 32 characters",
+            request_id=request_id,
+        )
+    for ch in token:
+        if ch.isalnum() or ch in {"-", "_"}:
+            continue
+        _raise(
+            400,
+            code="invalid_dataset_format",
+            message="file format contains invalid characters",
+            request_id=request_id,
+        )
+    return token
+
+
+def _storage_path_segment(value: Any, *, default: str) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return default
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in token
+    ).strip("._")
+    return cleaned or default
+
+
+def _default_user_dataset_s3_path(
+    *,
+    user_id: str,
+    dataset_id: str,
+    file_format: str,
+    prefer_remote: bool = True,
+) -> str:
+    ext = _storage_path_segment(file_format, default="parquet").lower()
+    safe_user_id = _storage_path_segment(user_id, default="user")
+    safe_dataset_id = _storage_path_segment(dataset_id, default="dataset")
+    object_key = f"users/{safe_user_id}/datasets/{safe_dataset_id}.{ext}"
+    if not prefer_remote:
+        return object_key
+    bucket = str(os.getenv("BACKTEST_USER_DATASETS_BUCKET") or "").strip().rstrip("/")
+    if not bucket:
+        return object_key
+    if "://" in bucket:
+        return f"{bucket}/{object_key}"
+    return f"s3://{bucket}/{object_key}"
+
+
+def _format_user_dataset(dataset: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dataset if isinstance(dataset, dict) else {}
+    return {
+        "dataset_id": str(payload.get("dataset_id") or ""),
+        "user_id": str(payload.get("user_id") or ""),
+        "tenant_id": str(payload.get("tenant_id") or ""),
+        "dataset_name": str(payload.get("dataset_name") or ""),
+        "source_filename": str(payload.get("source_filename") or "") or None,
+        "s3_path": str(payload.get("s3_path") or ""),
+        "status": str(payload.get("status") or ""),
+        "file_format": str(payload.get("file_format") or ""),
+        "source_format": str(payload.get("source_format") or "") or None,
+        "row_count": (
+            None
+            if payload.get("row_count") is None
+            else int(payload.get("row_count") or 0)
+        ),
+        "size_bytes": (
+            None
+            if payload.get("size_bytes") is None
+            else int(payload.get("size_bytes") or 0)
+        ),
+        "schema_name": str(payload.get("schema_name") or "") or None,
+        "metadata": (
+            payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        ),
+        "created_at": payload.get("created_at"),
+        "updated_at": payload.get("updated_at"),
+    }
+
+
+def _user_datasets_local_cache_dir() -> Path:
+    configured = str(
+        os.getenv("BACKTEST_USER_DATASETS_LOCAL_CACHE_DIR") or "data/user_datasets"
+    ).strip()
+    base = Path(configured) if configured else Path("data/user_datasets")
+    if not base.is_absolute():
+        base = (Path.cwd() / base).resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _user_dataset_local_cache_path(*, user_id: str, dataset_id: str) -> Path:
+    safe_user_id = _storage_path_segment(user_id, default="user")
+    safe_dataset_id = _storage_path_segment(dataset_id, default="dataset")
+    target = _user_datasets_local_cache_dir() / safe_user_id / f"{safe_dataset_id}.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _user_dataset_upload_max_bytes() -> int:
+    raw = os.getenv("BACKTEST_USER_DATASET_UPLOAD_MAX_BYTES")
+    try:
+        parsed = int(str(raw).strip()) if raw is not None else 25 * 1024 * 1024
+    except Exception:
+        parsed = 25 * 1024 * 1024
+    return max(1, parsed)
+
+
+def _is_http_remote_locator(locator: str) -> bool:
+    scheme = str(urlparse(str(locator or "").strip()).scheme or "").strip().lower()
+    return scheme in {"http", "https"}
+
+
+def _user_dataset_storage_mode() -> str:
+    mode = str(os.getenv("BACKTEST_USER_DATASETS_STORAGE_MODE") or "auto").strip().lower()
+    if mode in {"local", "remote"}:
+        return mode
+    return "auto"
+
+
+def _request_prefers_local_user_datasets(request: Optional[Request]) -> bool:
+    mode = _user_dataset_storage_mode()
+    if mode == "local":
+        return True
+    if mode == "remote":
+        return False
+    host = ""
+    if request is not None:
+        try:
+            host = str(request.url.hostname or "").strip().lower()
+        except Exception:
+            host = ""
+    if host in {"", "localhost", "127.0.0.1", "::1", "0.0.0.0", "testserver"}:
+        return True
+    bucket = str(os.getenv("BACKTEST_USER_DATASETS_BUCKET") or "").strip()
+    return not bool(bucket)
+
+
+def _parse_s3_locator(locator: str) -> Optional[Tuple[str, str]]:
+    parsed = urlparse(str(locator or "").strip())
+    if parsed.scheme.lower() != "s3":
+        return None
+    bucket = str(parsed.netloc or "").strip()
+    key = str(parsed.path or "").lstrip("/")
+    if not bucket or not key:
+        return None
+    return bucket, key
+
+
+def _build_user_dataset_s3_client():
+    endpoint = str(
+        os.getenv("BACKTEST_USER_DATASETS_S3_ENDPOINT")
+        or os.getenv("BACKTEST_REMOTE_S3_ENDPOINT")
+        or "",
+    ).strip()
+    if not endpoint:
+        account_id = str(
+            os.getenv("BACKTEST_USER_DATASETS_S3_ACCOUNT_ID")
+            or os.getenv("BACKTEST_REMOTE_S3_ACCOUNT_ID")
+            or "",
+        ).strip()
+        if account_id:
+            endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
+
+    access_key = str(
+        os.getenv("BACKTEST_USER_DATASETS_S3_ACCESS_KEY_ID")
+        or os.getenv("BACKTEST_REMOTE_S3_ACCESS_KEY_ID")
+        or "",
+    ).strip()
+    secret_key = str(
+        os.getenv("BACKTEST_USER_DATASETS_S3_SECRET_ACCESS_KEY")
+        or os.getenv("BACKTEST_REMOTE_S3_SECRET_ACCESS_KEY")
+        or "",
+    ).strip()
+    region = (
+        str(
+            os.getenv("BACKTEST_USER_DATASETS_S3_REGION")
+            or os.getenv("BACKTEST_REMOTE_S3_REGION")
+            or "auto"
+        ).strip()
+        or "auto"
+    )
+
+    try:
+        import boto3  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(f"boto3 import failed: {exc}") from exc
+
+    kwargs: Dict[str, Any] = {"region_name": region}
+    if endpoint:
+        kwargs["endpoint_url"] = endpoint
+    if access_key and secret_key:
+        kwargs["aws_access_key_id"] = access_key
+        kwargs["aws_secret_access_key"] = secret_key
+    return boto3.client("s3", **kwargs)
+
+
+def _store_user_dataset_parquet(
+    *,
+    local_parquet_path: Path,
+    storage_locator: str,
+) -> str:
+    parsed = _parse_s3_locator(storage_locator)
+    if parsed is None:
+        return "local_cache"
+    bucket, key = parsed
+    client = _build_user_dataset_s3_client()
+    try:
+        client.upload_file(
+            Filename=str(local_parquet_path),
+            Bucket=bucket,
+            Key=key,
+            ExtraArgs={"ContentType": "application/octet-stream"},
+        )
+    except AttributeError:
+        with local_parquet_path.open("rb") as handle:
+            client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=handle.read(),
+                ContentType="application/octet-stream",
+            )
+    return "s3"
+
+
+def _download_user_dataset_parquet_to_cache(
+    *,
+    storage_locator: str,
+    local_parquet_path: Path,
+) -> Optional[Path]:
+    tmp_path = local_parquet_path.with_suffix(local_parquet_path.suffix + ".part")
+    parsed = _parse_s3_locator(storage_locator)
+    try:
+        local_parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        if parsed is not None:
+            bucket, key = parsed
+            client = _build_user_dataset_s3_client()
+            response = client.get_object(Bucket=bucket, Key=key)
+            body = response.get("Body")
+            if body is None:
+                return None
+            with tmp_path.open("wb") as handle:
+                while True:
+                    chunk = body.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+        elif _is_http_remote_locator(storage_locator):
+            timeout_raw = (
+                os.getenv("BACKTEST_USER_DATASETS_REMOTE_TIMEOUT_SEC")
+                or os.getenv("BACKTEST_REMOTE_TIMEOUT_SEC")
+                or "30"
+            )
+            try:
+                timeout = max(1.0, float(str(timeout_raw).strip()))
+            except Exception:
+                timeout = 30.0
+            response = requests.get(storage_locator, stream=True, timeout=timeout)
+            response.raise_for_status()
+            with tmp_path.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        handle.write(chunk)
+        else:
+            return None
+        tmp_path.replace(local_parquet_path)
+        return local_parquet_path
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _persist_user_dataset_local_cache_metadata(
+    *,
+    dataset_store: Any,
+    dataset: Dict[str, Any],
+    local_parquet_path: Path,
+    storage_mode: str,
+) -> Dict[str, Any]:
+    metadata = (
+        dict(dataset.get("metadata") or {})
+        if isinstance(dataset.get("metadata"), dict)
+        else {}
+    )
+    ingest = (
+        dict(metadata.get("ingest") or {})
+        if isinstance(metadata.get("ingest"), dict)
+        else {}
+    )
+    ingest.update(
+        {
+            "local_cache_path": str(local_parquet_path),
+            "storage_mode": str(storage_mode or "").strip() or "local_cache",
+            "hydrated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        }
+    )
+    metadata["ingest"] = ingest
+    return dataset_store.upsert_user_dataset(
+        dataset_id=str(dataset.get("dataset_id") or ""),
+        user_id=str(dataset.get("user_id") or ""),
+        tenant_id=str(dataset.get("tenant_id") or ""),
+        dataset_name=str(dataset.get("dataset_name") or ""),
+        source_filename=str(dataset.get("source_filename") or "").strip() or None,
+        s3_path=str(dataset.get("s3_path") or ""),
+        status=str(dataset.get("status") or "").strip() or "ready",
+        file_format=str(dataset.get("file_format") or "").strip() or "parquet",
+        source_format=str(dataset.get("source_format") or "").strip() or None,
+        row_count=dataset.get("row_count"),
+        size_bytes=max(0, int(local_parquet_path.stat().st_size)),
+        schema_name=str(dataset.get("schema_name") or "").strip() or None,
+        metadata=metadata,
+    )
+
+
+def _read_csv_upload_frame(
+    *,
+    body: bytes,
+    encoding: str,
+    delimiter: str,
+) -> pd.DataFrame:
+    raw_encoding = str(encoding or "").strip() or "utf-8"
+    raw_delimiter = str(delimiter or ",")
+    if len(raw_delimiter) != 1:
+        raise ValueError("delimiter must be a single character")
+    if not body:
+        raise ValueError("CSV payload is empty")
+    try:
+        text = body.decode(raw_encoding)
+    except Exception as exc:
+        raise ValueError(
+            f"Unable to decode CSV payload with encoding '{raw_encoding}'"
+        ) from exc
+    try:
+        frame = pd.read_csv(io.StringIO(text), sep=raw_delimiter)
+    except Exception as exc:
+        raise ValueError(f"Unable to parse CSV payload: {exc}") from exc
+    if frame is None:
+        raise ValueError("Unable to parse CSV payload")
+    return frame
+
+
+def _enforce_user_dataset_access(
+    *,
+    dataset: Dict[str, Any],
+    auth: AuthContext,
+    request_id: str,
+) -> None:
+    if _is_admin(auth):
+        return
+    owner_user_id = str(dataset.get("user_id") or "").strip()
+    if owner_user_id == auth.user_id:
+        return
+    _raise(
+        403,
+        code="forbidden",
+        message="Dataset does not belong to current user",
+        request_id=request_id,
+    )
+
+
+def _resolve_user_dataset_run_data_file(
+    *,
+    dataset_id: str,
+    auth: AuthContext,
+    services: V2Services,
+    request: Optional[Request],
+    request_id: str,
+) -> Tuple[str, Dict[str, Any]]:
+    normalized_dataset_id = _normalize_dataset_identifier(dataset_id, request_id=request_id)
+    if not normalized_dataset_id:
+        _raise(
+            400,
+            code="invalid_dataset_id",
+            message="dataset_id is required",
+            request_id=request_id,
+        )
+
+    dataset_store = _datasets_store_for_user(services)
+    dataset = dataset_store.get_user_dataset(dataset_id=normalized_dataset_id)
+    if not isinstance(dataset, dict):
+        _raise(
+            404,
+            code="dataset_not_found",
+            message="Dataset not found",
+            request_id=request_id,
+        )
+    _enforce_user_dataset_access(dataset=dataset, auth=auth, request_id=request_id)
+
+    status = str(dataset.get("status") or "").strip().lower()
+    if status and status != "ready":
+        _raise(
+            409,
+            code="dataset_not_ready",
+            message="Dataset is not ready for run execution",
+            request_id=request_id,
+        )
+
+    owner_user_id = str(dataset.get("user_id") or "").strip() or auth.user_id
+    metadata = dataset.get("metadata") if isinstance(dataset.get("metadata"), dict) else {}
+    ingest = metadata.get("ingest") if isinstance(metadata.get("ingest"), dict) else {}
+
+    candidate_paths: list[Path] = []
+    cached_path = str(ingest.get("local_cache_path") or "").strip()
+    if cached_path:
+        candidate_paths.append(Path(cached_path).expanduser())
+    candidate_paths.append(
+        _user_dataset_local_cache_path(
+            user_id=owner_user_id,
+            dataset_id=normalized_dataset_id,
+        )
+    )
+
+    s3_path = str(dataset.get("s3_path") or "").strip()
+    if s3_path and "://" not in s3_path:
+        candidate_paths.append(Path(s3_path).expanduser())
+
+    seen: set[str] = set()
+    for candidate in candidate_paths:
+        token = str(candidate)
+        if token in seen:
+            continue
+        seen.add(token)
+        try:
+            if candidate.exists() and candidate.is_file():
+                return str(candidate.resolve()), dataset
+        except OSError:
+            continue
+
+    local_cache_path = _user_dataset_local_cache_path(
+        user_id=owner_user_id,
+        dataset_id=normalized_dataset_id,
+    )
+    if not _request_prefers_local_user_datasets(request) and (
+        _parse_s3_locator(s3_path) is not None or _is_http_remote_locator(s3_path)
+    ):
+        try:
+            hydrated = _download_user_dataset_parquet_to_cache(
+                storage_locator=s3_path,
+                local_parquet_path=local_cache_path,
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "Dataset hydration storage unavailable for %s: %s",
+                normalized_dataset_id,
+                exc,
+            )
+            _raise(
+                503,
+                code="dataset_storage_unavailable",
+                message="Object storage is not configured for dataset hydration",
+                request_id=request_id,
+                extras={"dataset_id": normalized_dataset_id},
+            )
+        except Exception as exc:
+            logger.warning(
+                "Dataset hydration failed for %s from %s: %s",
+                normalized_dataset_id,
+                s3_path,
+                exc,
+            )
+            _raise(
+                502,
+                code="dataset_storage_failed",
+                message="Failed to hydrate dataset parquet from object storage",
+                request_id=request_id,
+                extras={"dataset_id": normalized_dataset_id},
+            )
+        if hydrated is not None and hydrated.exists():
+            try:
+                dataset = _persist_user_dataset_local_cache_metadata(
+                    dataset_store=dataset_store,
+                    dataset=dataset,
+                    local_parquet_path=hydrated,
+                    storage_mode="s3",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to refresh dataset cache metadata for %s: %s",
+                    normalized_dataset_id,
+                    exc,
+                )
+            return str(hydrated.resolve()), dataset
+
+    _raise(
+        409,
+        code="dataset_data_unavailable",
+        message="Dataset parquet is not available on the local runner",
+        request_id=request_id,
+        extras={"dataset_id": normalized_dataset_id},
+    )
+    return "", {}
+
+
 def _sync_user_run_statuses(
     *, auth: AuthContext, services: V2Services, api_services: Any
 ) -> None:
@@ -1312,6 +1894,383 @@ async def v2_upsert_user_settings(
         "tenant_id": auth.tenant_id,
         "plan_tier": auth.plan_tier,
         "settings": settings,
+    }
+
+
+@router.get("/datasets")
+async def v2_list_user_datasets(
+    request: Request,
+    status: str = "",
+    limit: int = 100,
+    auth: AuthContext = Depends(get_auth_context),
+    services: V2Services = Depends(get_v2_services),
+):
+    req_id = _request_id(request)
+    dataset_store = _datasets_store_for_user(services)
+    normalized_status = (
+        _normalize_dataset_status(status, request_id=req_id)
+        if str(status or "").strip()
+        else None
+    )
+    query_limit = max(1, min(_parse_non_negative_int(limit, 100), 500))
+    datasets = dataset_store.list_user_datasets(
+        user_id=auth.user_id,
+        limit=query_limit,
+        status=normalized_status,
+    )
+    formatted = [_format_user_dataset(item) for item in datasets]
+    return {
+        "request_id": req_id,
+        "tenant_id": auth.tenant_id,
+        "plan_tier": auth.plan_tier,
+        "datasets": formatted,
+        "count": len(formatted),
+    }
+
+
+@router.get("/datasets/{dataset_id}")
+async def v2_get_user_dataset(
+    dataset_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    services: V2Services = Depends(get_v2_services),
+):
+    req_id = _request_id(request)
+    normalized_dataset_id = _normalize_dataset_identifier(dataset_id, request_id=req_id)
+    dataset_store = _datasets_store_for_user(services)
+    dataset = dataset_store.get_user_dataset(dataset_id=normalized_dataset_id or "")
+    if not isinstance(dataset, dict):
+        _raise(
+            404,
+            code="dataset_not_found",
+            message="Dataset not found",
+            request_id=req_id,
+        )
+    _enforce_user_dataset_access(dataset=dataset, auth=auth, request_id=req_id)
+    return {
+        "request_id": req_id,
+        "tenant_id": auth.tenant_id,
+        "plan_tier": auth.plan_tier,
+        "dataset": _format_user_dataset(dataset),
+    }
+
+
+@router.post("/datasets")
+async def v2_upsert_user_dataset(
+    payload: V2UserDatasetRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    services: V2Services = Depends(get_v2_services),
+):
+    req_id = _request_id(request)
+    dataset_store = _datasets_store_for_user(services)
+    normalized_dataset_id = _normalize_dataset_identifier(
+        payload.dataset_id,
+        request_id=req_id,
+    ) or f"ds_{uuid4().hex}"
+    dataset_name = str(payload.dataset_name or "").strip()
+    if not dataset_name:
+        _raise(
+            400,
+            code="invalid_dataset_name",
+            message="dataset_name is required",
+            request_id=req_id,
+        )
+
+    existing = dataset_store.get_user_dataset(dataset_id=normalized_dataset_id)
+    if isinstance(existing, dict):
+        _enforce_user_dataset_access(dataset=existing, auth=auth, request_id=req_id)
+
+    file_format = _normalize_dataset_format(
+        payload.file_format,
+        request_id=req_id,
+        default="parquet",
+    ) or "parquet"
+    source_format = _normalize_dataset_format(
+        payload.source_format,
+        request_id=req_id,
+        default=None,
+    )
+    owner_user_id = (
+        str((existing or {}).get("user_id") or "").strip()
+        if isinstance(existing, dict)
+        else ""
+    ) or auth.user_id
+    owner_tenant_id = (
+        str((existing or {}).get("tenant_id") or "").strip()
+        if isinstance(existing, dict)
+        else ""
+    ) or auth.tenant_id
+    prefer_local = _request_prefers_local_user_datasets(request)
+    s3_path = str(payload.s3_path or "").strip() or _default_user_dataset_s3_path(
+        user_id=owner_user_id,
+        dataset_id=normalized_dataset_id,
+        file_format=file_format,
+        prefer_remote=not prefer_local,
+    )
+
+    try:
+        saved = dataset_store.upsert_user_dataset(
+            dataset_id=normalized_dataset_id,
+            user_id=owner_user_id,
+            tenant_id=owner_tenant_id,
+            dataset_name=dataset_name,
+            source_filename=str(payload.source_filename or "").strip() or None,
+            s3_path=s3_path,
+            status=_normalize_dataset_status(payload.status, request_id=req_id),
+            file_format=file_format,
+            source_format=source_format,
+            row_count=payload.row_count,
+            size_bytes=payload.size_bytes,
+            schema_name=str(payload.schema_name or "").strip() or None,
+            metadata=payload.metadata,
+        )
+    except ValueError as exc:
+        _raise(400, code="invalid_dataset_payload", message=str(exc), request_id=req_id)
+
+    return {
+        "request_id": req_id,
+        "tenant_id": auth.tenant_id,
+        "plan_tier": auth.plan_tier,
+        "dataset": _format_user_dataset(saved),
+    }
+
+
+@router.delete("/datasets/{dataset_id}")
+async def v2_delete_user_dataset(
+    dataset_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    services: V2Services = Depends(get_v2_services),
+):
+    req_id = _request_id(request)
+    normalized_dataset_id = _normalize_dataset_identifier(dataset_id, request_id=req_id)
+    dataset_store = _datasets_store_for_user(services)
+    dataset = dataset_store.get_user_dataset(dataset_id=normalized_dataset_id or "")
+    if not isinstance(dataset, dict):
+        _raise(
+            404,
+            code="dataset_not_found",
+            message="Dataset not found",
+            request_id=req_id,
+        )
+    _enforce_user_dataset_access(dataset=dataset, auth=auth, request_id=req_id)
+
+    deleted = dataset_store.delete_user_dataset(
+        dataset_id=normalized_dataset_id or "",
+        user_id=str(dataset.get("user_id") or "").strip() or auth.user_id,
+    )
+    if not deleted:
+        _raise(
+            404,
+            code="dataset_not_found",
+            message="Dataset not found",
+            request_id=req_id,
+        )
+    return {
+        "request_id": req_id,
+        "tenant_id": auth.tenant_id,
+        "plan_tier": auth.plan_tier,
+        "dataset_id": normalized_dataset_id,
+        "deleted": True,
+    }
+
+
+@router.post("/datasets/upload/csv")
+async def v2_upload_user_dataset_csv(
+    request: Request,
+    dataset_name: str,
+    dataset_id: str = "",
+    source_filename: Optional[str] = None,
+    schema_name: Optional[str] = None,
+    delimiter: str = ",",
+    encoding: str = "utf-8",
+    auth: AuthContext = Depends(get_auth_context),
+    services: V2Services = Depends(get_v2_services),
+):
+    req_id = _request_id(request)
+    dataset_store = _datasets_store_for_user(services)
+    normalized_dataset_id = _normalize_dataset_identifier(
+        dataset_id,
+        request_id=req_id,
+    ) or f"ds_{uuid4().hex}"
+    normalized_name = str(dataset_name or "").strip()
+    if not normalized_name:
+        _raise(
+            400,
+            code="invalid_dataset_name",
+            message="dataset_name is required",
+            request_id=req_id,
+        )
+
+    body = await request.body()
+    max_bytes = _user_dataset_upload_max_bytes()
+    if len(body) > max_bytes:
+        _raise(
+            413,
+            code="dataset_upload_too_large",
+            message="CSV payload exceeds upload size limit",
+            request_id=req_id,
+            extras={"max_bytes": max_bytes, "received_bytes": len(body)},
+        )
+
+    existing = dataset_store.get_user_dataset(dataset_id=normalized_dataset_id)
+    if isinstance(existing, dict):
+        _enforce_user_dataset_access(dataset=existing, auth=auth, request_id=req_id)
+
+    try:
+        frame = _read_csv_upload_frame(body=body, encoding=encoding, delimiter=delimiter)
+    except ValueError as exc:
+        _raise(400, code="invalid_dataset_upload", message=str(exc), request_id=req_id)
+
+    owner_user_id = (
+        str((existing or {}).get("user_id") or "").strip()
+        if isinstance(existing, dict)
+        else ""
+    ) or auth.user_id
+    owner_tenant_id = (
+        str((existing or {}).get("tenant_id") or "").strip()
+        if isinstance(existing, dict)
+        else ""
+    ) or auth.tenant_id
+    storage_mode_setting = _user_dataset_storage_mode()
+    prefer_local = _request_prefers_local_user_datasets(request)
+    storage_locator = _default_user_dataset_s3_path(
+        user_id=owner_user_id,
+        dataset_id=normalized_dataset_id,
+        file_format="parquet",
+        prefer_remote=not prefer_local,
+    )
+    if (
+        storage_mode_setting == "remote"
+        and _parse_s3_locator(storage_locator) is None
+        and not _is_http_remote_locator(storage_locator)
+    ):
+        _raise(
+            503,
+            code="dataset_storage_unavailable",
+            message="Remote dataset storage mode requires BACKTEST_USER_DATASETS_BUCKET",
+            request_id=req_id,
+        )
+
+    local_parquet_path = _user_dataset_local_cache_path(
+        user_id=owner_user_id,
+        dataset_id=normalized_dataset_id,
+    )
+    try:
+        write_parquet_compat(frame, local_parquet_path, index=False)
+    except Exception as exc:
+        logger.warning(
+            "Failed to materialize parquet for dataset upload %s: %s",
+            normalized_dataset_id,
+            exc,
+        )
+        _raise(
+            500,
+            code="dataset_materialization_failed",
+            message="Failed to convert CSV payload to parquet",
+            request_id=req_id,
+        )
+
+    storage_mode = "local_cache"
+    if not prefer_local:
+        try:
+            storage_mode = _store_user_dataset_parquet(
+                local_parquet_path=local_parquet_path,
+                storage_locator=storage_locator,
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "Dataset upload storage unavailable for %s: %s",
+                normalized_dataset_id,
+                exc,
+            )
+            _raise(
+                503,
+                code="dataset_storage_unavailable",
+                message="Object storage is not configured for dataset uploads",
+                request_id=req_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Dataset upload storage failure for %s: %s",
+                normalized_dataset_id,
+                exc,
+            )
+            _raise(
+                502,
+                code="dataset_storage_failed",
+                message="Failed to persist parquet object",
+                request_id=req_id,
+            )
+
+    existing_metadata = (
+        dict(existing.get("metadata") or {})
+        if isinstance(existing, dict) and isinstance(existing.get("metadata"), dict)
+        else {}
+    )
+    ingest_metadata = (
+        dict(existing_metadata.get("ingest") or {})
+        if isinstance(existing_metadata.get("ingest"), dict)
+        else {}
+    )
+    ingest_metadata.update(
+        {
+            "source": "csv_upload",
+            "encoding": str(encoding or "").strip() or "utf-8",
+            "delimiter": str(delimiter or ","),
+            "storage_mode": storage_mode,
+            "local_cache_path": str(local_parquet_path),
+            "uploaded_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        }
+    )
+    existing_metadata["ingest"] = ingest_metadata
+
+    try:
+        saved = dataset_store.upsert_user_dataset(
+            dataset_id=normalized_dataset_id,
+            user_id=owner_user_id,
+            tenant_id=owner_tenant_id,
+            dataset_name=normalized_name,
+            source_filename=(
+                str(source_filename or "").strip()
+                or (
+                    str((existing or {}).get("source_filename") or "").strip() or None
+                    if isinstance(existing, dict)
+                    else None
+                )
+            ),
+            s3_path=storage_locator,
+            status="ready",
+            file_format="parquet",
+            source_format="csv",
+            row_count=int(len(frame.index)),
+            size_bytes=max(0, int(local_parquet_path.stat().st_size)),
+            schema_name=(
+                str(schema_name or "").strip()
+                or (
+                    str((existing or {}).get("schema_name") or "").strip() or None
+                    if isinstance(existing, dict)
+                    else None
+                )
+            ),
+            metadata=existing_metadata,
+        )
+    except ValueError as exc:
+        _raise(400, code="invalid_dataset_payload", message=str(exc), request_id=req_id)
+
+    return {
+        "request_id": req_id,
+        "tenant_id": auth.tenant_id,
+        "plan_tier": auth.plan_tier,
+        "dataset": _format_user_dataset(saved),
+        "upload": {
+            "source_format": "csv",
+            "file_format": "parquet",
+            "received_bytes": len(body),
+            "storage_mode": storage_mode,
+            "local_cache_path": str(local_parquet_path),
+        },
     }
 
 
@@ -1923,6 +2882,18 @@ async def v2_create_run(
 
     body = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
     body["strategy_api_url"] = resolved_strategy_url
+    resolved_dataset = None
+    dataset_id = str(getattr(payload, "dataset_id", "") or "").strip()
+    if dataset_id:
+        resolved_data_file, resolved_dataset = _resolve_user_dataset_run_data_file(
+            dataset_id=dataset_id,
+            auth=auth,
+            services=services,
+            request=request,
+            request_id=req_id,
+        )
+        body["data_file"] = resolved_data_file
+    body.pop("dataset_id", None)
 
     job_id = f"job_{uuid4().hex}"
     _create_job_record(
@@ -1931,7 +2902,13 @@ async def v2_create_run(
         user_id=auth.user_id,
         tenant_id=auth.tenant_id,
         job_type="run",
-        payload={"run_key": provisional_run_key, "request": body},
+        payload={
+            "run_key": provisional_run_key,
+            "dataset_id": (
+                str((resolved_dataset or {}).get("dataset_id") or "").strip() or None
+            ),
+            "request": body,
+        },
         status="queued",
         idempotency_key=idempotency_key,
         max_attempts=_resolve_job_max_attempts(services=services, job_type="run"),
@@ -1945,7 +2922,13 @@ async def v2_create_run(
         ticker=ticker,
         date_label=date_label,
         status="queued",
-        metadata={"job_id": job_id, "plan_tier": auth.plan_tier},
+        metadata={
+            "job_id": job_id,
+            "plan_tier": auth.plan_tier,
+            "dataset_id": (
+                str((resolved_dataset or {}).get("dataset_id") or "").strip() or None
+            ),
+        },
     )
     services.store.increment_usage(user_id=auth.user_id, metric="run_start_requests")
 
@@ -1970,6 +2953,9 @@ async def v2_create_run(
         "status": "queued",
         "run_key": provisional_run_key,
         "idempotency_key": idempotency_key,
+        "dataset_id": (
+            str((resolved_dataset or {}).get("dataset_id") or "").strip() or None
+        ),
     }
 
 

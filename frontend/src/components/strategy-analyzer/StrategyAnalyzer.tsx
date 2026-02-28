@@ -32,17 +32,11 @@ import { useStrategyAnalyzerRunOrchestration } from "./useStrategyAnalyzerRunOrc
 import { useStrategyAnalyzerTickerCatalog } from "./useStrategyAnalyzerTickerCatalog";
 import { useStrategyAnalyzerTimelineCache } from "./useStrategyAnalyzerTimelineCache";
 import { useStrategyAnalyzerRangeScrub } from "./useStrategyAnalyzerRangeScrub";
+import {
+  type StrategyAnalyzerOpenDayRequest,
+  useStrategyAnalyzerOpenDayRequest,
+} from "./useStrategyAnalyzerOpenDayRequest";
 import { useStrategyAnalyzerWfo } from "./useStrategyAnalyzerWfo";
-
-const handledOpenDayAutoLoadRequestIds = new Set<number>();
-
-/* ── types ───────────────────────────────────────────────────────── */
-type StrategyAnalyzerOpenDayRequest = {
-  requestId: number;
-  ticker: string;
-  isoDate: string;
-  runKey?: string | null;
-};
 
 interface StrategyAnalyzerProps {
   selectedTicker: string | null;
@@ -132,12 +126,6 @@ export default function StrategyAnalyzer({
 
   // run state
   const [analyzerRunKey, setAnalyzerRunKey] = useState<string | null>(null);
-  const [pendingOpenDayAutoLoad, setPendingOpenDayAutoLoad] =
-    useState<StrategyAnalyzerOpenDayRequest | null>(null);
-  const tickerCatalogLoadStartedRef = useRef(false);
-  const openDayAutoLoadInFlightRef = useRef<number | null>(null);
-  const openDayStoredSnapshotInFlightRef = useRef<number | null>(null);
-  const consumedOpenDayAutoLoadRequestIdRef = useRef<number | null>(null);
 
   const resetSelectionForNewData = useCallback(() => {
     setSelectedRangeFrom(null);
@@ -303,144 +291,31 @@ export default function StrategyAnalyzer({
     setIsDecisionsDetached(false);
   }, [isAnalyzerAttachedRun]);
 
-  useEffect(() => {
-    if (loadingTickers) {
-      tickerCatalogLoadStartedRef.current = true;
-    }
-  }, [loadingTickers]);
-
-  useEffect(() => {
-    if (!openDayRequest) return;
-
-    const targetDate = String(openDayRequest.isoDate || "").trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-      onOpenDayRequestHandled?.(openDayRequest.requestId);
-      return;
-    }
-
-    // Wait for the initial ticker catalog hydration attempt so it does not
-    // overwrite the externally requested single-day selection afterward.
-    const catalogLoadStarted = tickerCatalogLoadStartedRef.current;
-    if (!catalogLoadStarted && tickers.length === 0) return;
-    if (loadingTickers) return;
-
-    const requestedTicker = String(openDayRequest.ticker || selectedTicker || ticker || "MU")
-      .trim()
-      .toUpperCase();
-    const targetTicker = requestedTicker || "MU";
-    const requestedRunKey = String(openDayRequest.runKey || "").trim();
-
-    const applyPreviewSelection = () => {
-      setError(null);
-      if (targetTicker !== ticker) {
-        setTicker(targetTicker);
-        onTickerChange(targetTicker);
-        resetForTickerChange();
-      } else {
-        resetSelectionForNewData();
-      }
-      setDateFrom(targetDate);
-      setDateTo(targetDate);
-      setRangeSelectMode(false);
-      setPendingOpenDayAutoLoad({
-        requestId: openDayRequest.requestId,
-        ticker: targetTicker,
-        isoDate: targetDate,
-      });
-      onOpenDayRequestHandled?.(openDayRequest.requestId);
-    };
-
-    if (requestedRunKey && typeof onOpenStoredRunSnapshot === "function") {
-      if (openDayStoredSnapshotInFlightRef.current === openDayRequest.requestId) return;
-      let cancelled = false;
-      openDayStoredSnapshotInFlightRef.current = openDayRequest.requestId;
-      void onOpenStoredRunSnapshot(requestedRunKey)
-        .then((loaded) => {
-          if (cancelled) return;
-          if (!loaded) {
-            applyPreviewSelection();
-            return;
-          }
-          setError(null);
-          if (targetTicker !== ticker) {
-            setTicker(targetTicker);
-            onTickerChange(targetTicker);
-          }
-          setDateFrom(targetDate);
-          setDateTo(targetDate);
-          setRangeSelectMode(false);
-          setSelectedRangeFrom(`${targetDate}T00:00`);
-          setSelectedRangeTo(`${targetDate}T23:59`);
-          setRangeScrubOffset(0);
-          setAnalyzerRunKey(requestedRunKey);
-          onOpenDayRequestHandled?.(openDayRequest.requestId);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          applyPreviewSelection();
-        })
-        .finally(() => {
-          if (openDayStoredSnapshotInFlightRef.current === openDayRequest.requestId) {
-            openDayStoredSnapshotInFlightRef.current = null;
-          }
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    applyPreviewSelection();
-  }, [
+  useStrategyAnalyzerOpenDayRequest({
     openDayRequest,
     onOpenDayRequestHandled,
     onOpenStoredRunSnapshot,
     loadingTickers,
-    tickers.length,
+    tickersLength: tickers.length,
     selectedTicker,
     ticker,
     onTickerChange,
+    setTicker,
+    setDateFrom,
+    setDateTo,
+    setError,
+    setRangeSelectMode,
+    setSelectedRangeFrom,
+    setSelectedRangeTo,
+    setRangeScrubOffset,
+    setAnalyzerRunKey,
     resetForTickerChange,
     resetSelectionForNewData,
-  ]);
-
-  useEffect(() => {
-    if (!pendingOpenDayAutoLoad) return;
-    const targetDate = String(pendingOpenDayAutoLoad.isoDate || "").trim();
-    const targetTicker = String(pendingOpenDayAutoLoad.ticker || "").trim().toUpperCase();
-    const requestId = pendingOpenDayAutoLoad.requestId;
-    if (!targetDate) {
-      setPendingOpenDayAutoLoad(null);
-      return;
-    }
-    if (loading) return;
-    if (targetTicker && String(ticker || "").trim().toUpperCase() !== targetTicker) return;
-    if (dateFrom !== targetDate || dateTo !== targetDate) return;
-
-    let cancelled = false;
-    if (handledOpenDayAutoLoadRequestIds.has(requestId)) {
-      setPendingOpenDayAutoLoad(null);
-      return;
-    }
-    handledOpenDayAutoLoadRequestIds.add(requestId);
-    if (consumedOpenDayAutoLoadRequestIdRef.current === requestId) return;
-    consumedOpenDayAutoLoadRequestIdRef.current = requestId;
-    // Consume immediately so rerenders/effect re-runs cannot enqueue the same auto-load twice.
-    setPendingOpenDayAutoLoad(null);
-    if (openDayAutoLoadInFlightRef.current === requestId) return;
-    openDayAutoLoadInFlightRef.current = requestId;
-    void loadBars().finally(() => {
-      if (openDayAutoLoadInFlightRef.current === requestId) {
-        openDayAutoLoadInFlightRef.current = null;
-      }
-      if (cancelled) return;
-      setSelectedRangeFrom(`${targetDate}T00:00`);
-      setSelectedRangeTo(`${targetDate}T23:59`);
-      setRangeScrubOffset(0);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingOpenDayAutoLoad, loading, ticker, dateFrom, dateTo, loadBars]);
+    loading,
+    dateFrom,
+    dateTo,
+    loadBars,
+  });
 
   /* ── range selection callback ──────────────────────────────────── */
   const handleRangeSelected = useCallback((from: string, to: string) => {

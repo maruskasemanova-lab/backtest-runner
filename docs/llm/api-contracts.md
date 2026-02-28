@@ -36,6 +36,40 @@ Behavioral notes:
   - default: local SQLite (`user_settings` table in SaaS state DB).
   - optional prod: Supabase PostgREST adapter when `BACKTEST_SUPABASE_USER_SETTINGS_ENABLED=1` and backend has `BACKTEST_SUPABASE_URL` + `BACKTEST_SUPABASE_SERVICE_ROLE_KEY`.
 
+### `GET /api/v2/datasets` / `GET /api/v2/datasets/{dataset_id}` / `POST /api/v2/datasets` / `DELETE /api/v2/datasets/{dataset_id}`
+
+Purpose: persist authenticated user dataset metadata for private object-storage-backed uploads.
+
+Behavioral notes:
+
+- dataset rows are user-scoped (owned by authenticated `user_id`); non-admin callers cannot read or mutate another user’s dataset metadata.
+- `GET /api/v2/datasets` lists caller-owned rows only and supports optional `status` filter plus bounded `limit`.
+- `POST` accepts dataset metadata (`dataset_name`, optional `source_filename`, `s3_path`, `status`, `file_format`, `source_format`, `row_count`, `size_bytes`, `schema_name`, `metadata`).
+- when `dataset_id` is omitted, backend generates `ds_<uuidhex>`.
+- when `s3_path` is omitted, backend derives a default object key:
+  - `s3://<BACKTEST_USER_DATASETS_BUCKET>/users/{user_id}/datasets/{dataset_id}.{file_format}` when `BACKTEST_USER_DATASETS_BUCKET` is set.
+  - `users/{user_id}/datasets/{dataset_id}.{file_format}` when the bucket env is unset.
+- storage backend:
+  - default: local SQLite (`user_datasets` table in SaaS state DB).
+  - optional prod: Supabase PostgREST adapter when `BACKTEST_SUPABASE_USER_DATASETS_ENABLED=1` and backend has `BACKTEST_SUPABASE_URL` + `BACKTEST_SUPABASE_SERVICE_ROLE_KEY`.
+
+### `POST /api/v2/datasets/upload/csv`
+
+Purpose: ingest a user-uploaded CSV payload, convert it to parquet, and upsert dataset metadata in one request.
+
+Behavioral notes:
+
+- request body is the raw CSV payload (no multipart dependency); metadata is passed as query params (`dataset_name` required, optional `dataset_id`, `source_filename`, `schema_name`, `delimiter`, `encoding`).
+- upload size is guarded by `BACKTEST_USER_DATASET_UPLOAD_MAX_BYTES` (default `26214400` bytes).
+- backend converts CSV -> parquet and stores a local cache copy under `BACKTEST_USER_DATASETS_LOCAL_CACHE_DIR`.
+- storage mode is controlled by `BACKTEST_USER_DATASETS_STORAGE_MODE`:
+  - `auto` (default): localhost/testserver uses local cache only; non-local hosts use remote mode when a bucket is configured, otherwise they fall back to local cache.
+  - `local`: always local cache only.
+  - `remote`: always attempt remote object-storage upload.
+- in remote mode, backend uploads the parquet object when `BACKTEST_USER_DATASETS_BUCKET` resolves to an `s3://...` locator (or bucket name) using `BACKTEST_USER_DATASETS_S3_*` creds when set, otherwise falling back to existing `BACKTEST_REMOTE_S3_*` creds.
+- forced `remote` mode without a configured bucket is rejected with `503 dataset_storage_unavailable` instead of silently writing local-only metadata.
+- in local mode, the logical dataset path remains `users/{user_id}/datasets/{dataset_id}.parquet` and metadata records the local cache path plus `storage_mode=local_cache`.
+
 ### `GET /api/v2/ops/metrics`
 
 Purpose: admin-only operational metrics for queue pressure, runtime HTTP health, and local SaaS DB footprint.
@@ -69,6 +103,13 @@ Purpose: authenticated run orchestration with quota enforcement and async job po
 Behavioral notes:
 
 - run start is queued and returned as `job_id` (status `queued|running|completed|failed`).
+- optional `dataset_id` lets authenticated callers run against a previously registered `user_datasets` parquet instead of the default OHLCV range resolver.
+- when `dataset_id` is supplied, backend resolves it synchronously during `POST /api/v2/runs`, enforces ownership, and injects the local parquet cache path into `data_file`.
+- local mode (`BACKTEST_USER_DATASETS_STORAGE_MODE=local`, or `auto` on localhost/testserver): runs use only the local parquet cache (`BACKTEST_USER_DATASETS_LOCAL_CACHE_DIR` or recorded `metadata.ingest.local_cache_path`).
+- object-storage mode (`remote`, or `auto` on non-local hosts): when the local cache is missing, backend attempts to hydrate the parquet into local cache before queueing.
+  - `s3://...` hydration uses `BACKTEST_USER_DATASETS_S3_*` creds (fallback `BACKTEST_REMOTE_S3_*`) and requires `boto3` in the backend runtime.
+  - `http(s)://...` hydration is supported as read-only remote fetch using `BACKTEST_USER_DATASETS_REMOTE_TIMEOUT_SEC` (fallback `BACKTEST_REMOTE_TIMEOUT_SEC`).
+- if neither local cache nor remote hydration is available, the request fails before queueing.
 - optional `Idempotency-Key`/`X-Idempotency-Key` request header deduplicates repeated submissions and returns original `job_id` (`idempotent_replay=true`).
 - queue dispatch is bounded by `BACKTEST_V2_WORKER_CONCURRENCY`; queued-heavy backlog is guarded by `BACKTEST_V2_MAX_QUEUE_BACKLOG`.
 - transient job failures are retried with bounded attempts (`BACKTEST_V2_JOB_MAX_ATTEMPTS*`) and exponential backoff (`BACKTEST_V2_JOB_RETRY_*`).
@@ -80,6 +121,7 @@ Behavioral notes:
 - admin callers may override `strategy_api_url` only when URL is in allowlist (`BACKTEST_STRATEGY_API_ALLOWLIST`).
 - `GET /api/v2/jobs/{job_id}` includes `attempts`, `max_attempts`, and `idempotency_key` in the job payload.
 - when `BACKTEST_SUPABASE_RUN_STATE_MIRROR_ENABLED=1`, the same job lifecycle is mirrored best-effort into Supabase `run_jobs`/`runs` for Realtime subscribers; API responses and SQLite dispatch semantics stay unchanged.
+- current FE authenticated start path uses `/api/v2/runs` + `/api/v2/jobs/{job_id}` and only re-attaches to legacy `/api/run/*` endpoints after the async job reaches `completed`.
 
 ### `POST /api/v2/adaptive-tuner/run` / `POST /api/v2/data/download`
 

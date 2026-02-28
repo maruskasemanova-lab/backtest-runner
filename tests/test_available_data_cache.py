@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from available_data import DataDiscovery
+from src.services.data_discovery import DataDiscovery
 
 
 def test_scan_refreshes_cache_older_than_day_even_when_seconds_remainder_is_small(

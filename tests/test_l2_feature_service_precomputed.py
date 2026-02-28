@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import src.l2_data_manager as l2_data_manager_module
 from src.l2_data_manager import L2DataManager
 from src.l2_feature_service import L2FeatureService
 from src.parquet_compat import write_parquet_compat
@@ -71,3 +72,51 @@ def test_build_feature_map_prefers_precomputed_features(
     assert bool(stats.get("has_l2")) is True
     assert str(stats.get("source")) == "precomputed"
     assert int(stats.get("trade_events", 0)) == 22
+
+
+def test_load_precomputed_feature_map_uses_polars_path_without_read_parquet_compat(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    precomputed_dir = tmp_path / "l2_precomputed"
+    precomputed_dir.mkdir(parents=True, exist_ok=True)
+
+    minute_keys = [
+        int(datetime(2026, 2, 10, 14, 30, tzinfo=timezone.utc).timestamp() // 60),
+        int(datetime(2026, 2, 10, 14, 31, tzinfo=timezone.utc).timestamp() // 60),
+    ]
+    precomputed = pd.DataFrame(
+        {
+            "minute_key": minute_keys,
+            "l2_delta": [10.0, -4.0],
+            "l2_quality_trade_ticks": [5, 6],
+            "l2_quality_book_updates": [8, 9],
+            "ignored": ["x", "y"],
+        }
+    )
+    write_parquet_compat(
+        precomputed, precomputed_dir / "MU_2026-02-10.parquet", index=False
+    )
+
+    monkeypatch.setenv("BACKTEST_L2_PRECOMPUTED_FEATURES_ENABLED", "1")
+    monkeypatch.setenv("BACKTEST_L2_PRECOMPUTED_DIR", str(precomputed_dir))
+
+    def _unexpected_reader(*_args, **_kwargs):
+        raise AssertionError(
+            "read_parquet_compat should not run for precomputed feature map loads"
+        )
+
+    monkeypatch.setattr(l2_data_manager_module, "read_parquet_compat", _unexpected_reader)
+
+    manager = L2DataManager(data_dirs=[str(tmp_path / "missing_raw_l2")])
+    feature_map, stats = manager.load_precomputed_feature_map(
+        ticker="MU",
+        start_time=datetime(2026, 2, 10, 14, 30, tzinfo=timezone.utc),
+        end_time=datetime(2026, 2, 10, 14, 31, tzinfo=timezone.utc),
+    )
+
+    assert feature_map is not None
+    assert len(feature_map) == 2
+    assert int(stats.get("covered_minutes", 0)) == 2
+    assert int(feature_map[minute_keys[0]]["l2_quality_trade_ticks"]) == 5
+    assert float(feature_map[minute_keys[1]]["l2_delta"]) == -4.0

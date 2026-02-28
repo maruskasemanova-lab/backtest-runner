@@ -1,6 +1,10 @@
+from pathlib import Path
+
 import duckdb
 
-con = duckdb.connect("saas_state.db")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+con = duckdb.connect(str(REPO_ROOT / "data" / "saas_state.db"))
 print("Total GOOGL trades:", con.execute("SELECT count(*) FROM session_trades WHERE symbol='GOOGL'").fetchone()[0])
 
 rejections = con.execute("""

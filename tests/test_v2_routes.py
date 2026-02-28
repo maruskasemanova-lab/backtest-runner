@@ -4,14 +4,17 @@ import base64
 import hashlib
 import hmac
 import json
+from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from src.routes.v2_routes import router
+from src.parquet_compat import read_parquet_compat, write_parquet_compat
+from src.routes.v2_routes import _request_prefers_local_user_datasets, router
 from src.services.saas_service import (
     InMemorySlidingWindowLimiter,
     SaaSStateStore,
@@ -39,17 +42,20 @@ def _build_client(
     start_run_impl=None,
     max_queue_backlog: int = 200,
     user_settings_store=None,
+    user_datasets_store=None,
     run_state_mirror=None,
 ):
     store = SaaSStateStore(str(tmp_path / "saas_state.db"))
     limiter = InMemorySlidingWindowLimiter(default_window_seconds=60)
 
     called_urls = []
+    called_data_files = []
     called_tuner_urls = []
     called_download_tickers = []
 
     async def _start_run(request):
         called_urls.append(request.strategy_api_url)
+        called_data_files.append(request.data_file)
         if callable(start_run_impl):
             return await start_run_impl(request)
         date_label = request.date or f"{request.date_from}_to_{request.date_to}"
@@ -76,6 +82,7 @@ def _build_client(
         ads_provider="test",
         ads_placements=["dashboard"],
         user_settings_store=user_settings_store,
+        user_datasets_store=user_datasets_store,
         run_state_mirror=run_state_mirror,
         max_queue_backlog=max_queue_backlog,
         job_retry_base_seconds=0.01,
@@ -89,6 +96,7 @@ def _build_client(
     )
     return TestClient(app), {
         "run_urls": called_urls,
+        "run_data_files": called_data_files,
         "tuner_urls": called_tuner_urls,
         "download_tickers": called_download_tickers,
         "store": store,
@@ -431,6 +439,363 @@ def test_v2_run_mirrors_job_and_run_state_updates(tmp_path, monkeypatch):
     assert "queued" in run_statuses
     assert "ready" in run_statuses
     assert {"run_key": run_key, "status": "running"} in mirror.run_status_updates
+
+
+def test_v2_run_with_dataset_id_uses_local_dataset_parquet(tmp_path, monkeypatch):
+    client, calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+    monkeypatch.setenv(
+        "BACKTEST_USER_DATASETS_LOCAL_CACHE_DIR",
+        str(tmp_path / "user_dataset_cache"),
+    )
+
+    store = calls["store"]
+    dataset_id = "ds_run_1"
+    local_path = tmp_path / "user_dataset_cache" / "run-user-1" / f"{dataset_id}.parquet"
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    write_parquet_compat(
+        pd.DataFrame(
+            [
+                {
+                    "timestamp": "2026-02-03T14:30:00Z",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.5,
+                    "close": 100.5,
+                    "volume": 1000,
+                }
+            ]
+        ),
+        local_path,
+        index=False,
+    )
+    store.upsert_user_dataset(
+        dataset_id=dataset_id,
+        user_id="run-user-1",
+        tenant_id="tenant_run-user-1",
+        dataset_name="Backtest Dataset",
+        source_filename="bars.csv",
+        s3_path="users/run-user-1/datasets/ds_run_1.parquet",
+        status="ready",
+        file_format="parquet",
+        source_format="csv",
+        row_count=1,
+        size_bytes=int(local_path.stat().st_size),
+        schema_name="ohlcv",
+        metadata={"ingest": {"local_cache_path": str(local_path)}},
+    )
+
+    token = _make_jwt(
+        {
+            "sub": "run-user-1",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+
+    response = client.post(
+        "/api/v2/runs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "run_id": "dataset-run",
+            "ticker": "MU",
+            "date": "2026-02-03",
+            "dataset_id": dataset_id,
+            "strategy_api_url": "http://localhost:8001",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["dataset_id"] == dataset_id
+    job_id = response.json()["job_id"]
+
+    for _ in range(30):
+        polled = client.get(
+            f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert polled.status_code == 200
+        if polled.json()["job"]["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.05)
+
+    assert calls["run_data_files"]
+    assert calls["run_data_files"][0] == str(local_path.resolve())
+
+
+def test_v2_run_with_dataset_id_requires_local_dataset_file(tmp_path, monkeypatch):
+    client, calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+    monkeypatch.setenv(
+        "BACKTEST_USER_DATASETS_LOCAL_CACHE_DIR",
+        str(tmp_path / "user_dataset_cache"),
+    )
+
+    calls["store"].upsert_user_dataset(
+        dataset_id="ds_missing_local",
+        user_id="run-user-2",
+        tenant_id="tenant_run-user-2",
+        dataset_name="Missing Local Cache",
+        source_filename="bars.csv",
+        s3_path="users/run-user-2/datasets/ds_missing_local.parquet",
+        status="ready",
+        file_format="parquet",
+        source_format="csv",
+        row_count=1,
+        size_bytes=123,
+        schema_name="ohlcv",
+        metadata={},
+    )
+
+    token = _make_jwt(
+        {
+            "sub": "run-user-2",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+
+    response = client.post(
+        "/api/v2/runs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "run_id": "dataset-run-missing",
+            "ticker": "MU",
+            "date": "2026-02-03",
+            "dataset_id": "ds_missing_local",
+            "strategy_api_url": "http://localhost:8001",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "dataset_data_unavailable"
+
+
+def test_v2_run_with_dataset_id_hydrates_from_s3_when_local_cache_missing(
+    tmp_path, monkeypatch
+):
+    client, calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("BACKTEST_USER_DATASETS_STORAGE_MODE", "remote")
+    monkeypatch.setenv(
+        "BACKTEST_USER_DATASETS_LOCAL_CACHE_DIR",
+        str(tmp_path / "user_dataset_cache"),
+    )
+
+    remote_source = tmp_path / "remote_dataset.parquet"
+    write_parquet_compat(
+        pd.DataFrame(
+            [
+                {
+                    "timestamp": "2026-02-03T14:30:00Z",
+                    "open": 200.0,
+                    "high": 201.0,
+                    "low": 199.5,
+                    "close": 200.5,
+                    "volume": 1500,
+                }
+            ]
+        ),
+        remote_source,
+        index=False,
+    )
+    remote_bytes = remote_source.read_bytes()
+
+    class _StubBody:
+        def __init__(self, payload: bytes):
+            self._payload = payload
+            self._offset = 0
+
+        def read(self, size: int = -1):
+            if size is None or size < 0:
+                size = len(self._payload) - self._offset
+            if self._offset >= len(self._payload):
+                return b""
+            chunk = self._payload[self._offset : self._offset + size]
+            self._offset += len(chunk)
+            return chunk
+
+    class _StubS3Client:
+        def __init__(self):
+            self.calls = []
+
+        def get_object(self, *, Bucket: str, Key: str):
+            self.calls.append((Bucket, Key))
+            return {"Body": _StubBody(remote_bytes)}
+
+    stub_client = _StubS3Client()
+    monkeypatch.setattr(
+        "src.routes.v2_routes._build_user_dataset_s3_client",
+        lambda: stub_client,
+    )
+
+    calls["store"].upsert_user_dataset(
+        dataset_id="ds_remote_hydrate",
+        user_id="run-user-3",
+        tenant_id="tenant_run-user-3",
+        dataset_name="Remote Hydrated Dataset",
+        source_filename="bars.csv",
+        s3_path="s3://datasets-bucket/users/run-user-3/datasets/ds_remote_hydrate.parquet",
+        status="ready",
+        file_format="parquet",
+        source_format="csv",
+        row_count=1,
+        size_bytes=len(remote_bytes),
+        schema_name="ohlcv",
+        metadata={},
+    )
+
+    token = _make_jwt(
+        {
+            "sub": "run-user-3",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+
+    response = client.post(
+        "/api/v2/runs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "run_id": "dataset-run-remote",
+            "ticker": "MU",
+            "date": "2026-02-03",
+            "dataset_id": "ds_remote_hydrate",
+            "strategy_api_url": "http://localhost:8001",
+        },
+    )
+    assert response.status_code == 200
+
+    job_id = response.json()["job_id"]
+    for _ in range(30):
+        polled = client.get(
+            f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert polled.status_code == 200
+        if polled.json()["job"]["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.05)
+
+    assert stub_client.calls == [
+        ("datasets-bucket", "users/run-user-3/datasets/ds_remote_hydrate.parquet")
+    ]
+    assert calls["run_data_files"]
+    hydrated_path = Path(calls["run_data_files"][0])
+    assert hydrated_path.exists()
+    frame = read_parquet_compat(hydrated_path)
+    assert len(frame.index) == 1
+
+    dataset_row = calls["store"].get_user_dataset(dataset_id="ds_remote_hydrate")
+    assert dataset_row is not None
+    ingest_meta = dataset_row["metadata"]["ingest"]
+    assert ingest_meta["storage_mode"] == "s3"
+    assert ingest_meta["local_cache_path"] == str(hydrated_path)
+
+
+def test_v2_run_with_dataset_id_hydrates_from_http_when_remote_mode_enabled(
+    tmp_path, monkeypatch
+):
+    client, calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("BACKTEST_USER_DATASETS_STORAGE_MODE", "remote")
+    monkeypatch.setenv(
+        "BACKTEST_USER_DATASETS_LOCAL_CACHE_DIR",
+        str(tmp_path / "user_dataset_cache"),
+    )
+
+    remote_source = tmp_path / "remote_http_dataset.parquet"
+    write_parquet_compat(
+        pd.DataFrame(
+            [
+                {
+                    "timestamp": "2026-02-03T14:30:00Z",
+                    "open": 300.0,
+                    "high": 301.0,
+                    "low": 299.5,
+                    "close": 300.5,
+                    "volume": 1700,
+                }
+            ]
+        ),
+        remote_source,
+        index=False,
+    )
+    remote_bytes = remote_source.read_bytes()
+
+    class _StubResponse:
+        def __init__(self, payload: bytes):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size=1024 * 1024):
+            for start in range(0, len(self._payload), chunk_size):
+                yield self._payload[start : start + chunk_size]
+
+    def _fake_get(url, stream=False, timeout=None, **kwargs):
+        _ = stream, timeout, kwargs
+        assert (
+            url
+            == "https://cdn.example.com/users/run-user-4/datasets/ds_remote_http.parquet"
+        )
+        return _StubResponse(remote_bytes)
+
+    monkeypatch.setattr("src.routes.v2_routes.requests.get", _fake_get)
+
+    calls["store"].upsert_user_dataset(
+        dataset_id="ds_remote_http",
+        user_id="run-user-4",
+        tenant_id="tenant_run-user-4",
+        dataset_name="Remote HTTP Dataset",
+        source_filename="bars.csv",
+        s3_path="https://cdn.example.com/users/run-user-4/datasets/ds_remote_http.parquet",
+        status="ready",
+        file_format="parquet",
+        source_format="csv",
+        row_count=1,
+        size_bytes=len(remote_bytes),
+        schema_name="ohlcv",
+        metadata={},
+    )
+
+    token = _make_jwt(
+        {
+            "sub": "run-user-4",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+
+    response = client.post(
+        "/api/v2/runs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "run_id": "dataset-run-http",
+            "ticker": "MU",
+            "date": "2026-02-03",
+            "dataset_id": "ds_remote_http",
+            "strategy_api_url": "http://localhost:8001",
+        },
+    )
+    assert response.status_code == 200
+
+    job_id = response.json()["job_id"]
+    for _ in range(30):
+        polled = client.get(
+            f"/api/v2/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert polled.status_code == 200
+        if polled.json()["job"]["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.05)
+
+    assert calls["run_data_files"]
+    hydrated_path = Path(calls["run_data_files"][0])
+    assert hydrated_path.exists()
+    frame = read_parquet_compat(hydrated_path)
+    assert len(frame.index) == 1
 
 
 def test_v2_backlog_limit_blocks_new_heavy_jobs(tmp_path, monkeypatch):
@@ -1246,3 +1611,357 @@ def test_v2_user_settings_can_use_external_store_adapter(tmp_path, monkeypatch):
     assert get_resp.json()["settings"]["run_config_draft"]["config"]["ticker"] == "AMD"
     assert any(call[0] == "merge" for call in stub.calls)
     assert any(call[0] == "get" for call in stub.calls)
+
+
+def test_v2_user_datasets_roundtrip_with_default_object_path(tmp_path, monkeypatch):
+    client, _calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("BACKTEST_USER_DATASETS_STORAGE_MODE", "remote")
+    monkeypatch.setenv("BACKTEST_USER_DATASETS_BUCKET", "datasets-bucket")
+
+    token = _make_jwt(
+        {
+            "sub": "dataset-user-1",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    initial = client.get("/api/v2/datasets", headers=headers)
+    assert initial.status_code == 200
+    assert initial.json()["datasets"] == []
+
+    create = client.post(
+        "/api/v2/datasets",
+        headers=headers,
+        json={
+            "dataset_name": "My EURAUD Tick Data",
+            "source_filename": "euraud_ticks.csv",
+            "row_count": 1234,
+            "size_bytes": 5678,
+            "metadata": {"timezone": "UTC"},
+        },
+    )
+    assert create.status_code == 200
+    dataset = create.json()["dataset"]
+    dataset_id = dataset["dataset_id"]
+    assert dataset_id.startswith("ds_")
+    assert dataset["status"] == "ready"
+    assert dataset["file_format"] == "parquet"
+    assert (
+        dataset["s3_path"]
+        == f"s3://datasets-bucket/users/dataset-user-1/datasets/{dataset_id}.parquet"
+    )
+
+    listed = client.get("/api/v2/datasets", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()["count"] == 1
+    assert listed.json()["datasets"][0]["dataset_id"] == dataset_id
+
+    fetched = client.get(f"/api/v2/datasets/{dataset_id}", headers=headers)
+    assert fetched.status_code == 200
+    assert fetched.json()["dataset"]["dataset_name"] == "My EURAUD Tick Data"
+
+    deleted = client.delete(f"/api/v2/datasets/{dataset_id}", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+
+    final = client.get("/api/v2/datasets", headers=headers)
+    assert final.status_code == 200
+    assert final.json()["datasets"] == []
+
+
+def test_v2_user_datasets_default_path_is_local_in_auto_mode_on_testserver(
+    tmp_path, monkeypatch
+):
+    client, _calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("BACKTEST_USER_DATASETS_STORAGE_MODE", "auto")
+    monkeypatch.setenv("BACKTEST_USER_DATASETS_BUCKET", "datasets-bucket")
+
+    token = _make_jwt(
+        {
+            "sub": "dataset-user-auto",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    create = client.post(
+        "/api/v2/datasets",
+        headers=headers,
+        json={"dataset_name": "Auto Local Dataset"},
+    )
+    assert create.status_code == 200
+    dataset = create.json()["dataset"]
+    assert dataset["s3_path"].startswith("users/dataset-user-auto/datasets/")
+    assert not dataset["s3_path"].startswith("s3://")
+
+
+def test_v2_user_dataset_auto_mode_uses_bucket_only_for_non_local_hosts(monkeypatch):
+    monkeypatch.setenv("BACKTEST_USER_DATASETS_STORAGE_MODE", "auto")
+    request = SimpleNamespace(url=SimpleNamespace(hostname="prod.example.com"))
+
+    monkeypatch.delenv("BACKTEST_USER_DATASETS_BUCKET", raising=False)
+    assert _request_prefers_local_user_datasets(request) is True
+
+    monkeypatch.setenv("BACKTEST_USER_DATASETS_BUCKET", "datasets-bucket")
+    assert _request_prefers_local_user_datasets(request) is False
+
+
+def test_v2_user_datasets_are_user_scoped(tmp_path, monkeypatch):
+    client, _calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+
+    token_user_a = _make_jwt(
+        {
+            "sub": "dataset-user-a",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+    token_user_b = _make_jwt(
+        {
+            "sub": "dataset-user-b",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+    headers_a = {"Authorization": f"Bearer {token_user_a}"}
+    headers_b = {"Authorization": f"Bearer {token_user_b}"}
+
+    create = client.post(
+        "/api/v2/datasets",
+        headers=headers_a,
+        json={"dataset_name": "Private Dataset", "s3_path": "users/a/private.parquet"},
+    )
+    assert create.status_code == 200
+    dataset_id = create.json()["dataset"]["dataset_id"]
+
+    list_b = client.get("/api/v2/datasets", headers=headers_b)
+    assert list_b.status_code == 200
+    assert list_b.json()["datasets"] == []
+
+    get_b = client.get(f"/api/v2/datasets/{dataset_id}", headers=headers_b)
+    assert get_b.status_code == 403
+    assert get_b.json()["detail"]["code"] == "forbidden"
+
+    delete_b = client.delete(f"/api/v2/datasets/{dataset_id}", headers=headers_b)
+    assert delete_b.status_code == 403
+    assert delete_b.json()["detail"]["code"] == "forbidden"
+
+    get_a = client.get(f"/api/v2/datasets/{dataset_id}", headers=headers_a)
+    assert get_a.status_code == 200
+    assert get_a.json()["dataset"]["dataset_name"] == "Private Dataset"
+
+
+def test_v2_user_datasets_can_use_external_store_adapter(tmp_path, monkeypatch):
+    class _StubDatasetsStore:
+        def __init__(self):
+            self.calls = []
+            self.rows = {}
+
+        def list_user_datasets(self, *, user_id: str, limit: int = 100, status=None):
+            self.calls.append(("list", user_id, limit, status))
+            rows = [
+                dict(row)
+                for row in self.rows.values()
+                if str(row.get("user_id") or "") == user_id
+            ]
+            if status:
+                rows = [
+                    row
+                    for row in rows
+                    if str(row.get("status") or "").lower() == str(status).lower()
+                ]
+            return rows[:limit]
+
+        def get_user_dataset(self, *, dataset_id: str):
+            self.calls.append(("get", dataset_id))
+            row = self.rows.get(dataset_id)
+            return dict(row) if isinstance(row, dict) else None
+
+        def upsert_user_dataset(self, **kwargs):
+            self.calls.append(("upsert", dict(kwargs)))
+            row = dict(kwargs)
+            row.setdefault("created_at", "2026-02-28T12:00:00Z")
+            row["updated_at"] = "2026-02-28T12:05:00Z"
+            row["metadata"] = (
+                row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            )
+            self.rows[row["dataset_id"]] = row
+            return dict(row)
+
+        def delete_user_dataset(self, *, dataset_id: str, user_id: str):
+            self.calls.append(("delete", dataset_id, user_id))
+            row = self.rows.get(dataset_id)
+            if not isinstance(row, dict):
+                return False
+            if str(row.get("user_id") or "") != user_id:
+                return False
+            del self.rows[dataset_id]
+            return True
+
+    stub = _StubDatasetsStore()
+    client, _calls = _build_client(tmp_path, user_datasets_store=stub)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+
+    token = _make_jwt(
+        {
+            "sub": "dataset-external-1",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    put_resp = client.post(
+        "/api/v2/datasets",
+        headers=headers,
+        json={
+            "dataset_name": "Adapter Dataset",
+            "s3_path": "users/dataset-external-1/datasets/adapter.parquet",
+        },
+    )
+    assert put_resp.status_code == 200
+    dataset_id = put_resp.json()["dataset"]["dataset_id"]
+
+    list_resp = client.get("/api/v2/datasets", headers=headers)
+    assert list_resp.status_code == 200
+    assert list_resp.json()["count"] == 1
+    assert list_resp.json()["datasets"][0]["dataset_id"] == dataset_id
+
+    del_resp = client.delete(f"/api/v2/datasets/{dataset_id}", headers=headers)
+    assert del_resp.status_code == 200
+    assert del_resp.json()["deleted"] is True
+    assert any(call[0] == "upsert" for call in stub.calls)
+    assert any(call[0] == "list" for call in stub.calls)
+    assert any(call[0] == "delete" for call in stub.calls)
+
+
+def test_v2_user_dataset_csv_upload_creates_local_parquet(tmp_path, monkeypatch):
+    client, _calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+    monkeypatch.delenv("BACKTEST_USER_DATASETS_BUCKET", raising=False)
+    monkeypatch.setenv(
+        "BACKTEST_USER_DATASETS_LOCAL_CACHE_DIR",
+        str(tmp_path / "user_dataset_cache"),
+    )
+
+    token = _make_jwt(
+        {
+            "sub": "dataset-upload-1",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "text/csv; charset=utf-8",
+    }
+
+    response = client.post(
+        "/api/v2/datasets/upload/csv",
+        headers=headers,
+        params={
+            "dataset_name": "Uploaded CSV Dataset",
+            "source_filename": "ticks.csv",
+            "schema_name": "custom_ticks",
+        },
+        content=(
+            b"ts,price,qty\n"
+            b"2026-02-28T10:00:00Z,1.25,10\n"
+            b"2026-02-28T10:00:01Z,1.30,12\n"
+        ),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    dataset = payload["dataset"]
+    upload = payload["upload"]
+
+    assert dataset["dataset_name"] == "Uploaded CSV Dataset"
+    assert dataset["source_format"] == "csv"
+    assert dataset["file_format"] == "parquet"
+    assert dataset["row_count"] == 2
+    assert dataset["schema_name"] == "custom_ticks"
+    assert dataset["s3_path"].startswith("users/dataset-upload-1/datasets/")
+    assert upload["storage_mode"] == "local_cache"
+
+    local_cache_path = upload["local_cache_path"]
+    assert local_cache_path
+    frame = read_parquet_compat(local_cache_path)
+    assert len(frame.index) == 2
+    assert list(frame.columns) == ["ts", "price", "qty"]
+
+    dataset_id = dataset["dataset_id"]
+    fetched = client.get(f"/api/v2/datasets/{dataset_id}", headers=headers)
+    assert fetched.status_code == 200
+    ingest_meta = fetched.json()["dataset"]["metadata"]["ingest"]
+    assert ingest_meta["source"] == "csv_upload"
+    assert ingest_meta["storage_mode"] == "local_cache"
+    assert ingest_meta["local_cache_path"] == local_cache_path
+
+
+def test_v2_user_dataset_csv_upload_enforces_size_limit(tmp_path, monkeypatch):
+    client, _calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("BACKTEST_USER_DATASET_UPLOAD_MAX_BYTES", "16")
+
+    token = _make_jwt(
+        {
+            "sub": "dataset-upload-2",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "text/csv",
+    }
+
+    response = client.post(
+        "/api/v2/datasets/upload/csv",
+        headers=headers,
+        params={"dataset_name": "Too Large"},
+        content=b"ts,price\n2026-02-28T10:00:00Z,1.25\n",
+    )
+    assert response.status_code == 413
+    assert response.json()["detail"]["code"] == "dataset_upload_too_large"
+
+
+def test_v2_user_dataset_csv_upload_remote_mode_requires_bucket(tmp_path, monkeypatch):
+    client, _calls = _build_client(tmp_path)
+    monkeypatch.setenv("BACKTEST_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("BACKTEST_USER_DATASETS_STORAGE_MODE", "remote")
+    monkeypatch.delenv("BACKTEST_USER_DATASETS_BUCKET", raising=False)
+
+    token = _make_jwt(
+        {
+            "sub": "dataset-upload-3",
+            "exp": int(time.time()) + 3600,
+            "app_metadata": {"role": "free", "plan_tier": "free"},
+        },
+        "test-secret",
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "text/csv",
+    }
+
+    response = client.post(
+        "/api/v2/datasets/upload/csv",
+        headers=headers,
+        params={"dataset_name": "Remote Needs Bucket"},
+        content=b"ts,price\n2026-02-28T10:00:00Z,1.25\n",
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "dataset_storage_unavailable"

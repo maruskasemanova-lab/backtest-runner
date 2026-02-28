@@ -6,7 +6,7 @@ This script:
 1) Loads OHLCV data for each ticker.
 2) Tunes key strategy parameters per ticker on a training window.
 3) Evaluates the tuned parameters on a test week.
-4) Writes strategy_overrides.json + tuning_results.json + test_week_results.json.
+4) Writes strategy_overrides.json plus detailed outputs under analysis/optimization/.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Dict, Any, List, Tuple
 
 import pandas as pd
 
-from available_data import get_discovery
+from src.services.data_discovery import get_discovery
 from data_loader import DataLoader
 
 # Import strategy engine (read-only) from market_regime_detection
@@ -345,14 +345,22 @@ def main():
 
     # Write outputs
     out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep auxiliary tuning artifacts out of the repo root by default.
+    artifact_dir = (
+        out_path.parent if out_path.parent != Path(".") else Path("analysis/optimization")
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    tuning_results_path = artifact_dir / "tuning_results.json"
+    test_results_path = artifact_dir / "test_week_results.json"
     out_path.write_text(json.dumps(overrides, indent=2))
-    Path("tuning_results.json").write_text(json.dumps(tuning_results, indent=2))
-    Path("test_week_results.json").write_text(json.dumps(test_results, indent=2))
+    tuning_results_path.write_text(json.dumps(tuning_results, indent=2))
+    test_results_path.write_text(json.dumps(test_results, indent=2))
 
     print("Wrote:")
     print(f"  {out_path}")
-    print("  tuning_results.json")
-    print("  test_week_results.json")
+    print(f"  {tuning_results_path}")
+    print(f"  {test_results_path}")
 
 
 if __name__ == "__main__":

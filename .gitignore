@@ -30,6 +30,10 @@ aos_optimization/.adaptive_tuner_aos/
 
 # Generated backtest outputs
 data/
+analysis/optimization/tuning_results.json
+analysis/optimization/test_week_results.json
+analysis/optimization/wfo_results.json
+analysis/runtime/performance_data.json
 audit_*.json
 batch_report.json
 batch_results_*.json

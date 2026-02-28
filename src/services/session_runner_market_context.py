@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime
 import math
 from typing import Any, Callable, Dict, List, Optional
@@ -12,13 +11,51 @@ except Exception:  # pragma: no cover - polars may be unavailable
 
 
 SafeFloat = Callable[[Any], Optional[float]]
+NormalizedBar = tuple[Any, ...]
+MetricRow = tuple[Any, ...]
+
+_METRIC_COLUMNS = (
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+    "candle_range",
+    "candle_body",
+    "body_to_range_ratio",
+    "upper_wick",
+    "lower_wick",
+    "close_location_pct",
+    "bar_return_pct",
+    "close_to_vwap_pct",
+    "close_change_1_bar_pct",
+    "close_change_3_bar_pct",
+    "close_change_5_bar_pct",
+    "close_change_10_bar_pct",
+    "close_change_20_bar_pct",
+    "realized_volatility_5_bar_pct",
+    "realized_volatility_20_bar_pct",
+    "session_open_price",
+    "session_high_so_far",
+    "session_low_so_far",
+    "distance_from_session_open_pct",
+    "distance_from_session_high_pct",
+    "distance_from_session_low_pct",
+    "avg_volume_5_bar",
+    "avg_volume_20_bar",
+    "volume_vs_avg_5_ratio",
+    "volume_vs_avg_20_ratio",
+)
 
 
 class MarketContextProvider:
     def __init__(self, bars: List[Dict[str, Any]], safe_float: SafeFloat):
-        self._bars = list(bars)
         self._safe_float = safe_float
-        self._contexts = self._build_contexts()
+        self._normalized_bars = self._normalize_bars(bars)
+        self._bar_count = len(self._normalized_bars)
+        self._contexts = self._build_contexts(self._normalized_bars)
 
     def build_context(self, bar_index: int) -> Dict[str, Any]:
         if not self._contexts:
@@ -35,11 +72,16 @@ class MarketContextProvider:
             }
 
         resolved_index = min(max(int(bar_index), 0), len(self._contexts) - 1)
-        payload = deepcopy(self._contexts[resolved_index])
+        payload = self._compose_context_payload(
+            metrics=self._contexts[resolved_index],
+            recent_bars=self._build_recent_bars_for_index(resolved_index),
+        )
         payload["bar_index"] = resolved_index
-        payload["total_bars"] = len(self._bars)
+        payload["total_bars"] = self._bar_count
         payload["progress_pct"] = (
-            ((resolved_index + 1) / len(self._bars) * 100.0) if self._bars else 0.0
+            ((resolved_index + 1) / self._bar_count * 100.0)
+            if self._bar_count
+            else 0.0
         )
         return payload
 
@@ -71,51 +113,140 @@ class MarketContextProvider:
         variance = sum((value - mean) ** 2 for value in values) / len(values)
         return math.sqrt(max(variance, 0.0))
 
-    def _normalize_bars(self) -> List[Dict[str, Any]]:
-        normalized: List[Dict[str, Any]] = []
-        for bar in self._bars:
+    def _normalize_bars(self, bars: List[Dict[str, Any]]) -> List[NormalizedBar]:
+        normalized: List[NormalizedBar] = []
+        for bar in bars:
             normalized.append(
-                {
-                    "timestamp": self._timestamp_token(bar.get("timestamp")),
-                    "open": self._safe_float(bar.get("open")),
-                    "high": self._safe_float(bar.get("high")),
-                    "low": self._safe_float(bar.get("low")),
-                    "close": self._safe_float(bar.get("close")),
-                    "volume": self._safe_float(bar.get("volume")),
-                    "vwap": self._safe_float(bar.get("vwap")),
-                    "l2_signed_aggression": self._safe_float(
-                        bar.get("l2_signed_aggression")
-                    ),
-                    "l2_imbalance": self._safe_float(bar.get("l2_imbalance")),
-                    "l2_book_pressure": self._safe_float(bar.get("l2_book_pressure")),
-                }
+                (
+                    self._timestamp_token(bar.get("timestamp")),
+                    self._safe_float(bar.get("open")),
+                    self._safe_float(bar.get("high")),
+                    self._safe_float(bar.get("low")),
+                    self._safe_float(bar.get("close")),
+                    self._safe_float(bar.get("volume")),
+                    self._safe_float(bar.get("vwap")),
+                    self._safe_float(bar.get("l2_signed_aggression")),
+                    self._safe_float(bar.get("l2_imbalance")),
+                    self._safe_float(bar.get("l2_book_pressure")),
+                )
             )
         return normalized
 
-    def _build_recent_snapshots(
-        self, normalized_bars: List[Dict[str, Any]]
-    ) -> List[List[Dict[str, Any]]]:
-        snapshots: List[List[Dict[str, Any]]] = []
-        for idx in range(len(normalized_bars)):
-            start = max(0, idx - 4)
-            snapshots.append(
-                [
-                    {
-                        "timestamp": item["timestamp"],
-                        "open": item["open"],
-                        "high": item["high"],
-                        "low": item["low"],
-                        "close": item["close"],
-                        "volume": item["volume"],
-                        "vwap": item["vwap"],
-                        "l2_signed_aggression": item["l2_signed_aggression"],
-                        "l2_imbalance": item["l2_imbalance"],
-                        "l2_book_pressure": item["l2_book_pressure"],
-                    }
-                    for item in normalized_bars[start : idx + 1]
-                ]
-            )
-        return snapshots
+    @staticmethod
+    def _snapshot_bar(item: NormalizedBar) -> Dict[str, Any]:
+        (
+            timestamp,
+            open_px,
+            high_px,
+            low_px,
+            close_px,
+            volume,
+            vwap,
+            l2_signed_aggression,
+            l2_imbalance,
+            l2_book_pressure,
+        ) = item
+        return {
+            "timestamp": timestamp,
+            "open": open_px,
+            "high": high_px,
+            "low": low_px,
+            "close": close_px,
+            "volume": volume,
+            "vwap": vwap,
+            "l2_signed_aggression": l2_signed_aggression,
+            "l2_imbalance": l2_imbalance,
+            "l2_book_pressure": l2_book_pressure,
+        }
+
+    def _build_recent_bars_for_index(self, bar_index: int) -> List[Dict[str, Any]]:
+        start = max(0, int(bar_index) - 4)
+        return [
+            self._snapshot_bar(item)
+            for item in self._normalized_bars[start : int(bar_index) + 1]
+        ]
+
+    @staticmethod
+    def _compose_context_payload(
+        *, metrics: MetricRow, recent_bars: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        (
+            timestamp,
+            open_px,
+            high_px,
+            low_px,
+            close_px,
+            volume,
+            vwap,
+            candle_range,
+            candle_body,
+            body_to_range_ratio,
+            upper_wick,
+            lower_wick,
+            close_location_pct,
+            bar_return_pct,
+            close_to_vwap_pct,
+            close_change_1_bar_pct,
+            close_change_3_bar_pct,
+            close_change_5_bar_pct,
+            close_change_10_bar_pct,
+            close_change_20_bar_pct,
+            realized_volatility_5_bar_pct,
+            realized_volatility_20_bar_pct,
+            session_open_price,
+            session_high_so_far,
+            session_low_so_far,
+            distance_from_session_open_pct,
+            distance_from_session_high_pct,
+            distance_from_session_low_pct,
+            avg_volume_5_bar,
+            avg_volume_20_bar,
+            volume_vs_avg_5_ratio,
+            volume_vs_avg_20_ratio,
+        ) = metrics
+        return {
+            "timestamp": timestamp,
+            "bar_ohlcv": {
+                "open": open_px,
+                "high": high_px,
+                "low": low_px,
+                "close": close_px,
+                "volume": volume,
+                "vwap": vwap,
+            },
+            "candle": {
+                "range": candle_range,
+                "body": candle_body,
+                "body_to_range_ratio": body_to_range_ratio,
+                "upper_wick": upper_wick,
+                "lower_wick": lower_wick,
+                "close_location_pct": close_location_pct,
+                "bar_return_pct": bar_return_pct,
+                "close_to_vwap_pct": close_to_vwap_pct,
+            },
+            "price_evolution": {
+                "close_change_1_bar_pct": close_change_1_bar_pct,
+                "close_change_3_bar_pct": close_change_3_bar_pct,
+                "close_change_5_bar_pct": close_change_5_bar_pct,
+                "close_change_10_bar_pct": close_change_10_bar_pct,
+                "close_change_20_bar_pct": close_change_20_bar_pct,
+                "realized_volatility_5_bar_pct": realized_volatility_5_bar_pct,
+                "realized_volatility_20_bar_pct": realized_volatility_20_bar_pct,
+                "session_open_price": session_open_price,
+                "session_high_so_far": session_high_so_far,
+                "session_low_so_far": session_low_so_far,
+                "distance_from_session_open_pct": distance_from_session_open_pct,
+                "distance_from_session_high_pct": distance_from_session_high_pct,
+                "distance_from_session_low_pct": distance_from_session_low_pct,
+            },
+            "volume_context": {
+                "avg_volume_5_bar": avg_volume_5_bar,
+                "avg_volume_20_bar": avg_volume_20_bar,
+                "volume_vs_avg_5_ratio": volume_vs_avg_5_ratio,
+                "volume_vs_avg_20_ratio": volume_vs_avg_20_ratio,
+            },
+            "recent_bars": recent_bars,
+        }
 
     @staticmethod
     def _pct_change_expr(current: Any, baseline: Any) -> Any:
@@ -133,29 +264,22 @@ class MarketContextProvider:
 
     def _build_contexts_polars(
         self,
-        normalized_bars: List[Dict[str, Any]],
-        recent_snapshots: List[List[Dict[str, Any]]],
-    ) -> List[Dict[str, Any]]:
+        normalized_bars: List[NormalizedBar],
+    ) -> List[MetricRow]:
         if pl is None:
-            return self._build_contexts_fallback(normalized_bars, recent_snapshots)
+            return self._build_contexts_fallback(normalized_bars)
 
-        first_close = next(
-            (row["close"] for row in normalized_bars if row.get("close") is not None),
-            None,
-        )
+        first_close = next((row[4] for row in normalized_bars if row[4] is not None), None)
         metrics_df = pl.DataFrame(
-            [
-                {
-                    "timestamp": row["timestamp"],
-                    "open": row["open"],
-                    "high": row["high"],
-                    "low": row["low"],
-                    "close": row["close"],
-                    "volume": row["volume"],
-                    "vwap": row["vwap"],
-                }
-                for row in normalized_bars
-            ]
+            {
+                "timestamp": [row[0] for row in normalized_bars],
+                "open": [row[1] for row in normalized_bars],
+                "high": [row[2] for row in normalized_bars],
+                "low": [row[3] for row in normalized_bars],
+                "close": [row[4] for row in normalized_bars],
+                "volume": [row[5] for row in normalized_bars],
+                "vwap": [row[6] for row in normalized_bars],
+            }
         ).with_columns(
             [
                 (pl.col("high") - pl.col("low")).alias("candle_range"),
@@ -262,84 +386,32 @@ class MarketContextProvider:
             ]
         )
 
-        contexts: List[Dict[str, Any]] = []
-        for idx, row in enumerate(metrics_df.iter_rows(named=True)):
-            contexts.append(
-                {
-                    "timestamp": row["timestamp"],
-                    "bar_ohlcv": {
-                        "open": row["open"],
-                        "high": row["high"],
-                        "low": row["low"],
-                        "close": row["close"],
-                        "volume": row["volume"],
-                        "vwap": row["vwap"],
-                    },
-                    "candle": {
-                        "range": row["candle_range"],
-                        "body": row["candle_body"],
-                        "body_to_range_ratio": row["body_to_range_ratio"],
-                        "upper_wick": row["upper_wick"],
-                        "lower_wick": row["lower_wick"],
-                        "close_location_pct": row["close_location_pct"],
-                        "bar_return_pct": row["bar_return_pct"],
-                        "close_to_vwap_pct": row["close_to_vwap_pct"],
-                    },
-                    "price_evolution": {
-                        "close_change_1_bar_pct": row["close_change_1_bar_pct"],
-                        "close_change_3_bar_pct": row["close_change_3_bar_pct"],
-                        "close_change_5_bar_pct": row["close_change_5_bar_pct"],
-                        "close_change_10_bar_pct": row["close_change_10_bar_pct"],
-                        "close_change_20_bar_pct": row["close_change_20_bar_pct"],
-                        "realized_volatility_5_bar_pct": row[
-                            "realized_volatility_5_bar_pct"
-                        ],
-                        "realized_volatility_20_bar_pct": row[
-                            "realized_volatility_20_bar_pct"
-                        ],
-                        "session_open_price": row["session_open_price"],
-                        "session_high_so_far": row["session_high_so_far"],
-                        "session_low_so_far": row["session_low_so_far"],
-                        "distance_from_session_open_pct": row[
-                            "distance_from_session_open_pct"
-                        ],
-                        "distance_from_session_high_pct": row[
-                            "distance_from_session_high_pct"
-                        ],
-                        "distance_from_session_low_pct": row[
-                            "distance_from_session_low_pct"
-                        ],
-                    },
-                    "volume_context": {
-                        "avg_volume_5_bar": row["avg_volume_5_bar"],
-                        "avg_volume_20_bar": row["avg_volume_20_bar"],
-                        "volume_vs_avg_5_ratio": row["volume_vs_avg_5_ratio"],
-                        "volume_vs_avg_20_ratio": row["volume_vs_avg_20_ratio"],
-                    },
-                    "recent_bars": recent_snapshots[idx],
-                }
-            )
-        return contexts
+        return list(metrics_df.select(list(_METRIC_COLUMNS)).iter_rows())
 
     def _build_contexts_fallback(
         self,
-        normalized_bars: List[Dict[str, Any]],
-        recent_snapshots: List[List[Dict[str, Any]]],
-    ) -> List[Dict[str, Any]]:
-        contexts: List[Dict[str, Any]] = []
+        normalized_bars: List[NormalizedBar],
+    ) -> List[MetricRow]:
+        metrics_rows: List[MetricRow] = []
         closes: List[float] = []
         highs: List[float] = []
         lows: List[float] = []
         volumes: List[float] = []
         returns: List[float] = []
 
-        for idx, row in enumerate(normalized_bars):
-            open_px = row["open"]
-            high_px = row["high"]
-            low_px = row["low"]
-            close_px = row["close"]
-            volume = row["volume"]
-            vwap = row["vwap"]
+        for row in normalized_bars:
+            (
+                timestamp,
+                open_px,
+                high_px,
+                low_px,
+                close_px,
+                volume,
+                vwap,
+                _l2_signed_aggression,
+                _l2_imbalance,
+                _l2_book_pressure,
+            ) = row
 
             if close_px is not None:
                 if closes:
@@ -392,79 +464,64 @@ class MarketContextProvider:
             session_high = max(highs) if highs else None
             session_low = min(lows) if lows else None
 
-            contexts.append(
-                {
-                    "timestamp": row["timestamp"],
-                    "bar_ohlcv": {
-                        "open": open_px,
-                        "high": high_px,
-                        "low": low_px,
-                        "close": close_px,
-                        "volume": volume,
-                        "vwap": vwap,
-                    },
-                    "candle": {
-                        "range": candle_range,
-                        "body": candle_body,
-                        "body_to_range_ratio": (
-                            (abs(candle_body) / candle_range)
-                            if candle_body is not None and candle_range not in (None, 0)
-                            else None
-                        ),
-                        "upper_wick": upper_wick,
-                        "lower_wick": lower_wick,
-                        "close_location_pct": close_location_pct,
-                        "bar_return_pct": self._pct_change(close_px, open_px),
-                        "close_to_vwap_pct": self._pct_change(close_px, vwap),
-                    },
-                    "price_evolution": {
-                        "close_change_1_bar_pct": _lookback_close_pct(1),
-                        "close_change_3_bar_pct": _lookback_close_pct(3),
-                        "close_change_5_bar_pct": _lookback_close_pct(5),
-                        "close_change_10_bar_pct": _lookback_close_pct(10),
-                        "close_change_20_bar_pct": _lookback_close_pct(20),
-                        "realized_volatility_5_bar_pct": self._stddev(returns[-5:]),
-                        "realized_volatility_20_bar_pct": self._stddev(returns[-20:]),
-                        "session_open_price": session_open,
-                        "session_high_so_far": session_high,
-                        "session_low_so_far": session_low,
-                        "distance_from_session_open_pct": self._pct_change(
-                            close_px, session_open
-                        ),
-                        "distance_from_session_high_pct": self._pct_change(
-                            close_px, session_high
-                        ),
-                        "distance_from_session_low_pct": self._pct_change(
-                            close_px, session_low
-                        ),
-                    },
-                    "volume_context": {
-                        "avg_volume_5_bar": avg_volume_5,
-                        "avg_volume_20_bar": avg_volume_20,
-                        "volume_vs_avg_5_ratio": (
-                            (volume / avg_volume_5)
-                            if volume is not None and avg_volume_5 not in (None, 0)
-                            else None
-                        ),
-                        "volume_vs_avg_20_ratio": (
-                            (volume / avg_volume_20)
-                            if volume is not None and avg_volume_20 not in (None, 0)
-                            else None
-                        ),
-                    },
-                    "recent_bars": recent_snapshots[idx],
-                }
+            metrics_rows.append(
+                (
+                    timestamp,
+                    open_px,
+                    high_px,
+                    low_px,
+                    close_px,
+                    volume,
+                    vwap,
+                    candle_range,
+                    candle_body,
+                    (
+                        (abs(candle_body) / candle_range)
+                        if candle_body is not None and candle_range not in (None, 0)
+                        else None
+                    ),
+                    upper_wick,
+                    lower_wick,
+                    close_location_pct,
+                    self._pct_change(close_px, open_px),
+                    self._pct_change(close_px, vwap),
+                    _lookback_close_pct(1),
+                    _lookback_close_pct(3),
+                    _lookback_close_pct(5),
+                    _lookback_close_pct(10),
+                    _lookback_close_pct(20),
+                    self._stddev(returns[-5:]),
+                    self._stddev(returns[-20:]),
+                    session_open,
+                    session_high,
+                    session_low,
+                    self._pct_change(close_px, session_open),
+                    self._pct_change(close_px, session_high),
+                    self._pct_change(close_px, session_low),
+                    avg_volume_5,
+                    avg_volume_20,
+                    (
+                        (volume / avg_volume_5)
+                        if volume is not None and avg_volume_5 not in (None, 0)
+                        else None
+                    ),
+                    (
+                        (volume / avg_volume_20)
+                        if volume is not None and avg_volume_20 not in (None, 0)
+                        else None
+                    ),
+                )
             )
-        return contexts
+        return metrics_rows
 
-    def _build_contexts(self) -> List[Dict[str, Any]]:
-        normalized_bars = self._normalize_bars()
-        recent_snapshots = self._build_recent_snapshots(normalized_bars)
+    def _build_contexts(
+        self, normalized_bars: List[NormalizedBar]
+    ) -> List[MetricRow]:
         if not normalized_bars:
             return []
         if pl is not None:
             try:
-                return self._build_contexts_polars(normalized_bars, recent_snapshots)
+                return self._build_contexts_polars(normalized_bars)
             except Exception:
                 pass
-        return self._build_contexts_fallback(normalized_bars, recent_snapshots)
+        return self._build_contexts_fallback(normalized_bars)

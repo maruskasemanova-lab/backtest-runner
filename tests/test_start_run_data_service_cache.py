@@ -50,13 +50,20 @@ class _DummyDataLoader:
         self.df = df
         self.load_csv_calls = 0
         self.load_parquet_calls = 0
+        self.last_load_parquet_columns = None
 
     def load_csv(self, file: str) -> pd.DataFrame:
         self.load_csv_calls += 1
         return self.df.copy()
 
-    def load_parquet(self, file: str) -> pd.DataFrame:
+    def preferred_parquet_columns(self) -> List[str]:
+        return ["timestamp", "open", "high", "low", "close", "volume", "vwap"]
+
+    def load_parquet(self, file: str, columns=None) -> pd.DataFrame:
         self.load_parquet_calls += 1
+        self.last_load_parquet_columns = (
+            list(columns) if isinstance(columns, (list, tuple)) else columns
+        )
         return self.df.copy()
 
     def filter_trading_range(
@@ -82,6 +89,37 @@ class _DummyDataLoader:
                 "close": float(row.close),
                 "volume": float(row.volume),
             }
+
+
+class _FastParquetDataLoader(_DummyDataLoader):
+    def __init__(self, bars: List[Dict[str, Any]], df: pd.DataFrame):
+        super().__init__(df)
+        self.fast_bars = [dict(bar) for bar in bars]
+        self.load_parquet_bars_calls = 0
+
+    def load_parquet_bars_for_range(
+        self,
+        files: List[str],
+        *,
+        start_date: str,
+        end_date: str,
+        include_premarket: bool = True,
+        trading_hours: List[int] | None = None,
+        regular_session_only: bool = False,
+    ) -> List[Dict[str, Any]]:
+        _ = (
+            files,
+            start_date,
+            end_date,
+            include_premarket,
+            trading_hours,
+            regular_session_only,
+        )
+        self.load_parquet_bars_calls += 1
+        return [dict(bar) for bar in self.fast_bars]
+
+    def load_parquet(self, file: str, columns=None) -> pd.DataFrame:
+        raise AssertionError("load_parquet should not run when fast parquet path is used")
 
 
 def _sample_df() -> pd.DataFrame:
@@ -237,6 +275,77 @@ def test_load_run_bars_uses_cache_for_same_inputs(isolated_disk_cache_dirs) -> N
         logger=logger,
     )
     assert bars_c[0]["open"] == 100.0
+
+
+def test_load_run_bars_passes_preferred_parquet_projection(isolated_disk_cache_dirs) -> None:
+    svc.clear_start_run_data_caches()
+
+    loader = _DummyDataLoader(_sample_df())
+    request = SimpleNamespace(data_file="mu_sample.parquet", allow_mock_data=False)
+    databento = _DummyDatabento(files=[])
+    discovery = _DummyDiscovery(files=[])
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
+
+    bars, files = svc.load_run_bars(
+        request=request,
+        ticker="MU",
+        range_start="2026-02-03",
+        range_end="2026-02-03",
+        data_loader=loader,
+        databento_svc=databento,
+        get_discovery=lambda: discovery,
+        aos_applied={},
+        logger=logger,
+    )
+
+    assert loader.load_parquet_calls == 1
+    assert loader.last_load_parquet_columns == loader.preferred_parquet_columns()
+    assert files == ["mu_sample.parquet"]
+    assert len(bars) == 3
+
+
+def test_load_run_bars_uses_direct_parquet_bar_fast_path(
+    isolated_disk_cache_dirs,
+) -> None:
+    svc.clear_start_run_data_caches()
+
+    fast_bars = [
+        {
+            "index": 0,
+            "timestamp": pd.Timestamp("2026-02-03T14:30:00Z"),
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.5,
+            "volume": 1000.0,
+            "vwap": 100.25,
+        }
+    ]
+    loader = _FastParquetDataLoader(fast_bars, _sample_df())
+    request = SimpleNamespace(data_file="mu_sample.parquet", allow_mock_data=False)
+    databento = _DummyDatabento(files=[])
+    discovery = _DummyDiscovery(files=[])
+    logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None
+    )
+
+    bars, files = svc.load_run_bars(
+        request=request,
+        ticker="MU",
+        range_start="2026-02-03",
+        range_end="2026-02-03",
+        data_loader=loader,
+        databento_svc=databento,
+        get_discovery=lambda: discovery,
+        aos_applied={},
+        logger=logger,
+    )
+
+    assert loader.load_parquet_bars_calls == 1
+    assert files == ["mu_sample.parquet"]
+    assert bars == fast_bars
 
 
 def test_load_run_bars_regular_session_override_excludes_pre_and_post_market(

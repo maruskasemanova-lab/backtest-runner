@@ -25,7 +25,7 @@ from uuid import uuid4
 from data_loader import DataLoader
 from session_runner import SessionRunner, RunConfig
 from decision_tracker import MarkerType
-from available_data import get_discovery, reset_discovery
+from src.services.data_discovery import get_discovery, reset_discovery
 from src.config_io import (
     load_json_file,
     save_json_file,

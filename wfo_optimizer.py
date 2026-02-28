@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 import pandas as pd
 
-from available_data import get_discovery
+from src.services.data_discovery import get_discovery
 from data_loader import DataLoader
 
 
@@ -873,11 +873,18 @@ def main():
 
     # Save results
     output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(final_overrides, indent=2))
     print(f"\n💾 Saved optimized parameters to: {output_path}")
 
-    # Also save detailed results
-    results_path = Path("wfo_results.json")
+    # Keep auxiliary optimization artifacts out of the repo root by default.
+    artifact_dir = (
+        output_path.parent
+        if output_path.parent != Path(".")
+        else Path("analysis/optimization")
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    results_path = artifact_dir / "wfo_results.json"
     results_data = {
         "timestamp": datetime.now().isoformat(),
         "config": {

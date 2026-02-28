@@ -444,6 +444,7 @@ function App() {
   } = useRunSnapshotActions({
     runKey,
     activeRunApiBase,
+    authToken: usageToken,
     isPageVisible,
     clearActiveRunState,
     refreshActiveRuns,

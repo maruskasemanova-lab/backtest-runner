@@ -824,7 +824,9 @@ class PerformanceTracker:
 
 if __name__ == "__main__":
     # Example usage and testing
-    tracker = PerformanceTracker(storage_path="performance_data.json")
+    example_storage_path = Path("analysis/runtime/performance_data.json")
+    example_storage_path.parent.mkdir(parents=True, exist_ok=True)
+    tracker = PerformanceTracker(storage_path=str(example_storage_path))
 
     # Add some sample trades
     tracker.record_trade(

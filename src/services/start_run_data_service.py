@@ -777,6 +777,31 @@ def _try_load_cached_base_bars(
     return cached_bars, list(cached_files)
 
 
+def _preferred_runtime_parquet_columns(data_loader: Any) -> List[str] | None:
+    resolver = getattr(data_loader, "preferred_parquet_columns", None)
+    if not callable(resolver):
+        return None
+    try:
+        columns = resolver()
+    except Exception:
+        return None
+    if not isinstance(columns, list):
+        try:
+            columns = list(columns or [])
+        except Exception:
+            return None
+    projected = [str(col) for col in columns if str(col).strip()]
+    return projected or None
+
+
+def _can_use_direct_parquet_bar_load(data_loader: Any, files: List[str]) -> bool:
+    if not files:
+        return False
+    if not all(file.endswith(".parquet") or file.endswith(".parq") for file in files):
+        return False
+    return callable(getattr(data_loader, "load_parquet_bars_for_range", None))
+
+
 def _load_dataframe_from_files(
     *,
     data_files: List[str],
@@ -790,10 +815,11 @@ def _load_dataframe_from_files(
 ) -> pd.DataFrame:
     dfs = []
     skipped_files = []
+    parquet_columns = _preferred_runtime_parquet_columns(data_loader)
     for file in data_files:
         try:
             if file.endswith(".parquet") or file.endswith(".parq"):
-                dfs.append(data_loader.load_parquet(file))
+                dfs.append(data_loader.load_parquet(file, columns=parquet_columns))
             else:
                 dfs.append(data_loader.load_csv(file))
         except FileNotFoundError as exc:
@@ -811,7 +837,10 @@ def _load_dataframe_from_files(
             400, f"No usable data files for the specified date/range.{skipped_note}"
         )
 
-    df = pd.concat(dfs, ignore_index=True)
+    if len(dfs) == 1:
+        df = dfs[0]
+    else:
+        df = pd.concat(dfs, ignore_index=True)
     df = (
         df.drop_duplicates(subset=["timestamp"])
         .sort_values("timestamp")
@@ -918,16 +947,27 @@ def load_run_bars(
             return cached_bars
 
     if data_files:
-        df = _load_dataframe_from_files(
-            data_files=data_files,
-            range_start=range_start,
-            range_end=range_end,
-            data_loader=data_loader,
-            time_filter_enabled=time_filter_enabled,
-            trading_hours=trading_hours,
-            regular_session_only=regular_session_only,
-            logger=logger,
-        )
+        if _can_use_direct_parquet_bar_load(data_loader, data_files):
+            bars = data_loader.load_parquet_bars_for_range(
+                data_files,
+                start_date=range_start,
+                end_date=range_end,
+                include_premarket=not regular_session_only,
+                trading_hours=list(trading_hours) if time_filter_enabled else None,
+                regular_session_only=regular_session_only,
+            )
+        else:
+            df = _load_dataframe_from_files(
+                data_files=data_files,
+                range_start=range_start,
+                range_end=range_end,
+                data_loader=data_loader,
+                time_filter_enabled=time_filter_enabled,
+                trading_hours=trading_hours,
+                regular_session_only=regular_session_only,
+                logger=logger,
+            )
+            bars = list(data_loader.get_bars_iterator(df))
     else:
         df = _load_dataframe_without_files(
             request=request,
@@ -938,7 +978,7 @@ def load_run_bars(
             databento_svc=databento_svc,
             logger=logger,
         )
-    bars = list(data_loader.get_bars_iterator(df))
+        bars = list(data_loader.get_bars_iterator(df))
     if not bars:
         raise HTTPException(400, "No data available for the specified date/range")
     if cache_context is not None:
@@ -1259,11 +1299,26 @@ def _load_reference_map_from_files(
     if not ref_files:
         return ref_bars_map
 
+    if _can_use_direct_parquet_bar_load(data_loader, ref_files):
+        for qqq_bar in data_loader.load_parquet_bars_for_range(
+            ref_files,
+            start_date=range_start,
+            end_date=range_end,
+            include_premarket=True,
+        ):
+            ts = qqq_bar.get("timestamp")
+            ts_key = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+            qqq_bar["ticker"] = "QQQ"
+            ref_bars_map[ts_key] = qqq_bar
+        logger.info(f"Loaded {len(ref_bars_map)} QQQ reference bars for cross-asset")
+        return ref_bars_map
+
     qqq_dfs = []
+    parquet_columns = _preferred_runtime_parquet_columns(data_loader)
     for file in ref_files:
         try:
             if file.endswith(".parquet") or file.endswith(".parq"):
-                qqq_dfs.append(data_loader.load_parquet(file))
+                qqq_dfs.append(data_loader.load_parquet(file, columns=parquet_columns))
             else:
                 qqq_dfs.append(data_loader.load_csv(file))
         except Exception:
@@ -1271,7 +1326,10 @@ def _load_reference_map_from_files(
     if not qqq_dfs:
         return ref_bars_map
 
-    qqq_df = pd.concat(qqq_dfs, ignore_index=True)
+    if len(qqq_dfs) == 1:
+        qqq_df = qqq_dfs[0]
+    else:
+        qqq_df = pd.concat(qqq_dfs, ignore_index=True)
     qqq_df = data_loader.filter_trading_range(qqq_df, range_start, range_end)
     for qqq_bar in data_loader.get_bars_iterator(qqq_df):
         ts = qqq_bar.get("timestamp")

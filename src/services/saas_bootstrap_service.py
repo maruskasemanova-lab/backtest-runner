@@ -12,6 +12,7 @@ from src.services.saas_primitives import InMemorySlidingWindowLimiter
 from src.services.saas_supabase_store import (
     SupabaseRunReportsStore,
     SupabaseRunStateMirror,
+    SupabaseUserDatasetsStore,
     SupabaseUserSettingsStore,
 )
 from src.services.saas_service import (
@@ -27,6 +28,7 @@ class SaaSBootstrapResult:
     run_reports_source_mode: str
     runtime_metrics: RuntimeMetrics
     supabase_user_settings_store: Optional[SupabaseUserSettingsStore]
+    supabase_user_datasets_store: Optional[SupabaseUserDatasetsStore]
     supabase_run_reports_store: Optional[SupabaseRunReportsStore]
     supabase_run_state_mirror: Optional[SupabaseRunStateMirror]
 
@@ -80,12 +82,10 @@ def build_supabase_user_settings_store(
     *,
     logger: Any,
 ) -> Optional[SupabaseUserSettingsStore]:
-    enabled_raw = (
-        str(os.getenv("BACKTEST_SUPABASE_USER_SETTINGS_ENABLED", "0") or "")
-        .strip()
-        .lower()
+    enabled = parse_bool_value(
+        os.getenv("BACKTEST_SUPABASE_USER_SETTINGS_ENABLED"),
+        False,
     )
-    enabled = enabled_raw in {"1", "true", "yes", "on"}
     if not enabled:
         return None
 
@@ -125,6 +125,56 @@ def build_supabase_user_settings_store(
     except Exception as exc:
         logger.warning(
             "Failed to initialize Supabase user settings store; falling back to local SQLite store: %s",
+            exc,
+        )
+        return None
+
+
+def build_supabase_user_datasets_store(
+    *,
+    logger: Any,
+) -> Optional[SupabaseUserDatasetsStore]:
+    enabled = parse_bool_value(
+        os.getenv("BACKTEST_SUPABASE_USER_DATASETS_ENABLED"),
+        False,
+    )
+    if not enabled:
+        return None
+
+    supabase_url = str(
+        os.getenv("BACKTEST_SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "",
+    ).strip()
+    service_role_key = str(
+        os.getenv("BACKTEST_SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or "",
+    ).strip()
+    table_name = (
+        str(os.getenv("BACKTEST_SUPABASE_USER_DATASETS_TABLE") or "user_datasets").strip()
+        or "user_datasets"
+    )
+    timeout_seconds = safe_env_float(
+        "BACKTEST_SUPABASE_USER_DATASETS_TIMEOUT_SEC",
+        8.0,
+        min_value=1.0,
+    )
+
+    if not supabase_url or not service_role_key:
+        logger.warning(
+            "Supabase user datasets store enabled but missing url/service key; falling back to local SQLite store."
+        )
+        return None
+
+    try:
+        return SupabaseUserDatasetsStore(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            table_name=table_name,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize Supabase user datasets store; falling back to local SQLite store: %s",
             exc,
         )
         return None
@@ -194,6 +244,22 @@ def build_supabase_run_reports_store(
         )
         return None
 
+    try:
+        return SupabaseRunReportsStore(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            table_name=table_name,
+            timeout_seconds=timeout_seconds,
+            default_user_id=default_user_id,
+            default_tenant_id=default_tenant_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize Supabase run reports store; skipping external report persistence: %s",
+            exc,
+        )
+        return None
+
 
 def build_supabase_run_state_mirror(
     *,
@@ -248,22 +314,6 @@ def build_supabase_run_state_mirror(
         )
         return None
 
-    try:
-        return SupabaseRunReportsStore(
-            supabase_url=supabase_url,
-            service_role_key=service_role_key,
-            table_name=table_name,
-            timeout_seconds=timeout_seconds,
-            default_user_id=default_user_id,
-            default_tenant_id=default_tenant_id,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to initialize Supabase run reports store; skipping external report persistence: %s",
-            exc,
-        )
-        return None
-
 
 def resolve_run_reports_store(
     *,
@@ -296,6 +346,7 @@ def bootstrap_saas_runtime(*, logger: Any, project_root: Path) -> SaaSBootstrapR
     )
 
     supabase_user_settings_store = build_supabase_user_settings_store(logger=logger)
+    supabase_user_datasets_store = build_supabase_user_datasets_store(logger=logger)
     supabase_run_reports_store = build_supabase_run_reports_store(
         project_root=project_root,
         logger=logger,
@@ -330,6 +381,7 @@ def bootstrap_saas_runtime(*, logger: Any, project_root: Path) -> SaaSBootstrapR
             if item.strip()
         ],
         user_settings_store=supabase_user_settings_store,
+        user_datasets_store=supabase_user_datasets_store,
         run_state_mirror=supabase_run_state_mirror,
         job_semaphore=asyncio.Semaphore(v2_worker_concurrency),
         max_queue_backlog=v2_max_queue_backlog,
@@ -348,6 +400,7 @@ def bootstrap_saas_runtime(*, logger: Any, project_root: Path) -> SaaSBootstrapR
         run_reports_source_mode=run_reports_source_mode,
         runtime_metrics=runtime_metrics,
         supabase_user_settings_store=supabase_user_settings_store,
+        supabase_user_datasets_store=supabase_user_datasets_store,
         supabase_run_reports_store=supabase_run_reports_store,
         supabase_run_state_mirror=supabase_run_state_mirror,
     )
