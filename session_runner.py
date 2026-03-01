@@ -271,6 +271,7 @@ class SessionRunner:
         )
         self._last_bar_notify_at: Optional[float] = None
         self._last_bar_notify_progress_bucket: int = -1
+        self._last_bar_notify_warmup_only: Optional[bool] = None
         self._bulk_payload_frame: Optional[Any] = None
         self._bulk_payload_frame_signature: Optional[tuple[Any, ...]] = None
 
@@ -393,8 +394,11 @@ class SessionRunner:
             return 0.0
         return ((int(processed_bar_index) + 1) / len(self.bars)) * 100.0
 
-    def _mark_bar_notified(self, processed_bar_index: int) -> None:
+    def _mark_bar_notified(
+        self, processed_bar_index: int, *, warmup_only: bool
+    ) -> None:
         self._last_bar_notify_at = time_module.monotonic()
+        self._last_bar_notify_warmup_only = bool(warmup_only)
         progress_pct = self._bar_progress_pct_for_index(processed_bar_index)
         if self._bar_update_progress_step_pct <= 0:
             self._last_bar_notify_progress_bucket = processed_bar_index
@@ -403,8 +407,13 @@ class SessionRunner:
             progress_pct / self._bar_update_progress_step_pct
         )
 
-    def _should_notify_bar_update(self, processed_bar_index: int) -> bool:
+    def _should_notify_bar_update(
+        self, processed_bar_index: int, *, warmup_only: bool
+    ) -> bool:
         if self._last_bar_notify_at is None:
+            return True
+        # Always emit the first trading bar after warmup so UI progress starts at 0%.
+        if not bool(warmup_only) and self._last_bar_notify_warmup_only is True:
             return True
         if processed_bar_index >= max(0, len(self.bars) - 1):
             return True
@@ -422,11 +431,18 @@ class SessionRunner:
         bar_payload: Dict[str, Any],
         *,
         processed_bar_index: int,
+        warmup_only: bool,
     ) -> None:
-        if not self._should_notify_bar_update(processed_bar_index):
+        if not self._should_notify_bar_update(
+            processed_bar_index,
+            warmup_only=bool(warmup_only),
+        ):
             return
         await self._notify_bar(bar_payload)
-        self._mark_bar_notified(processed_bar_index)
+        self._mark_bar_notified(
+            processed_bar_index,
+            warmup_only=bool(warmup_only),
+        )
 
     def _resolve_bar_runtime_context(
         self,
@@ -691,10 +707,14 @@ class SessionRunner:
                 await self._notify_bar_throttled(
                     bar_payload,
                     processed_bar_index=processed_bar_index,
+                    warmup_only=bool(warmup_only),
                 )
             else:
                 await self._notify_bar(bar_payload)
-                self._mark_bar_notified(processed_bar_index)
+                self._mark_bar_notified(
+                    processed_bar_index,
+                    warmup_only=bool(warmup_only),
+                )
 
         return final_result
 
@@ -714,6 +734,7 @@ class SessionRunner:
         self._intrabar_quote_cache.clear()
         self._last_bar_notify_at = None
         self._last_bar_notify_progress_bucket = -1
+        self._last_bar_notify_warmup_only = None
         self._bulk_payload_frame = None
         self._bulk_payload_frame_signature = None
         self._drain_queue(self._bar_events_queue)
@@ -737,6 +758,7 @@ class SessionRunner:
         self._intrabar_quote_cache.clear()
         self._last_bar_notify_at = None
         self._last_bar_notify_progress_bucket = -1
+        self._last_bar_notify_warmup_only = None
         self._bulk_payload_frame = None
         self._bulk_payload_frame_signature = None
         self._drain_queue(self._bar_events_queue)

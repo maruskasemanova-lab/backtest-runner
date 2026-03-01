@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-01T07:04:20.986156+00:00",
+  "generated_at": "2026-03-01T09:35:43.055879+00:00",
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -474,8 +474,8 @@
           "path": "session_runner.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/session_runner.py",
           "exists": true,
-          "lines": 2252,
-          "last_commit": "0248cab 2026-02-28",
+          "lines": 2274,
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "function",
@@ -501,7 +501,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/data_loader.py",
           "exists": true,
           "lines": 544,
-          "last_commit": "6c4716f 2026-02-28",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "class",
@@ -548,7 +548,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/decision_tracker.py",
           "exists": true,
           "lines": 553,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "class",
@@ -641,7 +641,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/system_routes.py",
           "exists": true,
           "lines": 1931,
-          "last_commit": "58ebada 2026-02-27",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "function",
@@ -1239,7 +1239,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/config_read_routes.py",
           "exists": true,
           "lines": 140,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "async_function",
@@ -1361,7 +1361,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/config_write_routes.py",
           "exists": true,
           "lines": 111,
-          "last_commit": "b9accc6 2026-02-18",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "async_function",
@@ -2631,7 +2631,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/security/network_policy.py",
           "exists": true,
           "lines": 139,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "class",
@@ -2790,7 +2790,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/config_write_service.py",
           "exists": true,
           "lines": 801,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "class",
@@ -2881,7 +2881,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/run_control_service.py",
           "exists": true,
           "lines": 690,
-          "last_commit": "58ebada 2026-02-27",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "class",
@@ -3307,7 +3307,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/adaptive_tuner_runtime_service.py",
           "exists": true,
           "lines": 999,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "function",
@@ -3445,7 +3445,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_updates_service.py",
           "exists": true,
           "lines": 267,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "function",
@@ -3501,7 +3501,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_profiles_service.py",
           "exists": true,
           "lines": 934,
-          "last_commit": "1273b21 2026-02-23",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "function",
@@ -3572,7 +3572,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/strategy_api_session_service.py",
           "exists": true,
           "lines": 530,
-          "last_commit": "58ebada 2026-02-27",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "function",
@@ -3628,7 +3628,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_service.py",
           "exists": true,
           "lines": 1179,
-          "last_commit": "0248cab 2026-02-28",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "function",
@@ -3809,7 +3809,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_data_service.py",
           "exists": true,
           "lines": 1501,
-          "last_commit": "6c4716f 2026-02-28",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "function",
@@ -5665,7 +5665,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/l2_data_manager.py",
           "exists": true,
           "lines": 1192,
-          "last_commit": "6c4716f 2026-02-28",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [
             {
               "kind": "class",
@@ -6330,7 +6330,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/App.tsx",
           "exists": true,
           "lines": 671,
-          "last_commit": "6c4716f 2026-02-28",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6379,8 +6379,8 @@
           "path": "frontend/src/components/RunConfig.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/RunConfig.tsx",
           "exists": true,
-          "lines": 345,
-          "last_commit": "1273b21 2026-02-23",
+          "lines": 347,
+          "last_commit": "d064025 2026-03-01",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6410,7 +6410,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/AdaptiveStrategyStudio.tsx",
           "exists": true,
           "lines": 352,
-          "last_commit": "58ebada 2026-02-27",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6419,8 +6419,8 @@
           "path": "frontend/src/components/diagnostic-calendar/DiagnosticCalendar.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/diagnostic-calendar/DiagnosticCalendar.tsx",
           "exists": true,
-          "lines": 100,
-          "last_commit": "58ebada 2026-02-27",
+          "lines": 99,
+          "last_commit": "d064025 2026-03-01",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6430,7 +6430,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/StrategySettings.tsx",
           "exists": true,
           "lines": 488,
-          "last_commit": "0248cab 2026-02-28",
+          "last_commit": "d064025 2026-03-01",
           "symbols": [],
           "routes": [],
           "parse_error": null

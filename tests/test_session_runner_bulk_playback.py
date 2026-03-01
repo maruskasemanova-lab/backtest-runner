@@ -98,6 +98,8 @@ def test_run_all_uses_bulk_batches_and_throttles_bar_events(
         "application/vnd.apache.arrow.stream",
         "application/vnd.apache.arrow.stream",
     ]
-    assert len(bar_events) == 2
+    assert len(bar_events) == 3
     assert bar_events[0]["warmup_only"] is True
+    assert bar_events[1]["warmup_only"] is False
+    assert bar_events[1]["bar_index"] == 1
     assert bar_events[-1]["bar_index"] == 2
