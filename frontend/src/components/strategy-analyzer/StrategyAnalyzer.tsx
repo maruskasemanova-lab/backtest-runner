@@ -4,7 +4,7 @@ import StrategyAnalyzerAttachedPanels from "./StrategyAnalyzerAttachedPanels";
 import StrategyAnalyzerChartPanel from "./StrategyAnalyzerChartPanel";
 import StrategyAnalyzerDecisionsContent from "./StrategyAnalyzerDecisionsContent";
 import StrategyAnalyzerEntryConditionsContent from "./StrategyAnalyzerEntryConditionsContent";
-import StrategyEditorModal from "./StrategyEditorModal";
+import StrategyAnalyzerUnifiedConfigWrapper from "./StrategyAnalyzerUnifiedConfigWrapper";
 import StrategyAnalyzerHeaderControls from "./StrategyAnalyzerHeaderControls";
 import StrategyAnalyzerRangeActions from "./StrategyAnalyzerRangeActions";
 import type {
@@ -214,6 +214,7 @@ export default function StrategyAnalyzer({
   const { analyzerChartMarkers, chartBars } = useStrategyAnalyzerChartData({
     bars,
     isAnalyzerAttachedRun,
+    analyzerRunFinished,
     selectedRangeWindow,
     rangeScrubMeta,
     analyzerDecisionEvents,
@@ -499,9 +500,9 @@ export default function StrategyAnalyzer({
         ) : null}
       </div>
 
-      {/* ── Strategy Editor Modal ──────────────────────────────── */}
+      {/* ── Unified Strategy Configuration Dialog ────────────── */}
       {showStrategyEditor && (
-        <StrategyEditorModal
+        <StrategyAnalyzerUnifiedConfigWrapper
           ticker={ticker}
           strategyApiUrl={strategyApiUrl}
           onClose={() => setShowStrategyEditor(false)}

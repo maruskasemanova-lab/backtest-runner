@@ -1,8 +1,11 @@
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from src.routes.context import ApiServices, get_api_services
+from src.routes.unified_profile_user_store import (
+    build_user_unified_profile_options_payload,
+)
 
 router = APIRouter()
 
@@ -90,10 +93,19 @@ async def get_adaptive_tuner_options(
 
 @router.get("/api/profiles/{ticker}")
 async def get_unified_profiles(
-    ticker: str, services: ApiServices = Depends(get_api_services)
+    ticker: str,
+    request: Request,
+    services: ApiServices = Depends(get_api_services),
 ):
     """Get saved unified strategy+execution profiles for a ticker."""
-    return services.build_unified_profile_options_payload(ticker)
+    base_payload = services.build_unified_profile_options_payload(ticker)
+    return build_user_unified_profile_options_payload(
+        request=request,
+        ticker=ticker,
+        base_payload=base_payload,
+        load_aos_config=services.load_aos_config,
+        normalize_unified_profiles=services.build_config_write_deps().normalize_unified_profiles,
+    )
 
 
 @router.get("/api/aos-history/{ticker}")

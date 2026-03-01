@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Dict, Iterable, List
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -29,6 +29,12 @@ class ConfigWriteDeps:
     normalize_non_negative_int: Callable[..., Any]
     positioning_config_keys: Iterable[str]
     logger: Any
+    load_unified_profile_state: Optional[
+        Callable[[str], tuple[List[Dict[str, Any]], Optional[str]]]
+    ] = None
+    save_unified_profile_state: Optional[
+        Callable[[str, List[Dict[str, Any]], Optional[str]], None]
+    ] = None
 
 
 def _utc_now_iso() -> str:
@@ -180,6 +186,69 @@ def _build_execution_profile_snapshot(
     return execution_profile
 
 
+def _load_unified_profile_state(
+    *,
+    ticker: str,
+    ticker_cfg: Dict[str, Any],
+    deps: ConfigWriteDeps,
+) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    external_loader = getattr(deps, "load_unified_profile_state", None)
+    if callable(external_loader):
+        loaded_profiles, loaded_active = external_loader(ticker)
+        normalized_profiles = deps.normalize_unified_profiles(loaded_profiles)
+        active_profile_id = str(loaded_active or "").strip() or None
+        if active_profile_id:
+            known_profile_ids = {
+                str(row.get("profile_id") or "").strip()
+                for row in normalized_profiles
+                if isinstance(row, dict)
+            }
+            if active_profile_id not in known_profile_ids:
+                active_profile_id = None
+        return normalized_profiles, active_profile_id
+
+    profiles = deps.normalize_unified_profiles(ticker_cfg.get("unified_profiles", []))
+    active_profile_id = str(ticker_cfg.get("active_unified_profile_id") or "").strip() or None
+    if active_profile_id:
+        known_profile_ids = {
+            str(row.get("profile_id") or "").strip()
+            for row in profiles
+            if isinstance(row, dict)
+        }
+        if active_profile_id not in known_profile_ids:
+            active_profile_id = None
+    return profiles, active_profile_id
+
+
+def _save_unified_profile_state(
+    *,
+    ticker: str,
+    ticker_cfg: Dict[str, Any],
+    profiles: List[Dict[str, Any]],
+    active_profile_id: Optional[str],
+    deps: ConfigWriteDeps,
+) -> bool:
+    external_saver = getattr(deps, "save_unified_profile_state", None)
+    if callable(external_saver):
+        external_saver(ticker, profiles, active_profile_id)
+        return False
+
+    ticker_cfg["unified_profiles"] = profiles
+    ticker_cfg["active_unified_profile_id"] = str(active_profile_id or "").strip()
+    return True
+
+
+def _clear_local_unified_profile_state(ticker_cfg: Dict[str, Any]) -> bool:
+    changed = False
+    if "unified_profiles" in ticker_cfg:
+        ticker_cfg.pop("unified_profiles", None)
+        changed = True
+    if "active_unified_profile_id" in ticker_cfg:
+        ticker_cfg.pop("active_unified_profile_id", None)
+        changed = True
+    return changed
+
+
 async def capture_unified_profile(
     request: Any, deps: ConfigWriteDeps
 ) -> Dict[str, Any]:
@@ -217,9 +286,11 @@ async def capture_unified_profile(
     if not isinstance(positioning_ticker_cfg, dict):
         positioning_ticker_cfg = {}
 
-    profiles = deps.normalize_unified_profiles(ticker_cfg.get("unified_profiles", []))
-    if not isinstance(profiles, list):
-        profiles = []
+    profiles, active_profile_id = _load_unified_profile_state(
+        ticker=ticker,
+        ticker_cfg=ticker_cfg,
+        deps=deps,
+    )
 
     strategy_profile = _build_strategy_profile_snapshot(
         ticker_cfg=ticker_cfg,
@@ -253,21 +324,32 @@ async def capture_unified_profile(
         entry["source_adaptive_tuner_profile_id"] = source_adaptive_profile_id
 
     profiles.insert(0, entry)
-    ticker_cfg["unified_profiles"] = profiles[:30]
+    profiles = profiles[:30]
     if request.set_active:
-        ticker_cfg["active_unified_profile_id"] = entry["profile_id"]
-    config["tickers"][ticker] = ticker_cfg
-    if not deps.save_aos_config(config):
-        raise HTTPException(500, "Failed to save unified profile")
+        active_profile_id = entry["profile_id"]
+
+    saved_to_local_config = _save_unified_profile_state(
+        ticker=ticker,
+        ticker_cfg=ticker_cfg,
+        profiles=profiles,
+        active_profile_id=active_profile_id,
+        deps=deps,
+    )
+    config_changed = False
+    if saved_to_local_config:
+        config_changed = True
+    elif _clear_local_unified_profile_state(ticker_cfg):
+        config_changed = True
+    if config_changed:
+        config["tickers"][ticker] = ticker_cfg
+        if not deps.save_aos_config(config):
+            raise HTTPException(500, "Failed to save unified profile")
 
     return {
         "success": True,
         "ticker": ticker,
         "profile": entry,
-        "active_profile_id": str(
-            ticker_cfg.get("active_unified_profile_id", "")
-        ).strip()
-        or None,
+        "active_profile_id": active_profile_id or None,
     }
 
 
@@ -287,9 +369,11 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
     if not isinstance(ticker_cfg, dict):
         ticker_cfg = {}
 
-    profiles = deps.normalize_unified_profiles(ticker_cfg.get("unified_profiles", []))
-    if not isinstance(profiles, list):
-        profiles = []
+    profiles, _active_profile_id = _load_unified_profile_state(
+        ticker=ticker,
+        ticker_cfg=ticker_cfg,
+        deps=deps,
+    )
     target_profile = next(
         (
             profile
@@ -301,8 +385,16 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
     if not isinstance(target_profile, dict):
         raise HTTPException(404, f"Unified profile not found: {profile_id}")
 
-    ticker_cfg["unified_profiles"] = profiles
-    ticker_cfg["active_unified_profile_id"] = profile_id
+    saved_to_local_config = _save_unified_profile_state(
+        ticker=ticker,
+        ticker_cfg=ticker_cfg,
+        profiles=profiles,
+        active_profile_id=profile_id,
+        deps=deps,
+    )
+    config_changed = bool(saved_to_local_config)
+    if not saved_to_local_config and _clear_local_unified_profile_state(ticker_cfg):
+        config_changed = True
 
     strategy_profile = target_profile.get("strategy_profile")
     if not isinstance(strategy_profile, dict):
@@ -313,6 +405,7 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
 
     applied_execution = False
     if bool(getattr(request, "apply_execution", True)):
+        config_changed = True
         mode_value = strategy_profile.get("strategy_selection_mode")
         if isinstance(mode_value, str) and mode_value.strip():
             ticker_cfg["strategy_selection_mode"] = mode_value.strip().lower()
@@ -388,9 +481,10 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
             pos_tickers[ticker] = existing_pos
             applied_execution = True
 
-    config["tickers"][ticker] = ticker_cfg
-    if not deps.save_aos_config(config):
-        raise HTTPException(500, "Failed to save active unified profile")
+    if config_changed:
+        config["tickers"][ticker] = ticker_cfg
+        if not deps.save_aos_config(config):
+            raise HTTPException(500, "Failed to save active unified profile")
     if applied_execution and not deps.save_positioning_config(positioning_config):
         raise HTTPException(
             500, "Failed to save positioning config for unified profile"

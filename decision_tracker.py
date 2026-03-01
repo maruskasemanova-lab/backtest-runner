@@ -3,7 +3,7 @@ Decision Tracker - Tracks all trading decisions with explanations for visualizat
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import List, Dict, Any, Optional
 from enum import Enum
 import json
@@ -23,6 +23,60 @@ class MarkerType(str, Enum):
     TRAILING_STOP_UPDATED = "trailing_stop_updated"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
+
+
+def _to_json_compatible(value: Any) -> Any:
+    """Recursively normalize payload values for FastAPI JSON encoding."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _to_json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_json_compatible(item) for item in value]
+
+    item_method = getattr(value, "item", None)
+    if callable(item_method):
+        try:
+            return _to_json_compatible(item_method())
+        except Exception:
+            pass
+    tolist_method = getattr(value, "tolist", None)
+    if callable(tolist_method):
+        try:
+            return _to_json_compatible(tolist_method())
+        except Exception:
+            pass
+
+    return str(value)
+
+
+def _timestamp_to_iso(value: Any) -> str:
+    normalized = _to_json_compatible(value)
+    if isinstance(normalized, str):
+        return normalized
+    return str(normalized)
+
+
+def _timestamp_to_epoch_seconds(value: Any) -> int:
+    normalized = _to_json_compatible(value)
+    if isinstance(normalized, datetime):
+        dt = normalized
+    elif isinstance(normalized, str):
+        raw = normalized
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(raw)
+        except ValueError:
+            return 0
+    else:
+        return 0
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
 
 
 @dataclass
@@ -45,17 +99,17 @@ class DecisionMarker:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": _timestamp_to_iso(self.timestamp),
             "bar_index": self.bar_index,
             "marker_type": self.marker_type.value,
             "title": self.title,
             "description": self.description,
-            "price": self.price,
+            "price": _to_json_compatible(self.price),
             "side": self.side,
             "strategy": self.strategy,
             "regime": self.regime,
             "confidence": self.confidence,
-            "details": self.details,
+            "details": _to_json_compatible(self.details),
         }
 
 
@@ -426,7 +480,7 @@ class DecisionTracker:
 
             annotations.append(
                 {
-                    "time": int(m.timestamp.timestamp()),
+                    "time": _timestamp_to_epoch_seconds(m.timestamp),
                     "position": position,
                     "color": color,
                     "shape": shape,

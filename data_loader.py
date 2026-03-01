@@ -149,9 +149,14 @@ class DataLoader:
         raise ValueError(f"Required column '{target}' not found in parquet data")
 
     @staticmethod
-    def _polars_timestamp_expr(source_col: str):
+    def _polars_timestamp_expr(source_col: str, col_dtype=None):
         if pl is None:
             raise RuntimeError("polars is required for parquet loading")
+        # Fast path: column is already a Datetime — just cast to common
+        # microsecond precision and alias (avoids Utf8 round-trip entirely).
+        if col_dtype is not None and isinstance(col_dtype, pl.Datetime):
+            return pl.col(source_col).cast(pl.Datetime("us", "UTC")).alias("timestamp")
+        # Slow path: string column — parse via strptime.
         expr = pl.col(source_col).cast(pl.Utf8).str
         try:
             parsed = expr.to_datetime(strict=False, exact=False, format="%+")
@@ -166,9 +171,15 @@ class DataLoader:
         if pl is None:
             raise RuntimeError("polars is required for parquet loading")
         lazy_frame = scan_parquet_compat(filepath)
-        available = set(self._parquet_schema_columns(filepath))
+        # Single schema introspection — reuse for column lookup + dtype.
+        schema = lazy_frame.collect_schema()
+        try:
+            available = set(str(name) for name in schema.names())
+        except Exception:
+            available = set(str(name) for name in dict(schema).keys())
         timestamp_col = self._resolve_parquet_timestamp_column(available)
-        select_exprs = [self._polars_timestamp_expr(timestamp_col)]
+        col_dtype = schema.get(timestamp_col, None) if hasattr(schema, "get") else None
+        select_exprs = [self._polars_timestamp_expr(timestamp_col, col_dtype=col_dtype)]
         for col in self.REQUIRED_OHLCV_COLUMNS:
             source_col = self._resolve_parquet_value_column(col, available)
             select_exprs.append(pl.col(source_col).alias(col))
@@ -232,49 +243,80 @@ class DataLoader:
             return []
 
         combined = combined.unique(subset=["timestamp"], keep="first").sort("timestamp")
+
+        # ── Vectorized filtering in Polars (no Python per-row loop) ──
+        et_tz = ZoneInfo("America/New_York")
+        # Convert timestamp to market (ET) for filtering.
+        ts_col = pl.col("timestamp")
+        # Ensure UTC first, then convert to ET.
+        ts_utc = ts_col.cast(pl.Datetime("us", "UTC"))
+        ts_et = ts_utc.dt.convert_time_zone("America/New_York")
+
+        combined = combined.with_columns(
+            ts_et.alias("_ts_et"),
+        )
+
+        # Date range filter.
         start = pd.to_datetime(start_date).date()
         end = pd.to_datetime(end_date).date()
-        normalized_hours = {
-            int(hour)
-            for hour in (trading_hours or [])
-            if str(hour).strip() and str(hour).strip().lstrip("-").isdigit()
-        }
+        combined = combined.filter(
+            (pl.col("_ts_et").dt.date() >= start)
+            & (pl.col("_ts_et").dt.date() <= end)
+        )
+
+        # Session hours filter.
         session_start = (
             time(9, 30)
             if regular_session_only or not include_premarket
             else time(4, 0)
         )
         session_close = time(16, 0)
+        combined = combined.filter(
+            (pl.col("_ts_et").dt.time() >= session_start)
+            & (pl.col("_ts_et").dt.time() <= session_close)
+        )
+
+        # Trading hours filter.
+        normalized_hours = {
+            int(hour)
+            for hour in (trading_hours or [])
+            if str(hour).strip() and str(hour).strip().lstrip("-").isdigit()
+        }
+        if normalized_hours and not regular_session_only:
+            combined = combined.filter(
+                pl.col("_ts_et").dt.hour().is_in(list(normalized_hours))
+            )
+
+        # Drop helper column.
+        combined = combined.drop("_ts_et")
+
+        if combined.height == 0:
+            return []
+
+        # ── Vectorized row export (no iter_rows) ──
+        has_vwap = "vwap" in combined.columns
+        col_names = combined.columns
+        ts_idx = col_names.index("timestamp")
+        open_idx = col_names.index("open")
+        high_idx = col_names.index("high")
+        low_idx = col_names.index("low")
+        close_idx = col_names.index("close")
+        vol_idx = col_names.index("volume")
+        vwap_idx = col_names.index("vwap") if has_vwap else -1
 
         bars: List[Dict[str, Any]] = []
-        for row in combined.iter_rows(named=True):
-            market_ts = self._timestamp_to_market(row["timestamp"])
-            market_date = market_ts.date()
-            if market_date < start or market_date > end:
-                continue
-            market_time = market_ts.time()
-            if market_time < session_start or market_time > session_close:
-                continue
-            if (
-                normalized_hours
-                and not regular_session_only
-                and market_ts.hour not in normalized_hours
-            ):
-                continue
+        for idx, row in enumerate(combined.rows()):
+            vwap_val = row[vwap_idx] if has_vwap and vwap_idx >= 0 else None
             bars.append(
                 {
-                    "index": len(bars),
-                    "timestamp": row["timestamp"],
-                    "open": float(row["open"]),
-                    "high": float(row["high"]),
-                    "low": float(row["low"]),
-                    "close": float(row["close"]),
-                    "volume": float(row["volume"]),
-                    "vwap": (
-                        float(row["vwap"])
-                        if "vwap" in row and row["vwap"] is not None
-                        else None
-                    ),
+                    "index": idx,
+                    "timestamp": row[ts_idx],
+                    "open": float(row[open_idx]),
+                    "high": float(row[high_idx]),
+                    "low": float(row[low_idx]),
+                    "close": float(row[close_idx]),
+                    "volume": float(row[vol_idx]),
+                    "vwap": float(vwap_val) if vwap_val is not None else None,
                 }
             )
         return bars
@@ -386,18 +428,28 @@ class DataLoader:
     def get_bars_iterator(self, df: pd.DataFrame):
         """Yield bars one by one for walk-forward simulation."""
         has_vwap = "vwap" in df.columns
-        for idx, row in enumerate(df.itertuples(index=False)):
+        # Pre-extract numpy arrays for vectorized access (avoids per-row
+        # getattr overhead from itertuples).
+        timestamps = df["timestamp"].values
+        opens = df["open"].values
+        highs = df["high"].values
+        lows = df["low"].values
+        closes = df["close"].values
+        volumes = df["volume"].values
+        vwaps = df["vwap"].values if has_vwap else None
+        for idx in range(len(df)):
+            vwap_val = vwaps[idx] if vwaps is not None else None
             yield {
                 "index": idx,
-                "timestamp": row.timestamp,
-                "open": float(row.open),
-                "high": float(row.high),
-                "low": float(row.low),
-                "close": float(row.close),
-                "volume": float(row.volume),
+                "timestamp": timestamps[idx],
+                "open": float(opens[idx]),
+                "high": float(highs[idx]),
+                "low": float(lows[idx]),
+                "close": float(closes[idx]),
+                "volume": float(volumes[idx]),
                 "vwap": (
-                    float(getattr(row, "vwap", 0.0))
-                    if has_vwap and getattr(row, "vwap", None) is not None
+                    float(vwap_val)
+                    if vwap_val is not None and not (isinstance(vwap_val, float) and vwap_val != vwap_val)
                     else None
                 ),
             }

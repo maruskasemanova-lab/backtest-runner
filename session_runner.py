@@ -4,6 +4,7 @@ Session Runner - Orchestrates the connection between data source and strategy ev
 
 import asyncio
 import math
+import os
 import time as time_module
 from datetime import datetime, time, timezone
 from typing import Callable, Dict, Any, List, Optional, Set
@@ -28,19 +29,12 @@ from src.services.session_runner_marker_utils import (
 )
 from src.services.session_runner_intrabar_utils import IntrabarQuoteProvider
 from src.services.session_runner_bar_processing import StrategyBarProcessor
-from src.services.session_runner_payload_utils import (
-    StrategyBarPayloadBuilder,
-    StrategyBarPayloadBuildContext,
-    StrategyBarPayloadInput,
-)
 from src.services.session_runner_models import (
-    Err,
     StrategyBarResponse,
     StrategySignalPayload,
     dump_payload,
     dump_payload_or_none,
     ExecutionLifecycle,
-    Ok,
 )
 from src.services.session_runner_payload_validator import (
     StrategyBarPayloadValidator,
@@ -87,6 +81,11 @@ try:
     import numpy as _np
 except Exception:  # pragma: no cover - numpy may be unavailable in some envs
     _np = None
+
+try:
+    import polars as _pl
+except Exception:  # pragma: no cover - polars may be unavailable in some envs
+    _pl = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SessionRunner")
@@ -232,12 +231,6 @@ class SessionRunner:
             to_utc_datetime=self._to_utc_datetime,
             logger=logger,
         )
-        self._strategy_bar_payload_builder = StrategyBarPayloadBuilder(
-            l2_payload_keys=self.L2_PAYLOAD_KEYS,
-            tcbbo_payload_keys=self.TCBBO_PAYLOAD_KEYS,
-            validate_strategy_bar_payload=self._strategy_bar_payload_validator.validate,
-            logger=logger,
-        )
         # Optional progressive loader state (set by start_run service).
         self._progressive_loading_enabled: bool = False
         self._progressive_loading_complete: bool = True
@@ -256,6 +249,30 @@ class SessionRunner:
         self._on_decision_callbacks: List[Callable[[Dict[str, Any]], Any]] = []
         self._bar_events_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
         self._decision_events_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+        self._bulk_playback_enabled: bool = self._env_flag(
+            "BACKTEST_RUNNER_BULK_PLAYBACK_ENABLED",
+            True,
+        )
+        self._bulk_trade_chunk_size: int = self._env_int(
+            "BACKTEST_RUNNER_BULK_TRADE_CHUNK_SIZE",
+            10_000,
+            minimum=1,
+        )
+        self._bar_update_throttle_seconds: float = self._env_float(
+            "BACKTEST_RUNNER_WS_THROTTLE_MS",
+            100.0,
+            minimum=0.0,
+        ) / 1000.0
+        self._bar_update_progress_step_pct: float = self._env_float(
+            "BACKTEST_RUNNER_WS_PROGRESS_STEP_PCT",
+            2.0,
+            minimum=0.1,
+            maximum=100.0,
+        )
+        self._last_bar_notify_at: Optional[float] = None
+        self._last_bar_notify_progress_bucket: int = -1
+        self._bulk_payload_frame: Optional[Any] = None
+        self._bulk_payload_frame_signature: Optional[tuple[Any, ...]] = None
 
     def on_bar(self, callback: Callable[[Dict[str, Any]], Any]):
         """Register callback for bar updates."""
@@ -332,6 +349,355 @@ class SessionRunner:
             except Exception as e:
                 logger.error(f"Decision callback error: {e}")
 
+    @staticmethod
+    def _env_flag(name: str, default: bool) -> bool:
+        token = str(os.getenv(name, "")).strip().lower()
+        if not token:
+            return bool(default)
+        return token in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _env_int(name: str, default: int, *, minimum: int) -> int:
+        raw_value = os.getenv(name)
+        if raw_value is None:
+            return max(minimum, int(default))
+        try:
+            parsed = int(str(raw_value).strip())
+        except (TypeError, ValueError):
+            return max(minimum, int(default))
+        return max(minimum, parsed)
+
+    @staticmethod
+    def _env_float(
+        name: str,
+        default: float,
+        *,
+        minimum: float,
+        maximum: Optional[float] = None,
+    ) -> float:
+        raw_value = os.getenv(name)
+        if raw_value is None:
+            parsed = float(default)
+        else:
+            try:
+                parsed = float(str(raw_value).strip())
+            except (TypeError, ValueError):
+                parsed = float(default)
+        parsed = max(float(minimum), parsed)
+        if maximum is not None:
+            parsed = min(float(maximum), parsed)
+        return parsed
+
+    def _bar_progress_pct_for_index(self, processed_bar_index: int) -> float:
+        if not self.bars:
+            return 0.0
+        return ((int(processed_bar_index) + 1) / len(self.bars)) * 100.0
+
+    def _mark_bar_notified(self, processed_bar_index: int) -> None:
+        self._last_bar_notify_at = time_module.monotonic()
+        progress_pct = self._bar_progress_pct_for_index(processed_bar_index)
+        if self._bar_update_progress_step_pct <= 0:
+            self._last_bar_notify_progress_bucket = processed_bar_index
+            return
+        self._last_bar_notify_progress_bucket = int(
+            progress_pct / self._bar_update_progress_step_pct
+        )
+
+    def _should_notify_bar_update(self, processed_bar_index: int) -> bool:
+        if self._last_bar_notify_at is None:
+            return True
+        if processed_bar_index >= max(0, len(self.bars) - 1):
+            return True
+        if self._bar_update_throttle_seconds <= 0:
+            return True
+        elapsed = time_module.monotonic() - self._last_bar_notify_at
+        if elapsed >= self._bar_update_throttle_seconds:
+            return True
+        progress_pct = self._bar_progress_pct_for_index(processed_bar_index)
+        progress_bucket = int(progress_pct / self._bar_update_progress_step_pct)
+        return progress_bucket > self._last_bar_notify_progress_bucket
+
+    async def _notify_bar_throttled(
+        self,
+        bar_payload: Dict[str, Any],
+        *,
+        processed_bar_index: int,
+    ) -> None:
+        if not self._should_notify_bar_update(processed_bar_index):
+            return
+        await self._notify_bar(bar_payload)
+        self._mark_bar_notified(processed_bar_index)
+
+    def _resolve_bar_runtime_context(
+        self,
+        bar: Dict[str, Any],
+    ) -> tuple[datetime, bool]:
+        timestamp = bar["timestamp"]
+        if isinstance(timestamp, str):
+            timestamp = datetime.fromisoformat(timestamp)
+        ts_utc = self._to_utc_datetime(timestamp)
+        trade_start_utc = (
+            self._trade_start_time
+            if isinstance(self._trade_start_time, datetime)
+            else None
+        )
+        trade_end_utc = (
+            self._trade_end_time if isinstance(self._trade_end_time, datetime) else None
+        )
+        warmup_only = bool(
+            (trade_start_utc is not None and ts_utc < trade_start_utc)
+            or (trade_end_utc is not None and ts_utc > trade_end_utc)
+        )
+        return timestamp, warmup_only
+
+    async def _emit_session_start_marker_if_needed(
+        self,
+        *,
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        warmup_only: bool,
+    ) -> None:
+        if warmup_only or self._session_start_marker_emitted:
+            return
+        marker = self.decision_tracker.add_session_start(
+            timestamp=timestamp,
+            bar_index=self.current_bar_index,
+            price=bar["close"],
+        )
+        self._attach_market_context(
+            marker,
+            self._build_marker_market_context(bar=bar, timestamp=timestamp),
+        )
+        self._session_start_marker_emitted = True
+        await self._notify_decision(marker.to_dict())
+
+    def _build_live_payload_unvalidated(
+        self,
+        *,
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        warmup_only: bool,
+    ) -> tuple[Dict[str, Any], bool]:
+        consume_pending_entry = self._execution_state_manager.consume_pending_entry()
+        should_attach_intrabar_quotes = self._should_attach_intrabar_quotes(
+            consume_pending_entry
+        )
+        intrabar_quotes = (
+            self._load_intrabar_quotes(timestamp)
+            if should_attach_intrabar_quotes
+            else None
+        )
+        timestamp_token = (
+            timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
+        )
+        payload: Dict[str, Any] = {
+            "run_id": self.config.run_id,
+            "ticker": self.config.ticker,
+            "timestamp": timestamp_token,
+            "open": bar["open"],
+            "high": bar["high"],
+            "low": bar["low"],
+            "close": bar["close"],
+            "volume": bar["volume"],
+            "vwap": bar.get("vwap"),
+        }
+        if warmup_only:
+            payload["warmup_only"] = True
+
+        for key in self.L2_PAYLOAD_KEYS:
+            if key in bar:
+                payload[key] = bar.get(key)
+        for key in self.TCBBO_PAYLOAD_KEYS:
+            if key in bar:
+                payload[key] = bar.get(key)
+
+        if intrabar_quotes:
+            payload["intrabar_quotes_1s"] = [
+                {
+                    "s": quote.get("s"),
+                    "bid": quote.get("bid"),
+                    "ask": quote.get("ask"),
+                }
+                for quote in intrabar_quotes
+                if isinstance(quote, dict)
+            ]
+
+        ref_bar = self.ref_bars_map.get(timestamp_token)
+        if isinstance(ref_bar, dict):
+            payload["ref_ticker"] = ref_bar.get("ticker", "QQQ")
+            payload["ref_open"] = ref_bar.get("open")
+            payload["ref_high"] = ref_bar.get("high")
+            payload["ref_low"] = ref_bar.get("low")
+            payload["ref_close"] = ref_bar.get("close")
+            payload["ref_volume"] = ref_bar.get("volume")
+
+        return payload, consume_pending_entry
+
+    def _bulk_payload_signature(self) -> tuple[Any, ...]:
+        trade_start = (
+            self._trade_start_time.isoformat()
+            if isinstance(self._trade_start_time, datetime)
+            else None
+        )
+        trade_end = (
+            self._trade_end_time.isoformat()
+            if isinstance(self._trade_end_time, datetime)
+            else None
+        )
+        return (
+            len(self.bars),
+            len(self.ref_bars_map),
+            trade_start,
+            trade_end,
+            bool(self._should_attach_intrabar_quotes(False)),
+        )
+
+    def _refresh_bulk_payload_frame_if_needed(self) -> Optional[Any]:
+        if _pl is None:
+            self._bulk_payload_frame = None
+            self._bulk_payload_frame_signature = None
+            return None
+
+        signature = self._bulk_payload_signature()
+        if (
+            self._bulk_payload_frame is not None
+            and self._bulk_payload_frame_signature == signature
+        ):
+            return self._bulk_payload_frame
+
+        should_attach_intrabar_quotes = bool(self._should_attach_intrabar_quotes(False))
+        rows: List[Dict[str, Any]] = []
+        for bar in self.bars:
+            timestamp, warmup_only = self._resolve_bar_runtime_context(bar)
+            timestamp_token = (
+                timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
+            )
+            row: Dict[str, Any] = {
+                "run_id": self.config.run_id,
+                "ticker": self.config.ticker,
+                "timestamp": timestamp_token,
+                "open": bar["open"],
+                "high": bar["high"],
+                "low": bar["low"],
+                "close": bar["close"],
+                "volume": bar["volume"],
+                "vwap": bar.get("vwap"),
+                "warmup_only": bool(warmup_only),
+            }
+            for key in self.L2_PAYLOAD_KEYS:
+                if key in bar:
+                    row[key] = bar.get(key)
+            for key in self.TCBBO_PAYLOAD_KEYS:
+                if key in bar:
+                    row[key] = bar.get(key)
+            if should_attach_intrabar_quotes:
+                intrabar_quotes = self._load_intrabar_quotes(timestamp)
+                if intrabar_quotes:
+                    row["intrabar_quotes_1s"] = [
+                        {
+                            "s": quote.get("s"),
+                            "bid": quote.get("bid"),
+                            "ask": quote.get("ask"),
+                        }
+                        for quote in intrabar_quotes
+                        if isinstance(quote, dict)
+                    ]
+            ref_bar = self.ref_bars_map.get(timestamp_token)
+            if isinstance(ref_bar, dict):
+                row["ref_ticker"] = ref_bar.get("ticker", "QQQ")
+                row["ref_open"] = ref_bar.get("open")
+                row["ref_high"] = ref_bar.get("high")
+                row["ref_low"] = ref_bar.get("low")
+                row["ref_close"] = ref_bar.get("close")
+                row["ref_volume"] = ref_bar.get("volume")
+            rows.append(row)
+
+        try:
+            self._bulk_payload_frame = _pl.DataFrame(
+                rows,
+                infer_schema_length=max(1, min(len(rows), 1_000)),
+            )
+            self._bulk_payload_frame_signature = signature
+        except Exception:
+            self._bulk_payload_frame = None
+            self._bulk_payload_frame_signature = None
+        return self._bulk_payload_frame
+
+    async def _apply_strategy_response(
+        self,
+        *,
+        bar: Dict[str, Any],
+        timestamp: datetime,
+        response_payload: Dict[str, Any],
+        warmup_only: bool,
+        notify_bar: bool,
+        throttle_bar_update: bool,
+    ) -> Dict[str, Any]:
+        result = dict(response_payload or {})
+        self.phase = result.get("phase", self.phase)
+        self._update_execution_state(result)
+
+        if warmup_only:
+            resolved_warnings = self._extract_response_selection_warnings(result)
+            if resolved_warnings is not None:
+                self.selection_warnings = resolved_warnings
+            result["warmup_only"] = True
+        else:
+            await self._process_decision_markers(
+                result,
+                bar,
+                timestamp,
+                response_model=None,
+            )
+
+        processed_bar_index = self.current_bar_index
+        self.current_bar_index += 1
+        final_result = {
+            "success": True,
+            "bar_index": processed_bar_index,
+            "bar": bar,
+            "phase": self.phase,
+            "response": result,
+            "total_bars": len(self.bars),
+            "progress_pct": self._bar_progress_pct_for_index(processed_bar_index),
+            "warmup_only": warmup_only,
+        }
+        self.last_response = final_result
+
+        if isinstance(bar, dict):
+            bar["bar_index"] = processed_bar_index
+            bar["warmup_only"] = bool(warmup_only)
+            self._apply_response_analysis_to_bar(
+                bar,
+                result,
+                processed_bar_index=processed_bar_index,
+                warmup_only=bool(warmup_only),
+                include_debug_log=False,
+            )
+
+        if notify_bar:
+            bar_payload = {
+                **bar,
+                "bar_index": processed_bar_index,
+                "warmup_only": bool(warmup_only),
+            }
+            self._apply_response_analysis_to_bar(
+                bar_payload,
+                result,
+                processed_bar_index=processed_bar_index,
+                warmup_only=bool(warmup_only),
+            )
+            if throttle_bar_update:
+                await self._notify_bar_throttled(
+                    bar_payload,
+                    processed_bar_index=processed_bar_index,
+                )
+            else:
+                await self._notify_bar(bar_payload)
+                self._mark_bar_notified(processed_bar_index)
+
+        return final_result
+
     def load_bars(self, bars: List[Dict[str, Any]]):
         """Load bars for the session."""
         self.bars = bars
@@ -346,6 +712,10 @@ class SessionRunner:
         self.selection_warnings = []
         self._execution_state_manager.reset_flat()
         self._intrabar_quote_cache.clear()
+        self._last_bar_notify_at = None
+        self._last_bar_notify_progress_bucket = -1
+        self._bulk_payload_frame = None
+        self._bulk_payload_frame_signature = None
         self._drain_queue(self._bar_events_queue)
         self._drain_queue(self._decision_events_queue)
         logger.info(f"Loaded {len(bars)} bars for session")
@@ -365,6 +735,10 @@ class SessionRunner:
         self._session_start_marker_emitted = False
         self._execution_state_manager.reset_flat()
         self._intrabar_quote_cache.clear()
+        self._last_bar_notify_at = None
+        self._last_bar_notify_progress_bucket = -1
+        self._bulk_payload_frame = None
+        self._bulk_payload_frame_signature = None
         self._drain_queue(self._bar_events_queue)
         self._drain_queue(self._decision_events_queue)
         self.decision_tracker = DecisionTracker(
@@ -884,130 +1258,35 @@ class SessionRunner:
             self.phase = "ERROR"
             self.is_running = False
             return result
-
-        response_model = result.pop("_response_model", None)
-        self.current_bar_index += 1
-        self.last_response = result
-        processed_bar_index = self.current_bar_index - 1
-
-        # Persist UI-facing per-bar analysis onto the processed bar itself so
-        # snapshot/poll-based consumers (/bars endpoint) can scrub historical
-        # conditions, not only live WebSocket callbacks.
-        if isinstance(bar, dict):
-            bar["bar_index"] = processed_bar_index
-            bar["warmup_only"] = bool(result.get("warmup_only", False))
-            api_response = (
-                response_model
-                if response_model is not None
-                else (result.get("response") if isinstance(result, dict) else None)
-            )
-            self._apply_response_analysis_to_bar(
-                bar,
-                api_response,
-                processed_bar_index=processed_bar_index,
-                warmup_only=bool(result.get("warmup_only", False)),
-                include_debug_log=False,
-            )
-
-        # Notify callbacks if requested
-        if notify:
-            bar_payload = {
-                **bar,
-                "bar_index": processed_bar_index,
-                "warmup_only": bool(result.get("warmup_only", False)),
-            }
-            api_response = (
-                response_model
-                if response_model is not None
-                else (result.get("response") if isinstance(result, dict) else None)
-            )
-            self._apply_response_analysis_to_bar(
-                bar_payload,
-                api_response,
-                processed_bar_index=processed_bar_index,
-                warmup_only=bool(result.get("warmup_only", False)),
-            )
-            await self._notify_bar(bar_payload)
-
-        return result
+        return await self._apply_strategy_response(
+            bar=bar,
+            timestamp=result["timestamp"],
+            response_payload=dict(result.get("response") or {}),
+            warmup_only=bool(result.get("warmup_only", False)),
+            notify_bar=bool(notify),
+            throttle_bar_update=False,
+        )
 
     async def _process_bar(self, bar: Dict[str, Any]) -> Dict[str, Any]:
         """Send bar to strategy evaluator and process response."""
-        timestamp = bar["timestamp"]
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp)
-        ts_utc = self._to_utc_datetime(timestamp)
-        trade_start_utc = (
-            self._trade_start_time
-            if isinstance(self._trade_start_time, datetime)
-            else None
+        timestamp, warmup_only = self._resolve_bar_runtime_context(bar)
+        await self._emit_session_start_marker_if_needed(
+            bar=bar,
+            timestamp=timestamp,
+            warmup_only=warmup_only,
         )
-        trade_end_utc = (
-            self._trade_end_time if isinstance(self._trade_end_time, datetime) else None
-        )
-        warmup_only = bool(
-            (trade_start_utc is not None and ts_utc < trade_start_utc)
-            or (trade_end_utc is not None and ts_utc > trade_end_utc)
-        )
-
-        # First bar - add session start marker
-        if not warmup_only and not self._session_start_marker_emitted:
-            marker = self.decision_tracker.add_session_start(
-                timestamp=timestamp,
-                bar_index=self.current_bar_index,
-                price=bar["close"],
-            )
-            self._attach_market_context(
-                marker,
-                self._build_marker_market_context(bar=bar, timestamp=timestamp),
-            )
-            self._session_start_marker_emitted = True
-            await self._notify_decision(marker.to_dict())
-
-        # Send to strategy API
-        # Pending signal is consumed at this bar open (fill or reject).
-        consume_pending_entry = self._execution_state_manager.consume_pending_entry()
-        should_attach_intrabar_quotes = self._should_attach_intrabar_quotes(
-            consume_pending_entry
-        )
-        intrabar_quotes = (
-            self._load_intrabar_quotes(timestamp)
-            if should_attach_intrabar_quotes
-            else None
-        )
-        validated_payload = self._strategy_bar_payload_builder.build_validated_live_payload(
-            payload_input=StrategyBarPayloadInput(
-                run_id=self.config.run_id,
-                ticker=self.config.ticker,
+        try:
+            payload, consume_pending_entry = self._build_live_payload_unvalidated(
                 bar=bar,
                 timestamp=timestamp,
                 warmup_only=warmup_only,
-                current_bar_index=self.current_bar_index,
-                include_pending_entry=consume_pending_entry,
-            ),
-            build_context=StrategyBarPayloadBuildContext(
-                ref_bars_map=self.ref_bars_map,
-                should_attach_intrabar_quotes=should_attach_intrabar_quotes,
-                intrabar_recalc_enabled=bool(
-                    getattr(self.config, "intrabar_execution_recalc_1s", False)
-                ),
-                l2_manager_name=(
-                    type(self.l2_manager).__name__ if self.l2_manager else None
-                ),
-                intrabar_quotes_1s=intrabar_quotes,
-            ),
-        )
-        match validated_payload:
-            case Ok(value=payload):
-                pass
-            case Err(error=error_text):
-                if consume_pending_entry:
-                    self._pending_entry = True
-                return {
-                    "success": False,
-                    "error": f"Payload validation error: {error_text}",
-                    "bar_index": self.current_bar_index,
-                }
+            )
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": f"Payload build error: {str(exc)}",
+                "bar_index": self.current_bar_index,
+            }
 
         processed_result = await self._strategy_bar_processor.process(payload=payload)
         if not processed_result.success:
@@ -1018,39 +1297,13 @@ class SessionRunner:
                 "error": str(processed_result.error or "unknown error"),
                 "bar_index": self.current_bar_index,
             }
-        result = dict(processed_result.response_payload or {})
-        result_model = processed_result.response_model
-
-        # Update phase
-        self.phase = result.get("phase", self.phase)
-        self._update_execution_state(result)
-
-        # Process decision markers from response
-        if warmup_only:
-            resolved_warnings = self._extract_response_selection_warnings(
-                result_model or result
-            )
-            if resolved_warnings is not None:
-                self.selection_warnings = resolved_warnings
-            result["warmup_only"] = True
-        else:
-            await self._process_decision_markers(
-                result,
-                bar,
-                timestamp,
-                response_model=result_model,
-            )
 
         return {
             "success": True,
-            "bar_index": self.current_bar_index,
             "bar": bar,
-            "phase": self.phase,
-            "response": result,
-            "total_bars": len(self.bars),
-            "progress_pct": (self.current_bar_index + 1) / len(self.bars) * 100,
+            "timestamp": timestamp,
+            "response": dict(processed_result.response_payload or {}),
             "warmup_only": warmup_only,
-            "_response_model": result_model,
         }
 
     async def _process_decision_markers(
@@ -1620,12 +1873,149 @@ class SessionRunner:
         """Generate human-readable explanation for regime detection."""
         return generate_regime_explanation(response)
 
+    def _bulk_range_end(self, *, warmup_only: bool) -> int:
+        if self.current_bar_index >= len(self.bars):
+            return self.current_bar_index
+        limit = len(self.bars)
+        max_chunk_size = (
+            limit if warmup_only else max(1, int(self._bulk_trade_chunk_size))
+        )
+        end_index = self.current_bar_index
+        while end_index < limit:
+            _, bar_warmup_only = self._resolve_bar_runtime_context(self.bars[end_index])
+            if bool(bar_warmup_only) != bool(warmup_only):
+                break
+            if not warmup_only and (end_index - self.current_bar_index) >= max_chunk_size:
+                break
+            end_index += 1
+        return end_index
+
+    async def _process_bulk_range(
+        self,
+        *,
+        start_index: int,
+        end_index: int,
+    ) -> Dict[str, Any]:
+        if end_index <= start_index:
+            return {"success": True, "processed_count": 0}
+
+        prepared: List[Dict[str, Any]] = []
+        pending_entry_before_chunk = self._pending_entry
+        for index in range(start_index, end_index):
+            bar = self.bars[index]
+            timestamp, warmup_only = self._resolve_bar_runtime_context(bar)
+            self._execution_state_manager.consume_pending_entry()
+            await self._emit_session_start_marker_if_needed(
+                bar=bar,
+                timestamp=timestamp,
+                warmup_only=warmup_only,
+            )
+            prepared.append(
+                {
+                    "bar": bar,
+                    "timestamp": timestamp,
+                    "warmup_only": warmup_only,
+                }
+            )
+
+        payload_frame = self._refresh_bulk_payload_frame_if_needed()
+        batch_result: Any
+        if payload_frame is not None:
+            batch_result = await self._strategy_bar_processor.process_batch_frame(
+                payload_frame=payload_frame.slice(start_index, end_index - start_index),
+            )
+        else:
+            payloads: List[Dict[str, Any]] = []
+            try:
+                for prepared_item in prepared:
+                    payload, _consume_pending_entry = self._build_live_payload_unvalidated(
+                        bar=prepared_item["bar"],
+                        timestamp=prepared_item["timestamp"],
+                        warmup_only=bool(prepared_item["warmup_only"]),
+                    )
+                    payloads.append(payload)
+            except Exception as exc:
+                self._pending_entry = pending_entry_before_chunk
+                return {
+                    "success": False,
+                    "error": f"Bulk payload build error: {str(exc)}",
+                    "bar_index": self.current_bar_index,
+                }
+            batch_result = await self._strategy_bar_processor.process_batch(payloads=payloads)
+        if getattr(batch_result, "fallback_to_single", False):
+            self._pending_entry = pending_entry_before_chunk
+            last_result: Optional[Dict[str, Any]] = None
+            while self.current_bar_index < end_index:
+                last_result = await self.step(notify=True)
+                if not bool(last_result.get("success")):
+                    return last_result
+            return {
+                "success": True,
+                "processed_count": end_index - start_index,
+                "last_result": last_result or {},
+                "phase": self.phase,
+            }
+        if not batch_result.success:
+            self._pending_entry = pending_entry_before_chunk
+            return {
+                "success": False,
+                "error": str(batch_result.error or "unknown error"),
+                "bar_index": self.current_bar_index,
+            }
+
+        response_payloads = list(batch_result.response_payloads or [])
+        if len(response_payloads) != len(prepared):
+            self._pending_entry = pending_entry_before_chunk
+            return {
+                "success": False,
+                "error": (
+                    "Strategy batch response size mismatch: "
+                    f"expected {len(prepared)}, got {len(response_payloads)}"
+                ),
+                "bar_index": self.current_bar_index,
+            }
+
+        last_result: Optional[Dict[str, Any]] = None
+        for prepared_item, response_payload in zip(prepared, response_payloads):
+            last_result = await self._apply_strategy_response(
+                bar=prepared_item["bar"],
+                timestamp=prepared_item["timestamp"],
+                response_payload=response_payload,
+                warmup_only=bool(prepared_item["warmup_only"]),
+                notify_bar=True,
+                throttle_bar_update=True,
+            )
+
+        return {
+            "success": True,
+            "processed_count": len(prepared),
+            "last_result": last_result or {},
+            "phase": self.phase,
+        }
+
+    async def bulk_warmup(self) -> Dict[str, Any]:
+        """Process the current contiguous warmup segment in one strategy request."""
+        end_index = self._bulk_range_end(warmup_only=True)
+        return await self._process_bulk_range(
+            start_index=self.current_bar_index,
+            end_index=end_index,
+        )
+
+    async def bulk_trade(self) -> Dict[str, Any]:
+        """Process the current trading segment in chunked strategy requests."""
+        end_index = self._bulk_range_end(warmup_only=False)
+        return await self._process_bulk_range(
+            start_index=self.current_bar_index,
+            end_index=end_index,
+        )
+
     async def run_all(self, speed_ms=100) -> Dict[str, Any]:
         """Run through all bars with a simple, predictable delay per bar.
 
         - Strings like "10hz" are converted to milliseconds (100ms for 10hz).
-        - "max"/0/None means no intentional delay (but we still yield to the loop).
-        - Always notifies every processed bar so the UI progress moves smoothly.
+        - "max"/0/None means no intentional delay.
+        - Zero-delay playback uses chunked batch transport to reduce HTTP overhead.
+        - Delayed playback stays bar-by-bar so pause/resume semantics remain exact.
         """
         self.is_running = True
         self.is_paused = False
@@ -1652,6 +2042,7 @@ class SessionRunner:
         logger.info(
             f"Starting run_all with normalized delay {delay_seconds:.4f}s per bar (raw={speed_ms})"
         )
+        use_bulk_playback = bool(self._bulk_playback_enabled) and delay_seconds <= 0
 
         while self.is_running:
             if self.is_paused:
@@ -1660,7 +2051,18 @@ class SessionRunner:
 
             if self.current_bar_index < len(self.bars):
                 self._progressive_wait_started_at = None
-                step_result = await self.step(notify=True)
+                step_result: Dict[str, Any]
+                if use_bulk_playback:
+                    _, warmup_only = self._resolve_bar_runtime_context(
+                        self.bars[self.current_bar_index]
+                    )
+                    step_result = (
+                        await self.bulk_warmup()
+                        if warmup_only
+                        else await self.bulk_trade()
+                    )
+                else:
+                    step_result = await self.step(notify=True)
                 if not bool(step_result.get("success")):
                     logger.error(
                         "Stopping run_all after step failure at bar_index=%s: %s",

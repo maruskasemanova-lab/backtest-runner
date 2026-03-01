@@ -6379,3 +6379,137 @@ body {
     grid-template-rows: 1fr auto;
   }
 }
+
+/* ============ Unified Config Dialog ============ */
+
+.unified-config-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background-color: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.unified-config-shell {
+  width: 95vw;
+  height: 95vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--sidebar-bg-subtle);
+  border-color: var(--sidebar-border);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 8px 48px rgba(0, 0, 0, 0.4);
+}
+
+.unified-config-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Sidebar ── */
+
+.unified-config-sidebar {
+  width: 220px;
+  min-width: 220px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-color);
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.unified-config-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  font-family: inherit;
+}
+
+.unified-config-sidebar-item:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.unified-config-sidebar-item.active {
+  color: var(--text-primary);
+  border-left-color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.08);
+  font-weight: 600;
+}
+
+.unified-config-sidebar-icon {
+  font-size: 0.9rem;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.unified-config-sidebar-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Content area ── */
+
+.unified-config-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+/* ── Section headers ── */
+
+.unified-config-section-header {
+  margin-bottom: 12px;
+}
+
+.unified-config-section-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+
+.unified-config-section-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+/* ── Responsive: collapse sidebar on small screens ── */
+
+@media (max-width: 768px) {
+  .unified-config-sidebar {
+    display: none;
+  }
+
+  .unified-config-content {
+    padding: 16px;
+    gap: 28px;
+  }
+}

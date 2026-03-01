@@ -4,9 +4,11 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-import aiohttp
-
 from src.services.strategy_api_auth_headers import build_strategy_api_headers
+from src.services.strategy_api_transport import (
+    normalize_strategy_api_base_url,
+    open_strategy_api_session,
+)
 from src.services.strategy_api_types import StrategyApiIntegrationDeps
 
 
@@ -23,10 +25,6 @@ def _parse_positive_float_env(name: str, default: float) -> float:
 _STRATEGY_API_TIMEOUT_SECONDS = _parse_positive_float_env(
     "BACKTEST_STRATEGY_API_TIMEOUT_SECONDS",
     6.0,
-)
-_STRATEGY_API_CLIENT_TIMEOUT = aiohttp.ClientTimeout(
-    total=_STRATEGY_API_TIMEOUT_SECONDS,
-    connect=min(_STRATEGY_API_TIMEOUT_SECONDS, 3.0),
 )
 
 
@@ -265,12 +263,15 @@ async def configure_session(
                 params[str(key)] = json.dumps(value, separators=(",", ":"))
             else:
                 params[str(key)] = str(value)
+    base_url = normalize_strategy_api_base_url(strategy_api_url)
     try:
-        async with aiohttp.ClientSession(
-            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        async with open_strategy_api_session(
+            strategy_api_url=strategy_api_url,
+            timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+            connect_timeout_seconds=3.0,
         ) as session:
             async with session.post(
-                f"{strategy_api_url}/api/session/config",
+                f"{base_url}/api/session/config",
                 params=params,
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
@@ -289,10 +290,11 @@ async def clear_remote_strategy_sessions(
     deps: StrategyApiIntegrationDeps,
 ) -> None:
     normalized_ticker = ticker.upper()
+    base_url = normalize_strategy_api_base_url(strategy_api_url)
 
-    async def _clear_v2(session: aiohttp.ClientSession) -> None:
+    async def _clear_v2(session: Any) -> None:
         async with session.delete(
-            f"{strategy_api_url}/api/session/run",
+            f"{base_url}/api/session/run",
             params={"run_id": run_id, "ticker": normalized_ticker},
             headers=_strategy_api_headers(strategy_api_url),
         ) as resp:
@@ -302,8 +304,10 @@ async def clear_remote_strategy_sessions(
                 )
 
     try:
-        async with aiohttp.ClientSession(
-            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        async with open_strategy_api_session(
+            strategy_api_url=strategy_api_url,
+            timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+            connect_timeout_seconds=3.0,
         ) as session:
             await _clear_v2(session)
     except Exception as exc:
@@ -316,6 +320,7 @@ async def reset_remote_orchestrator_state(
     strategy_api_url: str,
     deps: StrategyApiIntegrationDeps,
 ) -> Dict[str, Any]:
+    base_url = normalize_strategy_api_base_url(strategy_api_url)
     detail: Dict[str, Any] = {
         "success": False,
         "scope": "all",
@@ -327,11 +332,13 @@ async def reset_remote_orchestrator_state(
         "error": None,
     }
     try:
-        async with aiohttp.ClientSession(
-            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        async with open_strategy_api_session(
+            strategy_api_url=strategy_api_url,
+            timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+            connect_timeout_seconds=3.0,
         ) as session:
             async with session.post(
-                f"{strategy_api_url}/api/orchestrator/reset",
+                f"{base_url}/api/orchestrator/reset",
                 params={"scope": "all", "clear_sessions": "true"},
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
@@ -369,6 +376,7 @@ async def reset_remote_orchestrator_state_scoped(
     deps: StrategyApiIntegrationDeps,
 ) -> Dict[str, Any]:
     normalized_scope = str(scope or "session").strip().lower() or "session"
+    base_url = normalize_strategy_api_base_url(strategy_api_url)
     detail: Dict[str, Any] = {
         "success": False,
         "scope": normalized_scope,
@@ -380,11 +388,13 @@ async def reset_remote_orchestrator_state_scoped(
         "error": None,
     }
     try:
-        async with aiohttp.ClientSession(
-            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        async with open_strategy_api_session(
+            strategy_api_url=strategy_api_url,
+            timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+            connect_timeout_seconds=3.0,
         ) as session:
             async with session.post(
-                f"{strategy_api_url}/api/orchestrator/reset",
+                f"{base_url}/api/orchestrator/reset",
                 params={"scope": normalized_scope, "clear_sessions": "true"},
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
@@ -425,12 +435,15 @@ async def apply_orchestrator_config(
     """Best-effort update of remote orchestrator runtime config."""
     if not isinstance(config, dict) or not config:
         return {}
+    base_url = normalize_strategy_api_base_url(strategy_api_url)
     try:
-        async with aiohttp.ClientSession(
-            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        async with open_strategy_api_session(
+            strategy_api_url=strategy_api_url,
+            timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+            connect_timeout_seconds=3.0,
         ) as session:
             async with session.post(
-                f"{strategy_api_url}/api/orchestrator/config",
+                f"{base_url}/api/orchestrator/config",
                 json=config,
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
@@ -453,12 +466,15 @@ async def load_remote_checkpoint(
     checkpoint_path: str,
     deps: StrategyApiIntegrationDeps,
 ) -> Optional[Dict]:
+    base_url = normalize_strategy_api_base_url(strategy_api_url)
     try:
-        async with aiohttp.ClientSession(
-            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        async with open_strategy_api_session(
+            strategy_api_url=strategy_api_url,
+            timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+            connect_timeout_seconds=3.0,
         ) as session:
             async with session.post(
-                f"{strategy_api_url}/api/orchestrator/checkpoint/load",
+                f"{base_url}/api/orchestrator/checkpoint/load",
                 params={"path": checkpoint_path},
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
@@ -481,6 +497,7 @@ async def save_remote_checkpoint(
     date_to: str,
     deps: StrategyApiIntegrationDeps,
 ) -> Optional[str]:
+    base_url = normalize_strategy_api_base_url(strategy_api_url)
     try:
         params = {
             key: value
@@ -492,11 +509,13 @@ async def save_remote_checkpoint(
             }.items()
             if value
         }
-        async with aiohttp.ClientSession(
-            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        async with open_strategy_api_session(
+            strategy_api_url=strategy_api_url,
+            timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+            connect_timeout_seconds=3.0,
         ) as session:
             async with session.post(
-                f"{strategy_api_url}/api/orchestrator/checkpoint/save",
+                f"{base_url}/api/orchestrator/checkpoint/save",
                 params=params,
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:

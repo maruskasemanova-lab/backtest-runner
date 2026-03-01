@@ -43,6 +43,7 @@ describe("useRunConfigProfiles unified-only flow", () => {
       useRunConfigProfiles({
         ticker: "MU",
         strategyApiUrl: "http://localhost:8001",
+        authToken: "",
         activeProfileSentinel: "__ACTIVE__",
         normalizeProfileRefToken,
         normalizeAosTickerConfig,
@@ -85,6 +86,7 @@ describe("useRunConfigProfiles unified-only flow", () => {
       useRunConfigProfiles({
         ticker: "MU",
         strategyApiUrl: "http://localhost:8001",
+        authToken: "",
         activeProfileSentinel: "__ACTIVE__",
         normalizeProfileRefToken,
         normalizeAosTickerConfig,
@@ -135,6 +137,7 @@ describe("useRunConfigProfiles unified-only flow", () => {
       useRunConfigProfiles({
         ticker: "MU",
         strategyApiUrl: "http://localhost:8001",
+        authToken: "",
         activeProfileSentinel: "__ACTIVE__",
         normalizeProfileRefToken,
         normalizeAosTickerConfig,
@@ -159,5 +162,67 @@ describe("useRunConfigProfiles unified-only flow", () => {
     expect(result.current.selectedUnifiedProfileId).toBe("u1");
     expect(result.current.unifiedProfilesResolved).toBe(true);
     expect(result.current.unifiedProfilesError).toBe("Failed to load unified profiles.");
+  });
+
+  it("adds Authorization header to unified profile calls when auth token is present", async () => {
+    const hydrateExecutionConfigFromPositioning = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/aos-config/MU") {
+        return responseJson({});
+      }
+      if (url === "/api/profiles/MU") {
+        return responseJson({
+          ticker: "MU",
+          profiles: [{ profile_id: "u1", profile_name: "Unified 1" }],
+          active_profile_id: "u1",
+        });
+      }
+      if (url === "/api/profiles/apply") {
+        return responseJson({ success: true });
+      }
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() =>
+      useRunConfigProfiles({
+        ticker: "MU",
+        strategyApiUrl: "http://localhost:8001",
+        authToken: "test-token",
+        activeProfileSentinel: "__ACTIVE__",
+        normalizeProfileRefToken,
+        normalizeAosTickerConfig,
+        hydrateExecutionConfigFromPositioning,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.unifiedProfilesLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.applyUnifiedProfile("MU", "u1", {
+        applyNow: true,
+        applyExecution: true,
+      });
+    });
+
+    const profileFetchCall = fetchMock.mock.calls.find(
+      (args) => String(args[0]) === "/api/profiles/MU",
+    );
+    expect(profileFetchCall?.[1]).toMatchObject({
+      headers: { Authorization: "Bearer test-token" },
+    });
+
+    const applyFetchCall = fetchMock.mock.calls.find(
+      (args) => String(args[0]) === "/api/profiles/apply",
+    );
+    expect(applyFetchCall?.[1]).toMatchObject({
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-token",
+      },
+    });
   });
 });

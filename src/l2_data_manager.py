@@ -87,20 +87,29 @@ class L2DataManager:
     ) -> Tuple[bool, List[Dict[str, Any]]]:
         if pl is None:
             raise RuntimeError("polars is required for precomputed L2 parquet reads")
-        available = set(self._parquet_schema_columns(file_path))
+        lazy_frame = scan_parquet_compat(file_path)
+        # Single schema introspection (avoid separate _parquet_schema_columns call).
+        schema = lazy_frame.collect_schema()
+        try:
+            available = set(str(name) for name in schema.names())
+        except Exception:
+            available = set(str(name) for name in dict(schema).keys())
         if "minute_key" not in available:
             return False, []
 
-        lazy_frame = scan_parquet_compat(file_path).with_columns(
+        lazy_frame = lazy_frame.with_columns(
             pl.col("minute_key").cast(pl.Int64, strict=False).alias("minute_key")
         )
-        lazy_frame = lazy_frame.filter(pl.col("minute_key").is_not_null())
         lazy_frame = lazy_frame.filter(
-            (pl.col("minute_key") >= minute_start) & (pl.col("minute_key") <= minute_end)
+            pl.col("minute_key").is_not_null()
+            & (pl.col("minute_key") >= minute_start)
+            & (pl.col("minute_key") <= minute_end)
         )
         lazy_frame = lazy_frame.sort("minute_key")
         frame = self._collect_polars_frame(lazy_frame)
-        return True, list(frame.iter_rows(named=True))
+        # to_dicts() is equivalent to iter_rows(named=True) but avoids
+        # iterator overhead for small result sets.
+        return True, frame.to_dicts()
 
     @staticmethod
     def _parse_positive_int_env(name: str, default: int) -> int:
@@ -206,10 +215,10 @@ class L2DataManager:
             0
         ]  # Backward compatibility for callers that inspect this attr.
         self.max_cached_tickers = self._parse_positive_int_env(
-            "BACKTEST_L2_CACHE_MAX_TICKERS", 1
+            "BACKTEST_L2_CACHE_MAX_TICKERS", 2
         )
         self.max_cached_rows = self._parse_positive_int_env(
-            "BACKTEST_L2_CACHE_MAX_ROWS", 2_000_000
+            "BACKTEST_L2_CACHE_MAX_ROWS", 5_000_000
         )
         self.max_cached_bytes = self._parse_positive_int_env(
             "BACKTEST_L2_CACHE_MAX_BYTES",

@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   type Dispatch,
   type SetStateAction,
 } from "react";
@@ -150,6 +151,35 @@ export function useStrategyAnalyzerRangeScrub({
   // Clamp offset when progressedMaxOffset shrinks (e.g. range change).
   // Depends on primitives from rangeScrubBase -> no object-identity loop.
   const progressedMaxOffset = rangeScrubBase?.progressedMaxOffset ?? 0;
+  const previousProgressedMaxOffsetRef = useRef(0);
+  const hasObservedProgressedMaxRef = useRef(false);
+
+  // Keep tail-follow behavior even when playback has just stopped:
+  // if user was already on the previous end and new bars arrive late
+  // (poll sync after is_running=false), advance to the new end.
+  useEffect(() => {
+    if (!rangeScrubBase) {
+      previousProgressedMaxOffsetRef.current = 0;
+      hasObservedProgressedMaxRef.current = false;
+      return;
+    }
+    const previousMax = previousProgressedMaxOffsetRef.current;
+    if (!hasObservedProgressedMaxRef.current) {
+      hasObservedProgressedMaxRef.current = true;
+      previousProgressedMaxOffsetRef.current = progressedMaxOffset;
+      return;
+    }
+    previousProgressedMaxOffsetRef.current = progressedMaxOffset;
+    if (progressedMaxOffset <= previousMax) return;
+
+    setRangeScrubOffset((prev) => {
+      const prevClamped = Math.max(0, Math.min(prev, previousMax));
+      const wasFollowingTail = prevClamped >= Math.max(0, previousMax - 1);
+      if (!wasFollowingTail) return prev;
+      return progressedMaxOffset;
+    });
+  }, [rangeScrubBase, progressedMaxOffset, setRangeScrubOffset]);
+
   useEffect(() => {
     if (!rangeScrubBase) {
       setRangeScrubOffset(0);

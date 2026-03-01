@@ -33,12 +33,6 @@ class _ClientSessionStub:
     def __init__(self, captured: Dict[str, Any]):
         self._captured = captured
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
     def post(self, url: str, **kwargs: Any) -> _PostResponse:
         self._captured["url"] = url
         self._captured["params"] = dict(kwargs.get("params") or {})
@@ -46,19 +40,32 @@ class _ClientSessionStub:
         return _PostResponse(status=200)
 
 
+class _SessionContext:
+    def __init__(self, captured: Dict[str, Any]):
+        self._captured = captured
+
+    async def __aenter__(self) -> _ClientSessionStub:
+        return _ClientSessionStub(self._captured)
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+
 def test_configure_session_forwards_extra_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: Dict[str, Any] = {}
 
-    def _session_factory(*args: Any, **kwargs: Any) -> _ClientSessionStub:
-        return _ClientSessionStub(captured)
+    def _open_session(**kwargs: Any) -> _SessionContext:
+        _ = kwargs
+        return _SessionContext(captured)
 
-    monkeypatch.setattr(svc.aiohttp, "ClientSession", _session_factory)
+    monkeypatch.setattr(svc, "open_strategy_api_session", _open_session)
     request = StartRunRequest(
         run_id="cfg-session",
         ticker="MU",
         date="2026-02-10",
+        partial_protect_min_mfe_r=0.0,
         context_aware_risk_enabled=True,
         intraday_levels_spike_detection_enabled=True,
         strategy_selection_mode="adaptive_top_n",
@@ -82,6 +89,6 @@ def test_configure_session_forwards_extra_params(
     assert captured.get("url") == "http://localhost:8001/api/session/config"
     assert params.get("intraday_levels_spike_detection_enabled") == 1
     assert params.get("context_aware_risk_enabled") == 1
-    assert params.get("context_risk_min_sl_pct") == 0.3
+    assert params.get("context_risk_min_sl_pct") == 0.5
     assert params.get("context_risk_min_room_pct") == 0.08
     assert params.get("extra_blob") == '{"mode":"test"}'

@@ -174,6 +174,7 @@ export function useRunConfigState({
   } = useRunConfigProfiles({
     ticker: config.ticker,
     strategyApiUrl: config.strategy_api_url,
+    authToken,
     activeProfileSentinel: ACTIVE_UNIFIED_PROFILE_SENTINEL,
     normalizeProfileRefToken,
     normalizeAosTickerConfig,

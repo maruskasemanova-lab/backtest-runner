@@ -120,13 +120,13 @@ def clear_start_run_data_caches(*, include_disk: bool = False) -> None:
                     continue
 
 
-def _cache_get(cache: OrderedDict, key: str) -> Any:
+def _cache_get(cache: OrderedDict, key: str, *, copy: bool = True) -> Any:
     with _CACHE_LOCK:
         value = cache.get(key)
         if value is None:
             return None
         cache.move_to_end(key)
-        return deepcopy(value)
+        return deepcopy(value) if copy else value
 
 
 def _cache_set(
@@ -202,7 +202,8 @@ def _disk_cache_get(cache_dir: Path, key: str) -> Any:
         with cache_path.open("rb") as handle:
             payload = pickle.load(handle)
         os.utime(cache_path, None)
-        return deepcopy(payload)
+        # pickle.load already produces a fresh object — skip redundant deepcopy.
+        return payload
     except Exception:
         try:
             cache_path.unlink()
@@ -716,7 +717,10 @@ def _try_load_cached_base_bars(
     regular_session_only: bool,
     logger: Any,
 ) -> Tuple[List[Dict[str, Any]], List[str]] | None:
-    cached_bars_payload = _cache_get(_BASE_BARS_CACHE, cache_context.cache_key)
+    # Skip deepcopy on exact-key hit — bars are read-only after load.
+    cached_bars_payload = _cache_get(
+        _BASE_BARS_CACHE, cache_context.cache_key, copy=False
+    )
     if cached_bars_payload is not None:
         cached_bars, cached_files = cached_bars_payload
         logger.info(
@@ -1230,7 +1234,10 @@ def _try_load_cached_reference_bars(
     range_end: str,
     logger: Any,
 ) -> Dict[str, Any] | None:
-    cached_ref_map = _cache_get(_REFERENCE_BARS_CACHE, cache_context.cache_key)
+    # Skip deepcopy — ref bars are read-only after load.
+    cached_ref_map = _cache_get(
+        _REFERENCE_BARS_CACHE, cache_context.cache_key, copy=False
+    )
     if cached_ref_map is not None:
         logger.info(
             "Using cached QQQ reference bars for %s %s..%s (%d bars)",

@@ -2,15 +2,63 @@ import React from "react";
 import { StartModeSettings } from "./run-config/StartModeSettings";
 import { useRunConfigState, UseRunConfigStateProps } from "./run-config/useRunConfigState";
 import RunConfigRunningInfo from "./run-config/RunConfigRunningInfo";
-import { FullscreenConfigDialog } from "./FullscreenConfigDialog";
+import { UnifiedConfigDialog } from "./unified-config/UnifiedConfigDialog";
 import {
   ACTIVE_UNIFIED_PROFILE_SENTINEL,
+  formatUnifiedProfileLabel,
   SHOW_RUN_CONFIG_ADVANCED_EXECUTION_CONTROLS,
 } from "./run-config/runConfigHelpers";
 
 export default function RunConfig(props: UseRunConfigStateProps) {
   const state = useRunConfigState(props);
   const [showFullscreenConfig, setShowFullscreenConfig] = React.useState(false);
+  const unifiedProfiles = React.useMemo(
+    () => (Array.isArray(state.unifiedProfiles) ? state.unifiedProfiles : []),
+    [state.unifiedProfiles]
+  );
+  const activeUnifiedProfile = React.useMemo(() => {
+    const activeProfileId = String(state.activeUnifiedProfileId || "").trim();
+    if (!activeProfileId) return null;
+    return (
+      unifiedProfiles.find(
+        (profile: any) => String(profile?.profile_id || "").trim() === activeProfileId
+      ) || null
+    );
+  }, [state.activeUnifiedProfileId, unifiedProfiles]);
+  const activeUnifiedProfileOptionLabel = React.useMemo(() => {
+    if (state.unifiedProfilesLoading) return "Loading available profiles...";
+    const activeProfileId = String(state.activeUnifiedProfileId || "").trim();
+    if (!activeProfileId) return "Use active unified profile (none)";
+    const activeProfileName = String(activeUnifiedProfile?.profile_name || "").trim();
+    const labelToken = activeProfileName || activeProfileId;
+    return `Use active unified profile (${labelToken})`;
+  }, [activeUnifiedProfile, state.activeUnifiedProfileId, state.unifiedProfilesLoading]);
+  const resolvedUnifiedProfileId = React.useMemo(() => {
+    const selectedProfileId = String(state.selectedUnifiedProfileId || "").trim();
+    if (selectedProfileId && selectedProfileId !== ACTIVE_UNIFIED_PROFILE_SENTINEL) {
+      return selectedProfileId;
+    }
+    const activeProfileId = String(state.activeUnifiedProfileId || "").trim();
+    if (activeProfileId) return activeProfileId;
+    return String(state.effectiveSnapshot?.effectiveUnifiedProfileId || "").trim();
+  }, [
+    state.activeUnifiedProfileId,
+    state.effectiveSnapshot?.effectiveUnifiedProfileId,
+    state.selectedUnifiedProfileId,
+  ]);
+  const resolvedUnifiedProfile = React.useMemo(() => {
+    if (!resolvedUnifiedProfileId) return null;
+    return (
+      unifiedProfiles.find(
+        (profile: any) => String(profile?.profile_id || "").trim() === resolvedUnifiedProfileId
+      ) || null
+    );
+  }, [resolvedUnifiedProfileId, unifiedProfiles]);
+  const resolvedUnifiedProfileName = React.useMemo(() => {
+    const explicitName = String(resolvedUnifiedProfile?.profile_name || "").trim();
+    if (explicitName) return explicitName;
+    return resolvedUnifiedProfileId;
+  }, [resolvedUnifiedProfile, resolvedUnifiedProfileId]);
 
   if (props.isRunning) {
     return <RunConfigRunningInfo config={state.config} effectiveSnapshot={state.effectiveSnapshot} />;
@@ -216,9 +264,7 @@ export default function RunConfig(props: UseRunConfigStateProps) {
                 disabled={state.unifiedProfilesLoading || state.unifiedProfileSwitching || !state.config.ticker}
               >
                 <option value={ACTIVE_UNIFIED_PROFILE_SENTINEL}>
-                  {state.unifiedProfilesLoading
-                    ? "Loading available profiles..."
-                    : `Use active unified profile${state.activeUnifiedProfileId ? ` (${state.activeUnifiedProfileId})` : " (none)"}`}
+                  {activeUnifiedProfileOptionLabel}
                 </option>
                 {state.unifiedProfiles
                   .filter((profile: any) => String(profile?.profile_id || "").trim())
@@ -226,7 +272,7 @@ export default function RunConfig(props: UseRunConfigStateProps) {
                     const profileId = String(profile?.profile_id || "").trim();
                     return (
                       <option key={profileId || `unified-${idx}`} value={profileId}>
-                        {(state as any).formatUnifiedProfileLabel?.(profile) || profileId}
+                        {formatUnifiedProfileLabel(profile)}
                       </option>
                     );
                   })}
@@ -281,7 +327,7 @@ export default function RunConfig(props: UseRunConfigStateProps) {
         </form>
       </div>
 
-      <FullscreenConfigDialog
+      <UnifiedConfigDialog
         isOpen={showFullscreenConfig}
         onClose={() => setShowFullscreenConfig(false)}
         config={state.config}
@@ -290,9 +336,11 @@ export default function RunConfig(props: UseRunConfigStateProps) {
         onMomentumSleeveChange={state.handleMomentumSleeveChange}
         onAddMomentumSleeve={state.handleAddMomentumSleeve}
         onRemoveMomentumSleeve={state.handleRemoveMomentumSleeve}
-        activeProfile={state.unifiedProfiles.find(
-          (p: any) => String(p.profile_id) === String(state.activeUnifiedProfileId)
-        )}
+        strategyApiUrl={state.config.strategy_api_url || "http://localhost:8001"}
+        selectedTicker={state.config.ticker}
+        activeProfile={resolvedUnifiedProfile}
+        activeProfileId={resolvedUnifiedProfileId}
+        activeProfileName={resolvedUnifiedProfileName}
       />
     </div>
   );

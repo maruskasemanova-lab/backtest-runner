@@ -23,6 +23,19 @@ def scan_parquet_compat(path: str | Path):
     return polars.scan_parquet(source)
 
 
+def read_parquet_polars(
+    path: str | Path, columns: Optional[Iterable[str]] = None
+):
+    """Read parquet and return a native Polars DataFrame (no pandas conversion).
+
+    Preferred for callers that consume data through Polars or convert to dicts.
+    """
+    polars = _require_polars()
+    source = str(Path(path))
+    cols = [str(col) for col in (columns or []) if str(col).strip()] or None
+    return polars.read_parquet(source, columns=cols)
+
+
 def _read_parquet_with_polars(
     source: str, *, columns: Optional[Iterable[str]] = None
 ) -> pd.DataFrame:

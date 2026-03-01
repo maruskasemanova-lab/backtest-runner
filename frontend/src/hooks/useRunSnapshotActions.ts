@@ -282,17 +282,24 @@ export const useRunSnapshotActions = ({
   const handleStartRun = useCallback(
     async (config: any) => {
       try {
+        const clientHint = String(config?.__client_hint || "")
+          .trim()
+          .toLowerCase();
+        const preferDirectStart = clientHint === "strategy_analyzer";
+        const requestPayload = { ...(config || {}) };
+        delete requestPayload.__client_hint;
+
         setRuntimeNotice('');
-        setSelectedTicker(config.ticker || null);
-        setStrategyApiUrl(config.strategy_api_url || defaultStrategyApiUrl);
-        if (normalizedAuthToken) {
+        setSelectedTicker(requestPayload.ticker || null);
+        setStrategyApiUrl(requestPayload.strategy_api_url || defaultStrategyApiUrl);
+        if (normalizedAuthToken && !preferDirectStart) {
           const queuedResponse = await fetch('/api/v2/runs', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${normalizedAuthToken}`,
             },
-            body: JSON.stringify(config),
+            body: JSON.stringify(requestPayload),
           });
 
           if (!queuedResponse.ok) {
@@ -308,13 +315,13 @@ export const useRunSnapshotActions = ({
           setRuntimeNotice(`Backtest queued (${jobId.slice(0, 8)}). Waiting for worker slot...`);
           const job = await waitForV2RunJob(jobId);
           const resultPayload = buildQueuedRunResultPayload(job);
-          return await applyStartedRun(resultPayload, config);
+          return await applyStartedRun(resultPayload, requestPayload);
         }
 
         const response = await fetch('/api/run/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(config),
+          body: JSON.stringify(requestPayload),
         });
 
         if (!response.ok) {
@@ -323,7 +330,7 @@ export const useRunSnapshotActions = ({
         }
 
         const data = await response.json();
-        return await applyStartedRun(data, config);
+        return await applyStartedRun(data, requestPayload);
       } catch (error) {
         const message = String(error instanceof Error ? error.message : '');
         if (!runIdCollisionPattern.test(message)) {

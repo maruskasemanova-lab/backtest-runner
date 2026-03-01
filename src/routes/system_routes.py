@@ -405,6 +405,159 @@ def _split_run_key(run_key: str) -> Tuple[Optional[str], Optional[str], Optional
     return (run_id, ticker, date_label)
 
 
+def _normalize_summary_ticker(value: Any) -> Optional[str]:
+    token = str(value or "").strip().upper()
+    if not token:
+        return None
+    return token
+
+
+def _extract_summary_date_range(
+    *,
+    summary_payload: Dict[str, Any],
+    run_key: str,
+    updated_at: Any,
+) -> Tuple[Optional[str], Optional[str]]:
+    start = _normalize_iso_date(summary_payload.get("date_from"))
+    end = _normalize_iso_date(summary_payload.get("date_to"))
+    if start and end:
+        if start <= end:
+            return start, end
+        return end, start
+    if start:
+        return start, start
+    if end:
+        return end, end
+
+    date_label = str(summary_payload.get("date") or "").strip()
+    if date_label:
+        range_from_label = _parse_range_label(date_label)
+        if range_from_label:
+            return range_from_label
+        day = _parse_run_day_from_label(date_label)
+        if day:
+            return day, day
+
+    _, _, run_key_date_label = _split_run_key(run_key)
+    if run_key_date_label:
+        range_from_run_key = _parse_range_label(run_key_date_label)
+        if range_from_run_key:
+            return range_from_run_key
+        day = _parse_run_day_from_label(run_key_date_label)
+        if day:
+            return day, day
+
+    fallback_day = _day_from_timestamp(updated_at)
+    if fallback_day:
+        return fallback_day, fallback_day
+    return None, None
+
+
+def _collect_run_report_ticker_ranges(
+    request: Request, *, limit: int = 2000
+) -> Dict[str, Dict[str, str]]:
+    store = _run_reports_store(request)
+    list_fn = getattr(store, "list_run_summaries", None)
+    if not callable(list_fn):
+        return {}
+
+    try:
+        rows = list_fn(limit=max(1, min(int(limit), 5000)))
+    except Exception:
+        return {}
+    if not isinstance(rows, list):
+        return {}
+
+    ticker_ranges: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        run_key = str(row.get("run_key") or "").strip()
+        summary = row.get("summary")
+        summary_payload = summary if isinstance(summary, dict) else {}
+
+        ticker = _normalize_summary_ticker(summary_payload.get("ticker"))
+        if not ticker:
+            _, ticker_from_run_key, _ = _split_run_key(run_key)
+            ticker = _normalize_summary_ticker(ticker_from_run_key)
+        if not ticker:
+            continue
+
+        start, end = _extract_summary_date_range(
+            summary_payload=summary_payload,
+            run_key=run_key,
+            updated_at=row.get("updated_at"),
+        )
+        if not start or not end:
+            continue
+
+        current = ticker_ranges.get(ticker)
+        if current is None:
+            ticker_ranges[ticker] = {"start": start, "end": end}
+            continue
+        if start < str(current.get("start") or start):
+            current["start"] = start
+        if end > str(current.get("end") or end):
+            current["end"] = end
+
+    return ticker_ranges
+
+
+def _merge_available_data_with_run_report_ranges(
+    summary: Dict[str, Any], run_report_ranges: Dict[str, Dict[str, str]]
+) -> Dict[str, Any]:
+    if not isinstance(summary, dict):
+        return summary
+    if not isinstance(run_report_ranges, dict) or not run_report_ranges:
+        return summary
+
+    merged_summary = dict(summary)
+    merged_tickers = {
+        str(item or "").strip().upper()
+        for item in list(summary.get("tickers", []))
+        if str(item or "").strip()
+    }
+
+    source_date_ranges = summary.get("date_ranges")
+    date_ranges: Dict[str, Dict[str, Any]] = {}
+    if isinstance(source_date_ranges, dict):
+        for ticker, payload in source_date_ranges.items():
+            ticker_token = _normalize_summary_ticker(ticker)
+            if not ticker_token:
+                continue
+            if isinstance(payload, dict):
+                date_ranges[ticker_token] = dict(payload)
+            else:
+                date_ranges[ticker_token] = {}
+
+    for ticker, payload in run_report_ranges.items():
+        ticker_token = _normalize_summary_ticker(ticker)
+        if not ticker_token:
+            continue
+        start = _normalize_iso_date(payload.get("start") if isinstance(payload, dict) else None)
+        end = _normalize_iso_date(payload.get("end") if isinstance(payload, dict) else None)
+        if not start or not end:
+            continue
+        if start > end:
+            start, end = end, start
+
+        merged_tickers.add(ticker_token)
+        target = date_ranges.setdefault(ticker_token, {})
+        existing_start = _normalize_iso_date(target.get("start"))
+        existing_end = _normalize_iso_date(target.get("end"))
+        if not existing_start or start < existing_start:
+            target["start"] = start
+        if not existing_end or end > existing_end:
+            target["end"] = end
+        if "files" not in target or not isinstance(target.get("files"), list):
+            target["files"] = []
+
+    merged_summary["tickers"] = sorted(merged_tickers)
+    merged_summary["date_ranges"] = date_ranges
+    return merged_summary
+
+
 def _decode_playback_snapshot(summary_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     snapshot_meta = (
         summary_payload.get("playback_snapshot", {})
@@ -1330,14 +1483,22 @@ async def update_l2_runtime(
 
 @router.get("/api/available-data")
 async def get_available_data(
+    request: Request,
     refresh: bool = Query(default=False),
+    include_run_report_ranges: bool = Query(default=False),
     services: ApiServices = Depends(get_api_services),
 ):
     """Get available tickers and date ranges from data files."""
     try:
-        return services.databento_svc.get_available_data_summary(refresh=bool(refresh))
+        summary = services.databento_svc.get_available_data_summary(refresh=bool(refresh))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    run_report_ranges = (
+        _collect_run_report_ticker_ranges(request)
+        if bool(include_run_report_ranges)
+        else {}
+    )
+    return _merge_available_data_with_run_report_ranges(summary, run_report_ranges)
 
 
 @router.get("/api/data/files")

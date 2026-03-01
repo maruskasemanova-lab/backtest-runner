@@ -38,7 +38,12 @@ type ApplyExecutionFieldChangeOptions = {
   raw?: boolean;
 };
 
-function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl }) {
+function AdaptiveStrategyStudio({
+  selectedTicker,
+  onTickerChange,
+  strategyApiUrl,
+  authToken = "",
+}) {
   const {
     executionConfigSnapshot,
     expandedExecutionModules,
@@ -80,6 +85,7 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
     activeTicker,
     strategyApiBase,
     strategyUniverseFallback: DEFAULT_STRATEGIES,
+    authToken,
   });
   const {
     saving,
@@ -90,6 +96,7 @@ function AdaptiveStrategyStudio({ selectedTicker, onTickerChange, strategyApiUrl
   } = useAdaptiveStudioMutations({
     activeTicker,
     strategyApiBase,
+    authToken,
     refreshActiveTickerData,
     setTickerConfigCache,
   });

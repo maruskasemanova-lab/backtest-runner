@@ -48,6 +48,7 @@ type AppViewRouterProps = {
   selectedTicker: string | null;
   setSelectedTicker: Dispatch<SetStateAction<string | null>>;
   strategyApiUrl: string;
+  authToken: string;
   handleStartRun: (config: any) => Promise<any>;
   handlePlay: (options?: any) => Promise<any> | void;
   handlePause: () => Promise<any> | void;
@@ -101,6 +102,7 @@ export default function AppViewRouter({
   selectedTicker,
   setSelectedTicker,
   strategyApiUrl,
+  authToken,
   handleStartRun,
   handlePlay,
   handlePause,
@@ -177,6 +179,7 @@ export default function AppViewRouter({
           selectedTicker={selectedTicker}
           onTickerChange={setSelectedTicker}
           strategyApiUrl={strategyApiUrl}
+          authToken={authToken}
         />
       ) : activeView === 'adaptive-tuner' ? (
         <AdaptiveTuner

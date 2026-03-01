@@ -620,6 +620,7 @@ function App() {
           selectedTicker={selectedTicker}
           setSelectedTicker={setSelectedTicker}
           strategyApiUrl={strategyApiUrl}
+          authToken={authSnapshot.token || ''}
           handleStartRun={handleStartRun}
           handlePlay={handlePlay}
           handlePause={handlePause}

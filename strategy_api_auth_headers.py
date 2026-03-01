@@ -10,7 +10,16 @@ _TOKEN_ENV_KEYS = (
     "BACKTEST_STRATEGY_INTERNAL_API_TOKEN",
     "STRATEGY_INTERNAL_API_TOKEN",
 )
-_LOCAL_STRATEGY_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "strategy-api", "::1"}
+_LOCAL_STRATEGY_HOSTS = {
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "strategy-api",
+    "::1",
+    "inprocess",
+    "strategy-inprocess",
+    "strategy-inprocess.local",
+}
 
 
 def _parse_bool_env(name: str, default: bool) -> bool:

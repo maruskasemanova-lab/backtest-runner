@@ -11,6 +11,7 @@ import type {
 type Params = {
   bars: StrategyAnalyzerChartBarLike[];
   isAnalyzerAttachedRun: boolean;
+  analyzerRunFinished: boolean;
   selectedRangeWindow: StrategyAnalyzerChartWindow | null;
   rangeScrubMeta: StrategyAnalyzerRangeScrubMeta;
   analyzerDecisionEvents: StrategyAnalyzerDecisionMarker[];
@@ -21,6 +22,7 @@ type Params = {
 export function useStrategyAnalyzerChartData({
   bars,
   isAnalyzerAttachedRun,
+  analyzerRunFinished,
   selectedRangeWindow,
   rangeScrubMeta,
   analyzerDecisionEvents,
@@ -93,12 +95,16 @@ export function useStrategyAnalyzerChartData({
       }
       const runBar = runBarsByTime.get(t);
       if (runBar) return runBar;
+      // After run completes, bars not emitted via WS throttle should fall
+      // back to the preview bar (same OHLCV) instead of an empty placeholder.
+      if (analyzerRunFinished) return previewBar;
       return { time: t, __wfPlaceholder: true };
     });
     return touchedSegment ? composedBars : previewBars;
   }, [
     bars,
     isAnalyzerAttachedRun,
+    analyzerRunFinished,
     selectedRangeWindow,
     timelineCacheVersion,
     rangeScrubMeta,

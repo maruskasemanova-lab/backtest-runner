@@ -31,14 +31,19 @@ class _ClientSessionStub:
     def __init__(self, payload: Dict[str, Any]):
         self._payload = payload
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
     def get(self, *args: Any, **kwargs: Any) -> _GetResponse:
         return _GetResponse(self._payload, status=200)
+
+
+class _SessionContext:
+    def __init__(self, payload: Dict[str, Any]):
+        self._payload = payload
+
+    async def __aenter__(self) -> _ClientSessionStub:
+        return _ClientSessionStub(self._payload)
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
 
 
 def test_apply_global_trailing_updates_global_exit_and_risk_fields(monkeypatch) -> None:
@@ -52,12 +57,8 @@ def test_apply_global_trailing_updates_global_exit_and_risk_fields(monkeypatch) 
 
     monkeypatch.setattr(
         svc,
-        "aiohttp",
-        SimpleNamespace(
-            ClientSession=lambda *args, **kwargs: _ClientSessionStub(
-                {"momentum_flow": {}, "pullback": {}}
-            )
-        ),
+        "open_strategy_api_session",
+        lambda **kwargs: _SessionContext({"momentum_flow": {}, "pullback": {}}),
     )
     monkeypatch.setattr(svc, "_run_strategy_updates", _run_updates)
 

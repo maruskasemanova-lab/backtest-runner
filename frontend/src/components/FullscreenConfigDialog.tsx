@@ -83,6 +83,8 @@ type FullscreenConfigDialogProps = {
   onAddMomentumSleeve?: (...args: any[]) => void;
   onRemoveMomentumSleeve?: (...args: any[]) => void;
   activeProfile?: any;
+  activeProfileId?: string;
+  activeProfileName?: string;
   zIndex?: number;
   readOnly?: boolean;
   title?: string;
@@ -100,6 +102,8 @@ export function FullscreenConfigDialog({
   onAddMomentumSleeve,
   onRemoveMomentumSleeve,
   activeProfile,
+  activeProfileId,
+  activeProfileName,
   zIndex = 50,
   readOnly = false,
   title,
@@ -136,6 +140,16 @@ export function FullscreenConfigDialog({
   const currentExecutionProfile = safeConfig.execution_profile || activeProfile?.execution_profile || {};
   const currentStrategyProfile = safeConfig.strategy_profile || activeProfile?.strategy_profile || {};
   const currentStrategyParams = currentStrategyProfile.strategy_params || {};
+  const resolvedActiveProfileId = String(activeProfileId ?? activeProfile?.profile_id ?? "").trim();
+  const resolvedActiveProfileName = String(activeProfileName ?? activeProfile?.profile_name ?? "").trim();
+  const activeProfileSummary =
+    resolvedActiveProfileName && resolvedActiveProfileId && resolvedActiveProfileName !== resolvedActiveProfileId
+      ? `${resolvedActiveProfileName} (${resolvedActiveProfileId})`
+      : resolvedActiveProfileName || resolvedActiveProfileId;
+  const hasProfilePayload =
+    Boolean(activeProfile)
+    || Object.keys(currentExecutionProfile).length > 0
+    || Object.keys(currentStrategyParams).length > 0;
 
   const handleExecutionParamChange = (key: string, value: any) => {
     safeHandleChange("execution_profile", {
@@ -413,7 +427,12 @@ export function FullscreenConfigDialog({
                 <div className="text-xs text-gray-400 mb-2">
                   All active strategy parameters and execution constraints loaded from this profile.
                 </div>
-                {activeProfile ? (
+                <div className="text-xs text-slate-400 mb-2">
+                  {activeProfileSummary
+                    ? `Using unified profile: ${activeProfileSummary}`
+                    : "Using unified profile: unresolved"}
+                </div>
+                {hasProfilePayload ? (
                   <div className="flex-1 overflow-auto bg-slate-900/50 border border-slate-800 rounded-md p-4 flex flex-col gap-4">
 
                     {/* execution_profile metadata */}
@@ -456,7 +475,9 @@ export function FullscreenConfigDialog({
                   </div>
                 ) : (
                   <div className="flex-1 flex items-center justify-center bg-slate-900 rounded-md border border-slate-800 text-slate-500 text-sm italic">
-                    No active unified profile selected.
+                    {activeProfileSummary
+                      ? `No unified profile payload loaded for ${activeProfileSummary}.`
+                      : "No active unified profile selected."}
                   </div>
                 )}
               </fieldset>

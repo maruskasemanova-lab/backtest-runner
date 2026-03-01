@@ -38,6 +38,32 @@ class _FakeResponse:
         return self._text_value
 
 
+class _FakeStrategyClientResponse:
+    def __init__(
+        self, status_code: int, payload: Any = None, text_value: str = ""
+    ) -> None:
+        self.status_code = status_code
+        self._payload = payload if payload is not None else {}
+        self._text_value = text_value
+
+    def json(self):
+        return self._payload
+
+    @property
+    def text(self) -> str:
+        return self._text_value
+
+
+class _FakeStrategyClient:
+    def __init__(self, response: _FakeStrategyClientResponse) -> None:
+        self._response = response
+        self.calls: list[Tuple[str, Dict[str, Any]]] = []
+
+    async def post_json(self, path: str, *, json: Dict[str, Any], params: Any = None):
+        self.calls.append((path, json))
+        return self._response
+
+
 class _FakeSession:
     def __init__(self, response: _FakeResponse) -> None:
         self._response = response
@@ -50,9 +76,15 @@ class _FakeSession:
 
 
 class _DummyRunner:
-    def __init__(self, session: _FakeSession) -> None:
+    def __init__(
+        self,
+        session: _FakeSession,
+        *,
+        strategy_client: _FakeStrategyClient | None = None,
+    ) -> None:
         self.config = _DummyConfig()
         self._session = session
+        self._strategy_api_client = strategy_client
 
     async def _get_strategy_http_session(self):
         return self._session
@@ -119,6 +151,30 @@ def test_evaluate_intrabar_slice_proxies_payload_and_headers(monkeypatch):
     assert kwargs["headers"] == {"x-internal-token": "secret-token"}
     assert kwargs["json"]["run_id"] == "run-123"
     assert kwargs["json"]["ticker"] == "NVDA"
+
+
+def test_evaluate_intrabar_slice_prefers_strategy_client_when_available():
+    strategy_client = _FakeStrategyClient(
+        _FakeStrategyClientResponse(200, payload={"ok": True, "source": "client"})
+    )
+    fake_session = _FakeSession(_FakeResponse(500, text_value="should-not-be-used"))
+    deps = _build_deps(
+        _DummyRunner(fake_session, strategy_client=strategy_client)
+    )
+
+    result = asyncio.run(
+        evaluate_intrabar_slice(
+            "external-run", "MU", "2026-02-04", _valid_intrabar_payload(), deps
+        )
+    )
+
+    assert result == {"ok": True, "source": "client"}
+    assert len(strategy_client.calls) == 1
+    path, payload = strategy_client.calls[0]
+    assert path == "/api/session/intrabar_eval"
+    assert payload["run_id"] == "run-123"
+    assert payload["ticker"] == "NVDA"
+    assert fake_session.calls == []
 
 
 def test_evaluate_intrabar_slice_surfaces_strategy_error():

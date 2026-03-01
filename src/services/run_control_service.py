@@ -6,12 +6,13 @@ import gzip
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Dict, Optional, Union
 
 import aiohttp
 from fastapi import HTTPException, Request
 
+from src.services.session_runner_strategy_client import StrategyApiClient
 from src.services.strategy_api_auth_headers import build_strategy_api_headers
 from src.services.trade_eval_mode_service import (
     normalize_trade_eval_mode,
@@ -127,6 +128,33 @@ def _env_int(name: str, default: int, *, minimum: int) -> int:
     except (TypeError, ValueError):
         return max(minimum, int(default))
     return max(minimum, parsed)
+
+
+def _to_json_compatible(value: Any) -> Any:
+    """Recursively normalize payload values for FastAPI JSON encoding."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _to_json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_json_compatible(item) for item in value]
+
+    item_method = getattr(value, "item", None)
+    if callable(item_method):
+        try:
+            return _to_json_compatible(item_method())
+        except Exception:
+            pass
+    tolist_method = getattr(value, "tolist", None)
+    if callable(tolist_method):
+        try:
+            return _to_json_compatible(tolist_method())
+        except Exception:
+            pass
+
+    return str(value)
 
 
 def _safe_runner_processed_bars(runner: Any) -> list[Dict[str, Any]]:
@@ -451,8 +479,9 @@ async def restart_run(run_id: str, ticker: str, date: str, deps: RunControlDeps)
 
 def get_processed_bars(run_id: str, ticker: str, date: str, deps: RunControlDeps):
     _, runner = deps.run_registry.require(run_id, ticker, date)
+    bars = _safe_runner_processed_bars(runner)
     return {
-        "bars": runner.get_processed_bars(),
+        "bars": _to_json_compatible(bars),
         "current_index": runner.current_bar_index,
         "total_bars": len(runner.bars),
     }
@@ -541,6 +570,28 @@ async def evaluate_intrabar_slice(
     proxy_payload = dict(body)
     proxy_payload["run_id"] = str(getattr(runner.config, "run_id", run_id) or run_id)
     proxy_payload["ticker"] = str(getattr(runner.config, "ticker", ticker) or ticker)
+
+    strategy_client = getattr(runner, "_strategy_api_client", None)
+    if strategy_client is not None:
+        response = await strategy_client.post_json(
+            "/api/session/intrabar_eval",
+            json=proxy_payload,
+        )
+        status_code = StrategyApiClient.response_status_code(response)
+        if status_code != 200:
+            error_text = await StrategyApiClient.response_text(response)
+            detail = (
+                error_text
+                or f"Strategy intrabar eval failed (HTTP {status_code})"
+            )
+            raise HTTPException(status_code=status_code, detail=detail)
+        try:
+            return await StrategyApiClient.response_json(response)
+        except Exception as exc:  # pragma: no cover - defensive path
+            raise HTTPException(
+                status_code=502,
+                detail=f"Invalid strategy intrabar response: {str(exc)}",
+            ) from exc
 
     headers = build_strategy_api_headers(strategy_api_url)
     session: Any = None

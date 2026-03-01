@@ -1,4 +1,4 @@
-import { FullscreenConfigDialog } from "../FullscreenConfigDialog";
+import { UnifiedConfigDialog } from "../unified-config/UnifiedConfigDialog";
 import DiagnosticCalendarDayDetail from "./DiagnosticCalendarDayDetail";
 import DiagnosticCalendarMonthGrid from "./DiagnosticCalendarMonthGrid";
 import DiagnosticCalendarToolbar from "./DiagnosticCalendarToolbar";
@@ -83,14 +83,13 @@ function DiagnosticCalendar({ onOpenInStrategyAnalyzer }: DiagnosticCalendarProp
         />
       </section>
       {showRunConfigSnapshotDialog && dayDetailModel.hasSelectedRunConfigSnapshot ? (
-        <FullscreenConfigDialog
+        <UnifiedConfigDialog
           isOpen={showRunConfigSnapshotDialog}
           onClose={() => setShowRunConfigSnapshotDialog(false)}
           readOnly
           title="Run Config Snapshot"
           subtitle={selectedRunSnapshotSubtitle}
           snapshotSections={selectedRunConfigSnapshotSections}
-          zIndex={2100}
         />
       ) : null}
     </main>

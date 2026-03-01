@@ -80,3 +80,13 @@ def test_allowlist_only_keeps_non_loopback_request(monkeypatch):
     )
     resolved = enforce_strategy_url_allowlist_only("http://strategy.internal:9000")
     assert resolved == "http://strategy.internal:9000"
+
+
+def test_allowlist_only_accepts_inprocess_alias(monkeypatch):
+    monkeypatch.setenv("BACKTEST_INTERNAL_STRATEGY_API_URL", "http://localhost:8001")
+    monkeypatch.setenv(
+        "BACKTEST_STRATEGY_API_ALLOWLIST",
+        "http://localhost:8001,http://inprocess",
+    )
+    resolved = enforce_strategy_url_allowlist_only("inprocess://strategy")
+    assert resolved == "http://inprocess"

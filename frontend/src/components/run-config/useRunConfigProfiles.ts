@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type FetchTickerAosOptions = {
   hydrateExecution?: boolean;
@@ -12,6 +12,7 @@ type ApplyUnifiedProfileOptions = {
 type UseRunConfigProfilesArgs = {
   ticker: string;
   strategyApiUrl: string;
+  authToken: string;
   activeProfileSentinel: string;
   normalizeProfileRefToken: (value: unknown) => string;
   normalizeAosTickerConfig: (payload: unknown) => Record<string, any>;
@@ -21,6 +22,7 @@ type UseRunConfigProfilesArgs = {
 export const useRunConfigProfiles = ({
   ticker,
   strategyApiUrl,
+  authToken,
   activeProfileSentinel,
   normalizeProfileRefToken,
   normalizeAosTickerConfig,
@@ -36,6 +38,10 @@ export const useRunConfigProfiles = ({
   const [activeUnifiedProfileId, setActiveUnifiedProfileId] = useState("");
   const [selectedUnifiedProfileId, setSelectedUnifiedProfileId] = useState(activeProfileSentinel);
   const lastFetchedTickerRef = useRef("");
+  const profileAuthHeader = useMemo(() => {
+    const token = String(authToken || "").trim();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, [authToken]);
 
   const fetchTickerAosConfig = useCallback(
     async (rawTicker: string, options: FetchTickerAosOptions = {}) => {
@@ -77,7 +83,9 @@ export const useRunConfigProfiles = ({
       setUnifiedProfilesResolved(false);
       setUnifiedProfilesError(null);
       try {
-        const resp = await fetch(`/api/profiles/${upperTicker}`);
+        const resp = await fetch(`/api/profiles/${upperTicker}`, {
+          headers: profileAuthHeader,
+        });
         if (!resp.ok) {
           throw new Error(`Failed to load unified profiles (HTTP ${resp.status}).`);
         }
@@ -115,7 +123,7 @@ export const useRunConfigProfiles = ({
         setUnifiedProfilesResolved(true);
       }
     },
-    [activeProfileSentinel, normalizeProfileRefToken],
+    [activeProfileSentinel, normalizeProfileRefToken, profileAuthHeader],
   );
 
   const applyUnifiedProfile = useCallback(
@@ -130,7 +138,10 @@ export const useRunConfigProfiles = ({
 
       const resp = await fetch("/api/profiles/apply", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...profileAuthHeader,
+        },
         body: JSON.stringify({
           ticker: upperTicker,
           profile_id: targetProfileId,
@@ -145,7 +156,7 @@ export const useRunConfigProfiles = ({
       }
       return await resp.json();
     },
-    [strategyApiUrl],
+    [profileAuthHeader, strategyApiUrl],
   );
 
   const reloadAosAndProfiles = useCallback(async () => {

@@ -87,6 +87,7 @@ export type StrategyAnalyzerStartRunPayload = {
   strategy_api_url: string;
   include_extended_hours: boolean;
   trade_eval_mode: StrategyAnalyzerTradeEvalMode;
+  __client_hint?: "strategy_analyzer";
 };
 
 export type StrategyAnalyzerStartRunResult = {

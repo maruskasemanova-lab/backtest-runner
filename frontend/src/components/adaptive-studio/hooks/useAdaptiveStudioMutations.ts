@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import type {
   AdaptiveStudioActionLoadingToken,
@@ -9,6 +9,7 @@ import type {
 type UseAdaptiveStudioMutationsArgs = {
   activeTicker: string;
   strategyApiBase: string;
+  authToken?: string;
   refreshActiveTickerData: () => Promise<void>;
   setTickerConfigCache: (nextConfig: AdaptiveStudioObjectRecord) => void;
 };
@@ -55,10 +56,17 @@ const buildHttpError = (
   return new Error(`HTTP ${status}`);
 };
 
-const postJson = async (url: string, body: unknown): Promise<JsonRequestResult> => {
+const postJson = async (
+  url: string,
+  body: unknown,
+  headers?: Record<string, string>,
+): Promise<JsonRequestResult> => {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(headers || {}),
+    },
     body: JSON.stringify(body),
   });
   const payload = asPayloadRecord(await response.json().catch(() => ({})));
@@ -86,20 +94,29 @@ const resolveUnifiedProfileSources = (
 export function useAdaptiveStudioMutations({
   activeTicker,
   strategyApiBase,
+  authToken = "",
   refreshActiveTickerData,
   setTickerConfigCache,
 }: UseAdaptiveStudioMutationsArgs): UseAdaptiveStudioMutationsResult {
   const [captureUnifiedActionLoading, setCaptureUnifiedActionLoading] = useState<AdaptiveStudioActionLoadingToken>(null);
   const [applyUnifiedActionLoading, setApplyUnifiedActionLoading] = useState<AdaptiveStudioActionLoadingToken>(null);
+  const authHeaders = useMemo(() => {
+    const token = String(authToken || "").trim();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, [authToken]);
 
   const saveAdaptiveConfigMutation = useMutation({
     mutationKey: ["adaptive-studio", "save-config", activeTicker],
     mutationFn: async ({ nextConfig }: SaveAdaptiveConfigArgs) => {
       if (!activeTicker) throw new Error("Ticker is required.");
-      const { response, payload } = await postJson("/api/aos-config/update", {
-        ticker: activeTicker,
-        config: nextConfig,
-      });
+      const { response, payload } = await postJson(
+        "/api/aos-config/update",
+        {
+          ticker: activeTicker,
+          config: nextConfig,
+        },
+        authHeaders,
+      );
       if (!response.ok) {
         throw buildHttpError(payload, response.status, "Failed to save adaptive configuration");
       }
@@ -114,12 +131,16 @@ export function useAdaptiveStudioMutations({
     mutationKey: ["adaptive-studio", "capture-unified-profile", activeTicker],
     mutationFn: async ({ profileName, setActive = true }: CaptureUnifiedProfileArgs) => {
       if (!activeTicker || !profileName) throw new Error("Unified profile name is required.");
-      const { response, payload } = await postJson("/api/profiles/capture", {
-        ticker: activeTicker,
-        profile_name: profileName,
-        strategy_api_url: strategyApiBase,
-        set_active: setActive,
-      });
+      const { response, payload } = await postJson(
+        "/api/profiles/capture",
+        {
+          ticker: activeTicker,
+          profile_name: profileName,
+          strategy_api_url: strategyApiBase,
+          set_active: setActive,
+        },
+        authHeaders,
+      );
       if (!response.ok) {
         throw buildHttpError(payload, response.status);
       }
@@ -141,13 +162,17 @@ export function useAdaptiveStudioMutations({
       const profileId = String(profile?.profile_id || "").trim();
       if (!activeTicker || !profileId) throw new Error("Unified profile ID is required.");
 
-      const { response, payload } = await postJson("/api/profiles/apply", {
-        ticker: activeTicker,
-        profile_id: profileId,
-        strategy_api_url: strategyApiBase,
-        apply_now: false,
-        apply_execution: true,
-      });
+      const { response, payload } = await postJson(
+        "/api/profiles/apply",
+        {
+          ticker: activeTicker,
+          profile_id: profileId,
+          strategy_api_url: strategyApiBase,
+          apply_now: false,
+          apply_execution: true,
+        },
+        authHeaders,
+      );
       if (response.ok) return;
 
       const { sourceCombo, sourceAdaptive } = resolveUnifiedProfileSources(profile);
@@ -156,12 +181,16 @@ export function useAdaptiveStudioMutations({
       }
 
       if (sourceCombo) {
-        const comboResult = await postJson("/api/strategy-combos/apply", {
-          ticker: activeTicker,
-          profile_id: sourceCombo,
-          strategy_api_url: strategyApiBase,
-          apply_now: false,
-        });
+        const comboResult = await postJson(
+          "/api/strategy-combos/apply",
+          {
+            ticker: activeTicker,
+            profile_id: sourceCombo,
+            strategy_api_url: strategyApiBase,
+            apply_now: false,
+          },
+          authHeaders,
+        );
         if (!comboResult.response.ok) {
           throw buildHttpError(
             comboResult.payload,
@@ -172,10 +201,14 @@ export function useAdaptiveStudioMutations({
       }
 
       if (sourceAdaptive) {
-        const adaptiveResult = await postJson("/api/adaptive-tuner/profiles/apply", {
-          ticker: activeTicker,
-          profile_id: sourceAdaptive,
-        });
+        const adaptiveResult = await postJson(
+          "/api/adaptive-tuner/profiles/apply",
+          {
+            ticker: activeTicker,
+            profile_id: sourceAdaptive,
+          },
+          authHeaders,
+        );
         if (!adaptiveResult.response.ok) {
           throw buildHttpError(
             adaptiveResult.payload,

@@ -140,3 +140,90 @@ def test_get_available_data_passes_refresh_query():
     assert response.status_code == 200
     assert response.json()["tickers"] == ["MU"]
     assert calls == [True]
+
+
+def test_get_available_data_merges_db_run_report_tickers():
+    def _summary(refresh=False):
+        _ = refresh
+        return {
+            "tickers": ["MU"],
+            "date_ranges": {
+                "MU": {
+                    "start": "2026-02-01",
+                    "end": "2026-02-28",
+                    "files": [],
+                }
+            },
+        }
+
+    class _RunReportsStore:
+        def list_run_summaries(self, *, limit=300):
+            _ = limit
+            return [
+                {
+                    "run_key": "diag-1:GOOGL:2026-02-20",
+                    "summary": {"ticker": "GOOGL", "date": "2026-02-20"},
+                    "updated_at": "2026-02-20T15:10:00+00:00",
+                }
+            ]
+
+    client = _build_client(
+        l2_manager=SimpleNamespace(
+            max_cached_tickers=1,
+            max_cached_rows=2_000_000,
+            max_cached_bytes=536_870_912,
+        ),
+        l2_features=SimpleNamespace(iceberg_detection_enabled=True),
+        databento_svc=SimpleNamespace(get_available_data_summary=_summary),
+    )
+    client.app.state.run_reports_store = _RunReportsStore()
+
+    response = client.get("/api/available-data")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tickers"] == ["GOOGL", "MU"]
+    assert payload["date_ranges"]["GOOGL"]["start"] == "2026-02-20"
+    assert payload["date_ranges"]["GOOGL"]["end"] == "2026-02-20"
+
+
+def test_get_available_data_merges_db_range_bounds():
+    def _summary(refresh=False):
+        _ = refresh
+        return {
+            "tickers": ["MU"],
+            "date_ranges": {
+                "MU": {
+                    "start": "2026-02-10",
+                    "end": "2026-02-10",
+                    "files": [],
+                }
+            },
+        }
+
+    class _RunReportsStore:
+        def list_run_summaries(self, *, limit=300):
+            _ = limit
+            return [
+                {
+                    "run_key": "diag-1:MU:2026-02-01_to_2026-02-12",
+                    "summary": {"ticker": "MU", "date": "2026-02-01_to_2026-02-12"},
+                    "updated_at": "2026-02-12T20:00:00+00:00",
+                }
+            ]
+
+    client = _build_client(
+        l2_manager=SimpleNamespace(
+            max_cached_tickers=1,
+            max_cached_rows=2_000_000,
+            max_cached_bytes=536_870_912,
+        ),
+        l2_features=SimpleNamespace(iceberg_detection_enabled=True),
+        databento_svc=SimpleNamespace(get_available_data_summary=_summary),
+    )
+    client.app.state.run_reports_store = _RunReportsStore()
+
+    response = client.get("/api/available-data")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["date_ranges"]["MU"]["start"] == "2026-02-01"
+    assert payload["date_ranges"]["MU"]["end"] == "2026-02-12"

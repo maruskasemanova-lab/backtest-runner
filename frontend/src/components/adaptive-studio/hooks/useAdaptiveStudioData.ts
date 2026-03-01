@@ -30,6 +30,7 @@ type UseAdaptiveStudioDataArgs = {
   activeTicker: string;
   strategyApiBase: string;
   strategyUniverseFallback: string[];
+  authToken?: string;
 };
 
 type UseAdaptiveStudioDataResult = {
@@ -75,9 +76,16 @@ export function useAdaptiveStudioData({
   activeTicker,
   strategyApiBase,
   strategyUniverseFallback,
+  authToken = "",
 }: UseAdaptiveStudioDataArgs): UseAdaptiveStudioDataResult {
   const queryClient = useQueryClient();
   const normalizedTicker = String(activeTicker || "").toUpperCase();
+  const normalizedAuthToken = String(authToken || "").trim();
+  const authHeaders = useMemo(() => {
+    return normalizedAuthToken
+      ? { Authorization: `Bearer ${normalizedAuthToken}` }
+      : {};
+  }, [normalizedAuthToken]);
   const availableTickersQuery = useQuery({
     queryKey: ["adaptive-studio", "available-tickers"],
     queryFn: async ({ signal }) => {
@@ -100,16 +108,39 @@ export function useAdaptiveStudioData({
     staleTime: 60_000,
   });
 
-  const tickerConfigQueryKey = ["adaptive-studio", "ticker-config", normalizedTicker] as const;
-  const profileOptionsQueryKey = ["adaptive-studio", "profile-options", normalizedTicker] as const;
-  const comboOptionsQueryKey = ["adaptive-studio", "combo-options", normalizedTicker] as const;
-  const unifiedProfilesQueryKey = ["adaptive-studio", "unified-profiles", normalizedTicker] as const;
+  const tickerConfigQueryKey = [
+    "adaptive-studio",
+    "ticker-config",
+    normalizedTicker,
+    normalizedAuthToken,
+  ] as const;
+  const profileOptionsQueryKey = [
+    "adaptive-studio",
+    "profile-options",
+    normalizedTicker,
+    normalizedAuthToken,
+  ] as const;
+  const comboOptionsQueryKey = [
+    "adaptive-studio",
+    "combo-options",
+    normalizedTicker,
+    normalizedAuthToken,
+  ] as const;
+  const unifiedProfilesQueryKey = [
+    "adaptive-studio",
+    "unified-profiles",
+    normalizedTicker,
+    normalizedAuthToken,
+  ] as const;
 
   const tickerConfigQuery = useQuery({
     queryKey: tickerConfigQueryKey,
     enabled: Boolean(normalizedTicker),
     queryFn: async ({ signal }) => {
-      const response = await fetch(`/api/aos-config/${normalizedTicker}`, { signal });
+      const response = await fetch(`/api/aos-config/${normalizedTicker}`, {
+        signal,
+        headers: authHeaders,
+      });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -124,7 +155,10 @@ export function useAdaptiveStudioData({
     queryKey: profileOptionsQueryKey,
     enabled: Boolean(normalizedTicker),
     queryFn: async ({ signal }) => {
-      const response = await fetch(`/api/adaptive-tuner/options/${normalizedTicker}`, { signal });
+      const response = await fetch(`/api/adaptive-tuner/options/${normalizedTicker}`, {
+        signal,
+        headers: authHeaders,
+      });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -139,7 +173,10 @@ export function useAdaptiveStudioData({
     queryKey: comboOptionsQueryKey,
     enabled: Boolean(normalizedTicker),
     queryFn: async ({ signal }) => {
-      const response = await fetch(`/api/strategy-combos/${normalizedTicker}`, { signal });
+      const response = await fetch(`/api/strategy-combos/${normalizedTicker}`, {
+        signal,
+        headers: authHeaders,
+      });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -158,7 +195,10 @@ export function useAdaptiveStudioData({
       profileOptionsQuery.isFetched &&
       comboOptionsQuery.isFetched,
     queryFn: async ({ signal }) => {
-      const response = await fetch(`/api/profiles/${normalizedTicker}`, { signal });
+      const response = await fetch(`/api/profiles/${normalizedTicker}`, {
+        signal,
+        headers: authHeaders,
+      });
       if (response.ok) {
         const payload = await response.json().catch(() => ({}));
         const source = asObject(payload);
@@ -219,7 +259,13 @@ export function useAdaptiveStudioData({
       comboOptionsQuery.refetch(),
     ]);
     await unifiedProfilesQuery.refetch();
-  }, [comboOptionsQuery, normalizedTicker, profileOptionsQuery, tickerConfigQuery, unifiedProfilesQuery]);
+  }, [
+    comboOptionsQuery,
+    normalizedTicker,
+    profileOptionsQuery,
+    tickerConfigQuery,
+    unifiedProfilesQuery,
+  ]);
 
   const refreshAllData = useCallback(async () => {
     await Promise.all([

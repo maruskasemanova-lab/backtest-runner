@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -151,6 +151,33 @@ def _strategy_reset_detail(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
     return {"success": bool(value), "legacy_bool_result": bool(value)}
+
+
+def _to_json_compatible(value: Any) -> Any:
+    """Recursively normalize payload values for FastAPI JSON encoding."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _to_json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_json_compatible(item) for item in value]
+
+    item_method = getattr(value, "item", None)
+    if callable(item_method):
+        try:
+            return _to_json_compatible(item_method())
+        except Exception:
+            pass
+    tolist_method = getattr(value, "tolist", None)
+    if callable(tolist_method):
+        try:
+            return _to_json_compatible(tolist_method())
+        except Exception:
+            pass
+
+    return str(value)
 
 
 def _acquire_prewarm_inflight(key: str) -> tuple[concurrent.futures.Future, bool]:
@@ -853,7 +880,7 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
 
     deps.logger.info(f"Started run {identity.run_key} with {len(bars)} bars")
 
-    return {
+    response = {
         "success": True,
         "run_key": identity.run_key,
         "ticker": identity.ticker,
@@ -891,6 +918,7 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         "first_bar": bars[0] if bars else None,
         "last_bar": bars[-1] if bars else None,
     }
+    return _to_json_compatible(response)
 
 
 async def prewarm_run_data(

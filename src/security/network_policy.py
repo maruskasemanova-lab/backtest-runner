@@ -31,7 +31,11 @@ def normalize_base_url(url: str) -> str:
     raw = str(url or "").strip()
     if not raw:
         raise StrategyApiPolicyError("Strategy API URL is empty")
+    if raw.lower() in {"inprocess", "local"}:
+        return "http://inprocess"
     parsed = urlparse(raw)
+    if parsed.scheme == "inprocess":
+        return "http://inprocess"
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise StrategyApiPolicyError(
             "Strategy API URL must include http/https scheme and host"
@@ -53,7 +57,7 @@ def resolve_strategy_allowlist(internal_url: str | None = None) -> List[str]:
     )
     configured = parse_csv_env(
         "BACKTEST_STRATEGY_API_ALLOWLIST",
-        "http://localhost:8001,http://127.0.0.1:8001",
+        "http://localhost:8001,http://127.0.0.1:8001,http://inprocess",
     )
     values: List[str] = []
     seen = set()
@@ -98,7 +102,7 @@ def _is_loopback_host(url: str) -> bool:
     except Exception:
         return False
     hostname = str(parsed.hostname or "").strip().lower()
-    return hostname in _LOOPBACK_HOSTS
+    return hostname in _LOOPBACK_HOSTS or hostname == "inprocess"
 
 
 def _resolve_runtime_reachable_strategy_url(

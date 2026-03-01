@@ -113,6 +113,31 @@ export default function StrategySettings({
     state.setAutoExpandedTicker(tickerKey);
   }, [state.autoExpandedTicker, initialExpandAll, selectedTicker, state.strategies, state.setExpanded, state.setDrafts, state.setAutoExpandedTicker]);
 
+  const strategyEntries = useMemo(() => {
+    if (!state.strategies) return [];
+    const sorted = Object.entries(state.strategies).sort((a, b) => {
+      const aE = a[1]?.enabled ? 1 : 0;
+      const bE = b[1]?.enabled ? 1 : 0;
+      if (aE !== bE) return bE - aE;
+      return String(a[1]?.display_name || a[0]).localeCompare(
+        String(b[1]?.display_name || b[0]),
+      );
+    });
+    const withCoreFilter =
+      selectedTicker === "MU" && state.showCoreOnly
+        ? sorted.filter(([name]) => FLOW_CORE_STRATEGIES.has(name))
+        : sorted;
+    if (state.strategyCategory === "all") return withCoreFilter;
+    return withCoreFilter.filter(
+      ([name]) => resolveStrategyCategory(name) === state.strategyCategory,
+    );
+  }, [
+    state.strategies,
+    selectedTicker,
+    state.showCoreOnly,
+    state.strategyCategory,
+  ]);
+
   const expandAllVisible = useCallback(() => {
     if (!strategyEntries.length) return;
     const nextExp: Record<string, boolean> = {};
@@ -151,35 +176,6 @@ export default function StrategySettings({
     },
     [],
   );
-
-  const strategyEntries = useMemo(() => {
-    if (!state.strategies) return [];
-    const sorted = Object.entries(state.strategies).sort((a, b) => {
-      const aE = a[1]?.enabled ? 1 : 0;
-      const bE = b[1]?.enabled ? 1 : 0;
-      if (aE !== bE) return bE - aE;
-      return String(a[1]?.display_name || a[0]).localeCompare(
-        String(b[1]?.display_name || b[0]),
-      );
-    });
-    const withCoreFilter =
-      selectedTicker === "MU" && state.showCoreOnly
-        ? sorted.filter(([name]) => FLOW_CORE_STRATEGIES.has(name))
-        : sorted;
-    if (state.strategyCategory === "all") return withCoreFilter;
-    return withCoreFilter.filter(
-      ([name]) => resolveStrategyCategory(name) === state.strategyCategory,
-    );
-  }, [
-    state.strategies,
-    selectedTicker,
-    state.showCoreOnly,
-    state.strategyCategory,
-  ]);
-
-  // We have strategyEntries as a dependency of expandAllVisible and collapseAllVisible because of the memo.
-  // We can safely hoist strategyEntries calculation above their definitions, 
-  // or define them directly since they're just used in the TSX return.
   
   const enabledCount = useMemo(
     () => strategyEntries.filter(([, cfg]) => !!cfg?.enabled).length,

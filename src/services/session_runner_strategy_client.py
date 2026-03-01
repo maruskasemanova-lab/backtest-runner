@@ -5,6 +5,11 @@ from typing import Any, Callable, Dict, Optional
 
 import httpx
 
+from src.services.strategy_api_transport import (
+    build_httpx_client_kwargs,
+    normalize_strategy_api_base_url,
+)
+
 
 class StrategyApiClient:
     def __init__(
@@ -14,7 +19,8 @@ class StrategyApiClient:
         headers_factory: Callable[[], Dict[str, str]],
         session_factory: Callable[..., Any],
     ):
-        self._strategy_api_url = str(strategy_api_url).rstrip("/")
+        self._strategy_api_target = str(strategy_api_url or "").strip()
+        self._strategy_api_url = normalize_strategy_api_base_url(strategy_api_url)
         self._headers_factory = headers_factory
         self._session_factory = session_factory
         self._session: Optional[Any] = None
@@ -85,9 +91,14 @@ class StrategyApiClient:
                 timeout=max(0.1, timeout_total),
                 connect=3.0,
             )
-            self._session = self._session_factory(timeout=timeout)
+            self._session = self._session_factory(
+                timeout=timeout,
+                **build_httpx_client_kwargs(self._strategy_api_target),
+            )
         except TypeError:
-            self._session = self._session_factory()
+            self._session = self._session_factory(
+                **build_httpx_client_kwargs(self._strategy_api_target)
+            )
 
         self._session_loop = current_loop
         return self._session
@@ -110,18 +121,57 @@ class StrategyApiClient:
             if inspect.isawaitable(result):
                 await result
 
+    def _build_headers(
+        self,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> Optional[Dict[str, str]]:
+        headers = dict(self._headers_factory() or {})
+        if extra_headers:
+            headers.update(
+                {
+                    str(key): str(value)
+                    for key, value in extra_headers.items()
+                    if value is not None
+                }
+            )
+        return headers or None
+
     async def post_json(
         self,
         path: str,
         *,
-        json: Dict[str, Any],
+        json: Any,
         params: Optional[Dict[str, Any]] = None,
     ) -> Any:
         session = await self.get_session()
         post_kwargs: Dict[str, Any] = {"json": json}
-        headers = self._headers_factory()
+        headers = self._build_headers()
         if headers:
             post_kwargs["headers"] = headers
+        if params:
+            post_kwargs["params"] = params
+        return await self.maybe_await(
+            session.post(f"{self._strategy_api_url}{path}", **post_kwargs)
+        )
+
+    async def post_content(
+        self,
+        path: str,
+        *,
+        content: bytes,
+        params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        content_type: Optional[str] = None,
+    ) -> Any:
+        session = await self.get_session()
+        resolved_headers = self._build_headers(headers)
+        if content_type:
+            if resolved_headers is None:
+                resolved_headers = {}
+            resolved_headers.setdefault("content-type", str(content_type))
+        post_kwargs: Dict[str, Any] = {"content": content}
+        if resolved_headers:
+            post_kwargs["headers"] = resolved_headers
         if params:
             post_kwargs["params"] = params
         return await self.maybe_await(

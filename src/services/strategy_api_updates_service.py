@@ -4,10 +4,13 @@ import asyncio
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-import aiohttp
 from fastapi import HTTPException
 
 from src.services.strategy_api_auth_headers import build_strategy_api_headers
+from src.services.strategy_api_transport import (
+    normalize_strategy_api_base_url,
+    open_strategy_api_session,
+)
 from src.services.strategy_api_types import StrategyApiIntegrationDeps
 
 
@@ -39,10 +42,6 @@ _STRATEGY_API_TIMEOUT_SECONDS = _parse_positive_float_env(
     "BACKTEST_STRATEGY_API_TIMEOUT_SECONDS",
     6.0,
 )
-_STRATEGY_API_CLIENT_TIMEOUT = aiohttp.ClientTimeout(
-    total=_STRATEGY_API_TIMEOUT_SECONDS,
-    connect=min(_STRATEGY_API_TIMEOUT_SECONDS, 3.0),
-)
 
 
 def _strategy_api_headers(strategy_api_url: Optional[str] = None) -> Dict[str, str]:
@@ -50,15 +49,16 @@ def _strategy_api_headers(strategy_api_url: Optional[str] = None) -> Dict[str, s
 
 
 async def _post_strategy_update(
-    session: aiohttp.ClientSession,
+    session: Any,
     *,
+    strategy_api_base_url: str,
     strategy_api_url: str,
     strategy_name: str,
     params: Dict[str, Any],
 ) -> Tuple[str, int | None, str | None]:
     try:
         async with session.post(
-            f"{strategy_api_url}/api/strategies/update",
+            f"{strategy_api_base_url}/api/strategies/update",
             json={"strategy_name": strategy_name, "params": params},
             headers=_strategy_api_headers(strategy_api_url),
         ) as resp:
@@ -74,8 +74,13 @@ async def _run_strategy_updates(
 ) -> List[Tuple[str, int | None, str | None]]:
     if not updates:
         return []
+    strategy_api_base_url = normalize_strategy_api_base_url(strategy_api_url)
     semaphore = asyncio.Semaphore(_STRATEGY_UPDATE_MAX_CONCURRENCY)
-    async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+    async with open_strategy_api_session(
+        strategy_api_url=strategy_api_url,
+        timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+        connect_timeout_seconds=3.0,
+    ) as session:
 
         async def _bounded_update(
             strategy_name: str,
@@ -84,6 +89,7 @@ async def _run_strategy_updates(
             async with semaphore:
                 return await _post_strategy_update(
                     session,
+                    strategy_api_base_url=strategy_api_base_url,
                     strategy_api_url=strategy_api_url,
                     strategy_name=strategy_name,
                     params=params,
@@ -126,9 +132,14 @@ async def fetch_remote_strategies(
     strategy_api_url: str,
     deps: StrategyApiIntegrationDeps,
 ) -> Dict[str, Any]:
-    async with aiohttp.ClientSession(timeout=_STRATEGY_API_CLIENT_TIMEOUT) as session:
+    base_url = normalize_strategy_api_base_url(strategy_api_url)
+    async with open_strategy_api_session(
+        strategy_api_url=strategy_api_url,
+        timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+        connect_timeout_seconds=3.0,
+    ) as session:
         async with session.get(
-            f"{strategy_api_url}/api/strategies",
+            f"{base_url}/api/strategies",
             headers=_strategy_api_headers(strategy_api_url),
         ) as resp:
             if resp.status != 200:
@@ -218,12 +229,15 @@ async def apply_global_trailing(
     if not update_payload:
         return
 
+    base_url = normalize_strategy_api_base_url(strategy_api_url)
     try:
-        async with aiohttp.ClientSession(
-            timeout=_STRATEGY_API_CLIENT_TIMEOUT
+        async with open_strategy_api_session(
+            strategy_api_url=strategy_api_url,
+            timeout_seconds=_STRATEGY_API_TIMEOUT_SECONDS,
+            connect_timeout_seconds=3.0,
         ) as session:
             async with session.get(
-                f"{strategy_api_url}/api/strategies",
+                f"{base_url}/api/strategies",
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
                 if resp.status != 200:

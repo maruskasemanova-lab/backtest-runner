@@ -197,6 +197,8 @@ Runtime safety notes:
 - raw L2 dataframe cache is bounded by `BACKTEST_L2_CACHE_MAX_TICKERS`, `BACKTEST_L2_CACHE_MAX_ROWS`, and `BACKTEST_L2_CACHE_MAX_BYTES` (defaults favor memory safety over aggressive reuse).
 - strategy update fanout (`/api/strategies/update` bursts during run start) is concurrency-limited by `BACKTEST_STRATEGY_UPDATE_MAX_CONCURRENCY` (default `8`) to reduce start latency without unbounded request pressure.
 - runner->strategy API HTTP calls use bounded timeout `BACKTEST_STRATEGY_API_TIMEOUT_SECONDS` (default `6.0`) to fail fast when strategy API is slow/unreachable.
+- strategy transport accepts an in-process mode (`BACKTEST_STRATEGY_API_TRANSPORT=inprocess` or in-process URL alias such as `inprocess://...` / `http://inprocess`), allowing run-start/session calls to use local ASGI transport instead of network HTTP.
+- adaptive tuner day-level process fanout is available only for in-process strategy transport and is controlled by `BACKTEST_ADAPTIVE_TUNER_DAY_PARALLEL_ENABLED` and `BACKTEST_ADAPTIVE_TUNER_DAY_PARALLEL_MAX_WORKERS`.
 - when effective strategy mode resolves to `all_enabled`, runner performs best-effort pre-session strategy sync (`enabled=true` for every strategy currently returned by strategy API) so active strategy set is not accidentally constrained by stale per-strategy enabled flags.
 
 Important response fields:
@@ -270,6 +272,8 @@ Behavioral notes:
 
 - OHLCV range uses effective file coverage (derived from timestamps), not only filename dates.
 - `l2_overlap_date_ranges` is provided for L2-only UX clamping while keeping backward compatibility with existing `date_ranges`.
+- response additionally merges ticker/day hints from run-reports store (`run_summaries` in SQLite/Supabase) so analyzer/dropdown clients can discover recently used tickers even when current file catalog is narrower.
+- DB-merged tickers are materialized into `tickers[]` and `date_ranges.{ticker}` with inferred `start/end` bounds from summary date labels (`date`, `date_from/date_to`, or run key label).
 
 ### `POST /api/run/diagnose`
 
@@ -372,20 +376,24 @@ Purpose: manage unified per-ticker profiles that bundle strategy and execution c
 
 List contract (`GET /api/profiles/{ticker}`):
 
-- returns saved `profiles` and `active_profile_id` for ticker from AOS config.
+- returns saved `profiles` and `active_profile_id` for ticker from per-user DB-backed settings store (`user_settings`):
+  - local: SQLite-backed `SaaSStateStore`
+  - production: Supabase `user_settings` adapter when enabled
+- if DB store has no unified profiles for ticker yet, endpoint performs one-time migration from legacy AOS JSON `unified_profiles`/`active_unified_profile_id` into DB.
 - each profile carries `profile_id`, `profile_name`, timestamps, `strategy_profile`, `execution_profile`.
+- legacy derived combo+tuner variants (`legacy-unified-*`) remain appended for compatibility in profile dropdowns.
 
 Capture contract (`POST /api/profiles/capture`):
 
 - request: `ticker`, optional `profile_name`, `strategy_api_url`, `set_active`
 - behavior: fetches live strategy params from strategy API and captures current ticker strategy/execution settings into one unified profile.
-- effect: when `set_active=true`, captured profile becomes ticker active unified profile.
+- effect: when `set_active=true`, captured profile becomes active in DB-backed unified-profile state (not persisted to ticker JSON).
 
 Apply contract (`POST /api/profiles/apply`):
 
 - request: `ticker`, `profile_id`, optional `strategy_api_url`, `apply_now`, `apply_execution`
-- behavior: marks profile as active unified profile; can apply strategy params immediately (`apply_now`) and persist execution section into positioning config (`apply_execution`).
-- effect: next `POST /api/run/start` prioritizes active unified profile over legacy combo/adaptive split paths.
+- behavior: marks profile as active in DB-backed unified-profile state; can apply strategy params immediately (`apply_now`) and persist execution section into positioning config (`apply_execution`).
+- effect: next `POST /api/run/start` prioritizes active unified profile over legacy combo/adaptive split paths when active profile is resolved from DB-backed state in API flows.
 
 ### `GET /api/live-trader/runs` / `GET /api/live-trader/events/{run_id}` / `GET /api/live-trader/snapshot/{run_id}`
 
@@ -610,6 +618,26 @@ Compatibility note:
 - Break-even diagnostics are session-native and propagated in payloads as `break_even` snapshot (state machine status, activation/proof diagnostics, computed stop/costs/buffer, anti-spike counters, runtime formula evaluation snapshots). Runner forwards this to marker details and market context.
 - Closed-position payloads include flow diagnostics (`flow_strategy`, `book_pressure_confirmed`, `book_pressure_avg`, `book_pressure_trend`, `signed_aggression`, `flow_snapshot`), preserved `level_context`/`signal_metadata`, `break_even`, and `entry_quality_diagnostics` (first-bar stop-loss analysis tags + entry confluence/risk snapshot).
 - Session summary now includes `entry_timing_diagnostics` and per-strategy `vwap_magnet_entry_timing_diagnostics` for fast-stop analysis.
+
+### `POST /api/session/bars`
+
+Purpose: Process an ordered batch of in-session bars in one request while preserving per-bar decision semantics.
+
+Request contract:
+
+- preferred fast path: Arrow IPC stream (`Content-Type: application/vnd.apache.arrow.stream`) containing the same bar columns as `POST /api/session/bar`
+- compatibility fallback: JSON list of bar objects, or `{"bars": [...]}`
+- rows must stay in chronological order; strategy engine processes them sequentially and returns one result per input row
+
+Response contract:
+
+- returns `{"results": [...], "bars_processed": <int>}`
+- `results[i]` is the same decision payload shape as single-bar `POST /api/session/bar` for the corresponding input row
+
+Behavioral guarantees:
+
+- batch ingestion is transport-level optimization only; strategy state still advances one bar at a time in order
+- no-lookahead invariants remain identical to the single-bar endpoint
 
 ### `GET /api/strategies` / `POST /api/strategies/update`
 

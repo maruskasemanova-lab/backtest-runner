@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.models.config_requests import (
     AOSUpdateRequest,
@@ -10,6 +10,9 @@ from src.models.config_requests import (
     UnifiedProfileCaptureRequest,
 )
 from src.routes.context import ApiServices, get_api_services
+from src.routes.unified_profile_user_store import (
+    bind_user_unified_profile_store_callbacks,
+)
 from src.services.config_write_service import (
     apply_unified_profile,
     apply_adaptive_tuner_profile,
@@ -70,17 +73,39 @@ async def apply_adaptive_tuner_profile_endpoint(
 
 @router.post("/api/profiles/capture")
 async def capture_unified_profile_endpoint(
-    request: UnifiedProfileCaptureRequest,
+    payload: UnifiedProfileCaptureRequest,
+    request: Request,
     services: ApiServices = Depends(get_api_services),
 ):
     """Capture a unified profile with strategy and execution sections for ticker."""
-    return await capture_unified_profile(request, services.build_config_write_deps())
+    deps = services.build_config_write_deps()
+    bind_user_unified_profile_store_callbacks(
+        request=request,
+        ticker=payload.ticker,
+        load_aos_config=services.load_aos_config,
+        deps=deps,
+    )
+    try:
+        return await capture_unified_profile(payload, deps)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/api/profiles/apply")
 async def apply_unified_profile_endpoint(
-    request: UnifiedProfileApplyRequest,
+    payload: UnifiedProfileApplyRequest,
+    request: Request,
     services: ApiServices = Depends(get_api_services),
 ):
     """Set active unified profile and optionally apply strategy/execution sections."""
-    return await apply_unified_profile(request, services.build_config_write_deps())
+    deps = services.build_config_write_deps()
+    bind_user_unified_profile_store_callbacks(
+        request=request,
+        ticker=payload.ticker,
+        load_aos_config=services.load_aos_config,
+        deps=deps,
+    )
+    try:
+        return await apply_unified_profile(payload, deps)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

@@ -37,16 +37,35 @@ class LocalConfigService:
         path = self.resolve_aos_config_path(aos_config_path)
         config = self.load_json_file(path, default={"version": "1.0.0", "tickers": {}})
 
-        tickers_dir = path.parent / "tickers"
         if "tickers" not in config or not isinstance(config["tickers"], dict):
             config["tickers"] = {}
 
-        if tickers_dir.exists() and tickers_dir.is_dir():
-            for ticker_file in tickers_dir.glob("*.json"):
+        # Runtime configs often live under /tmp while canonical ticker overrides
+        # stay in default_aos_path.parent / "tickers". Load default first and then
+        # overlay runtime ticker files so runtime edits keep priority.
+        primary_tickers_dir = path.parent / "tickers"
+        default_tickers_dir = self.default_aos_path.parent / "tickers"
+        candidate_dirs = []
+        seen_dirs = set()
+        for ticker_dir in (default_tickers_dir, primary_tickers_dir):
+            try:
+                resolved_dir = ticker_dir.resolve()
+            except Exception:
+                resolved_dir = ticker_dir
+            if resolved_dir in seen_dirs:
+                continue
+            seen_dirs.add(resolved_dir)
+            candidate_dirs.append(ticker_dir)
+
+        for ticker_dir in candidate_dirs:
+            if not ticker_dir.exists() or not ticker_dir.is_dir():
+                continue
+            for ticker_file in sorted(ticker_dir.glob("*.json")):
                 ticker = ticker_file.stem.upper()
                 try:
                     ticker_data = self.load_json_file(ticker_file, default={})
-                    config["tickers"][ticker] = ticker_data
+                    if isinstance(ticker_data, dict):
+                        config["tickers"][ticker] = ticker_data
                 except Exception as e:
                     self.logger.error(
                         f"Failed to load ticker config from {ticker_file}: {e}"

@@ -11,14 +11,16 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
 ## Core Runtime Flow
 
 1. Client calls `POST /api/run/start` on runner for unauthenticated/local playback, or `POST /api/v2/runs` when authenticated in SaaS mode.
-2. Runner resolves data, conditionally applies ticker strategy overrides (`apply_ticker_overrides_on_start`), applies AOS config (including per-ticker strategy-selection mode plus active unified profile when present, otherwise legacy strategy-combo + adaptive profile paths), applies optional run-level session scope override (`include_extended_hours`), optional L2 enrichment.
+2. Runner resolves data, conditionally applies ticker strategy overrides (`apply_ticker_overrides_on_start`), applies AOS config (including per-ticker strategy-selection mode plus active unified profile when present, with unified profile state sourced from DB-backed user settings and legacy combo+adaptive fallback variants retained), applies optional run-level session scope override (`include_extended_hours`), optional L2 enrichment.
    Parquet-backed OHLCV files are loaded through `src/parquet_compat.py` using a Polars lazy scan path before the existing pandas/list-of-bars compatibility boundary.
    When the requested run range is backed only by parquet files, `start_run_data_service` now materializes bars directly from Polars into runner bar dicts without first building a pandas DataFrame.
    L2 precomputed feature files and TCBBO options-flow parquet ingestion also use projected Polars-backed reads now; the old full-file parquet fallback path was removed for those runtime reads.
 3. Runner configures strategy session via `POST /api/session/config` (risk/L2 + strategy-selection settings, plus optional profile runtime overrides like daily-trade cap and MU choppy hard-block switch).
 4. Runner creates `SessionRunner` and stores it in active run registry.
    Strategy-analyzer market context precomputes scalar metrics once per run, stores them as compact tuple rows, and assembles `recent_bars` lazily per requested bar instead of pre-materializing snapshots for the full session.
-5. On `step/play`, runner sends each bar to strategy `POST /api/session/bar`.
+5. On `step/play`, runner sends bars to strategy session endpoints:
+   single-step and delayed playback use `POST /api/session/bar`;
+   zero-delay playback batches warmup/trade chunks over `POST /api/session/bars`.
 6. When intrabar execution mode is enabled, runner may attach 1-second intrabar top-of-book quotes for that minute (`intrabar_quotes_1s`) on each processed bar to support entry/exit logic.
 7. Strategy returns decision payload; runner maps it to markers and summary state.
 8. Runner broadcasts bar + decision updates over `/ws/live`.
@@ -96,6 +98,8 @@ Authenticated FE start behavior:
 - `monte_carlo.py`: drawdown distribution/risk gate from trade PnL sequences.
 - Runner adaptive tuner (`POST /api/adaptive-tuner/run`): date-range candidate search for adaptive v1/v2 controls with grid/random/optuna modes, optional L2-only date filtering, optional momentum-diversification dimensions (L2/CVD-aware momentum gating + fail-fast), and optional best-candidate persistence.
 - Runner adaptive tuner quick mode: optional approximate tuning path that samples representative days and boosts trial budget so more candidate combinations can be screened faster.
+- Runner adaptive tuner day-parallel mode: when strategy transport is in-process, per-candidate day evaluation can fan out via `ProcessPoolExecutor` (`BACKTEST_ADAPTIVE_TUNER_DAY_PARALLEL_ENABLED`, `BACKTEST_ADAPTIVE_TUNER_DAY_PARALLEL_MAX_WORKERS`) so each day runs in an isolated worker process.
+- Strategy transport supports HTTP and in-process ASGI shortcut (`BACKTEST_STRATEGY_API_TRANSPORT=inprocess` or in-process URL token), allowing runner backtests to bypass HTTP serialization overhead while keeping the standalone strategy API available for live/remote use.
 
 ## Frontend Behavioral Ownership
 
