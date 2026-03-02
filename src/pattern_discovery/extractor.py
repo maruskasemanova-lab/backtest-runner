@@ -97,6 +97,37 @@ class FeatureExtractor:
                 extraction_errors=errors,
             )
 
+        result = self.extract_from_payload(report, ticker)
+        snapshots.extend(result.snapshots)
+        total_bars += result.total_bars_processed
+        total_signals += result.total_signals_found
+        errors.extend(result.extraction_errors)
+
+        return ExtractionResult(
+            snapshots=snapshots,
+            total_bars_processed=total_bars,
+            total_signals_found=total_signals,
+            extraction_errors=errors,
+        )
+
+    def extract_from_payload(
+        self,
+        report: Dict[str, Any],
+        ticker: str,
+    ) -> ExtractionResult:
+        snapshots: List[PatternSnapshot] = []
+        errors: List[str] = []
+        total_bars = 0
+        total_signals = 0
+
+        if not isinstance(report, dict):
+            return ExtractionResult(
+                snapshots=[],
+                total_bars_processed=0,
+                total_signals_found=0,
+                extraction_errors=["Invalid report payload (expected object)."],
+            )
+
         # Handle daily report format
         if "days" in report:
             for day_data in report["days"]:
@@ -520,4 +551,59 @@ def extract_snapshots_from_backtest(
         f"from {date_from} to {date_to}"
     )
 
+    return deduped_snapshots
+
+
+def extract_snapshots_from_report_payloads(
+    *,
+    ticker: str,
+    date_from: str,
+    date_to: str,
+    report_payloads: List[Dict[str, Any]],
+    config: DiscoveryConfig,
+) -> List[PatternSnapshot]:
+    extractor = FeatureExtractor(
+        lookback_bars=config.lookback_bars,
+        forward_bars=config.forward_bars,
+    )
+    all_snapshots: List[PatternSnapshot] = []
+    for payload in report_payloads:
+        if not isinstance(payload, dict):
+            continue
+        try:
+            result = extractor.extract_from_payload(payload, ticker)
+        except Exception as exc:
+            logger.error("Failed to process report payload: %s", exc)
+            continue
+        all_snapshots.extend(result.snapshots)
+        if result.extraction_errors:
+            logger.warning(
+                "Extraction errors in report payload: %s",
+                len(result.extraction_errors),
+            )
+
+    start_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+    end_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+    filtered_snapshots = [
+        s for s in all_snapshots if start_date <= s.timestamp.date() <= end_date
+    ]
+
+    unique_snapshots: Dict[Tuple[str, str, int, str, str], PatternSnapshot] = {}
+    for snapshot in filtered_snapshots:
+        key = (
+            snapshot.ticker.upper(),
+            snapshot.timestamp.isoformat(),
+            int(snapshot.bar_index),
+            snapshot.strategy or "",
+            snapshot.signal_type or "",
+        )
+        unique_snapshots.setdefault(key, snapshot)
+    deduped_snapshots = list(unique_snapshots.values())
+    logger.info(
+        "Extracted %s snapshots for %s from payloads (%s to %s)",
+        len(deduped_snapshots),
+        ticker,
+        date_from,
+        date_to,
+    )
     return deduped_snapshots

@@ -25,9 +25,9 @@ Generated from mapped Python files in `component-map.json`.
 | `orchestration` | `GET` | `/api/health` | `health` | `src/routes/system_routes.py` | 1418 |
 | `orchestration` | `GET` | `/api/l2/footprint/{ticker}` | `get_footprint_data` | `src/routes/l2_routes.py` | 12 |
 | `orchestration` | `GET` | `/api/l2/icebergs/{ticker}` | `get_icebergs` | `src/routes/l2_routes.py` | 57 |
-| `orchestration` | `GET` | `/api/live-trader/events/{run_id}` | `get_live_trader_events` | `src/routes/live_trader_routes.py` | 37 |
-| `orchestration` | `GET` | `/api/live-trader/runs` | `list_live_trader_runs` | `src/routes/live_trader_routes.py` | 14 |
-| `orchestration` | `GET` | `/api/live-trader/snapshot/{run_id}` | `get_live_trader_snapshot` | `src/routes/live_trader_routes.py` | 55 |
+| `orchestration` | `GET` | `/api/live-trader/events/{run_id}` | `get_live_trader_events` | `src/routes/live_trader_routes.py` | 57 |
+| `orchestration` | `GET` | `/api/live-trader/runs` | `list_live_trader_runs` | `src/routes/live_trader_routes.py` | 24 |
+| `orchestration` | `GET` | `/api/live-trader/snapshot/{run_id}` | `get_live_trader_snapshot` | `src/routes/live_trader_routes.py` | 101 |
 | `orchestration` | `GET` | `/api/positioning-config` | `get_positioning_config` | `src/routes/config_read_routes.py` | 73 |
 | `orchestration` | `GET` | `/api/positioning-config/{ticker}` | `get_ticker_positioning_config` | `src/routes/config_read_routes.py` | 79 |
 | `orchestration` | `GET` | `/api/profiles/{ticker}` | `get_unified_profiles` | `src/routes/config_read_routes.py` | 95 |
@@ -90,7 +90,7 @@ Generated from mapped Python files in `component-map.json`.
 | `orchestration` | `PUT` | `/api/data-loader/api-key` | `set_databento_api_key` | `src/routes/data_loader_routes.py` | 150 |
 | `orchestration` | `PUT` | `/api/data-loader/settings` | `update_data_loader_settings` | `src/routes/data_loader_routes.py` | 132 |
 | `orchestration` | `PUT` | `/user/settings` | `v2_upsert_user_settings` | `src/routes/v2_routes.py` | 1874 |
-| `orchestration` | `WEBSOCKET` | `/ws/live` | `websocket_endpoint` | `api_server.py` | 1231 |
+| `orchestration` | `WEBSOCKET` | `/ws/live` | `websocket_endpoint` | `api_server.py` | 1444 |
 | `strategy-engine` | `DELETE` | `/api/session` | `clear_session` | `../market_regime_detection/api_server.py` | 617 |
 | `strategy-engine` | `DELETE` | `/api/session/run` | `clear_run_sessions` | `../market_regime_detection/api_server.py` | 628 |
 | `strategy-engine` | `GET` | `/` | `root` | `../market_regime_detection/api_server.py` | 265 |

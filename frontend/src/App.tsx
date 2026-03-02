@@ -59,8 +59,10 @@ import {
   toChartBar,
   upsertDecisionMarker,
   upsertStreamChartBar,
+  VIEW_TABS,
   WS_CONNECT_ATTEMPTS_BEFORE_FALLBACK,
   WS_FALLBACK_NOTICE,
+  WS_HANDSHAKE_TIMEOUT_MS,
   WS_RECONNECT_BASE_MS,
   WS_RECONNECT_MAX_MS,
 } from './app/appShared';
@@ -344,6 +346,7 @@ function App() {
     reconnectBaseMs: WS_RECONNECT_BASE_MS,
     reconnectMaxMs: WS_RECONNECT_MAX_MS,
     maxHandshakeAttempts: WS_CONNECT_ATTEMPTS_BEFORE_FALLBACK,
+    handshakeTimeoutMs: WS_HANDSHAKE_TIMEOUT_MS,
   });
 
   useEffect(() => {
@@ -571,9 +574,28 @@ function App() {
     mobileSidebarBreakpoint: MOBILE_SIDEBAR_BREAKPOINT,
     sidebarWidthStorageKey: SIDEBAR_WIDTH_STORAGE_KEY,
   });
-  
-  // Debug state moved to top level
-  
+
+  const currentViewMeta = useMemo(
+    () => VIEW_TABS.find((tab) => tab.id === activeView) ?? VIEW_TABS[0],
+    [activeView],
+  );
+  const shellSyncLabel = isConnected
+    ? isPollingFallback
+      ? 'Polling fallback'
+      : 'Realtime stream'
+    : 'Offline mode';
+  const shellTargetLabel = activeRunTicker || selectedTicker || 'Select symbol';
+  const shellRunLabel = activeRun
+    ? `${activeRun.ticker} ${activeRun.date}`
+    : 'No run attached';
+  const shellPhaseLabel = runState?.phase
+    ? String(runState.phase).replace(/_/g, ' ')
+    : 'Ready';
+  const shellQuotaLabel =
+    quotaSnapshot?.usage && quotaSnapshot?.limits
+      ? `${quotaSnapshot.usage.active_runs || 0}/${quotaSnapshot.limits.concurrent_runs || 0} lanes`
+      : `${activeRuns.length} tracked`;
+
   return (
     <div className="app-container">
       <AppSidebar
@@ -605,6 +627,48 @@ function App() {
           onSignIn={handleAuthSignIn}
           onSignOut={handleAuthSignOut}
         />
+
+        <section className="app-shell-hero" aria-label="Workspace overview">
+          <div className="app-shell-copy">
+            <span className="app-shell-eyebrow">2026 Trading Desk</span>
+            <h1 className="app-shell-title">
+              <span className="app-shell-title-icon" aria-hidden="true">
+                {currentViewMeta.icon}
+              </span>
+              <span>{currentViewMeta.label}</span>
+            </h1>
+            <p className="app-shell-subtitle">
+              Clearer control surfaces for tuning, diagnostics, and live execution without
+              burying the core state.
+            </p>
+          </div>
+          <div className="app-shell-metrics">
+            <div className="app-shell-pill">
+              <span className="app-shell-pill-label">Sync</span>
+              <strong>{shellSyncLabel}</strong>
+            </div>
+            <div className="app-shell-pill">
+              <span className="app-shell-pill-label">Symbol</span>
+              <strong>{shellTargetLabel}</strong>
+            </div>
+            <div className="app-shell-pill">
+              <span className="app-shell-pill-label">Run</span>
+              <strong>{shellRunLabel}</strong>
+            </div>
+            <div className="app-shell-pill">
+              <span className="app-shell-pill-label">Phase</span>
+              <strong>{shellPhaseLabel}</strong>
+            </div>
+            <div className="app-shell-pill">
+              <span className="app-shell-pill-label">Capacity</span>
+              <strong>{shellQuotaLabel}</strong>
+            </div>
+            <div className="app-shell-pill">
+              <span className="app-shell-pill-label">Plan</span>
+              <strong>{String(planTier || 'free').toUpperCase()}</strong>
+            </div>
+          </div>
+        </section>
 
         {showAdSlot ? (
           <section className="ad-slot">

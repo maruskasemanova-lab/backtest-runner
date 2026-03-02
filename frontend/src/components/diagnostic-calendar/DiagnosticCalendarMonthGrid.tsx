@@ -1,5 +1,6 @@
 import type {
   DiagnosticCalendarDayResult,
+  DiagnosticCalendarProfileDaySummary,
   DiagnosticCalendarMonthView,
   DiagnosticCalendarReport,
 } from "./diagnostic-calendar-types";
@@ -13,6 +14,7 @@ import {
 } from "./diagnostic-calendar-utils";
 
 type DiagnosticCalendarMonthGridProps = {
+  dayProfileSummaryMap: Map<string, DiagnosticCalendarProfileDaySummary[]>;
   dayResults: DiagnosticCalendarDayResult[];
   loading: boolean;
   maxAbsPnlPct: number;
@@ -23,6 +25,7 @@ type DiagnosticCalendarMonthGridProps = {
 };
 
 function DiagnosticCalendarMonthGrid({
+  dayProfileSummaryMap,
   dayResults,
   loading,
   maxAbsPnlPct,
@@ -83,7 +86,8 @@ function DiagnosticCalendarMonthGrid({
                   isSelected ? "selected" : "",
                 ].join(" ").trim();
                 const dayTrades = Number(result?.total_trades ?? 0);
-                const cellTooltip = buildDayTooltip(cell.isoDate, result);
+                const profileSummaries = dayProfileSummaryMap.get(cell.isoDate) || [];
+                const cellTooltip = buildDayTooltip(cell.isoDate, result, profileSummaries);
 
                 return (
                   <button
@@ -106,6 +110,26 @@ function DiagnosticCalendarMonthGrid({
                         <span className={`day-pnl-usd ${result.success === false ? "muted" : ""}`}>
                           {result.success === false ? "-" : formatUsd(result.pnl_dollars ?? 0)}
                         </span>
+                        {profileSummaries.length > 1 ? (
+                          <div className="day-profile-list">
+                            {profileSummaries.map((item) => {
+                              const profileClass = item.pnlDollars > 0
+                                ? "positive"
+                                : item.pnlDollars < 0
+                                  ? "negative"
+                                  : "flat";
+                              return (
+                                <span
+                                  key={`${cell.isoDate}-${item.profileKey}`}
+                                  className={`day-profile-row ${profileClass}`}
+                                  title={`${item.profileLabel} | ${formatPct(item.pnlPct)} | T:${item.totalTrades}`}
+                                >
+                                  {item.profileLabel}: {formatPct(item.pnlPct)} / T:{item.totalTrades}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : null}
                         <span className="day-trades">T:{Number.isFinite(dayTrades) ? dayTrades : 0}</span>
                       </>
                     ) : (

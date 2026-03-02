@@ -23,7 +23,11 @@ python -m uvicorn api_server:app --port 8001 --reload
 
 ```bash
 cd /Users/hotovo/.gemini/antigravity/scratch/backtest-runner
-python -m uvicorn api_server:app --port 8002 --reload
+# Stable mode (recommended for long-lived WebSocket sessions)
+BACKTEST_RUNNER_RELOAD=0 python -m uvicorn api_server:app --port 8002
+
+# Optional hot-reload mode for backend development
+BACKTEST_RUNNER_RELOAD=1 python -m uvicorn api_server:app --port 8002 --reload
 ```
 
 ### 3. Start Frontend (port 5173)

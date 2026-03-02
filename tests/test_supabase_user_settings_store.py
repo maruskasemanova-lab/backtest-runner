@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
+from src.services import saas_supabase_store
 from src.services.saas_service import (
     SaaSStateStore,
     SupabaseRunReportsStore,
@@ -114,10 +116,7 @@ def test_supabase_user_settings_store_fallback_to_run_summaries(monkeypatch):
             f"Unexpected request: {method} {url} params={params} json={json}"
         )
 
-    monkeypatch.setattr(
-        "src.services.saas_supabase_store.requests.request",
-        _fake_request,
-    )
+    monkeypatch.setattr(saas_supabase_store.requests, "request", _fake_request)
 
     store = SupabaseUserSettingsStore(
         supabase_url="https://example.supabase.co",
@@ -168,10 +167,7 @@ def test_supabase_user_settings_store_primary_table(monkeypatch):
 
         raise AssertionError(f"Unexpected method {method}")
 
-    monkeypatch.setattr(
-        "src.services.saas_supabase_store.requests.request",
-        _fake_request,
-    )
+    monkeypatch.setattr(saas_supabase_store.requests, "request", _fake_request)
 
     store = SupabaseUserSettingsStore(
         supabase_url="https://example.supabase.co",
@@ -260,10 +256,7 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
             f"Unexpected request: {method} {url} params={params} json={json}"
         )
 
-    monkeypatch.setattr(
-        "src.services.saas_supabase_store.requests.request",
-        _fake_request,
-    )
+    monkeypatch.setattr(saas_supabase_store.requests, "request", _fake_request)
 
     store = SupabaseRunReportsStore(
         supabase_url="https://example.supabase.co",
@@ -375,10 +368,7 @@ def test_supabase_run_state_mirror_upserts_job_and_run(monkeypatch):
             f"Unexpected request: {method} {url} params={params} json={json}"
         )
 
-    monkeypatch.setattr(
-        "src.services.saas_supabase_store.requests.request",
-        _fake_request,
-    )
+    monkeypatch.setattr(saas_supabase_store.requests, "request", _fake_request)
 
     mirror = SupabaseRunStateMirror(
         supabase_url="https://example.supabase.co",
@@ -507,10 +497,7 @@ def test_supabase_user_datasets_store_roundtrip(monkeypatch):
             f"Unexpected request: {method} {url} params={params} json={json}"
         )
 
-    monkeypatch.setattr(
-        "src.services.saas_supabase_store.requests.request",
-        _fake_request,
-    )
+    monkeypatch.setattr(saas_supabase_store.requests, "request", _fake_request)
 
     store = SupabaseUserDatasetsStore(
         supabase_url="https://example.supabase.co",
@@ -582,3 +569,125 @@ def test_sqlite_run_reports_store_upsert_and_list(tmp_path):
     assert single is not None
     assert single["run_key"] == "run-2:MU:2026-02-12"
     assert single["summary"]["session_summary"]["total_trades"] == 4
+
+
+def test_sqlite_config_snapshots_and_aos_history_store(tmp_path):
+    store = SaaSStateStore(str(tmp_path / "saas_state.db"))
+
+    assert store.get_config_snapshot(config_key="aos_config") is None
+    saved = store.upsert_config_snapshot(
+        config_key="aos_config",
+        payload={"version": "1.0.0", "tickers": {"MU": {"x": 1}}},
+        source="test",
+    )
+    assert saved["config_key"] == "aos_config"
+    loaded = store.get_config_snapshot(config_key="aos_config")
+    assert loaded is not None
+    assert loaded["payload"]["tickers"]["MU"]["x"] == 1
+    assert loaded["source"] == "test"
+
+    entry = {
+        "timestamp": "2026-03-02T10:00:00Z",
+        "ticker": "MU",
+        "old_active_unified_profile_id": "old",
+        "new_active_unified_profile_id": "new",
+        "old_active_adaptive_tuner_profile_id": "a",
+        "new_active_adaptive_tuner_profile_id": "b",
+        "active_profile_snapshot": {},
+    }
+    assert store.record_aos_history_entry(
+        ticker="MU",
+        entry=entry,
+        source="test",
+    )
+    assert store.record_aos_history_entry(
+        ticker="MU",
+        entry=entry,
+        source="test",
+    ) is False
+    history = store.list_aos_history_entries(ticker="MU", limit=10)
+    assert len(history) == 1
+    assert history[0]["new_active_unified_profile_id"] == "new"
+
+
+def test_sqlite_live_trader_events_store(tmp_path):
+    store = SaaSStateStore(str(tmp_path / "saas_state.db"))
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    assert store.upsert_live_trader_event(
+        run_id="run-live-1",
+        stream="runtime",
+        event={"event": "runtime_started", "ticker": "MU", "timestamp": now_iso},
+    )
+    assert store.upsert_live_trader_event(
+        run_id="run-live-1",
+        stream="decisions",
+        event={"decision": {"action": "ENTER_LONG"}, "timestamp": now_iso},
+    )
+    # Duplicate payload dedupes by event hash.
+    assert (
+        store.upsert_live_trader_event(
+            run_id="run-live-1",
+            stream="decisions",
+            event={"decision": {"action": "ENTER_LONG"}, "timestamp": now_iso},
+        )
+        is False
+    )
+
+    decision_rows = store.list_live_trader_events(
+        run_id="run-live-1",
+        stream="decisions",
+        limit=20,
+    )
+    assert len(decision_rows) == 1
+    assert decision_rows[0]["decision"]["action"] == "ENTER_LONG"
+
+    stats = store.get_live_trader_stream_stats(
+        run_id="run-live-1",
+        stream="runtime",
+    )
+    assert stats["count"] == 1
+    assert stats["latest"]["event"] == "runtime_started"
+
+    rows = store.list_live_trader_runs(limit=10, active_only=False)
+    assert rows
+    assert rows[0]["run_id"] == "run-live-1"
+    assert rows[0]["status"] in {"active", "idle"}
+
+
+def test_sqlite_live_trader_ingest_state_roundtrip(tmp_path):
+    store = SaaSStateStore(str(tmp_path / "saas_state.db"))
+
+    assert store.get_live_trader_ingest_state(source_path="/tmp/decisions_run-a.jsonl") is None
+
+    saved = store.upsert_live_trader_ingest_state(
+        source_path="/tmp/decisions_run-a.jsonl",
+        run_id="run-a",
+        stream="decisions",
+        file_mtime_ns=101,
+        file_size_bytes=2048,
+        byte_offset=512,
+    )
+    assert saved["run_id"] == "run-a"
+    assert saved["stream"] == "decisions"
+    assert saved["byte_offset"] == 512
+
+    loaded = store.get_live_trader_ingest_state(source_path="/tmp/decisions_run-a.jsonl")
+    assert loaded is not None
+    assert loaded["file_mtime_ns"] == 101
+    assert loaded["file_size_bytes"] == 2048
+    assert loaded["byte_offset"] == 512
+
+    store.upsert_live_trader_ingest_state(
+        source_path="/tmp/decisions_run-a.jsonl",
+        run_id="run-a",
+        stream="decisions",
+        file_mtime_ns=202,
+        file_size_bytes=4096,
+        byte_offset=4096,
+    )
+    updated = store.get_live_trader_ingest_state(source_path="/tmp/decisions_run-a.jsonl")
+    assert updated is not None
+    assert updated["file_mtime_ns"] == 202
+    assert updated["file_size_bytes"] == 4096
+    assert updated["byte_offset"] == 4096

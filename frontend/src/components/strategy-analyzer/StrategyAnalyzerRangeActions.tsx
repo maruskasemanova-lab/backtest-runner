@@ -51,72 +51,52 @@ export default function StrategyAnalyzerRangeActions({
   const busy = runLoading || wfoIsRunning;
 
   return (
-    <div className="card" style={{ padding: "0.75rem 1rem" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-        <label style={{ fontWeight: 600, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-          Test Range
+    <div className="card sa-range-card">
+      <div className="sa-range-toolbar">
+        <div className="sa-range-header">
+          <div className="sa-section-kicker">Playback Window</div>
+          <div className="sa-section-title">Test Range</div>
+        </div>
+
+        <label className="sa-control-field sa-control-field-tight">
+          <span className="sa-control-label">From</span>
+          <input
+            className="sa-control-input"
+            type="datetime-local"
+            value={selectedRangeFrom || ""}
+            onChange={(e) => setSelectedRangeFrom(e.target.value)}
+            step="60"
+          />
         </label>
 
-        <input
-          type="datetime-local"
-          value={selectedRangeFrom || ""}
-          onChange={(e) => setSelectedRangeFrom(e.target.value)}
-          step="60"
-          style={{
-            padding: "4px 8px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--border-color)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            fontSize: "0.85rem",
-          }}
-        />
-        <span style={{ color: "var(--text-muted)" }}>&rarr;</span>
-        <input
-          type="datetime-local"
-          value={selectedRangeTo || ""}
-          onChange={(e) => setSelectedRangeTo(e.target.value)}
-          step="60"
-          style={{
-            padding: "4px 8px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--border-color)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            fontSize: "0.85rem",
-          }}
-        />
+        <label className="sa-control-field sa-control-field-tight">
+          <span className="sa-control-label">To</span>
+          <input
+            className="sa-control-input"
+            type="datetime-local"
+            value={selectedRangeTo || ""}
+            onChange={(e) => setSelectedRangeTo(e.target.value)}
+            step="60"
+          />
+        </label>
 
         {selectedRangeFrom && selectedRangeTo ? (
-          <button
-            onClick={onClearRange}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: "0.8rem",
-            }}
-          >
-            clear
+          <button type="button" className="sa-text-btn" onClick={onClearRange}>
+            Clear range
           </button>
         ) : null}
+      </div>
 
-        <div style={{ flex: 1 }} />
-
-        <button
-          className="btn"
-          onClick={onOpenStrategyEditor}
-          style={{ padding: "6px 16px", fontSize: "0.85rem", fontWeight: 600 }}
-        >
+      <div className="sa-action-row">
+        <button type="button" className="btn btn-secondary" onClick={onOpenStrategyEditor}>
           Edit Strategy
         </button>
 
         <button
+          type="button"
           className="btn btn-primary"
           onClick={wfoEnabled ? onRunWfo : onStartTest}
           disabled={!selectedRangeFrom || !selectedRangeTo || busy}
-          style={{ padding: "6px 16px", fontSize: "0.85rem", fontWeight: 600 }}
         >
           {busy
             ? wfoEnabled
@@ -128,32 +108,26 @@ export default function StrategyAnalyzerRangeActions({
         </button>
       </div>
 
-      <div
-        style={{
-          marginTop: "0.75rem",
-          borderTop: "1px solid var(--border-color)",
-          paddingTop: "0.75rem",
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.55rem",
-        }}
-      >
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+      <div className="sa-wfo-panel">
+        <label className="sa-check-row">
           <input
             type="checkbox"
             checked={wfoEnabled}
             onChange={(event) => onWfoEnabledChange(event.target.checked)}
             disabled={busy}
           />
-          Enable WFO Combo Sweep Before Playback
+          <span>Enable WFO Combo Sweep Before Playback</span>
         </label>
 
         {wfoEnabled ? (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "8px 10px" }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                Min SL % (`context_risk_min_sl_pct`)
+            <div className="sa-wfo-grid">
+              <label className="sa-control-field">
+                <span className="sa-control-label">
+                  Min SL % (`context_risk_min_sl_pct`)
+                </span>
                 <input
+                  className="sa-control-input"
                   type="text"
                   value={wfoGridConfig.contextRiskMinSlValues}
                   onChange={(event) =>
@@ -161,79 +135,63 @@ export default function StrategyAnalyzerRangeActions({
                   }
                   disabled={busy}
                   placeholder="0.30, 0.50"
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-primary)",
-                    fontSize: "0.78rem",
-                  }}
                 />
               </label>
 
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                Time Exit Bars (`time_exit_bars`)
+              <label className="sa-control-field">
+                <span className="sa-control-label">Time Exit Bars (`time_exit_bars`)</span>
                 <input
+                  className="sa-control-input"
                   type="text"
                   value={wfoGridConfig.timeExitBarsValues}
-                  onChange={(event) => onWfoGridConfigChange({ timeExitBarsValues: event.target.value })}
+                  onChange={(event) =>
+                    onWfoGridConfigChange({ timeExitBarsValues: event.target.value })
+                  }
                   disabled={busy}
                   placeholder="7, 12"
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-primary)",
-                    fontSize: "0.78rem",
-                  }}
                 />
               </label>
 
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                Break-even Min R (`break_even_activation_min_r`)
+              <label className="sa-control-field">
+                <span className="sa-control-label">
+                  Break-even Min R (`break_even_activation_min_r`)
+                </span>
                 <input
+                  className="sa-control-input"
                   type="text"
                   value={wfoGridConfig.breakEvenMinRValues}
-                  onChange={(event) => onWfoGridConfigChange({ breakEvenMinRValues: event.target.value })}
+                  onChange={(event) =>
+                    onWfoGridConfigChange({ breakEvenMinRValues: event.target.value })
+                  }
                   disabled={busy}
                   placeholder="0.40, 0.60"
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-primary)",
-                    fontSize: "0.78rem",
-                  }}
                 />
               </label>
 
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                BE L2 Proof (`break_even_l2_proof_book_pressure_threshold`)
+              <label className="sa-control-field">
+                <span className="sa-control-label">
+                  BE L2 Proof (`break_even_l2_proof_book_pressure_threshold`)
+                </span>
                 <input
+                  className="sa-control-input"
                   type="text"
                   value={wfoGridConfig.breakEvenProofBookPressureValues}
                   onChange={(event) =>
-                    onWfoGridConfigChange({ breakEvenProofBookPressureValues: event.target.value })
+                    onWfoGridConfigChange({
+                      breakEvenProofBookPressureValues: event.target.value,
+                    })
                   }
                   disabled={busy}
                   placeholder="0.03, 0.06"
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-primary)",
-                    fontSize: "0.78rem",
-                  }}
                 />
               </label>
 
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                EV Relaxation Threshold (`ev_relaxation_threshold`)
+              <label className="sa-control-field">
+                <span className="sa-control-label">
+                  EV Relaxation Threshold (`ev_relaxation_threshold`)
+                </span>
                 <input
+                  className="sa-control-input"
                   type="text"
                   value={wfoGridConfig.evRelaxationThresholdValues}
                   onChange={(event) =>
@@ -241,53 +199,45 @@ export default function StrategyAnalyzerRangeActions({
                   }
                   disabled={busy}
                   placeholder="7, 10"
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-primary)",
-                    fontSize: "0.78rem",
-                  }}
                 />
               </label>
 
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                Aggression Block Z (`signed_aggression_block_z_threshold`)
+              <label className="sa-control-field">
+                <span className="sa-control-label">
+                  Aggression Block Z (`signed_aggression_block_z_threshold`)
+                </span>
                 <input
+                  className="sa-control-input"
                   type="text"
                   value={wfoGridConfig.signedAggressionBlockZValues}
                   onChange={(event) =>
-                    onWfoGridConfigChange({ signedAggressionBlockZValues: event.target.value })
+                    onWfoGridConfigChange({
+                      signedAggressionBlockZValues: event.target.value,
+                    })
                   }
                   disabled={busy}
                   placeholder="1.65, 1.20"
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-primary)",
-                    fontSize: "0.78rem",
-                  }}
                 />
               </label>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+            <div className="sa-inline-meta">
+              <label className="sa-check-row sa-check-row-compact">
                 <input
                   type="checkbox"
                   checked={wfoGridConfig.includeBaseline}
-                  onChange={(event) => onWfoGridConfigChange({ includeBaseline: event.target.checked })}
+                  onChange={(event) =>
+                    onWfoGridConfigChange({ includeBaseline: event.target.checked })
+                  }
                   disabled={busy}
                 />
-                Include baseline
+                <span>Include baseline</span>
               </label>
 
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                Max combos
+              <label className="sa-inline-field">
+                <span className="sa-control-label">Max combos</span>
                 <input
+                  className="sa-control-input"
                   type="number"
                   min={1}
                   max={128}
@@ -298,83 +248,47 @@ export default function StrategyAnalyzerRangeActions({
                     })
                   }
                   disabled={busy}
-                  style={{
-                    width: 72,
-                    padding: "4px 8px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-primary)",
-                    fontSize: "0.75rem",
-                  }}
                 />
               </label>
 
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                Parallel workers
+              <label className="sa-inline-field">
+                <span className="sa-control-label">Parallel workers</span>
                 <input
+                  className="sa-control-input"
                   type="number"
                   min={1}
                   max={8}
                   value={wfoGridConfig.parallelWorkers}
                   onChange={(event) =>
                     onWfoGridConfigChange({
-                      parallelWorkers: Math.max(1, Math.min(8, Math.trunc(Number(event.target.value) || 1))),
+                      parallelWorkers: Math.max(
+                        1,
+                        Math.min(8, Math.trunc(Number(event.target.value) || 1)),
+                      ),
                     })
                   }
                   disabled={busy}
-                  style={{
-                    width: 72,
-                    padding: "4px 8px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-primary)",
-                    fontSize: "0.75rem",
-                  }}
                 />
               </label>
 
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+              <span className="sa-meta-pill">
                 Estimated combinations: {wfoEstimatedCombinations}
               </span>
             </div>
           </>
         ) : null}
 
-        {wfoIsRunning ? (
-          <div style={{ fontSize: "0.78rem", color: "var(--accent-blue)" }}>{wfoProgressLabel}</div>
-        ) : null}
+        {wfoIsRunning ? <div className="sa-status-note">{wfoProgressLabel}</div> : null}
 
         {rankedWfoResults.length > 0 ? (
-          <div
-            style={{
-              marginTop: "0.25rem",
-              border: "1px solid var(--border-color)",
-              borderRadius: "var(--radius-sm)",
-              padding: "8px",
-              background: "var(--bg-secondary)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "6px",
-            }}
-          >
-            <div style={{ fontSize: "0.76rem", color: "var(--text-secondary)", fontWeight: 700 }}>
-              WFO Results
-            </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.74rem", color: "var(--text-secondary)" }}>
-              Playback variant
+          <div className="sa-results-box">
+            <div className="sa-results-title">WFO Results</div>
+            <label className="sa-control-field">
+              <span className="sa-control-label">Playback variant</span>
               <select
+                className="sa-control-input"
                 value={selectedWfoVariantId || bestWfoVariantId || rankedWfoResults[0]?.id || ""}
                 onChange={(event) => onSelectWfoVariant(event.target.value)}
-                style={{
-                  padding: "4px 8px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border-color)",
-                  background: "var(--bg-primary)",
-                  color: "var(--text-primary)",
-                  fontSize: "0.75rem",
-                }}
               >
                 {rankedWfoResults.map((variant) => {
                   const metrics = variant.metrics;

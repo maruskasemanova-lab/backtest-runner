@@ -312,11 +312,17 @@ async def step_run(
     if isinstance(result, dict):
         out = dict(result)
         out["trade_eval_mode"] = _effective_runner_trade_eval_mode(runner)
-        return out
-    return {
+        out["intrabar_eval_step_seconds"] = int(
+            getattr(runner.config, "intrabar_eval_step_seconds", 1) or 1
+        )
+        return _to_json_compatible(out)
+    return _to_json_compatible({
         "success": bool(result),
         "trade_eval_mode": _effective_runner_trade_eval_mode(runner),
-    }
+        "intrabar_eval_step_seconds": int(
+            getattr(runner.config, "intrabar_eval_step_seconds", 1) or 1
+        ),
+    })
 
 
 async def play_run(
@@ -364,6 +370,9 @@ async def play_run(
                 else "unknown"
             ),
             "trade_eval_mode": effective_trade_mode,
+            "intrabar_eval_step_seconds": int(
+                getattr(runner.config, "intrabar_eval_step_seconds", 1) or 1
+            ),
         }
 
     if runner.is_running:
@@ -406,6 +415,9 @@ async def play_run(
         "success": True,
         "speed_ms": raw_speed,
         "trade_eval_mode": effective_trade_mode,
+        "intrabar_eval_step_seconds": int(
+            getattr(runner.config, "intrabar_eval_step_seconds", 1) or 1
+        ),
     }
 
 

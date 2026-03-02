@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
 from pathlib import Path
 import sys
+
+from src.services.saas_service import SaaSStateStore
 
 
 _API_SERVER_PATH = Path(__file__).resolve().parents[1] / "api_server.py"
@@ -19,53 +20,69 @@ api_server = importlib.util.module_from_spec(_API_SERVER_SPEC)
 _API_SERVER_SPEC.loader.exec_module(api_server)
 
 
+def _seed_primary_config_snapshots(
+    *,
+    monkeypatch,
+    tmp_path: Path,
+    aos_config: dict,
+    positioning_config: dict,
+) -> SaaSStateStore:
+    store = SaaSStateStore(str(tmp_path / "saas_state.db"))
+    store.upsert_config_snapshot(
+        config_key="aos_config",
+        payload=aos_config,
+        source="test_seed",
+    )
+    store.upsert_config_snapshot(
+        config_key="positioning_config",
+        payload=positioning_config,
+        source="test_seed",
+    )
+    monkeypatch.setattr(api_server.v2_services, "store", store)
+    monkeypatch.setattr(api_server.api_services, "state_store", store)
+    monkeypatch.setattr(api_server.app.state, "saas_state_store", store, raising=False)
+    return store
+
+
 def test_capture_unified_profile_persists_strategy_and_execution(
     monkeypatch, tmp_path
 ) -> None:
-    temp_aos = tmp_path / "aos_config.json"
-    temp_positioning = tmp_path / "positioning_config.json"
-    temp_aos.write_text(
-        json.dumps(
-            {
-                "version": "1.0.0",
-                "tickers": {
-                    "MU": {
-                        "strategy_selection_mode": "adaptive_top_n",
-                        "max_active_strategies": 3,
-                        "trading_hours": [9, 10, 11],
-                        "time_filter_enabled": True,
-                        "active_strategy_combo_profile_id": "combo123",
-                        "active_adaptive_tuner_profile_id": "p123",
-                        "adaptive_tuner_profiles": [
-                            {
-                                "profile_id": "p123",
-                                "candidate": {
-                                    "enabled_strategies": ["momentum"],
-                                    "strategy_selection_mode": "all_enabled",
-                                    "max_active_strategies": 5,
-                                },
-                            }
-                        ],
-                    }
-                },
-            }
-        )
+    _seed_primary_config_snapshots(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        aos_config={
+            "version": "1.0.0",
+            "tickers": {
+                "MU": {
+                    "strategy_selection_mode": "adaptive_top_n",
+                    "max_active_strategies": 3,
+                    "trading_hours": [9, 10, 11],
+                    "time_filter_enabled": True,
+                    "active_strategy_combo_profile_id": "combo123",
+                    "active_adaptive_tuner_profile_id": "p123",
+                    "adaptive_tuner_profiles": [
+                        {
+                            "profile_id": "p123",
+                            "candidate": {
+                                "enabled_strategies": ["momentum"],
+                                "strategy_selection_mode": "all_enabled",
+                                "max_active_strategies": 5,
+                            },
+                        }
+                    ],
+                }
+            },
+        },
+        positioning_config={
+            "version": "1.0.0",
+            "tickers": {
+                "MU": {
+                    "risk_per_trade_pct": 0.9,
+                    "trailing_stop_pct": 0.7,
+                }
+            },
+        },
     )
-    temp_positioning.write_text(
-        json.dumps(
-            {
-                "version": "1.0.0",
-                "tickers": {
-                    "MU": {
-                        "risk_per_trade_pct": 0.9,
-                        "trailing_stop_pct": 0.7,
-                    }
-                },
-            }
-        )
-    )
-    monkeypatch.setattr(api_server, "AOS_CONFIG_PATH", temp_aos)
-    monkeypatch.setattr(api_server, "POSITIONING_CONFIG_PATH", temp_positioning)
 
     async def _fake_fetch(_strategy_api_url: str):
         return {
@@ -90,7 +107,7 @@ def test_capture_unified_profile_persists_strategy_and_execution(
     assert "strategy_profile" in result["profile"]
     assert "execution_profile" in result["profile"]
 
-    saved_aos = api_server._load_aos_config(temp_aos)
+    saved_aos = api_server._load_aos_config()
     mu_cfg = saved_aos["tickers"]["MU"]
     assert mu_cfg["active_unified_profile_id"] == result["profile"]["profile_id"]
     assert len(mu_cfg["unified_profiles"]) == 1
@@ -105,48 +122,44 @@ def test_capture_unified_profile_persists_strategy_and_execution(
 def test_apply_unified_profile_sets_active_and_updates_positioning(
     monkeypatch, tmp_path
 ) -> None:
-    temp_aos = tmp_path / "aos_config.json"
-    temp_positioning = tmp_path / "positioning_config.json"
-    temp_aos.write_text(
-        json.dumps(
-            {
-                "version": "1.0.0",
-                "tickers": {
-                    "MU": {
-                        "unified_profiles": [
-                            {
-                                "profile_id": "unified123",
-                                "profile_name": "MU Unified",
-                                "strategy_profile": {
-                                    "strategy_params": {
-                                        "momentum": {
-                                            "enabled": True,
-                                            "min_confidence": 58.0,
-                                        }
-                                    },
-                                    "strategy_selection_mode": "all_enabled",
-                                    "max_active_strategies": 4,
-                                    "trading_hours": [9, 10],
-                                    "time_filter_enabled": True,
-                                    "active_strategy_combo_profile_id": "combo123",
-                                    "active_adaptive_tuner_profile_id": "p123",
-                                },
-                                "execution_profile": {
-                                    "positioning": {
-                                        "risk_per_trade_pct": 0.8,
-                                        "trailing_stop_pct": 0.6,
+    _seed_primary_config_snapshots(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        aos_config={
+            "version": "1.0.0",
+            "tickers": {
+                "MU": {
+                    "unified_profiles": [
+                        {
+                            "profile_id": "unified123",
+                            "profile_name": "MU Unified",
+                            "strategy_profile": {
+                                "strategy_params": {
+                                    "momentum": {
+                                        "enabled": True,
+                                        "min_confidence": 58.0,
                                     }
                                 },
-                            }
-                        ]
-                    }
-                },
-            }
-        )
+                                "strategy_selection_mode": "all_enabled",
+                                "max_active_strategies": 4,
+                                "trading_hours": [9, 10],
+                                "time_filter_enabled": True,
+                                "active_strategy_combo_profile_id": "combo123",
+                                "active_adaptive_tuner_profile_id": "p123",
+                            },
+                            "execution_profile": {
+                                "positioning": {
+                                    "risk_per_trade_pct": 0.8,
+                                    "trailing_stop_pct": 0.6,
+                                }
+                            },
+                        }
+                    ]
+                }
+            },
+        },
+        positioning_config={"version": "1.0.0", "tickers": {"MU": {}}},
     )
-    temp_positioning.write_text(json.dumps({"version": "1.0.0", "tickers": {"MU": {}}}))
-    monkeypatch.setattr(api_server, "AOS_CONFIG_PATH", temp_aos)
-    monkeypatch.setattr(api_server, "POSITIONING_CONFIG_PATH", temp_positioning)
 
     async def _fake_apply(_strategy_api_url: str, strategy_params):
         assert "momentum" in strategy_params
@@ -173,7 +186,7 @@ def test_apply_unified_profile_sets_active_and_updates_positioning(
     assert result["apply_result"]["applied_count"] == 1
     assert result["applied_execution"] is True
 
-    saved_aos = api_server._load_aos_config(temp_aos)
+    saved_aos = api_server._load_aos_config()
     mu_cfg = saved_aos["tickers"]["MU"]
     assert mu_cfg["active_unified_profile_id"] == "unified123"
     assert mu_cfg["strategy_selection_mode"] == "all_enabled"
@@ -181,7 +194,7 @@ def test_apply_unified_profile_sets_active_and_updates_positioning(
     assert mu_cfg["active_strategy_combo_profile_id"] == "combo123"
     assert mu_cfg["active_adaptive_tuner_profile_id"] == "p123"
 
-    saved_positioning = json.loads(temp_positioning.read_text())
+    saved_positioning = api_server._load_positioning_config()
     mu_positioning = saved_positioning["tickers"]["MU"]
     assert mu_positioning["risk_per_trade_pct"] == 0.8
     assert mu_positioning["trailing_stop_pct"] == 0.6
@@ -190,67 +203,55 @@ def test_apply_unified_profile_sets_active_and_updates_positioning(
 def test_unified_profile_options_include_legacy_combo_adaptive_variants(
     monkeypatch, tmp_path
 ) -> None:
-    temp_aos = tmp_path / "aos_config.json"
-    temp_positioning = tmp_path / "positioning_config.json"
-    temp_aos.write_text(
-        json.dumps(
-            {
-                "version": "1.0.0",
-                "tickers": {
-                    "MU": {
-                        "strategy_selection_mode": "adaptive_top_n",
-                        "max_active_strategies": 3,
-                        "active_strategy_combo_profile_id": "combo-b",
-                        "active_adaptive_tuner_profile_id": "tuned-a",
-                        "strategy_combo_profiles": [
-                            {
-                                "profile_id": "combo-a",
-                                "profile_name": "Combo A",
-                                "strategy_params": {"momentum": {"enabled": True}},
-                                "updated_at": "2026-02-11T10:00:00Z",
+    _seed_primary_config_snapshots(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        aos_config={
+            "version": "1.0.0",
+            "tickers": {
+                "MU": {
+                    "strategy_selection_mode": "adaptive_top_n",
+                    "max_active_strategies": 3,
+                    "active_strategy_combo_profile_id": "combo-b",
+                    "active_adaptive_tuner_profile_id": "tuned-a",
+                    "strategy_combo_profiles": [
+                        {
+                            "profile_id": "combo-a",
+                            "profile_name": "Combo A",
+                            "strategy_params": {"momentum": {"enabled": True}},
+                            "updated_at": "2026-02-11T10:00:00Z",
+                        },
+                        {
+                            "profile_id": "combo-b",
+                            "profile_name": "Combo B",
+                            "strategy_params": {"pullback": {"enabled": True}},
+                            "updated_at": "2026-02-12T10:00:00Z",
+                        },
+                    ],
+                    "adaptive_tuner_profiles": [
+                        {
+                            "profile_id": "tuned-a",
+                            "profile_name": "Tuned A",
+                            "updated_at": "2026-02-13T10:00:00Z",
+                            "candidate": {"strategy_selection_mode": "all_enabled"},
+                        },
+                        {
+                            "profile_id": "tuned-b",
+                            "profile_name": "Tuned B",
+                            "updated_at": "2026-02-10T10:00:00Z",
+                            "candidate": {
+                                "strategy_selection_mode": "adaptive_top_n"
                             },
-                            {
-                                "profile_id": "combo-b",
-                                "profile_name": "Combo B",
-                                "strategy_params": {"pullback": {"enabled": True}},
-                                "updated_at": "2026-02-12T10:00:00Z",
-                            },
-                        ],
-                        "adaptive_tuner_profiles": [
-                            {
-                                "profile_id": "tuned-a",
-                                "profile_name": "Tuned A",
-                                "updated_at": "2026-02-13T10:00:00Z",
-                                "candidate": {"strategy_selection_mode": "all_enabled"},
-                            },
-                            {
-                                "profile_id": "tuned-b",
-                                "profile_name": "Tuned B",
-                                "updated_at": "2026-02-10T10:00:00Z",
-                                "candidate": {
-                                    "strategy_selection_mode": "adaptive_top_n"
-                                },
-                            },
-                        ],
-                    }
-                },
-            }
-        )
+                        },
+                    ],
+                }
+            },
+        },
+        positioning_config={
+            "version": "1.0.0",
+            "tickers": {"MU": {"risk_per_trade_pct": 0.9}},
+        },
     )
-    temp_positioning.write_text(
-        json.dumps(
-            {
-                "version": "1.0.0",
-                "tickers": {
-                    "MU": {
-                        "risk_per_trade_pct": 0.9,
-                    }
-                },
-            }
-        )
-    )
-    monkeypatch.setattr(api_server, "AOS_CONFIG_PATH", temp_aos)
-    monkeypatch.setattr(api_server, "POSITIONING_CONFIG_PATH", temp_positioning)
 
     payload = api_server._build_unified_profile_options_payload("MU")
     assert payload["ticker"] == "MU"

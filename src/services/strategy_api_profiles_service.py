@@ -27,6 +27,13 @@ _STRATEGY_API_TIMEOUT_SECONDS = _parse_positive_float_env(
 )
 
 _PROFILE_PLACEHOLDER_TOKENS = {"none", "null", "n/a", "na", "undefined", "-"}
+_INTRADAY_PROFILE_RUNTIME_PREFIXES = ("intraday_levels_",)
+_INTRADAY_PROFILE_RUNTIME_KEYS = {
+    "liquidity_sweep_detection_enabled",
+    "sweep_min_aggression_z",
+    "sweep_min_book_pressure_z",
+    "sweep_max_price_change_pct",
+}
 
 
 def _normalize_profile_ref_token(value: Any) -> str:
@@ -172,6 +179,13 @@ def extract_profile_runtime_overrides(
             runtime[key] = float(raw)
         except (TypeError, ValueError):
             continue
+    for key, value in candidate.items():
+        if value is None:
+            continue
+        if key in _INTRADAY_PROFILE_RUNTIME_KEYS or key.startswith(
+            _INTRADAY_PROFILE_RUNTIME_PREFIXES
+        ):
+            runtime[key] = value
     trading_hours = candidate.get("trading_hours")
     if isinstance(trading_hours, (list, tuple)):
         normalized_hours = []
@@ -330,7 +344,7 @@ def _extract_unified_runtime_overrides(
         else:
             runtime.pop(key, None)
 
-    for key in (
+    direct_runtime_keys = (
         "l2_min_delta",
         "l2_min_imbalance",
         "l2_min_signed_aggression",
@@ -366,13 +380,15 @@ def _extract_unified_runtime_overrides(
         "intraday_levels_micro_confirmation_intrabar_min_move_pct",
         "intraday_levels_micro_confirmation_intrabar_min_push_ratio",
         "intraday_levels_micro_confirmation_intrabar_max_spread_bps",
-    ):
-        if key not in strategy_profile:
-            continue
-        value = strategy_profile.get(key)
+    )
+    for key, value in strategy_profile.items():
         if value is None:
             continue
-        runtime[key] = value
+        if key in direct_runtime_keys or key in _INTRADAY_PROFILE_RUNTIME_KEYS:
+            runtime[key] = value
+            continue
+        if key.startswith(_INTRADAY_PROFILE_RUNTIME_PREFIXES):
+            runtime[key] = value
 
     momentum_runtime = deps.normalize_momentum_diversification_payload(
         strategy_profile.get("momentum_diversification")

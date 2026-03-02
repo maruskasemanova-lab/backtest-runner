@@ -166,9 +166,20 @@ export const defaultStrategyApiUrl = (() => {
   return isLocalBrowserHost() ? "http://localhost:8001" : "";
 })();
 
-export const defaultRunnerApiBaseUrl = rewriteDockerAliasForBrowser(
-  import.meta.env.VITE_API_BASE_URL || "",
-);
+const defaultLocalRunnerApiBaseUrl = (() => {
+  if (typeof window === "undefined") return "";
+  if (!isLocalBrowserHost()) return "";
+  const protocol = window.location.protocol === "https:" ? "https:" : "http:";
+  const hostname = String(window.location.hostname || "").trim().toLowerCase();
+  if (!hostname) return "";
+  return `${protocol}//${hostname}:8002`;
+})();
+
+export const defaultRunnerApiBaseUrl = (() => {
+  const configured = rewriteDockerAliasForBrowser(import.meta.env.VITE_API_BASE_URL || "");
+  if (configured) return configured;
+  return rewriteDockerAliasForBrowser(defaultLocalRunnerApiBaseUrl);
+})();
 
 const _isServerlessLikeHost = (value: string) => {
   if (!value) return false;
@@ -294,9 +305,57 @@ export const resolveWsLiveUrl = () => {
 export const resolveWsLiveUrlCandidates = () => {
   const candidates: string[] = [];
   const configuredWsBase = trimTrailingSlashes(import.meta.env.VITE_WS_BASE_URL || "");
+  let deferredConfiguredWsUrl = "";
   if (configuredWsBase) {
-    pushUniqueUrl(candidates, `${configuredWsBase}${WS_LIVE_PATH}`);
+    const configuredWsUrl = configuredWsBase.endsWith(WS_LIVE_PATH)
+      ? configuredWsBase
+      : `${configuredWsBase}${WS_LIVE_PATH}`;
+    if (typeof window !== "undefined" && isLocalBrowserHost()) {
+      try {
+        const parsed = new URL(configuredWsUrl);
+        const host = String(parsed.hostname || "").trim().toLowerCase();
+        const port = String(parsed.port || "").trim();
+        if ((host === "localhost" || host === "127.0.0.1") && port === "5173") {
+          // Misconfigured local WS base often points to Vite dev server.
+          // Keep it as last resort and prefer runner API candidates first.
+          deferredConfiguredWsUrl = configuredWsUrl;
+        } else {
+          pushUniqueUrl(candidates, configuredWsUrl);
+        }
+      } catch (_err) {
+        pushUniqueUrl(candidates, configuredWsUrl);
+      }
+    } else {
+      pushUniqueUrl(candidates, configuredWsUrl);
+    }
+  }
+
+  if (typeof window === "undefined") {
+    if (defaultPlaybackApiBaseUrl) {
+      pushUniqueUrl(candidates, buildWsLiveUrlFromHttpBase(defaultPlaybackApiBaseUrl));
+    }
+    if (defaultRunnerApiBaseUrl) {
+      pushUniqueUrl(candidates, buildWsLiveUrlFromHttpBase(defaultRunnerApiBaseUrl));
+    }
     return candidates;
+  }
+
+  const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const browserHost = String(window.location.host || "").trim();
+
+  if (isLocalBrowserHost()) {
+    const browserHostname = String(window.location.hostname || "").trim().toLowerCase();
+    // Local dev typically serves frontend on :5173 and runner on :8002.
+    // Prefer :8002 candidates first to avoid sticky reconnect loops to Vite.
+    if (browserHostname) {
+      pushUniqueUrl(candidates, `${wsProtocol}://${browserHostname}:8002${WS_LIVE_PATH}`);
+    }
+    if (browserHostname !== "localhost") {
+      pushUniqueUrl(candidates, `${wsProtocol}://localhost:8002${WS_LIVE_PATH}`);
+    }
+    if (browserHostname !== "127.0.0.1") {
+      pushUniqueUrl(candidates, `${wsProtocol}://127.0.0.1:8002${WS_LIVE_PATH}`);
+    }
   }
 
   if (defaultPlaybackApiBaseUrl) {
@@ -307,27 +366,11 @@ export const resolveWsLiveUrlCandidates = () => {
     pushUniqueUrl(candidates, buildWsLiveUrlFromHttpBase(defaultRunnerApiBaseUrl));
   }
 
-  if (typeof window === "undefined") {
-    return candidates;
-  }
-
-  const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const browserHost = String(window.location.host || "").trim();
   if (browserHost) {
     pushUniqueUrl(candidates, `${wsProtocol}://${browserHost}${WS_LIVE_PATH}`);
   }
-
-  if (isLocalBrowserHost()) {
-    const browserHostname = String(window.location.hostname || "").trim().toLowerCase();
-    if (browserHostname) {
-      pushUniqueUrl(candidates, `${wsProtocol}://${browserHostname}:8002${WS_LIVE_PATH}`);
-    }
-    if (browserHostname !== "localhost") {
-      pushUniqueUrl(candidates, `${wsProtocol}://localhost:8002${WS_LIVE_PATH}`);
-    }
-    if (browserHostname !== "127.0.0.1") {
-      pushUniqueUrl(candidates, `${wsProtocol}://127.0.0.1:8002${WS_LIVE_PATH}`);
-    }
+  if (deferredConfiguredWsUrl) {
+    pushUniqueUrl(candidates, deferredConfiguredWsUrl);
   }
 
   return candidates;

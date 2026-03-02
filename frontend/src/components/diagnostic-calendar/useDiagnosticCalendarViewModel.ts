@@ -17,6 +17,7 @@ import {
   buildDiagnosticReportBase,
   buildDiagnosticReportView,
   buildSelectedRunOptions,
+  dedupeRunsByProfile,
   normalizeHistoryLimit,
   normalizeTicker,
   normalizeTradeViewMode,
@@ -39,6 +40,7 @@ const diagnosticUrlParsers = {
     .withOptions({ clearOnDefault: false }),
   tradeViewMode: parseAsStringLiteral(DIAGNOSTIC_TRADE_VIEW_MODES)
     .withDefault(DEFAULT_TRADE_VIEW_MODE),
+  variantFilter: parseAsString.withDefault(""),
 };
 
 const buildQueryErrorMessage = (error) => {
@@ -61,6 +63,7 @@ const normalizeUrlFilters = (filters) => ({
   runId: String(filters?.runId || "").trim(),
   ticker: normalizeTicker(filters?.ticker),
   tradeViewMode: normalizeTradeViewMode(filters?.tradeViewMode),
+  variantFilter: String(filters?.variantFilter || "").trim(),
 });
 
 export default function useDiagnosticCalendarViewModel() {
@@ -122,8 +125,9 @@ export default function useDiagnosticCalendarViewModel() {
       report: reportBase.report,
       reportDayResults: reportBase.reportDayResults,
       tradeViewMode: urlFilters.tradeViewMode,
+      variantFilter: urlFilters.variantFilter,
     }),
-    [reportBase, urlFilters.tradeViewMode],
+    [reportBase, urlFilters.tradeViewMode, urlFilters.variantFilter],
   );
 
   useEffect(() => {
@@ -135,7 +139,10 @@ export default function useDiagnosticCalendarViewModel() {
   }, [reportView.dayResultMap, reportView.dayResults]);
 
   const selectedResult = selectedDate ? reportView.dayResultMap.get(selectedDate) || null : null;
-  const selectedRuns = Array.isArray(selectedResult?.runs) ? selectedResult.runs : [];
+  const selectedRuns = useMemo(() => {
+    const rawRuns = Array.isArray(selectedResult?.runs) ? selectedResult.runs : [];
+    return dedupeRunsByProfile(rawRuns);
+  }, [selectedResult]);
   const selectedRunOptions = useMemo(
     () => buildSelectedRunOptions(selectedRuns),
     [selectedRuns],
@@ -211,6 +218,15 @@ export default function useDiagnosticCalendarViewModel() {
     });
   }, [commitUrlFilters, urlFilters]);
 
+  const setVariantFilter = useCallback((value) => {
+    const nextVariantFilter = String(value || "").trim();
+    commitUrlFilters({
+      ...urlFilters,
+      runId: nextVariantFilter ? "" : urlFilters.runId,
+      variantFilter: nextVariantFilter,
+    });
+  }, [commitUrlFilters, urlFilters]);
+
   const applyDraftFilters = useCallback((draftFilters) => {
     const nextDraftFilters = {
       adaptiveProfileId: String(draftFilters.adaptiveProfileId || "").trim(),
@@ -230,6 +246,7 @@ export default function useDiagnosticCalendarViewModel() {
 
   return {
     calendarModel: {
+      dayProfileSummaryMap: reportView.dayProfileSummaryMap,
       dayResults: reportView.dayResults,
       loading: reportQuery.isFetching,
       maxAbsPnlPct: reportView.maxAbsPnlPct,
@@ -252,7 +269,9 @@ export default function useDiagnosticCalendarViewModel() {
       applyDraftFilters,
       runIdOptions: reportBase.runIdOptions,
       setTradeViewMode,
+      setVariantFilter,
       tradeViewMode: urlFilters.tradeViewMode || DEFAULT_TRADE_VIEW_MODE,
+      variantFilter: urlFilters.variantFilter,
     },
     reportPath: resolveReportPath({
       adaptiveProfileId: urlFilters.adaptiveProfileId,

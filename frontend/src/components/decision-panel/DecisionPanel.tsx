@@ -24,19 +24,11 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
   const [listTab, setListTab] = useState('decisions');
   const [isDetailFullscreen, setIsDetailFullscreen] = useState(false);
   const [uiLanguage, setUiLanguage] = useState(resolveDecisionLanguage);
-  const [portalDocument, setPortalDocument] = useState(
-    typeof document !== "undefined" ? document : null,
-  );
   const panelRootRef = useRef(null);
+  const fallbackDocument = typeof document !== "undefined" ? document : null;
+  const portalDocument = panelRootRef.current?.ownerDocument || fallbackDocument;
   const portalWindow = portalDocument?.defaultView || (typeof window !== "undefined" ? window : null);
   const portalBody = portalDocument?.body || (typeof document !== "undefined" ? document.body : null);
-
-  useEffect(() => {
-    const nextDoc = panelRootRef.current?.ownerDocument || null;
-    if (nextDoc && nextDoc !== portalDocument) {
-      setPortalDocument(nextDoc);
-    }
-  }, [portalDocument]);
 
   useEffect(() => {
     if (!portalWindow?.localStorage) return;
@@ -221,10 +213,6 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
     <div
       ref={(node) => {
         panelRootRef.current = node;
-        const nextDoc = node?.ownerDocument || null;
-        if (nextDoc && nextDoc !== portalDocument) {
-          setPortalDocument(nextDoc);
-        }
       }}
       style={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}
     >

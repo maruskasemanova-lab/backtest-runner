@@ -26,6 +26,15 @@ from src.services.execution_config.intraday_context import (
 )
 
 
+_INTRADAY_PROFILE_OVERRIDE_PREFIXES = ("intraday_levels_",)
+_INTRADAY_PROFILE_OVERRIDE_KEYS = {
+    "liquidity_sweep_detection_enabled",
+    "sweep_min_aggression_z",
+    "sweep_min_book_pressure_z",
+    "sweep_max_price_change_pct",
+}
+
+
 def _resolve_strategy_selection(
     *,
     request: Any,
@@ -352,36 +361,15 @@ def _apply_intraday_profile_overrides(
     # Unified profile strategy runtime can override intraday-level controls
     # when the same field was not explicitly provided at run start.
     request_fields = _request_fields_set(request)
-    profile_intraday_keys = (
-        "intraday_levels_entry_tolerance_pct",
-        "intraday_levels_memory_enabled",
-        "intraday_levels_memory_min_tests",
-        "intraday_levels_memory_max_age_days",
-        "intraday_levels_memory_decay_after_days",
-        "intraday_levels_memory_decay_weight",
-        "intraday_levels_memory_max_levels",
-        "intraday_levels_poc_migration_enabled",
-        "intraday_levels_poc_migration_interval_bars",
-        "intraday_levels_poc_migration_trend_threshold_pct",
-        "intraday_levels_poc_migration_range_threshold_pct",
-        "intraday_levels_micro_confirmation_enabled",
-        "intraday_levels_micro_confirmation_bars",
-        "intraday_levels_micro_confirmation_disable_for_sweep",
-        "intraday_levels_micro_confirmation_sweep_bars",
-        "intraday_levels_micro_confirmation_require_intrabar",
-        "intraday_levels_micro_confirmation_intrabar_window_seconds",
-        "intraday_levels_micro_confirmation_intrabar_min_coverage_points",
-        "intraday_levels_micro_confirmation_intrabar_min_move_pct",
-        "intraday_levels_micro_confirmation_intrabar_min_push_ratio",
-        "intraday_levels_micro_confirmation_intrabar_max_spread_bps",
-    )
     if isinstance(adaptive_profile_runtime, dict) and adaptive_profile_runtime:
-        for key in profile_intraday_keys:
+        for key, value in adaptive_profile_runtime.items():
+            if key not in _INTRADAY_PROFILE_OVERRIDE_KEYS and not key.startswith(
+                _INTRADAY_PROFILE_OVERRIDE_PREFIXES
+            ):
+                continue
             if key in request_fields:
                 continue
-            if key not in adaptive_profile_runtime:
-                continue
-            resolved[key] = adaptive_profile_runtime.get(key)
+            resolved[key] = value
 
         # Re-normalize all intraday-level fields after profile overlays.
         normalized_proxy = type("IntradayProfileProxy", (), {})()
@@ -399,11 +387,15 @@ def _apply_context_risk_profile_overrides(
     adaptive_profile_runtime: Dict[str, Any],
 ) -> Dict[str, Any]:
     resolved = dict(context_risk_cfg)
+    request_fields = _request_fields_set(request)
 
     for key, request_default in (
         ("context_aware_risk_enabled", False),
         ("context_risk_level_trail_enabled", True),
     ):
+        if key in request_fields:
+            resolved[key] = bool(getattr(request, key, request_default))
+            continue
         value, _ = helper_resolve_positioning_bool(
             request_value=getattr(request, key, request_default),
             request_default=request_default,
@@ -423,6 +415,17 @@ def _apply_context_risk_profile_overrides(
         ("context_risk_trailing_tighten_factor", 0.50, 0.0, 1.0),
         ("context_risk_max_anchor_search_pct", 2.5, 0.1, None),
     ):
+        if key in request_fields:
+            try:
+                value = float(getattr(request, key, request_default))
+            except (TypeError, ValueError):
+                value = float(request_default)
+            if min_value is not None:
+                value = max(min_value, value)
+            if max_value is not None:
+                value = min(max_value, value)
+            resolved[key] = float(value)
+            continue
         value, _ = helper_resolve_positioning_float(
             request_value=getattr(request, key, request_default),
             request_default=request_default,
@@ -435,16 +438,23 @@ def _apply_context_risk_profile_overrides(
         )
         resolved[key] = float(value)
 
-    value, _ = helper_resolve_positioning_int(
-        request_value=getattr(request, "context_risk_min_level_tests_for_sl", 1),
-        request_default=1,
-        positioning_key="context_risk_min_level_tests_for_sl",
-        positioning_cfg=positioning_cfg,
-        adaptive_profile_runtime=adaptive_profile_runtime,
-        min_value=0,
-        runtime_key="context_risk_min_level_tests_for_sl",
-    )
-    resolved["context_risk_min_level_tests_for_sl"] = int(value)
+    if "context_risk_min_level_tests_for_sl" in request_fields:
+        try:
+            value = int(getattr(request, "context_risk_min_level_tests_for_sl", 1))
+        except (TypeError, ValueError):
+            value = 1
+        resolved["context_risk_min_level_tests_for_sl"] = max(0, value)
+    else:
+        value, _ = helper_resolve_positioning_int(
+            request_value=getattr(request, "context_risk_min_level_tests_for_sl", 1),
+            request_default=1,
+            positioning_key="context_risk_min_level_tests_for_sl",
+            positioning_cfg=positioning_cfg,
+            adaptive_profile_runtime=adaptive_profile_runtime,
+            min_value=0,
+            runtime_key="context_risk_min_level_tests_for_sl",
+        )
+        resolved["context_risk_min_level_tests_for_sl"] = int(value)
     return resolved
 
 

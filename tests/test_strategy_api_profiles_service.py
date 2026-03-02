@@ -2,6 +2,7 @@ import asyncio
 from typing import Any, Dict, List
 
 from src.services.strategy_api_profiles_service import (
+    _extract_unified_runtime_overrides,
     apply_active_adaptive_tuner_profile,
     apply_aos_optimizations,
     extract_profile_runtime_overrides,
@@ -203,6 +204,49 @@ def test_extract_runtime_overrides_includes_trading_hours() -> None:
     assert runtime["time_filter_enabled"] is True
     assert runtime["regime_detection_minutes"] == 45
     assert runtime["regime_refresh_bars"] == 3
+
+
+def test_extract_runtime_overrides_includes_intraday_context_fields() -> None:
+    deps = _build_deps([])
+    runtime = extract_profile_runtime_overrides(
+        {
+            "intraday_levels_entry_quality_enabled": False,
+            "intraday_levels_opening_range_minutes": 12,
+            "intraday_levels_rvol_filter_enabled": False,
+            "intraday_levels_adaptive_window_min_bars": 4,
+            "intraday_levels_confluence_sizing_enabled": True,
+            "liquidity_sweep_detection_enabled": True,
+            "sweep_max_price_change_pct": 0.02,
+        },
+        deps,
+    )
+
+    assert runtime["intraday_levels_entry_quality_enabled"] is False
+    assert runtime["intraday_levels_opening_range_minutes"] == 12
+    assert runtime["intraday_levels_rvol_filter_enabled"] is False
+    assert runtime["intraday_levels_adaptive_window_min_bars"] == 4
+    assert runtime["intraday_levels_confluence_sizing_enabled"] is True
+    assert runtime["liquidity_sweep_detection_enabled"] is True
+    assert runtime["sweep_max_price_change_pct"] == 0.02
+
+
+def test_extract_unified_runtime_overrides_includes_top_level_intraday_fields() -> None:
+    deps = _build_deps([])
+    runtime = _extract_unified_runtime_overrides(
+        {
+            "runtime_overrides": {"intraday_levels_rvol_filter_enabled": True},
+            "intraday_levels_rvol_filter_enabled": False,
+            "intraday_levels_entry_quality_enabled": False,
+            "liquidity_sweep_detection_enabled": True,
+            "sweep_min_aggression_z": -3.0,
+        },
+        deps,
+    )
+
+    assert runtime["intraday_levels_rvol_filter_enabled"] is False
+    assert runtime["intraday_levels_entry_quality_enabled"] is False
+    assert runtime["liquidity_sweep_detection_enabled"] is True
+    assert runtime["sweep_min_aggression_z"] == -3.0
 
 
 def test_apply_aos_optimizations_prefers_adaptive_trading_hours() -> None:

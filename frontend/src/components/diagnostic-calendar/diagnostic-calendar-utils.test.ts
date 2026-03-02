@@ -4,8 +4,11 @@ import {
   buildDiagnosticHistoryRequestUrl,
   buildMonthGrid,
   buildDiagnosticReportBase,
+  buildDayProfileSummaryMap,
   buildDiagnosticReportView,
   buildRunScopeKey,
+  buildSelectedRunTradeDetails,
+  dedupeRunsByProfile,
   formatAdaptiveProfileList,
   formatMonthLabel,
   getDayCellStyle,
@@ -58,6 +61,7 @@ describe("diagnostic-calendar utils", () => {
       runId: "run-7",
       ticker: "NVDA",
       tradeViewMode: "adaptive",
+      variantFilter: "",
     });
 
     expect(
@@ -73,6 +77,136 @@ describe("diagnostic-calendar utils", () => {
       "run-1@@/tmp/reports/a",
     );
     expect(buildRunScopeKey({ run_id: "run-1" })).toBe("run-1");
+  });
+
+  it("deduplicates selected day runs to one run per profile identity", () => {
+    const deduped = dedupeRunsByProfile([
+      {
+        run_id: "run-latest",
+        report_dir: "/tmp/latest",
+        unified_profile_id: "u-alpha",
+        total_trades: 0,
+      },
+      {
+        run_id: "run-older",
+        report_dir: "/tmp/older",
+        unified_profile_id: "u-alpha",
+        total_trades: 3,
+      },
+      {
+        run_id: "run-other-profile",
+        report_dir: "/tmp/other",
+        unified_profile_id: "u-beta",
+        total_trades: 3,
+      },
+    ]);
+
+    expect(deduped.map((run) => run.run_id)).toEqual([
+      "run-older",
+      "run-other-profile",
+    ]);
+  });
+
+  it("falls back to profile-scoped trade matching when selected run id has no direct trades", () => {
+    const selectedResult = {
+      date: "2026-02-18",
+      runs: [
+        {
+          run_id: "screen-ctx_min_sl_040-20260218",
+          total_trades: 18,
+          run_request_config: {
+            context_aware_risk_enabled: true,
+            context_risk_min_room_pct: 0.08,
+            context_risk_min_effective_rr: 0.5,
+          },
+        },
+        {
+          run_id: "oos-b7-comp-baseline-20260218",
+          total_trades: 18,
+          run_request_config: {
+            context_aware_risk_enabled: true,
+            context_risk_min_room_pct: 0.08,
+            context_risk_min_effective_rr: 0.5,
+          },
+        },
+      ],
+      trade_details: [
+        { run_id: "oos-b7-comp-baseline-20260218", trade_id: "t1", pnl_dollars: 10 },
+        { run_id: "oos-b7-comp-baseline-20260218", trade_id: "t2", pnl_dollars: 8 },
+      ],
+    };
+
+    const selectedTrades = buildSelectedRunTradeDetails({
+      selectedResult,
+      selectedRunRecord: selectedResult.runs[0],
+    });
+
+    expect(selectedTrades.map((trade) => trade.trade_id)).toEqual(["t1", "t2"]);
+  });
+
+  it("deduplicates profile-scoped trades replicated across multiple runs", () => {
+    const selectedResult = {
+      date: "2026-02-18",
+      runs: [
+        {
+          run_id: "screen-ctx_min_sl_040-20260218",
+          run_request_config: {
+            context_aware_risk_enabled: true,
+            context_risk_min_room_pct: 0.08,
+            context_risk_min_effective_rr: 0.5,
+          },
+        },
+        {
+          run_id: "oos-b3-baseline-20260218",
+          run_request_config: {
+            context_aware_risk_enabled: true,
+            context_risk_min_room_pct: 0.08,
+            context_risk_min_effective_rr: 0.5,
+          },
+        },
+        {
+          run_id: "oos-b7-comp-baseline-20260218",
+          run_request_config: {
+            context_aware_risk_enabled: true,
+            context_risk_min_room_pct: 0.08,
+            context_risk_min_effective_rr: 0.5,
+          },
+        },
+      ],
+      trade_details: [
+        {
+          run_id: "oos-b3-baseline-20260218",
+          strategy: "Momentum",
+          side: "LONG",
+          entry_time: "2026-02-18T15:45:00Z",
+          exit_time: "2026-02-18T16:00:00Z",
+          pnl_dollars: 177.4,
+          trade_id: "diag-20260218",
+        },
+        {
+          run_id: "oos-b7-comp-baseline-20260218",
+          strategy: "Momentum",
+          side: "LONG",
+          entry_time: "2026-02-18T15:45:00Z",
+          exit_time: "2026-02-18T16:00:00Z",
+          pnl_dollars: 177.4,
+          trade_id: "diag-20260218",
+        },
+      ],
+    };
+
+    const selectedTrades = buildSelectedRunTradeDetails({
+      selectedResult,
+      selectedRunRecord: selectedResult.runs[0],
+    });
+
+    expect(selectedTrades).toHaveLength(1);
+    expect(selectedTrades[0]).toMatchObject({
+      strategy: "Momentum",
+      side: "LONG",
+      pnl_dollars: 177.4,
+      trade_id: "diag-20260218",
+    });
   });
 
   it("resolves run profiles from execution config and aos metadata", () => {
@@ -136,9 +270,209 @@ describe("diagnostic-calendar utils", () => {
       "2025-01-02",
       "2025-01-03",
     ]);
+    expect(
+      reportView.dayProfileSummaryMap.get("2025-01-03")?.map((item) => item.profileLabel)
+    ).toEqual(["No Profile"]);
     expect(reportView.summary.totalTrades).toBe(3);
     expect(reportView.monthlyViews).toHaveLength(1);
     expect(reportView.maxAbsPnlPct).toBeGreaterThan(0);
+  });
+
+  it("filters day results to selected variant and keeps only matching trades", () => {
+    const reportBase = buildDiagnosticReportBase({
+      day_results: [
+        {
+          date: "2026-02-05",
+          runs: [
+            {
+              run_id: "oos-b7-comp-baseline-20260205",
+              total_trades: 2,
+              pnl_dollars: 40,
+              signals: 7,
+              regime_evaluations: 6,
+              execution_config: { account_size_usd: 10000 },
+              run_request_config: {
+                context_aware_risk_enabled: true,
+                context_risk_min_room_pct: 0.08,
+                context_risk_min_effective_rr: 0.5,
+              },
+            },
+            {
+              run_id: "oos-b7-comp-relaxed_context_35-20260205",
+              total_trades: 3,
+              pnl_dollars: 15,
+              signals: 4,
+              regime_evaluations: 5,
+              execution_config: { account_size_usd: 10000 },
+              run_request_config: {
+                context_aware_risk_enabled: true,
+                context_risk_min_room_pct: 0.02,
+                context_risk_min_effective_rr: 0.35,
+              },
+            },
+          ],
+          trade_details: [
+            { run_id: "oos-b7-comp-baseline-20260205", pnl_dollars: 20 },
+            { run_id: "oos-b7-comp-baseline-20260205", pnl_dollars: 20 },
+            { run_id: "oos-b7-comp-relaxed_context_35-20260205", pnl_dollars: 15 },
+          ],
+        },
+      ],
+    });
+
+    const reportView = buildDiagnosticReportView({
+      report: reportBase.report,
+      reportDayResults: reportBase.reportDayResults,
+      tradeViewMode: "all",
+      variantFilter: "variant:baseline",
+    });
+
+    expect(reportView.dayResults).toHaveLength(1);
+    expect(reportView.dayResults[0]?.runs?.map((run) => run.run_id)).toEqual([
+      "oos-b7-comp-baseline-20260205",
+    ]);
+    expect(reportView.dayResults[0]?.trade_details?.map((trade) => trade.run_id)).toEqual([
+      "oos-b7-comp-baseline-20260205",
+    ]);
+    expect(Number(reportView.dayResults[0]?.pnl_dollars ?? 0)).toBe(20);
+    expect(Number(reportView.dayResults[0]?.total_trades ?? 0)).toBe(1);
+  });
+
+  it("deduplicates same-day runs by profile into one profile summary row", () => {
+    const summaryMap = buildDayProfileSummaryMap([
+      {
+        date: "2025-01-08",
+        runs: [
+          {
+            total_trades: 2,
+            pnl_dollars: 120,
+            unified_profile_id: "u-alpha",
+            execution_config: { account_size_usd: 10000 },
+          },
+          {
+            total_trades: 1,
+            pnl_dollars: -20,
+            unified_profile_id: "u-alpha",
+            execution_config: { account_size_usd: 10000 },
+          },
+          {
+            total_trades: 3,
+            pnl_dollars: 80,
+            unified_profile_id: "u-beta",
+            execution_config: { account_size_usd: 10000 },
+          },
+        ],
+      },
+    ]);
+
+    expect(summaryMap.get("2025-01-08")).toEqual([
+      {
+        profileKey: "u-alpha",
+        profileLabel: "u-alpha",
+        totalTrades: 2,
+        pnlDollars: 120,
+        pnlPct: 1.2,
+        runCount: 2,
+      },
+      {
+        profileKey: "u-beta",
+        profileLabel: "u-beta",
+        totalTrades: 3,
+        pnlDollars: 80,
+        pnlPct: 0.8,
+        runCount: 1,
+      },
+    ]);
+  });
+
+  it("groups comparator runs by context-risk variant when unified profile id is shared", () => {
+    const summaryMap = buildDayProfileSummaryMap([
+      {
+        date: "2026-02-24",
+        runs: [
+          {
+            run_id: "oos-b7-comp-baseline-20260224",
+            unified_profile_id: "792e993d1d95",
+            total_trades: 3,
+            pnl_dollars: -12.9686,
+            execution_config: { account_size_usd: 10000 },
+            run_request_config: {
+              context_aware_risk_enabled: true,
+              context_risk_min_room_pct: 0.08,
+              context_risk_min_effective_rr: 0.5,
+            },
+          },
+          {
+            run_id: "oos-b8-comp2-baseline-20260224",
+            unified_profile_id: "792e993d1d95",
+            total_trades: 1,
+            pnl_dollars: 2.0,
+            execution_config: { account_size_usd: 10000 },
+            run_request_config: {
+              context_aware_risk_enabled: true,
+              context_risk_min_room_pct: 0.08,
+              context_risk_min_effective_rr: 0.5,
+            },
+          },
+          {
+            run_id: "oos-b7-comp-relaxed_context_35-20260224",
+            unified_profile_id: "792e993d1d95",
+            total_trades: 3,
+            pnl_dollars: -12.9686,
+            execution_config: { account_size_usd: 10000 },
+            run_request_config: {
+              context_aware_risk_enabled: true,
+              context_risk_min_room_pct: 0.02,
+              context_risk_min_effective_rr: 0.35,
+            },
+          },
+          {
+            run_id: "oos-b7-comp-no_context_risk-20260224",
+            unified_profile_id: "792e993d1d95",
+            total_trades: 2,
+            pnl_dollars: 39.2179,
+            execution_config: { account_size_usd: 10000 },
+            run_request_config: {
+              context_aware_risk_enabled: false,
+              context_risk_min_room_pct: 0.08,
+              context_risk_min_effective_rr: 0.5,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const rows = summaryMap.get("2026-02-24") || [];
+    expect(rows).toHaveLength(3);
+    expect(rows.map((item) => item.profileKey)).toEqual([
+      "variant:baseline",
+      "variant:no_context_risk",
+      "variant:relaxed_context_35",
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      profileLabel: "baseline (room=0.08, rr=0.50)",
+      totalTrades: 3,
+      pnlDollars: -12.9686,
+      runCount: 2,
+    });
+    expect(rows[0].pnlPct).toBeCloseTo(-0.129686, 9);
+
+    expect(rows[1]).toMatchObject({
+      profileLabel: "no_context_risk (room=0.08, rr=0.50)",
+      totalTrades: 2,
+      pnlDollars: 39.2179,
+      runCount: 1,
+    });
+    expect(rows[1].pnlPct).toBeCloseTo(0.392179, 9);
+
+    expect(rows[2]).toMatchObject({
+      profileLabel: "relaxed_context_35 (room=0.02, rr=0.35)",
+      totalTrades: 3,
+      pnlDollars: -12.9686,
+      runCount: 1,
+    });
+    expect(rows[2].pnlPct).toBeCloseTo(-0.129686, 9);
   });
 
   it("uses Temporal plain dates for month labels and grid generation", () => {

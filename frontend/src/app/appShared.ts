@@ -63,6 +63,7 @@ export const WS_FALLBACK_NOTICE = 'WebSocket unavailable on this deployment. Usi
 export const WS_RECONNECT_BASE_MS = 800;
 export const WS_RECONNECT_MAX_MS = 8000;
 export const WS_CONNECT_ATTEMPTS_BEFORE_FALLBACK = 8;
+export const WS_HANDSHAKE_TIMEOUT_MS = 5000;
 export const ACTIVE_RUNS_POLL_BACKTEST_VISIBLE_MS = 8000;
 export const ACTIVE_RUNS_POLL_OTHER_VISIBLE_MS = 30000;
 export const ICEBERG_FETCH_LIMIT = 400;

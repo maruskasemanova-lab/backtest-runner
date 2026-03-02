@@ -32,6 +32,7 @@ export const DIAGNOSTIC_CALENDAR_URL_KEYS = {
   runId: "diag_run_id",
   ticker: "diag_ticker",
   tradeViewMode: "diag_trade_view",
+  variantFilter: "diag_variant",
 } as const;
 
 const toPlainDateValue = (
@@ -187,6 +188,7 @@ export const readDiagnosticCalendarUrlState = (
     runId: String(params.get(DIAGNOSTIC_CALENDAR_URL_KEYS.runId) || "").trim(),
     ticker: normalizeTicker(params.get(DIAGNOSTIC_CALENDAR_URL_KEYS.ticker)),
     tradeViewMode: normalizeTradeViewMode(params.get(DIAGNOSTIC_CALENDAR_URL_KEYS.tradeViewMode)),
+    variantFilter: String(params.get(DIAGNOSTIC_CALENDAR_URL_KEYS.variantFilter) || "").trim(),
   };
 };
 
@@ -203,6 +205,7 @@ export const buildDiagnosticCalendarUrl = ({
   const adaptiveProfileId = String(filters?.adaptiveProfileId || "").trim();
   const runId = String(filters?.runId || "").trim();
   const tradeViewMode = normalizeTradeViewMode(filters?.tradeViewMode);
+  const variantFilter = String(filters?.variantFilter || "").trim();
 
   nextUrl.searchParams.set(DIAGNOSTIC_CALENDAR_URL_KEYS.ticker, ticker);
   nextUrl.searchParams.set(DIAGNOSTIC_CALENDAR_URL_KEYS.historyLimit, String(historyLimit));
@@ -212,6 +215,9 @@ export const buildDiagnosticCalendarUrl = ({
 
   if (runId) nextUrl.searchParams.set(DIAGNOSTIC_CALENDAR_URL_KEYS.runId, runId);
   else nextUrl.searchParams.delete(DIAGNOSTIC_CALENDAR_URL_KEYS.runId);
+
+  if (variantFilter) nextUrl.searchParams.set(DIAGNOSTIC_CALENDAR_URL_KEYS.variantFilter, variantFilter);
+  else nextUrl.searchParams.delete(DIAGNOSTIC_CALENDAR_URL_KEYS.variantFilter);
 
   if (tradeViewMode !== DEFAULT_TRADE_VIEW_MODE) {
     nextUrl.searchParams.set(DIAGNOSTIC_CALENDAR_URL_KEYS.tradeViewMode, tradeViewMode);

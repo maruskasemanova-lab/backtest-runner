@@ -63,6 +63,72 @@ const SCALP_FIELD_ORDER = [
   "no_intrabar_flow_buffer",
 ];
 
+const FOCUS_FIELD_PRIORITY = [
+  "allowed_regimes",
+  "min_confidence",
+  "risk_mode",
+  "exit_mode",
+  "atr_stop_multiplier",
+  "stop_loss_pct",
+  "rr_ratio",
+  "take_profit_rr",
+  "trailing_stop_pct",
+  "time_exit_bars",
+  "min_flow_score",
+  "min_signed_aggression",
+  "min_directional_consistency",
+  "min_book_pressure",
+  "min_imbalance",
+  "min_absorption_rate",
+  "min_divergence",
+  "entry_threshold",
+  "entry_deviation_pct",
+  "breakout_threshold",
+  "min_intrabar_move_pct",
+  "min_intrabar_push_ratio",
+  "max_intrabar_spread_bps",
+];
+
+const STRATEGY_SPECIFIC_FOCUS_FIELDS: Record<string, string[]> = {
+  absorption_reversal: [
+    "min_absorption_rate",
+    "min_divergence",
+    "min_signed_aggression",
+    "min_book_pressure",
+    "min_price_extension_pct",
+  ],
+  exhaustion_fade: [
+    "min_flow_score",
+    "min_signed_aggression",
+    "min_directional_consistency",
+    "entry_deviation_pct",
+  ],
+  scalp_l2_intrabar: [
+    "min_flow_score",
+    "min_intrabar_move_pct",
+    "min_intrabar_push_ratio",
+    "min_intrabar_directional_consistency",
+    "max_intrabar_spread_bps",
+  ],
+  momentum_flow: [
+    "min_flow_score",
+    "min_signed_aggression",
+    "min_directional_consistency",
+    "entry_threshold",
+  ],
+};
+
+const GROUP_FALLBACK_ORDER = [
+  "Signal Setup",
+  "Risk & Exit",
+  "Scalp Intrabar",
+  "Regime",
+  "Other",
+  "Custom Rules",
+];
+
+const MAX_FOCUS_FIELDS = 8;
+
 export const formatFieldLabel = (field: string) => {
   const upperTokenMap = new Map([
     ["ma", "MA"],
@@ -174,4 +240,61 @@ export const buildEditableFieldGroups = (name: string, cfg: any) => {
   }
 
   return Object.entries(grouped).filter(([, entries]) => entries.length > 0);
+};
+
+export const buildFocusFieldLayout = (name: string, cfg: any) => {
+  const grouped = buildEditableFieldGroups(name, cfg);
+  const fieldMap = new Map<string, any>();
+
+  grouped.forEach(([, entries]) => {
+    entries.forEach(([field, value]) => {
+      fieldMap.set(field, value);
+    });
+  });
+
+  const orderedFields: string[] = [];
+  const pushField = (field: string) => {
+    if (!fieldMap.has(field) || orderedFields.includes(field)) return;
+    orderedFields.push(field);
+  };
+
+  [
+    ...(STRATEGY_SPECIFIC_FOCUS_FIELDS[name] || []),
+    ...FOCUS_FIELD_PRIORITY,
+  ].forEach(pushField);
+
+  GROUP_FALLBACK_ORDER.forEach((groupName) => {
+    const group = grouped.find(([label]) => label === groupName);
+    if (!group) return;
+    group[1].forEach(([field]) => {
+      if (orderedFields.length >= MAX_FOCUS_FIELDS) return;
+      pushField(field);
+    });
+  });
+
+  const focusFields = orderedFields
+    .slice(0, MAX_FOCUS_FIELDS)
+    .map((field) => [field, fieldMap.get(field)] as [string, any]);
+  const focusSet = new Set(focusFields.map(([field]) => field));
+  const advancedGroups = grouped
+    .map(
+      ([label, entries]) =>
+        [
+          label,
+          entries.filter(([field]) => !focusSet.has(field)),
+        ] as [string, Array<[string, any]>],
+    )
+    .filter(([, entries]) => entries.length > 0);
+  const totalEditableFields = grouped.reduce(
+    (sum, [, entries]) => sum + entries.length,
+    0,
+  );
+
+  return {
+    focusFields,
+    advancedGroups,
+    totalEditableFields,
+    focusFieldCount: focusFields.length,
+    advancedFieldCount: Math.max(totalEditableFields - focusFields.length, 0),
+  };
 };

@@ -31,9 +31,12 @@ function DiagnosticCalendar({ onOpenInStrategyAnalyzer }: DiagnosticCalendarProp
     applyDraftFilters,
     runIdOptions,
     setTradeViewMode,
+    setVariantFilter,
     tradeViewMode,
+    variantFilter,
   } = filterModel;
   const {
+    dayProfileSummaryMap,
     dayResults,
     loading,
     maxAbsPnlPct,
@@ -61,12 +64,15 @@ function DiagnosticCalendar({ onOpenInStrategyAnalyzer }: DiagnosticCalendarProp
         reportPath={reportPath}
         runIdOptions={runIdOptions}
         setTradeViewMode={setTradeViewMode}
+        setVariantFilter={setVariantFilter}
         summary={summary}
         tradeViewMode={tradeViewMode}
+        variantFilter={variantFilter}
       />
 
       <section className="diagnostic-calendar-layout">
         <DiagnosticCalendarMonthGrid
+          dayProfileSummaryMap={dayProfileSummaryMap}
           dayResults={dayResults}
           loading={loading}
           maxAbsPnlPct={maxAbsPnlPct}

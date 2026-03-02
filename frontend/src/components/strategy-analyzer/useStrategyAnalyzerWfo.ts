@@ -3,6 +3,7 @@ import { buildRunApiBase, parseRunKey, readErrorDetail } from "../../app/appShar
 import { defaultStrategyApiUrl } from "../../utils";
 import { dateTimeLocalToUtcIso } from "./utils";
 import type {
+  StrategyAnalyzerContextRiskPresetKey,
   StrategyAnalyzerRangePlaybackMeta,
   StrategyAnalyzerStartRunPayload,
   StrategyAnalyzerStartRunResult,
@@ -11,6 +12,10 @@ import type {
   StrategyAnalyzerWfoMetrics,
   StrategyAnalyzerWfoVariantResult,
 } from "./types";
+import {
+  resolveStrategyAnalyzerContextRiskOverrides,
+  strategyAnalyzerContextRiskRunIdToken,
+} from "./strategyAnalyzerContextRiskPresets";
 
 type Params = {
   selectedRangeFrom: string | null;
@@ -18,6 +23,7 @@ type Params = {
   ticker: string;
   strategyApiUrl: string;
   analyzerTradeEvalMode: StrategyAnalyzerTradeEvalMode;
+  contextRiskPresetKey: StrategyAnalyzerContextRiskPresetKey;
   rangePlaybackMeta: StrategyAnalyzerRangePlaybackMeta;
   onOpenStoredRunSnapshot?: (runKey: string) => Promise<boolean>;
   setError: (value: string | null) => void;
@@ -220,6 +226,7 @@ export function useStrategyAnalyzerWfo({
   ticker,
   strategyApiUrl,
   analyzerTradeEvalMode,
+  contextRiskPresetKey,
   rangePlaybackMeta,
   onOpenStoredRunSnapshot,
   setError,
@@ -258,6 +265,7 @@ export function useStrategyAnalyzerWfo({
       const effectiveEndLocal = rangePlaybackMeta?.tradeEndLocal || selectedRangeTo;
       const effectiveTradeStartLocal = rangePlaybackMeta?.tradeStartLocal || selectedRangeFrom;
       const effectiveTradeEndLocal = rangePlaybackMeta?.tradeEndLocal || selectedRangeTo;
+      const contextRiskOverrides = resolveStrategyAnalyzerContextRiskOverrides(contextRiskPresetKey);
 
       const payload: StrategyAnalyzerStartRunPayload & Record<string, any> = {
         run_id: runId,
@@ -271,6 +279,7 @@ export function useStrategyAnalyzerWfo({
         strategy_api_url: strategyApiUrl || defaultStrategyApiUrl,
         include_extended_hours: true,
         trade_eval_mode: analyzerTradeEvalMode,
+        ...contextRiskOverrides,
       };
       return {
         ...payload,
@@ -284,6 +293,7 @@ export function useStrategyAnalyzerWfo({
       ticker,
       strategyApiUrl,
       analyzerTradeEvalMode,
+      contextRiskPresetKey,
     ],
   );
 
@@ -420,7 +430,7 @@ export function useStrategyAnalyzerWfo({
         setVariant(index, { status: "running", error: null });
         setProgress(`running ${index + 1}/${totalCount}`);
         try {
-          const runId = `analyzer-wfo-${Date.now()}-${index + 1}-${Math.random().toString(36).slice(2, 8)}`;
+          const runId = `analyzer-wfo-${strategyAnalyzerContextRiskRunIdToken(contextRiskPresetKey)}-${Date.now()}-${index + 1}-${Math.random().toString(36).slice(2, 8)}`;
           const payload = buildStartPayload(variant.overrides, runId);
           const startResult = await startWfoRun(payload);
           const runKey = String(startResult?.run_key || "").trim();
@@ -501,6 +511,7 @@ export function useStrategyAnalyzerWfo({
     buildStartPayload,
     startWfoRun,
     waitForRunCompletion,
+    contextRiskPresetKey,
     setAnalyzerRunKey,
     setRangeScrubOffset,
     onOpenStoredRunSnapshot,

@@ -145,8 +145,19 @@ export const useRunControlActions = ({
       }
 
       try {
+        const overrideSpeedRaw = playOptions?.speed_ms;
+        const hasSpeedOverride =
+          overrideSpeedRaw !== undefined &&
+          overrideSpeedRaw !== null &&
+          String(overrideSpeedRaw).trim() !== '';
+
         let speedParam: string | number;
-        if (typeof speed === 'string') {
+        if (hasSpeedOverride) {
+          speedParam =
+            typeof overrideSpeedRaw === 'string'
+              ? overrideSpeedRaw.trim()
+              : overrideSpeedRaw;
+        } else if (typeof speed === 'string') {
           speedParam = speed;
         } else if (speed === 0) {
           speedParam = 'max';
@@ -193,6 +204,19 @@ export const useRunControlActions = ({
           return;
         }
         const playPayload = await response.json().catch(() => ({}));
+        if (playPayload?.success === false) {
+          const detailMessage = String(playPayload?.error || 'Play failed').trim();
+          const runAlreadyInProgress = /already in progress/i.test(detailMessage);
+          if (runAlreadyInProgress) {
+            setRuntimeNotice('');
+            setIsPlaying(true);
+            return;
+          }
+          setRuntimeNotice(`Play failed: ${detailMessage}`);
+          setIsPlaying(false);
+          console.error('Play response rejected:', detailMessage, playPayload);
+          return;
+        }
         const effectiveTradeMode = String(playPayload?.trade_eval_mode || '').trim().toLowerCase();
         if (
           effectiveTradeMode === 'intrabar_5s' ||
@@ -275,8 +299,10 @@ export const useRunControlActions = ({
 
         const processedCount = Number(state?.current_bar_index || 0);
         const localBarsCount = Number(barsLengthRef.current || 0);
+        const barsCountMismatch = processedCount !== localBarsCount;
         const shouldSyncBars =
-          processedCount > 0 && (isPollingFallback || processedCount > localBarsCount);
+          (processedCount > 0 || localBarsCount > 0) &&
+          (isPollingFallback || barsCountMismatch);
 
         if (shouldSyncBars) {
           try {
@@ -284,14 +310,14 @@ export const useRunControlActions = ({
             if (barsResponse.ok) {
               const barsPayload = await barsResponse.json();
               const rawBars = Array.isArray(barsPayload?.bars) ? barsPayload.bars : [];
-              if (rawBars.length > localBarsCount) {
+              if (rawBars.length !== localBarsCount) {
                 const chartBars = rawBars
                   .map((bar: any) => toChartBar(bar))
                   .filter(Boolean)
                   .sort((a: CandlestickChartBar, b: CandlestickChartBar) => a.time - b.time);
                 setBars(chartBars);
-                setCurrentBar(rawBars[rawBars.length - 1] || null);
               }
+              setCurrentBar(rawBars[rawBars.length - 1] || null);
             }
           } catch (barsError) {
             console.debug('Bars poll sync failed:', barsError);

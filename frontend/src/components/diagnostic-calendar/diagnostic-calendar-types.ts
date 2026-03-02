@@ -29,6 +29,7 @@ export type DiagnosticCalendarHistoryFilters = {
   runId: string;
   ticker: string;
   tradeViewMode: DiagnosticCalendarTradeViewMode;
+  variantFilter: string;
 };
 
 export type DiagnosticCalendarProfileOption = {
@@ -115,6 +116,15 @@ export type DiagnosticCalendarRunMetrics = {
   trades: number | null;
 };
 
+export type DiagnosticCalendarProfileDaySummary = {
+  profileKey: string;
+  profileLabel: string;
+  pnlDollars: number;
+  pnlPct: number;
+  runCount: number;
+  totalTrades: number;
+};
+
 export type DiagnosticCalendarDayDetailModel = {
   activeDayRunKey: string;
   canOpenSelectedDayInAnalyzer: boolean;
@@ -135,6 +145,7 @@ export type DiagnosticCalendarDayDetailModel = {
 
 export type DiagnosticCalendarReportView = {
   dayResultMap: Map<string, DiagnosticCalendarDayResult>;
+  dayProfileSummaryMap: Map<string, DiagnosticCalendarProfileDaySummary[]>;
   dayResults: DiagnosticCalendarDayResult[];
   maxAbsPnlPct: number;
   monthlyViews: DiagnosticCalendarMonthView[];

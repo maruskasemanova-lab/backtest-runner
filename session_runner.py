@@ -274,6 +274,14 @@ class SessionRunner:
         self._last_bar_notify_warmup_only: Optional[bool] = None
         self._bulk_payload_frame: Optional[Any] = None
         self._bulk_payload_frame_signature: Optional[tuple[Any, ...]] = None
+        self._slow_chunk_log_ms: float = self._env_float(
+            "BACKTEST_RUNNER_SLOW_CHUNK_LOG_MS",
+            250.0,
+            minimum=0.0,
+        )
+        self._intrabar_points_observed: int = 0
+        self._intrabar_bars_observed: int = 0
+        self._intrabar_sample_logged: bool = False
 
     def on_bar(self, callback: Callable[[Dict[str, Any]], Any]):
         """Register callback for bar updates."""
@@ -389,6 +397,11 @@ class SessionRunner:
             parsed = min(float(maximum), parsed)
         return parsed
 
+    def _effective_trade_eval_mode(self) -> str:
+        if not bool(getattr(self.config, "intrabar_execution_recalc_1s", False)):
+            return "standard"
+        return "intrabar_5s" if self._intrabar_eval_step_seconds() >= 5 else "intrabar_1s"
+
     def _bar_progress_pct_for_index(self, processed_bar_index: int) -> float:
         if not self.bars:
             return 0.0
@@ -448,10 +461,8 @@ class SessionRunner:
         self,
         bar: Dict[str, Any],
     ) -> tuple[datetime, bool]:
-        timestamp = bar["timestamp"]
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp)
-        ts_utc = self._to_utc_datetime(timestamp)
+        timestamp = self._to_utc_datetime(bar["timestamp"])
+        ts_utc = timestamp
         trade_start_utc = (
             self._trade_start_time
             if isinstance(self._trade_start_time, datetime)
@@ -506,6 +517,19 @@ class SessionRunner:
         timestamp_token = (
             timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
         )
+        if should_attach_intrabar_quotes and intrabar_quotes:
+            quote_count = len(intrabar_quotes)
+            self._intrabar_bars_observed += 1
+            self._intrabar_points_observed += quote_count
+            if not self._intrabar_sample_logged:
+                self._intrabar_sample_logged = True
+                logger.info(
+                    "RUNNER_INTRABAR sample mode=%s step=%ss points=%d timestamp=%s",
+                    self._effective_trade_eval_mode(),
+                    self._intrabar_eval_step_seconds(),
+                    quote_count,
+                    timestamp_token,
+                )
         payload: Dict[str, Any] = {
             "run_id": self.config.run_id,
             "ticker": self.config.ticker,
@@ -581,7 +605,10 @@ class SessionRunner:
         ):
             return self._bulk_payload_frame
 
+        build_started = time_module.perf_counter()
         should_attach_intrabar_quotes = bool(self._should_attach_intrabar_quotes(False))
+        frame_intrabar_rows = 0
+        frame_intrabar_points = 0
         rows: List[Dict[str, Any]] = []
         for bar in self.bars:
             timestamp, warmup_only = self._resolve_bar_runtime_context(bar)
@@ -609,6 +636,11 @@ class SessionRunner:
             if should_attach_intrabar_quotes:
                 intrabar_quotes = self._load_intrabar_quotes(timestamp)
                 if intrabar_quotes:
+                    quote_count = len(intrabar_quotes)
+                    frame_intrabar_rows += 1
+                    frame_intrabar_points += quote_count
+                    self._intrabar_bars_observed += 1
+                    self._intrabar_points_observed += quote_count
                     row["intrabar_quotes_1s"] = [
                         {
                             "s": quote.get("s"),
@@ -637,6 +669,23 @@ class SessionRunner:
         except Exception:
             self._bulk_payload_frame = None
             self._bulk_payload_frame_signature = None
+
+        build_ms = (time_module.perf_counter() - build_started) * 1000.0
+        if build_ms >= self._slow_chunk_log_ms:
+            avg_points = (
+                frame_intrabar_points / frame_intrabar_rows
+                if frame_intrabar_rows > 0
+                else 0.0
+            )
+            logger.info(
+                "RUNNER_PERF bulk_payload_frame mode=%s step=%ss rows=%d build_ms=%.1f intrabar_rows=%d avg_intrabar_points=%.2f",
+                self._effective_trade_eval_mode(),
+                self._intrabar_eval_step_seconds(),
+                len(rows),
+                build_ms,
+                frame_intrabar_rows,
+                avg_points,
+            )
         return self._bulk_payload_frame
 
     async def _apply_strategy_response(
@@ -737,6 +786,9 @@ class SessionRunner:
         self._last_bar_notify_warmup_only = None
         self._bulk_payload_frame = None
         self._bulk_payload_frame_signature = None
+        self._intrabar_points_observed = 0
+        self._intrabar_bars_observed = 0
+        self._intrabar_sample_logged = False
         self._drain_queue(self._bar_events_queue)
         self._drain_queue(self._decision_events_queue)
         logger.info(f"Loaded {len(bars)} bars for session")
@@ -761,6 +813,9 @@ class SessionRunner:
         self._last_bar_notify_warmup_only = None
         self._bulk_payload_frame = None
         self._bulk_payload_frame_signature = None
+        self._intrabar_points_observed = 0
+        self._intrabar_bars_observed = 0
+        self._intrabar_sample_logged = False
         self._drain_queue(self._bar_events_queue)
         self._drain_queue(self._decision_events_queue)
         self.decision_tracker = DecisionTracker(
@@ -776,9 +831,23 @@ class SessionRunner:
         if isinstance(value, datetime):
             dt = value
         else:
-            raw = str(value)
+            raw = str(value).strip()
             if raw.endswith("Z"):
                 raw = raw[:-1] + "+00:00"
+            fractional_index = raw.find(".")
+            if fractional_index >= 0:
+                timezone_index = len(raw)
+                for marker in ("+", "-"):
+                    marker_index = raw.find(marker, fractional_index + 1)
+                    if marker_index >= 0:
+                        timezone_index = min(timezone_index, marker_index)
+                fractional = raw[fractional_index + 1 : timezone_index]
+                if len(fractional) > 6 and fractional.isdigit():
+                    raw = (
+                        f"{raw[:fractional_index + 1]}"
+                        f"{fractional[:6]}"
+                        f"{raw[timezone_index:]}"
+                    )
             dt = datetime.fromisoformat(raw)
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
@@ -1921,6 +1990,8 @@ class SessionRunner:
         if end_index <= start_index:
             return {"success": True, "processed_count": 0}
 
+        chunk_started = time_module.perf_counter()
+        prepare_started = chunk_started
         prepared: List[Dict[str, Any]] = []
         pending_entry_before_chunk = self._pending_entry
         for index in range(start_index, end_index):
@@ -1939,7 +2010,9 @@ class SessionRunner:
                     "warmup_only": warmup_only,
                 }
             )
+        prepare_ms = (time_module.perf_counter() - prepare_started) * 1000.0
 
+        strategy_started = time_module.perf_counter()
         payload_frame = self._refresh_bulk_payload_frame_if_needed()
         batch_result: Any
         if payload_frame is not None:
@@ -1964,6 +2037,9 @@ class SessionRunner:
                     "bar_index": self.current_bar_index,
                 }
             batch_result = await self._strategy_bar_processor.process_batch(payloads=payloads)
+        strategy_ms = (time_module.perf_counter() - strategy_started) * 1000.0
+
+        chunk_mode = "warmup" if bool(prepared and prepared[0].get("warmup_only")) else "trade"
         if getattr(batch_result, "fallback_to_single", False):
             self._pending_entry = pending_entry_before_chunk
             last_result: Optional[Dict[str, Any]] = None
@@ -1971,6 +2047,21 @@ class SessionRunner:
                 last_result = await self.step(notify=True)
                 if not bool(last_result.get("success")):
                     return last_result
+            total_ms = (time_module.perf_counter() - chunk_started) * 1000.0
+            if total_ms >= self._slow_chunk_log_ms:
+                processed_count = max(0, end_index - start_index)
+                per_bar_ms = total_ms / processed_count if processed_count else 0.0
+                logger.info(
+                    "RUNNER_PERF bulk_chunk_fallback mode=%s bars=%d prepare_ms=%.1f strategy_ms=%.1f total_ms=%.1f per_bar_ms=%.3f eval_mode=%s step=%ss",
+                    chunk_mode,
+                    processed_count,
+                    prepare_ms,
+                    strategy_ms,
+                    total_ms,
+                    per_bar_ms,
+                    self._effective_trade_eval_mode(),
+                    self._intrabar_eval_step_seconds(),
+                )
             return {
                 "success": True,
                 "processed_count": end_index - start_index,
@@ -1997,6 +2088,7 @@ class SessionRunner:
                 "bar_index": self.current_bar_index,
             }
 
+        apply_started = time_module.perf_counter()
         last_result: Optional[Dict[str, Any]] = None
         for prepared_item, response_payload in zip(prepared, response_payloads):
             last_result = await self._apply_strategy_response(
@@ -2006,6 +2098,23 @@ class SessionRunner:
                 warmup_only=bool(prepared_item["warmup_only"]),
                 notify_bar=True,
                 throttle_bar_update=True,
+            )
+        apply_ms = (time_module.perf_counter() - apply_started) * 1000.0
+        total_ms = (time_module.perf_counter() - chunk_started) * 1000.0
+        if total_ms >= self._slow_chunk_log_ms:
+            processed_count = len(prepared)
+            per_bar_ms = total_ms / processed_count if processed_count else 0.0
+            logger.info(
+                "RUNNER_PERF bulk_chunk mode=%s bars=%d prepare_ms=%.1f strategy_ms=%.1f apply_ms=%.1f total_ms=%.1f per_bar_ms=%.3f eval_mode=%s step=%ss",
+                chunk_mode,
+                processed_count,
+                prepare_ms,
+                strategy_ms,
+                apply_ms,
+                total_ms,
+                per_bar_ms,
+                self._effective_trade_eval_mode(),
+                self._intrabar_eval_step_seconds(),
             )
 
         return {
@@ -2064,7 +2173,24 @@ class SessionRunner:
         logger.info(
             f"Starting run_all with normalized delay {delay_seconds:.4f}s per bar (raw={speed_ms})"
         )
-        use_bulk_playback = bool(self._bulk_playback_enabled) and delay_seconds <= 0
+        intrabar_quotes_required = bool(self._should_attach_intrabar_quotes(False))
+        # Bulk mode prebuilds payload frames synchronously. In intrabar mode this
+        # forces eager quote loading for many bars and can block the event loop.
+        # Keep zero-delay bulk playback for standard bar mode only.
+        use_bulk_playback = (
+            bool(self._bulk_playback_enabled)
+            and delay_seconds <= 0
+            and not intrabar_quotes_required
+        )
+        logger.info(
+            "Run playback config: eval_mode=%s intrabar_step=%ss bulk_enabled=%s bulk_active=%s intrabar_quotes_required=%s total_bars=%d",
+            self._effective_trade_eval_mode(),
+            self._intrabar_eval_step_seconds(),
+            bool(self._bulk_playback_enabled),
+            use_bulk_playback,
+            intrabar_quotes_required,
+            len(self.bars),
+        )
 
         while self.is_running:
             if self.is_paused:
@@ -2086,6 +2212,7 @@ class SessionRunner:
                 else:
                     step_result = await self.step(notify=True)
                 if not bool(step_result.get("success")):
+                    self.phase = "ERROR"
                     logger.error(
                         "Stopping run_all after step failure at bar_index=%s: %s",
                         step_result.get("bar_index", self.current_bar_index),
@@ -2127,6 +2254,17 @@ class SessionRunner:
             break
 
         self.is_running = False
+        if self._intrabar_bars_observed > 0:
+            avg_intrabar_points = self._intrabar_points_observed / max(
+                1, self._intrabar_bars_observed
+            )
+            logger.info(
+                "RUNNER_INTRABAR summary mode=%s step=%ss bars=%d avg_points=%.2f",
+                self._effective_trade_eval_mode(),
+                self._intrabar_eval_step_seconds(),
+                self._intrabar_bars_observed,
+                avg_intrabar_points,
+            )
         logger.info("run_all completed")
         return self.get_summary()
 

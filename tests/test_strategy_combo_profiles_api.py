@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
 from pathlib import Path
 import sys
+
+from src.services.saas_service import SaaSStateStore
 
 
 _API_SERVER_PATH = Path(__file__).resolve().parents[1] / "api_server.py"
@@ -17,6 +18,25 @@ _API_SERVER_SPEC = importlib.util.spec_from_file_location(
 assert _API_SERVER_SPEC is not None and _API_SERVER_SPEC.loader is not None
 api_server = importlib.util.module_from_spec(_API_SERVER_SPEC)
 _API_SERVER_SPEC.loader.exec_module(api_server)
+
+
+def _seed_primary_config(monkeypatch, tmp_path: Path, aos_config: dict) -> SaaSStateStore:
+    store = SaaSStateStore(str(tmp_path / "saas_state.db"))
+    store.upsert_config_snapshot(
+        config_key="aos_config",
+        payload=aos_config,
+        source="test_seed",
+    )
+    # Combo handlers also read positioning via shared deps; keep a valid baseline snapshot.
+    store.upsert_config_snapshot(
+        config_key="positioning_config",
+        payload={"version": "1.0.0", "tickers": {}},
+        source="test_seed",
+    )
+    monkeypatch.setattr(api_server.v2_services, "store", store)
+    monkeypatch.setattr(api_server.api_services, "state_store", store)
+    monkeypatch.setattr(api_server.app.state, "saas_state_store", store, raising=False)
+    return store
 
 
 def test_extract_strategy_params_for_profile_sanitizes_payload() -> None:
@@ -48,9 +68,11 @@ def test_extract_strategy_params_for_profile_sanitizes_payload() -> None:
 
 
 def test_capture_strategy_combo_persists_profile(monkeypatch, tmp_path) -> None:
-    temp_aos = tmp_path / "aos_config.json"
-    temp_aos.write_text(json.dumps({"version": "1.0.0", "tickers": {}}))
-    monkeypatch.setattr(api_server, "AOS_CONFIG_PATH", temp_aos)
+    _seed_primary_config(
+        monkeypatch,
+        tmp_path,
+        {"version": "1.0.0", "tickers": {}},
+    )
 
     async def _fake_fetch(_strategy_api_url: str):
         return {
@@ -78,7 +100,7 @@ def test_capture_strategy_combo_persists_profile(monkeypatch, tmp_path) -> None:
     assert result["ticker"] == "MU"
     assert result["profile"]["profile_name"] == "MU short window v1"
     assert result["active_profile_id"] == result["profile"]["profile_id"]
-    saved = api_server._load_aos_config(temp_aos)
+    saved = api_server._load_aos_config()
     mu_cfg = saved["tickers"]["MU"]
     assert mu_cfg["active_strategy_combo_profile_id"] == result["profile"]["profile_id"]
     assert len(mu_cfg["strategy_combo_profiles"]) == 1
@@ -93,33 +115,31 @@ def test_capture_strategy_combo_persists_profile(monkeypatch, tmp_path) -> None:
 def test_apply_strategy_combo_sets_active_and_apply_result(
     monkeypatch, tmp_path
 ) -> None:
-    temp_aos = tmp_path / "aos_config.json"
-    temp_aos.write_text(
-        json.dumps(
-            {
-                "version": "1.0.0",
-                "tickers": {
-                    "MU": {
-                        "strategy_combo_profiles": [
-                            {
-                                "profile_id": "combo123",
-                                "profile_name": "Combo 123",
-                                "created_at": "2026-02-09T20:00:00Z",
-                                "updated_at": "2026-02-09T20:00:00Z",
-                                "strategy_params": {
-                                    "momentum_flow": {
-                                        "enabled": True,
-                                        "min_confidence": 57.0,
-                                    }
-                                },
-                            }
-                        ]
-                    }
-                },
-            }
-        )
+    _seed_primary_config(
+        monkeypatch,
+        tmp_path,
+        {
+            "version": "1.0.0",
+            "tickers": {
+                "MU": {
+                    "strategy_combo_profiles": [
+                        {
+                            "profile_id": "combo123",
+                            "profile_name": "Combo 123",
+                            "created_at": "2026-02-09T20:00:00Z",
+                            "updated_at": "2026-02-09T20:00:00Z",
+                            "strategy_params": {
+                                "momentum_flow": {
+                                    "enabled": True,
+                                    "min_confidence": 57.0,
+                                }
+                            },
+                        }
+                    ]
+                }
+            },
+        },
     )
-    monkeypatch.setattr(api_server, "AOS_CONFIG_PATH", temp_aos)
 
     async def _fake_apply(_strategy_api_url: str, strategy_params):
         assert "momentum_flow" in strategy_params
@@ -143,5 +163,5 @@ def test_apply_strategy_combo_sets_active_and_apply_result(
     assert result["success"] is True
     assert result["profile_id"] == "combo123"
     assert result["apply_result"]["applied_count"] == 1
-    saved = api_server._load_aos_config(temp_aos)
+    saved = api_server._load_aos_config()
     assert saved["tickers"]["MU"]["active_strategy_combo_profile_id"] == "combo123"

@@ -20,7 +20,8 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
    Strategy-analyzer market context precomputes scalar metrics once per run, stores them as compact tuple rows, and assembles `recent_bars` lazily per requested bar instead of pre-materializing snapshots for the full session.
 5. On `step/play`, runner sends bars to strategy session endpoints:
    single-step and delayed playback use `POST /api/session/bar`;
-   zero-delay playback batches warmup/trade chunks over `POST /api/session/bars`.
+   zero-delay playback in `standard` mode batches warmup/trade chunks over `POST /api/session/bars`;
+   zero-delay playback in intrabar modes (`intrabar_1s|intrabar_5s`) stays bar-by-bar to avoid eager full-range quote loading stalls.
 6. When intrabar execution mode is enabled, runner may attach 1-second intrabar top-of-book quotes for that minute (`intrabar_quotes_1s`) on each processed bar to support entry/exit logic.
 7. Strategy returns decision payload; runner maps it to markers and summary state.
 8. Runner broadcasts bar + decision updates over `/ws/live`.
@@ -56,6 +57,10 @@ Authenticated FE start behavior:
 20. Authenticated users can register personal dataset metadata via `/api/v2/datasets`; dataset rows are user-scoped and default object paths follow `users/{user_id}/datasets/{dataset_id}.parquet` (optionally prefixed by `BACKTEST_USER_DATASETS_BUCKET`).
 21. `POST /api/v2/datasets/upload/csv` provides the first integrated user-data ingest path: raw CSV upload is converted to parquet, cached locally, and optionally pushed to S3/R2 before `user_datasets` is updated.
 22. Authenticated `POST /api/v2/runs` can target a registered private dataset via `dataset_id`; in `auto` storage mode the runner prefers local parquet cache on localhost/dev, non-local hosts use remote hydration only when a bucket is configured, and otherwise stay on local cache semantics.
+23. Primary AOS and positioning configs are strict snapshot-backed in local SQLite (`config_snapshots`) on request paths; legacy JSON files are migration/bootstrap input only.
+24. AOS profile-change timeline (`/api/aos-history/{ticker}`) is DB-backed via `aos_history_entries`; legacy `aos_history.jsonl` is treated as migration input.
+25. Live trader monitoring endpoints are strict DB-backed (`live_trader_events`) and return `503` when the DB store backend is unavailable; sibling `ibkr-realtime-trader/artifacts` JSONL files are ingest input only.
+26. Live-trader JSONL ingest is incremental and checkpointed in `live_trader_ingest_state` (`source_path` + byte offset/mtime/size), so unchanged files are skipped and only appended complete lines are parsed.
 
 ## Session And State Model
 

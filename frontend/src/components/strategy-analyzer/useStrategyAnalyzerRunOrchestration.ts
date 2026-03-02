@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { defaultStrategyApiUrl } from "../../utils";
 import { dateTimeLocalToUtcIso } from "./utils";
 import type {
+  StrategyAnalyzerContextRiskPresetKey,
   StrategyAnalyzerOnClearRun,
   StrategyAnalyzerOnStartRun,
   StrategyAnalyzerRangePlaybackMeta,
@@ -9,6 +10,10 @@ import type {
   StrategyAnalyzerStartRunResult,
   StrategyAnalyzerTradeEvalMode,
 } from "./types";
+import {
+  resolveStrategyAnalyzerContextRiskOverrides,
+  strategyAnalyzerContextRiskRunIdToken,
+} from "./strategyAnalyzerContextRiskPresets";
 
 type Params = {
   selectedRangeFrom: string | null;
@@ -16,6 +21,7 @@ type Params = {
   ticker: string;
   strategyApiUrl: string;
   analyzerTradeEvalMode: StrategyAnalyzerTradeEvalMode;
+  contextRiskPresetKey: StrategyAnalyzerContextRiskPresetKey;
   rangePlaybackMeta: StrategyAnalyzerRangePlaybackMeta;
   onStartRun?: StrategyAnalyzerOnStartRun;
   onSwitchToBacktest?: () => void;
@@ -70,6 +76,7 @@ export function useStrategyAnalyzerRunOrchestration({
   ticker,
   strategyApiUrl,
   analyzerTradeEvalMode,
+  contextRiskPresetKey,
   rangePlaybackMeta,
   onStartRun,
   onSwitchToBacktest,
@@ -125,6 +132,7 @@ export function useStrategyAnalyzerRunOrchestration({
       const effectiveTradeEndLocal = rangePlaybackMeta?.tradeEndLocal || selectedRangeTo;
       const dateFrom = effectiveStartLocal.slice(0, 10);
       const dateTo = effectiveEndLocal.slice(0, 10);
+      const contextRiskOverrides = resolveStrategyAnalyzerContextRiskOverrides(contextRiskPresetKey);
 
       // Ensure bars are cached before /api/run/start.
       // If background prewarm already completed, this returns instantly (cache hit).
@@ -133,7 +141,7 @@ export function useStrategyAnalyzerRunOrchestration({
       lastPrewarmKeyRef.current = `${ticker}:${dateFrom}:${dateTo}`;
 
       const payload: StrategyAnalyzerStartRunPayload = {
-        run_id: `analyzer-${Date.now()}`,
+        run_id: `analyzer-${strategyAnalyzerContextRiskRunIdToken(contextRiskPresetKey)}-${Date.now()}`,
         ticker,
         date_from: dateFrom,
         date_to: dateTo,
@@ -147,6 +155,7 @@ export function useStrategyAnalyzerRunOrchestration({
         // Hint for frontend start handler: analyzer should start immediately
         // (skip queued v2 orchestration path and use direct /api/run/start).
         __client_hint: "strategy_analyzer",
+        ...contextRiskOverrides,
       };
       if (typeof onStartRun === "function") {
         const result = await onStartRun(payload);
@@ -180,6 +189,7 @@ export function useStrategyAnalyzerRunOrchestration({
     ticker,
     strategyApiUrl,
     analyzerTradeEvalMode,
+    contextRiskPresetKey,
     rangePlaybackMeta,
     onStartRun,
     onSwitchToBacktest,

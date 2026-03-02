@@ -19,6 +19,7 @@ import type {
   StrategyAnalyzerOnRunControl,
   StrategyAnalyzerOnStartRun,
   StrategyAnalyzerTimelineCacheState,
+  StrategyAnalyzerContextRiskPresetKey,
   StrategyAnalyzerTradeEvalMode,
   StrategyAnalyzerRunBarLike,
 } from "./types";
@@ -37,6 +38,7 @@ import {
   useStrategyAnalyzerOpenDayRequest,
 } from "./useStrategyAnalyzerOpenDayRequest";
 import { useStrategyAnalyzerWfo } from "./useStrategyAnalyzerWfo";
+import { DEFAULT_STRATEGY_ANALYZER_CONTEXT_RISK_PRESET } from "./strategyAnalyzerContextRiskPresets";
 
 interface StrategyAnalyzerProps {
   selectedTicker: string | null;
@@ -102,6 +104,9 @@ export default function StrategyAnalyzer({
   const chartRef = useRef<StrategyAnalyzerChartHandle | null>(null);
   const [rangeScrubOffset, setRangeScrubOffset] = useState(0);
   const [analyzerTradeEvalMode, setAnalyzerTradeEvalMode] = useState<StrategyAnalyzerTradeEvalMode>("intrabar_5s");
+  const [contextRiskPresetKey, setContextRiskPresetKey] = useState<StrategyAnalyzerContextRiskPresetKey>(
+    DEFAULT_STRATEGY_ANALYZER_CONTEXT_RISK_PRESET,
+  );
 
   // ── incremental caching refs for performance ─────────────────────
   // These refs hold pre-computed data structures that are incrementally
@@ -178,7 +183,10 @@ export default function StrategyAnalyzer({
   );
   const analyzerDecisionEvents: StrategyAnalyzerDecisionMarker[] = isAnalyzerAttachedRun ? decisionEvents : [];
   const analyzerRunPhase = isAnalyzerAttachedRun ? String(attachedRunState?.phase || "").trim() : "";
-  const analyzerRunFinished = isAnalyzerAttachedRun && !attachedRunState?.is_running && analyzerRunPhase === "COMPLETED";
+  const analyzerRunTerminal =
+    isAnalyzerAttachedRun &&
+    !attachedRunState?.is_running &&
+    ["COMPLETED", "END_OF_DAY", "ERROR", "FAILED", "STOPPED"].includes(analyzerRunPhase);
   const { timelineCacheVersion } = useStrategyAnalyzerTimelineCache({
     isAnalyzerAttachedRun,
     rangePlaybackMeta,
@@ -213,8 +221,9 @@ export default function StrategyAnalyzer({
     : analyzerRunPhase;
   const { analyzerChartMarkers, chartBars } = useStrategyAnalyzerChartData({
     bars,
+    attachedRunBars,
     isAnalyzerAttachedRun,
-    analyzerRunFinished,
+    analyzerRunTerminal,
     selectedRangeWindow,
     rangeScrubMeta,
     analyzerDecisionEvents,
@@ -227,6 +236,7 @@ export default function StrategyAnalyzer({
     ticker,
     strategyApiUrl,
     analyzerTradeEvalMode,
+    contextRiskPresetKey,
     rangePlaybackMeta,
     onStartRun,
     onSwitchToBacktest,
@@ -255,6 +265,7 @@ export default function StrategyAnalyzer({
     ticker,
     strategyApiUrl,
     analyzerTradeEvalMode,
+    contextRiskPresetKey,
     rangePlaybackMeta,
     onOpenStoredRunSnapshot,
     setError,
@@ -340,17 +351,6 @@ export default function StrategyAnalyzer({
     void handleStartTest();
   }, [wfoEnabled, handleRunWfo, handleStartTest]);
 
-  const detachedToggleButtonStyle = {
-    padding: "2px 8px",
-    borderRadius: "var(--radius-sm)",
-    border: "1px solid var(--border-color)",
-    background: "var(--bg-secondary)",
-    color: "var(--text-secondary)",
-    fontSize: "0.72rem",
-    fontWeight: 600,
-    cursor: "pointer",
-  };
-
   const entryConditionsContent = (
     <StrategyAnalyzerEntryConditionsContent
       effectiveConditionsMarker={effectiveConditionsMarker}
@@ -369,7 +369,7 @@ export default function StrategyAnalyzer({
 
   /* ── render ────────────────────────────────────────────────────── */
   return (
-    <div className="strategy-analyzer" style={{ display: "flex", flexDirection: "column", gap: "0.75rem", height: "100%", padding: "0.75rem" }}>
+    <div className="strategy-analyzer sa-shell">
       <StrategyAnalyzerHeaderControls
         tickers={tickers}
         ticker={ticker}
@@ -383,12 +383,14 @@ export default function StrategyAnalyzer({
         barCount={barCount}
         warmupBars={warmupBars}
         onWarmupBarsChange={setWarmupBars}
+        contextRiskPresetKey={contextRiskPresetKey}
+        onContextRiskPresetChange={setContextRiskPresetKey}
         isAnalyzerAttachedRun={isAnalyzerAttachedRun}
         analyzerTradeEvalMode={analyzerTradeEvalMode}
         onAnalyzerTradeEvalModeChange={setAnalyzerTradeEvalMode}
         runLoading={runLoading || wfoIsRunning}
         isPlayingRun={isPlayingRun}
-        analyzerRunFinished={analyzerRunFinished}
+        analyzerRunTerminal={analyzerRunTerminal}
         onPlayRun={onPlayRun}
         onPauseRun={onPauseRun}
         onStepRun={onStepRun}
@@ -403,34 +405,20 @@ export default function StrategyAnalyzer({
 
       {/* ── Error ──────────────────────────────────────────────── */}
       {error && (
-        <div className="card" style={{ padding: "0.5rem 1rem", color: "var(--accent-red)", fontSize: "0.85rem" }}>
+        <div className="card sa-alert-card">
           {error}
-          <button onClick={() => setError(null)} style={{ marginLeft: 8, cursor: "pointer", background: "none", border: "none", color: "var(--text-muted)" }}>
+          <button
+            type="button"
+            className="sa-alert-dismiss"
+            onClick={() => setError(null)}
+          >
             dismiss
           </button>
         </div>
       )}
 
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          gap: "0.75rem",
-          flexWrap: "wrap",
-          alignItems: "stretch",
-        }}
-      >
-        <div
-          style={{
-            flex: "1 1 760px",
-            minWidth: 0,
-            minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.75rem",
-          }}
-        >
+      <div className={`sa-workspace ${isAnalyzerAttachedRun ? "is-attached" : ""}`}>
+        <div className="sa-chart-column">
           <StrategyAnalyzerChartPanel
             bars={bars}
             ticker={ticker}
@@ -458,7 +446,9 @@ export default function StrategyAnalyzer({
             focusSelectedRangeOffset={focusSelectedRangeOffset}
             moveSelectedRangeByStep={moveSelectedRangeByStep}
           />
+        </div>
 
+        <aside className="sa-utility-rail">
           <StrategyAnalyzerRangeActions
             selectedRangeFrom={selectedRangeFrom}
             selectedRangeTo={selectedRangeTo}
@@ -481,23 +471,22 @@ export default function StrategyAnalyzer({
             bestWfoVariantId={bestWfoVariantId}
             onSelectWfoVariant={handleSelectWfoVariant}
           />
-        </div>
 
-        {isAnalyzerAttachedRun ? (
-          <StrategyAnalyzerAttachedPanels
-            ticker={ticker}
-            analyzerDecisionEventsCount={analyzerDecisionEvents.length}
-            hasConditionsPanelData={hasConditionsPanelData}
-            conditionsPanelBadge={conditionsPanelBadge}
-            detachedToggleButtonStyle={detachedToggleButtonStyle}
-            isConditionsDetached={isConditionsDetached}
-            isDecisionsDetached={isDecisionsDetached}
-            setIsConditionsDetached={setIsConditionsDetached}
-            setIsDecisionsDetached={setIsDecisionsDetached}
-            entryConditionsContent={entryConditionsContent}
-            decisionsContent={decisionsContent}
-          />
-        ) : null}
+          {isAnalyzerAttachedRun ? (
+            <StrategyAnalyzerAttachedPanels
+              ticker={ticker}
+              analyzerDecisionEventsCount={analyzerDecisionEvents.length}
+              hasConditionsPanelData={hasConditionsPanelData}
+              conditionsPanelBadge={conditionsPanelBadge}
+              isConditionsDetached={isConditionsDetached}
+              isDecisionsDetached={isDecisionsDetached}
+              setIsConditionsDetached={setIsConditionsDetached}
+              setIsDecisionsDetached={setIsDecisionsDetached}
+              entryConditionsContent={entryConditionsContent}
+              decisionsContent={decisionsContent}
+            />
+          ) : null}
+        </aside>
       </div>
 
       {/* ── Unified Strategy Configuration Dialog ────────────── */}

@@ -34,24 +34,32 @@ export default function DataManagerCatalogCard({
   onScan,
   onRefresh,
 }: DataManagerCatalogCardProps) {
+  const shownCount = filteredCatalog.length;
+  const totalCount = catalogWithFormats.length;
+
   return (
     <div className="card dm-catalog-card">
       <div className="card-header">
         <span className="card-title">📁 Data Catalog</span>
         <div className="dm-header-actions">
-          <button className="btn btn-secondary btn-sm" onClick={onScan} disabled={scanning}>
-            {scanning ? "⏳" : "🔍"} Scan
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onScan} disabled={scanning}>
+            {scanning ? "Scanning..." : "Scan Storage"}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={onRefresh} disabled={loading}>
-            ↻ Refresh
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onRefresh} disabled={loading}>
+            Refresh
           </button>
         </div>
       </div>
 
       <div className="card-body dm-filter-bar">
+        <div className="dm-filter-meta" role="status" aria-live="polite">
+          <strong>{shownCount}</strong> of <strong>{totalCount}</strong> datasets visible
+        </div>
         <div className="form-group">
-          <label>Ticker</label>
+          <label htmlFor="dm_catalog_filter_ticker">Ticker</label>
           <select
+            id="dm_catalog_filter_ticker"
+            name="catalog_ticker"
             value={filters.ticker}
             onChange={(e) => setFilters((prev) => ({ ...prev, ticker: e.target.value }))}
           >
@@ -64,8 +72,10 @@ export default function DataManagerCatalogCard({
           </select>
         </div>
         <div className="form-group">
-          <label>Schema</label>
+          <label htmlFor="dm_catalog_filter_schema">Schema</label>
           <select
+            id="dm_catalog_filter_schema"
+            name="catalog_schema"
             value={filters.schema}
             onChange={(e) => setFilters((prev) => ({ ...prev, schema: e.target.value }))}
           >
@@ -78,8 +88,10 @@ export default function DataManagerCatalogCard({
           </select>
         </div>
         <div className="form-group">
-          <label>Format</label>
+          <label htmlFor="dm_catalog_filter_format">Format</label>
           <select
+            id="dm_catalog_filter_format"
+            name="catalog_format"
             value={filters.format}
             onChange={(e) => setFilters((prev) => ({ ...prev, format: e.target.value }))}
           >
@@ -90,8 +102,10 @@ export default function DataManagerCatalogCard({
           </select>
         </div>
         <div className="form-group">
-          <label>Source</label>
+          <label htmlFor="dm_catalog_filter_source">Source</label>
           <select
+            id="dm_catalog_filter_source"
+            name="catalog_source"
             value={filters.source}
             onChange={(e) => setFilters((prev) => ({ ...prev, source: e.target.value }))}
           >
@@ -104,8 +118,10 @@ export default function DataManagerCatalogCard({
           </select>
         </div>
         <div className="form-group">
-          <label>Ownership</label>
+          <label htmlFor="dm_catalog_filter_managed">Ownership</label>
           <select
+            id="dm_catalog_filter_managed"
+            name="catalog_managed"
             value={filters.managed}
             onChange={(e) => setFilters((prev) => ({ ...prev, managed: e.target.value }))}
           >
@@ -128,16 +144,19 @@ export default function DataManagerCatalogCard({
           <div className="dm-empty">No rows match current filters.</div>
         ) : (
           <table className="data-table">
+            <caption className="sr-only">
+              Data catalog entries filtered by ticker, schema, format, source and ownership.
+            </caption>
             <thead>
               <tr>
-                <th>Ticker</th>
-                <th>Schema</th>
-                <th>Date Range</th>
-                <th>Format</th>
-                <th>Size</th>
-                <th>Rows</th>
-                <th>Status</th>
-                <th></th>
+                <th scope="col">Ticker</th>
+                <th scope="col">Schema</th>
+                <th scope="col">Date Range</th>
+                <th scope="col">Format</th>
+                <th scope="col">Size</th>
+                <th scope="col">Rows</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -176,15 +195,30 @@ export default function DataManagerCatalogCard({
                       <span className="dm-readonly-tag">External</span>
                     ) : confirmDelete === i ? (
                       <div className="dm-confirm-delete">
-                        <button className="btn btn-danger btn-sm" onClick={() => onDelete(entry)}>
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          onClick={() => onDelete(entry)}
+                          aria-label={`Confirm delete for ${entry.ticker} ${entry.start_date} to ${entry.end_date}`}
+                        >
                           Confirm
                         </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setConfirmDelete(null)}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setConfirmDelete(null)}
+                          aria-label="Cancel delete"
+                        >
                           ✕
                         </button>
                       </div>
                     ) : (
-                      <button className="btn btn-danger btn-sm" onClick={() => setConfirmDelete(i)}>
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        onClick={() => setConfirmDelete(i)}
+                        aria-label={`Delete ${entry.ticker} ${entry.start_date} to ${entry.end_date}`}
+                      >
                         Delete
                       </button>
                     )}

@@ -62,8 +62,9 @@ export function useStrategyAnalyzerTimelineCache({
         const runBar = runBars[i];
         const t = Number(runBar?.time);
         if (!Number.isFinite(t)) continue;
+        const isWarmupOnly = runBar?.warmup_only === true;
 
-        if (runBar?.warmup_only === true) {
+        if (isWarmupOnly) {
           cache.warmupDone += 1;
         } else {
           cache.tradeDone += 1;
@@ -71,6 +72,8 @@ export function useStrategyAnalyzerTimelineCache({
 
         if (t < startTime - 1 || t > endTime + 1) continue;
         cache.runBarsByTime.set(t, runBar);
+        // Trade timeline/scrub should advance only on active trade bars.
+        if (isWarmupOnly) continue;
         cache.progressedTradeBars.push(runBar);
 
         const barTime = t;

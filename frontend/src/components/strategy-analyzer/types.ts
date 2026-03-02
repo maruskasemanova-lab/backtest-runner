@@ -6,9 +6,15 @@ import type {
 } from "../CandlestickChart";
 
 export type StrategyAnalyzerTradeEvalMode = "standard" | "intrabar_1s" | "intrabar_5s";
+export type StrategyAnalyzerContextRiskPresetKey =
+  | "current_defaults"
+  | "baseline"
+  | "relaxed_context_35"
+  | "no_context_risk";
 
 export type StrategyAnalyzerRunControlOptions = {
   trade_eval_mode?: StrategyAnalyzerTradeEvalMode | string;
+  speed_ms?: number | string;
 };
 
 export type StrategyAnalyzerPlaybackProgress = {
@@ -87,6 +93,9 @@ export type StrategyAnalyzerStartRunPayload = {
   strategy_api_url: string;
   include_extended_hours: boolean;
   trade_eval_mode: StrategyAnalyzerTradeEvalMode;
+  context_aware_risk_enabled?: boolean;
+  context_risk_min_room_pct?: number;
+  context_risk_min_effective_rr?: number;
   __client_hint?: "strategy_analyzer";
 };
 

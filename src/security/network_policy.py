@@ -57,7 +57,7 @@ def resolve_strategy_allowlist(internal_url: str | None = None) -> List[str]:
     )
     configured = parse_csv_env(
         "BACKTEST_STRATEGY_API_ALLOWLIST",
-        "http://localhost:8001,http://127.0.0.1:8001,http://inprocess",
+        "http://localhost:8001,http://127.0.0.1:8001,http://localhost:8012,http://127.0.0.1:8012,http://inprocess",
     )
     values: List[str] = []
     seen = set()

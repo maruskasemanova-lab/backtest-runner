@@ -14,6 +14,7 @@ type UseRunWebSocketArgs = {
   reconnectBaseMs: number;
   reconnectMaxMs: number;
   maxHandshakeAttempts: number;
+  handshakeTimeoutMs: number;
 };
 
 export const useRunWebSocket = ({
@@ -25,9 +26,11 @@ export const useRunWebSocket = ({
   reconnectBaseMs,
   reconnectMaxMs,
   maxHandshakeAttempts,
+  handshakeTimeoutMs,
 }: UseRunWebSocketArgs) => {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handshakeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onMessageRef = useRef(onMessage);
   const activeRunIdRef = useRef(activeRunId);
   const activeRunKeyRef = useRef(activeRunKey);
@@ -62,6 +65,10 @@ export const useRunWebSocket = ({
     let disposed = false;
     let connectAttempts = 0;
     const wsCandidates = resolveWsLiveUrlCandidates();
+    const fallbackAttemptLimit = Math.max(
+      2,
+      Math.min(maxHandshakeAttempts, Math.max(2, wsCandidates.length + 1)),
+    );
 
     if (!wsFeatureEnabled) {
       pollingFallbackRef.current = true;
@@ -97,11 +104,26 @@ export const useRunWebSocket = ({
       const ws = new WebSocket(wsUrl);
       let openedOnce = false;
       wsRef.current = ws;
+      if (handshakeTimeoutRef.current) clearTimeout(handshakeTimeoutRef.current);
+      handshakeTimeoutRef.current = setTimeout(() => {
+        if (disposed || openedOnce) return;
+        if (ws.readyState !== WebSocket.CONNECTING) return;
+        console.warn(`WebSocket handshake timed out for ${wsUrl}; forcing reconnect.`);
+        try {
+          ws.close();
+        } catch (_error) {
+          // Ignore close errors while forcing reconnect.
+        }
+      }, Math.max(250, handshakeTimeoutMs));
 
       ws.onopen = () => {
         if (disposed) {
           ws.close();
           return;
+        }
+        if (handshakeTimeoutRef.current) {
+          clearTimeout(handshakeTimeoutRef.current);
+          handshakeTimeoutRef.current = null;
         }
         openedOnce = true;
         connectAttempts = 0;
@@ -121,10 +143,14 @@ export const useRunWebSocket = ({
       };
 
       ws.onclose = () => {
+        if (handshakeTimeoutRef.current) {
+          clearTimeout(handshakeTimeoutRef.current);
+          handshakeTimeoutRef.current = null;
+        }
         if (disposed) return;
         if (!openedOnce) {
           connectAttempts += 1;
-          if (connectAttempts >= maxHandshakeAttempts) {
+          if (connectAttempts >= fallbackAttemptLimit) {
             pollingFallbackRef.current = true;
             setIsPollingFallback(true);
             setIsConnected(true);
@@ -165,6 +191,10 @@ export const useRunWebSocket = ({
     return () => {
       disposed = true;
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (handshakeTimeoutRef.current) {
+        clearTimeout(handshakeTimeoutRef.current);
+        handshakeTimeoutRef.current = null;
+      }
       if (wsRef.current) {
         try {
           wsRef.current.close();
@@ -177,6 +207,7 @@ export const useRunWebSocket = ({
   }, [
     fallbackNotice,
     maxHandshakeAttempts,
+    handshakeTimeoutMs,
     reconnectBaseMs,
     reconnectMaxMs,
     setRuntimeNotice,

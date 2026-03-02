@@ -115,5 +115,15 @@ describe("useDiagnosticCalendarViewModel URL sync", () => {
       const nextUrlUpdate = onUrlUpdate.mock.calls[onUrlUpdate.mock.calls.length - 1]?.[0];
       expect(nextUrlUpdate?.queryString).not.toContain("diag_trade_view=");
     });
+
+    act(() => {
+      result.current.filterModel.setVariantFilter("variant:baseline");
+    });
+
+    await waitFor(() => {
+      const variantUrlUpdate = onUrlUpdate.mock.calls[onUrlUpdate.mock.calls.length - 1]?.[0];
+      expect(variantUrlUpdate?.queryString).toContain("diag_variant=variant:baseline");
+      expect(variantUrlUpdate?.queryString).not.toContain("diag_run_id=");
+    });
   });
 });

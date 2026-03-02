@@ -4,8 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NuqsAdapter } from 'nuqs/adapters/react';
 import App from './App'
 import './index.css'
+import './styles/shell-2026.css'
+import './styles/data-manager-2026.css'
+import './styles/analysis-2026.css'
 import { hasConfiguredApiRequestRewrite, resolveApiRequestUrl } from './utils';
 import { bootstrapAuthSession } from './auth/supabaseAuth';
+import { initializeWebMcpTools } from './webmcp';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,6 +19,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+initializeWebMcpTools();
 
 if (
   typeof window !== "undefined" &&

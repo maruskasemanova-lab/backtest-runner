@@ -234,6 +234,25 @@ def test_strategy_bar_response_validates_nested_trade_payloads() -> None:
     assert dumped["session_summary"]["selection_warnings"] == ["missing tcbbo"]
 
 
+def test_to_utc_datetime_accepts_nanosecond_iso_strings() -> None:
+    resolved = SessionRunner._to_utc_datetime("2026-02-24T15:00:00.123456789")
+
+    assert resolved == datetime(2026, 2, 24, 15, 0, 0, 123456, tzinfo=timezone.utc)
+
+
+def test_resolve_bar_runtime_context_accepts_nanosecond_timestamp_strings() -> None:
+    runner = SessionRunner.__new__(SessionRunner)
+    runner._trade_start_time = None
+    runner._trade_end_time = None
+
+    timestamp, warmup_only = runner._resolve_bar_runtime_context(
+        {"timestamp": "2026-02-24T15:00:00.000000000"}
+    )
+
+    assert timestamp == datetime(2026, 2, 24, 15, 0, 0, tzinfo=timezone.utc)
+    assert warmup_only is False
+
+
 def test_typed_entry_marker_context_extracts_metadata_snapshots() -> None:
     response_model = StrategyBarResponse.model_validate(
         {

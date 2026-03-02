@@ -20,16 +20,16 @@ export const aosAppliedSchema = z.object({
 
 export const tradeSchema = z.object({
   bars_held: numberLikeSchema.optional(),
-  entry_reason: z.string().optional(),
-  entry_time: z.string().optional(),
-  exit_reason: z.string().optional(),
-  exit_time: z.string().optional(),
+  entry_reason: nullableStringSchema.optional(),
+  entry_time: nullableStringSchema.optional(),
+  exit_reason: nullableStringSchema.optional(),
+  exit_time: nullableStringSchema.optional(),
   pnl_dollars: numberLikeSchema.optional(),
-  report_dir: z.string().optional(),
-  run_id: z.string().optional(),
-  side: z.string().optional(),
-  strategy: z.string().optional(),
-  trade_id: z.union([z.string(), z.number()]).optional(),
+  report_dir: nullableStringSchema.optional(),
+  run_id: nullableStringSchema.optional(),
+  side: nullableStringSchema.optional(),
+  strategy: nullableStringSchema.optional(),
+  trade_id: z.union([z.string(), z.number(), z.null()]).optional(),
 }).passthrough();
 
 export const runSchema = z.object({
@@ -110,8 +110,8 @@ export const runIdOptionSchema = z.object({
 }).passthrough();
 
 export const splitSchema = z.object({
-  end: z.string().optional(),
-  start: z.string().optional(),
+  end: nullableStringSchema.optional(),
+  start: nullableStringSchema.optional(),
 }).passthrough();
 
 export const filterOptionsSchema = z.object({

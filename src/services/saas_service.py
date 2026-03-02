@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 import threading
@@ -127,6 +128,32 @@ class UserDatasetsStore(Protocol):
     ) -> Dict[str, Any]: ...
 
     def delete_user_dataset(self, *, dataset_id: str, user_id: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class ConfigSnapshotRecord:
+    config_key: str
+    payload: Dict[str, Any]
+    source: str
+    updated_at: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class AosHistoryEntryRecord:
+    ticker: str
+    timestamp: str
+    payload: Dict[str, Any]
+    source: str
+
+
+@dataclass(frozen=True)
+class LiveTraderEventRecord:
+    run_id: str
+    stream: str
+    event: Dict[str, Any]
+    event_ts: Optional[str] = None
+    source_path: Optional[str] = None
+    source_mtime_ns: Optional[int] = None
 
 
 class SaaSStateStore:
@@ -300,6 +327,47 @@ class SaaSStateStore:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS config_snapshots (
+                    config_key TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS aos_history_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    entry_hash TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS live_trader_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    stream TEXT NOT NULL,
+                    event_json TEXT NOT NULL,
+                    event_ts TEXT,
+                    source_path TEXT,
+                    source_mtime_ns INTEGER,
+                    event_hash TEXT NOT NULL,
+                    ingested_at TEXT NOT NULL,
+                    UNIQUE(run_id, stream, event_hash)
+                );
+
+                CREATE TABLE IF NOT EXISTS live_trader_ingest_state (
+                    source_path TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    stream TEXT NOT NULL,
+                    file_mtime_ns INTEGER NOT NULL,
+                    file_size_bytes INTEGER NOT NULL,
+                    byte_offset INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_jobs_status_created
                     ON jobs(status, created_at);
                 CREATE INDEX IF NOT EXISTS idx_jobs_user_status
@@ -318,6 +386,16 @@ class SaaSStateStore:
                     ON adaptive_strategy_profiles(scope, owner_user_id, owner_tenant_id, ticker, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_diagnostic_cache_lookup
                     ON diagnostic_payload_cache(ticker, profile, phase, source_mtime_ns);
+                CREATE INDEX IF NOT EXISTS idx_config_snapshots_updated
+                    ON config_snapshots(updated_at);
+                CREATE INDEX IF NOT EXISTS idx_aos_history_ticker_time
+                    ON aos_history_entries(ticker, timestamp DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_live_trader_run_stream_id
+                    ON live_trader_events(run_id, stream, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_live_trader_run_time
+                    ON live_trader_events(run_id, event_ts DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_live_trader_ingest_run_stream
+                    ON live_trader_ingest_state(run_id, stream, updated_at DESC);
                 """
             )
             self._ensure_column("jobs", "idempotency_key", "TEXT")
@@ -729,6 +807,456 @@ class SaaSStateStore:
                 }
             )
         return payload_rows
+
+    def get_config_snapshot(self, *, config_key: str) -> Optional[Dict[str, Any]]:
+        key = str(config_key or "").strip().lower()
+        if not key:
+            return None
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute(
+                """
+                SELECT config_key, payload_json, source, updated_at
+                FROM config_snapshots
+                WHERE config_key = ?
+                LIMIT 1
+                """,
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "config_key": str(row["config_key"] or key),
+            "payload": self._decode_json(row["payload_json"]),
+            "source": str(row["source"] or "unknown"),
+            "updated_at": row["updated_at"],
+        }
+
+    def upsert_config_snapshot(
+        self,
+        *,
+        config_key: str,
+        payload: Dict[str, Any],
+        source: str = "runtime",
+    ) -> Dict[str, Any]:
+        key = str(config_key or "").strip().lower()
+        if not key:
+            raise ValueError("config_key is required")
+        normalized_payload = (
+            dict(payload)
+            if isinstance(payload, dict)
+            else payload_decode_json_object(payload_json_dumps_compact(payload))
+        )
+        serialized = payload_json_dumps_compact(normalized_payload)
+        now = utc_now_iso()
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute(
+                "SELECT created_at FROM config_snapshots WHERE config_key = ?",
+                (key,),
+            ).fetchone()
+            created_at = (
+                str(row["created_at"]).strip()
+                if row is not None and row["created_at"]
+                else now
+            )
+            cur.execute(
+                """
+                INSERT INTO config_snapshots(config_key, payload_json, source, created_at, updated_at)
+                VALUES(?, ?, ?, ?, ?)
+                ON CONFLICT(config_key) DO UPDATE SET
+                    payload_json=excluded.payload_json,
+                    source=excluded.source,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    key,
+                    serialized,
+                    str(source or "runtime").strip() or "runtime",
+                    created_at,
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return {
+            "config_key": key,
+            "payload": normalized_payload,
+            "source": str(source or "runtime").strip() or "runtime",
+            "updated_at": now,
+        }
+
+    def record_aos_history_entry(
+        self,
+        *,
+        ticker: str,
+        entry: Dict[str, Any],
+        source: str = "runtime",
+    ) -> bool:
+        ticker_upper = str(ticker or "").strip().upper()
+        if not ticker_upper:
+            return False
+        payload = dict(entry) if isinstance(entry, dict) else {}
+        timestamp_value = str(payload.get("timestamp") or "").strip() or utc_now_iso()
+        payload["ticker"] = ticker_upper
+        payload["timestamp"] = timestamp_value
+        payload_json = payload_json_dumps_compact(payload)
+        entry_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        now = utc_now_iso()
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO aos_history_entries(
+                    ticker,
+                    timestamp,
+                    payload_json,
+                    source,
+                    entry_hash,
+                    created_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ticker_upper,
+                    timestamp_value,
+                    payload_json,
+                    str(source or "runtime").strip() or "runtime",
+                    entry_hash,
+                    now,
+                ),
+            )
+            inserted = int(cur.rowcount or 0)
+            self._conn.commit()
+        return inserted > 0
+
+    def list_aos_history_entries(
+        self,
+        *,
+        ticker: str,
+        limit: int = 1000,
+    ) -> list[Dict[str, Any]]:
+        ticker_upper = str(ticker or "").strip().upper()
+        if not ticker_upper:
+            return []
+        query_limit = max(1, min(int(limit or 1000), 5000))
+        with self._lock:
+            cur = self._conn.cursor()
+            rows = cur.execute(
+                """
+                SELECT payload_json
+                FROM aos_history_entries
+                WHERE ticker = ?
+                ORDER BY timestamp ASC, id ASC
+                LIMIT ?
+                """,
+                (ticker_upper, query_limit),
+            ).fetchall()
+        return [self._decode_json(row["payload_json"]) for row in rows]
+
+    def upsert_live_trader_event(
+        self,
+        *,
+        run_id: str,
+        stream: str,
+        event: Dict[str, Any],
+        event_ts: Optional[str] = None,
+        source_path: Optional[str] = None,
+        source_mtime_ns: Optional[int] = None,
+    ) -> bool:
+        run_id_value = str(run_id or "").strip()
+        stream_value = str(stream or "").strip().lower()
+        if not run_id_value or stream_value not in {
+            "runtime",
+            "decisions",
+            "signals",
+            "orders",
+        }:
+            return False
+        payload = dict(event) if isinstance(event, dict) else {}
+        serialized = payload_json_dumps_compact(payload)
+        event_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        resolved_event_ts = self._normalize_iso_timestamp(
+            event_ts
+            or payload.get("timestamp")
+            or payload.get("updated_at")
+            or payload.get("ts")
+        )
+        now = utc_now_iso()
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO live_trader_events(
+                    run_id,
+                    stream,
+                    event_json,
+                    event_ts,
+                    source_path,
+                    source_mtime_ns,
+                    event_hash,
+                    ingested_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id_value,
+                    stream_value,
+                    serialized,
+                    resolved_event_ts,
+                    str(source_path or "").strip() or None,
+                    (
+                        None
+                        if source_mtime_ns is None
+                        else max(0, int(source_mtime_ns))
+                    ),
+                    event_hash,
+                    now,
+                ),
+            )
+            inserted = int(cur.rowcount or 0)
+            self._conn.commit()
+        return inserted > 0
+
+    def list_live_trader_events(
+        self,
+        *,
+        run_id: str,
+        stream: str,
+        limit: int = 200,
+    ) -> list[Dict[str, Any]]:
+        run_id_value = str(run_id or "").strip()
+        stream_value = str(stream or "").strip().lower()
+        if not run_id_value or stream_value not in {
+            "runtime",
+            "decisions",
+            "signals",
+            "orders",
+        }:
+            return []
+        query_limit = max(1, min(int(limit or 200), 2000))
+        with self._lock:
+            cur = self._conn.cursor()
+            rows = cur.execute(
+                """
+                SELECT event_json
+                FROM live_trader_events
+                WHERE run_id = ? AND stream = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (run_id_value, stream_value, query_limit),
+            ).fetchall()
+        decoded_desc = [self._decode_json(row["event_json"]) for row in rows]
+        decoded_desc.reverse()
+        return decoded_desc
+
+    def get_live_trader_stream_stats(
+        self,
+        *,
+        run_id: str,
+        stream: str,
+    ) -> Dict[str, Any]:
+        run_id_value = str(run_id or "").strip()
+        stream_value = str(stream or "").strip().lower()
+        if not run_id_value or stream_value not in {
+            "runtime",
+            "decisions",
+            "signals",
+            "orders",
+        }:
+            return {"count": 0, "latest": None, "updated_at": None}
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute(
+                """
+                SELECT COUNT(1) AS item_count
+                FROM live_trader_events
+                WHERE run_id = ? AND stream = ?
+                """,
+                (run_id_value, stream_value),
+            ).fetchone()
+            latest = cur.execute(
+                """
+                SELECT event_json, event_ts, ingested_at
+                FROM live_trader_events
+                WHERE run_id = ? AND stream = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (run_id_value, stream_value),
+            ).fetchone()
+        count = int((row["item_count"] or 0) if row is not None else 0)
+        if latest is None:
+            return {"count": count, "latest": None, "updated_at": None}
+        updated_at = self._normalize_iso_timestamp(
+            latest["event_ts"] or latest["ingested_at"]
+        ) or str(latest["event_ts"] or latest["ingested_at"] or "").strip() or None
+        return {
+            "count": count,
+            "latest": self._decode_json(latest["event_json"]),
+            "updated_at": updated_at,
+        }
+
+    def list_live_trader_runs(
+        self,
+        *,
+        limit: int = 20,
+        active_only: bool = False,
+        active_window_seconds: int = 180,
+    ) -> list[Dict[str, Any]]:
+        stream_keys = ("runtime", "decisions", "signals", "orders")
+        query_limit = max(1, min(int(limit or 20), 500))
+        with self._lock:
+            cur = self._conn.cursor()
+            run_rows = cur.execute(
+                """
+                SELECT run_id, MAX(COALESCE(event_ts, ingested_at)) AS updated_at
+                FROM live_trader_events
+                GROUP BY run_id
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (max(query_limit * 10, 200),),
+            ).fetchall()
+
+        out: list[Dict[str, Any]] = []
+        for run_row in run_rows:
+            run_id_value = str(run_row["run_id"] or "").strip()
+            if not run_id_value:
+                continue
+            updated_at = (
+                self._normalize_iso_timestamp(run_row["updated_at"])
+                or str(run_row["updated_at"] or "").strip()
+                or None
+            )
+            streams: Dict[str, Any] = {}
+            for stream_key in stream_keys:
+                streams[stream_key] = self.get_live_trader_stream_stats(
+                    run_id=run_id_value,
+                    stream=stream_key,
+                )
+            runtime_latest = streams.get("runtime", {}).get("latest")
+            runtime_summary = runtime_latest if isinstance(runtime_latest, dict) else None
+            status = self._infer_live_run_status(
+                updated_at=updated_at,
+                runtime_summary=runtime_summary,
+                active_window_seconds=active_window_seconds,
+            )
+            if active_only and status != "active":
+                continue
+            out.append(
+                {
+                    "run_id": run_id_value,
+                    "streams": streams,
+                    "updated_at": updated_at,
+                    "status": status,
+                    "runtime": runtime_summary,
+                    "ticker": (
+                        str((runtime_summary or {}).get("ticker") or "").strip().upper()
+                        or None
+                    ),
+                }
+            )
+            if len(out) >= query_limit:
+                break
+        return out
+
+    def get_live_trader_ingest_state(self, *, source_path: str) -> Optional[Dict[str, Any]]:
+        path_value = str(source_path or "").strip()
+        if not path_value:
+            return None
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute(
+                """
+                SELECT
+                    source_path,
+                    run_id,
+                    stream,
+                    file_mtime_ns,
+                    file_size_bytes,
+                    byte_offset,
+                    updated_at
+                FROM live_trader_ingest_state
+                WHERE source_path = ?
+                LIMIT 1
+                """,
+                (path_value,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "source_path": str(row["source_path"] or path_value),
+            "run_id": str(row["run_id"] or ""),
+            "stream": str(row["stream"] or ""),
+            "file_mtime_ns": int(row["file_mtime_ns"] or 0),
+            "file_size_bytes": int(row["file_size_bytes"] or 0),
+            "byte_offset": int(row["byte_offset"] or 0),
+            "updated_at": row["updated_at"],
+        }
+
+    def upsert_live_trader_ingest_state(
+        self,
+        *,
+        source_path: str,
+        run_id: str,
+        stream: str,
+        file_mtime_ns: int,
+        file_size_bytes: int,
+        byte_offset: int,
+    ) -> Dict[str, Any]:
+        path_value = str(source_path or "").strip()
+        run_id_value = str(run_id or "").strip()
+        stream_value = str(stream or "").strip().lower()
+        if not path_value:
+            raise ValueError("source_path is required")
+        if not run_id_value:
+            raise ValueError("run_id is required")
+        if stream_value not in {"runtime", "decisions", "signals", "orders"}:
+            raise ValueError("stream is invalid")
+        now = utc_now_iso()
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO live_trader_ingest_state(
+                    source_path,
+                    run_id,
+                    stream,
+                    file_mtime_ns,
+                    file_size_bytes,
+                    byte_offset,
+                    updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_path) DO UPDATE SET
+                    run_id=excluded.run_id,
+                    stream=excluded.stream,
+                    file_mtime_ns=excluded.file_mtime_ns,
+                    file_size_bytes=excluded.file_size_bytes,
+                    byte_offset=excluded.byte_offset,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    path_value,
+                    run_id_value,
+                    stream_value,
+                    max(0, int(file_mtime_ns)),
+                    max(0, int(file_size_bytes)),
+                    max(0, int(byte_offset)),
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return {
+            "source_path": path_value,
+            "run_id": run_id_value,
+            "stream": stream_value,
+            "file_mtime_ns": max(0, int(file_mtime_ns)),
+            "file_size_bytes": max(0, int(file_size_bytes)),
+            "byte_offset": max(0, int(byte_offset)),
+            "updated_at": now,
+        }
 
     def upsert_subscription(
         self,
@@ -1531,6 +2059,55 @@ class SaaSStateStore:
         return payload_decode_diagnostic_payload_blob(row["payload_gzip"])
 
     @staticmethod
+    def _normalize_iso_timestamp(value: Any) -> Optional[str]:
+        token = str(value or "").strip()
+        if not token:
+            return None
+        normalized = token.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _parse_utc_iso(value: Any) -> Optional[datetime]:
+        token = str(value or "").strip()
+        if not token:
+            return None
+        normalized = token.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @classmethod
+    def _infer_live_run_status(
+        cls,
+        *,
+        updated_at: Any,
+        runtime_summary: Optional[Dict[str, Any]],
+        active_window_seconds: int = 180,
+    ) -> str:
+        event = str((runtime_summary or {}).get("event", "")).strip().lower()
+        if event == "runtime_error":
+            return "error"
+        if event == "runtime_finished":
+            return "finished"
+        updated_dt = cls._parse_utc_iso(updated_at)
+        now_utc = datetime.now(timezone.utc)
+        if updated_dt is not None and (now_utc - updated_dt) <= timedelta(
+            seconds=max(1, int(active_window_seconds))
+        ):
+            return "active"
+        return "idle"
+
+    @staticmethod
     def _decode_json(raw: Optional[str]) -> Dict[str, Any]:
         return payload_decode_json_object(raw)
 
@@ -1591,6 +2168,9 @@ class V2Services:
 
 
 __all__ = [
+    "AosHistoryEntryRecord",
+    "ConfigSnapshotRecord",
+    "LiveTraderEventRecord",
     "RunReportsStore",
     "RunStateMirror",
     "SaaSStateStore",

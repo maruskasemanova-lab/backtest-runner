@@ -6,6 +6,14 @@ import type {
   StrategyAnalyzerTimelineCacheRef,
 } from "./types";
 
+const TERMINAL_RUN_PHASES = new Set([
+  "COMPLETED",
+  "END_OF_DAY",
+  "ERROR",
+  "FAILED",
+  "STOPPED",
+]);
+
 type Params = {
   isAnalyzerAttachedRun: boolean;
   rangePlaybackMeta: StrategyAnalyzerRangePlaybackMeta;
@@ -25,10 +33,14 @@ export function useStrategyAnalyzerPlaybackProgress({
     if (!isAnalyzerAttachedRun || !rangePlaybackMeta) return null;
 
     const cache = timelineCacheRef.current;
-    const warmupDone = cache.warmupDone;
-    const tradeDone = cache.tradeDone;
+    const cacheWarmupDone = Number(cache.warmupDone || 0);
+    const cacheTradeDone = Number(cache.tradeDone || 0);
 
     const backendTotalBars = Number(attachedRunState?.total_bars || 0);
+    const backendProcessedRaw = Number(attachedRunState?.current_bar_index || 0);
+    const backendProcessed = Number.isFinite(backendProcessedRaw)
+      ? Math.max(0, Math.trunc(backendProcessedRaw))
+      : 0;
     const estimatedWarmup = Number(rangePlaybackMeta.warmupTotalBars || 0);
 
     const warmupTotal =
@@ -38,9 +50,20 @@ export function useStrategyAnalyzerPlaybackProgress({
         ? Math.max(0, backendTotalBars - warmupTotal)
         : Number(rangePlaybackMeta.tradeTotalBars || 0);
 
-    const warmupClamped = warmupTotal > 0 ? Math.min(warmupTotal, warmupDone) : 0;
-    const tradeClamped = tradeTotal > 0 ? Math.min(tradeTotal, tradeDone) : tradeDone;
-    const isInitializing = warmupTotal > 0 && warmupClamped < warmupTotal;
+    const backendWarmupDone = warmupTotal > 0 ? Math.min(warmupTotal, backendProcessed) : 0;
+    const backendTradeDone = Math.max(0, backendProcessed - warmupTotal);
+
+    const observedWarmupDone = Math.max(cacheWarmupDone, backendWarmupDone);
+    const observedTradeDone = Math.max(cacheTradeDone, backendTradeDone);
+
+    const warmupClamped = warmupTotal > 0 ? Math.min(warmupTotal, observedWarmupDone) : 0;
+    const tradeClamped = tradeTotal > 0 ? Math.min(tradeTotal, observedTradeDone) : observedTradeDone;
+
+    const runPhase = String(attachedRunState?.phase || "").trim().toUpperCase();
+    const isTerminalRunState =
+      !Boolean(attachedRunState?.is_running) && TERMINAL_RUN_PHASES.has(runPhase);
+    const isInitializing =
+      !isTerminalRunState && warmupTotal > 0 && warmupClamped < warmupTotal;
     const tradeProgressPct = tradeTotal > 0 ? (tradeClamped / tradeTotal) * 100 : 0;
     return {
       warmupDone: warmupClamped,

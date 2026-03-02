@@ -37,6 +37,7 @@ class ApiServices:
     broadcast: Callable[[Dict[str, Any]], Awaitable[None]]
     refresh_runtime_data_services: Callable[[], None]
     reset_discovery: Callable[[], None]
+    state_store: Any = None
 
 
 def get_api_services(request: Request) -> ApiServices:

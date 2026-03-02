@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback } from "react";
+import { useEffect, useMemo, useCallback, useState } from "react";
 import { useTickerStrategyPresets } from "./strategy-settings/useTickerStrategyPresets";
 import { AosHistoryTimeline } from "./strategy-settings/AosHistoryTimeline";
 import { useStrategySettingsState, UseStrategySettingsStateProps } from "./strategy-settings/useStrategySettingsState";
@@ -14,6 +14,7 @@ import {
   STRATEGY_RECOMMENDED_PARAMS,
 } from "./strategy-settings/strategySettingsKnowledge";
 import {
+  buildFocusFieldLayout,
   FLOW_CORE_STRATEGIES,
   buildEditableFieldGroups,
   formatCategoryLabel,
@@ -30,8 +31,15 @@ export default function StrategySettings({
   selectedTicker,
   initialExpandAll = false,
 }: StrategySettingsProps) {
-
   const state = useStrategySettingsState({ apiUrl, selectedTicker });
+  const [focusMode, setFocusMode] = useState(true);
+  const [strategyQuery, setStrategyQuery] = useState("");
+  const [advancedVisible, setAdvancedVisible] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [referenceVisible, setReferenceVisible] = useState<Record<string, boolean>>(
+    {},
+  );
 
   const applyRecommended = useCallback(async (name: string) => {
     const recommended = STRATEGY_RECOMMENDED_PARAMS[name as keyof typeof STRATEGY_RECOMMENDED_PARAMS];
@@ -127,15 +135,28 @@ export default function StrategySettings({
       selectedTicker === "MU" && state.showCoreOnly
         ? sorted.filter(([name]) => FLOW_CORE_STRATEGIES.has(name))
         : sorted;
-    if (state.strategyCategory === "all") return withCoreFilter;
-    return withCoreFilter.filter(
+    const withCategoryFilter =
+      state.strategyCategory === "all"
+        ? withCoreFilter
+        : withCoreFilter.filter(
       ([name]) => resolveStrategyCategory(name) === state.strategyCategory,
     );
+    const normalizedQuery = strategyQuery.trim().toLowerCase();
+    if (!normalizedQuery) return withCategoryFilter;
+    return withCategoryFilter.filter(([name, cfg]) => {
+      const displayName = String(cfg?.display_name || cfg?.name || name).toLowerCase();
+      const normalizedName = String(name || "").replace(/_/g, " ").toLowerCase();
+      return (
+        displayName.includes(normalizedQuery) ||
+        normalizedName.includes(normalizedQuery)
+      );
+    });
   }, [
     state.strategies,
     selectedTicker,
     state.showCoreOnly,
     state.strategyCategory,
+    strategyQuery,
   ]);
 
   const expandAllVisible = useCallback(() => {
@@ -198,6 +219,25 @@ export default function StrategySettings({
     return next;
   }, [strategyEntries]);
 
+  const focusLayoutByStrategy = useMemo(() => {
+    const next: Record<
+      string,
+      ReturnType<typeof buildFocusFieldLayout>
+    > = {};
+    strategyEntries.forEach(([name, cfg]) => {
+      next[name] = buildFocusFieldLayout(name, cfg);
+    });
+    return next;
+  }, [strategyEntries]);
+
+  const toggleAdvancedVisibility = useCallback((name: string) => {
+    setAdvancedVisible((prev) => ({ ...prev, [name]: !prev[name] }));
+  }, []);
+
+  const toggleReferenceVisibility = useCallback((name: string) => {
+    setReferenceVisible((prev) => ({ ...prev, [name]: !prev[name] }));
+  }, []);
+
   const handleNameMouseEnter = useCallback(
     (e: React.MouseEvent, name: string) => {
       if (state.hoverTimeoutRef.current) clearTimeout(state.hoverTimeoutRef.current);
@@ -241,6 +281,13 @@ export default function StrategySettings({
             </button>
           )}
           <button
+            className={`sc-chip-btn sc-chip-btn-focus ${focusMode ? "active" : ""}`}
+            onClick={() => setFocusMode((prev) => !prev)}
+            title="Focus view hides deep-dive controls until you need them"
+          >
+            {focusMode ? "Focus View" : "Show All"}
+          </button>
+          <button
             className={`sc-chip-btn sc-chip-btn-pro ${state.showProNotes ? "active" : ""}`}
             onClick={() => state.setShowProNotes((prev) => !prev)}
             title="Show professional setting guidance"
@@ -249,6 +296,14 @@ export default function StrategySettings({
           </button>
         </div>
         <div className="sc-toolbar-right">
+          <input
+            type="search"
+            value={strategyQuery}
+            onChange={(e) => setStrategyQuery(e.target.value)}
+            className="sc-search-input"
+            placeholder="Find strategy..."
+            aria-label="Find strategy"
+          />
           <button
             className="sc-icon-btn"
             onClick={state.fetchStrategies}
@@ -298,7 +353,12 @@ export default function StrategySettings({
             const categoryKey = resolveStrategyCategory(name);
             const warning = warningByStrategy[name];
             const editableGroups = editableGroupsByStrategy[name] || [];
+            const focusLayout = focusLayoutByStrategy[name];
             const isExpanded = !!state.expanded[name];
+            const visibleAdvanced = !focusMode || !!advancedVisible[name];
+            const visibleReference = !focusMode || !!referenceVisible[name];
+            const primaryFieldCount = focusLayout?.focusFieldCount ?? 0;
+            const advancedFieldCount = focusLayout?.advancedFieldCount ?? 0;
             return (
               <div
                 key={name}
@@ -324,6 +384,14 @@ export default function StrategySettings({
                       {formatCategoryLabel(categoryKey)}
                     </span>
                     <span className="sc-regimes">{regimes}</span>
+                    <span className="sc-density">
+                      {focusMode
+                        ? `${primaryFieldCount} core${advancedFieldCount ? ` + ${advancedFieldCount} advanced` : ""}`
+                        : `${editableGroups.reduce(
+                            (sum, [, fields]) => sum + fields.length,
+                            0,
+                          )} controls`}
+                    </span>
                   </div>
                   <div
                     className="sc-item-controls"
@@ -345,83 +413,69 @@ export default function StrategySettings({
                   </span>
                 </div>
 
-                {/* Expanded edit panel — flat sections */}
+                {/* Expanded edit panel */}
                 {isExpanded && (
                   <div className="sc-item-body">
                     {warning && <div className="sc-warning">⚠ {warning}</div>}
-                    <div className="sc-msg">
-                      Exit source:{" "}
-                      {String(
-                        cfg?.exit_mode || cfg?.trailing_stop_mode || "custom",
-                      )}
-                      {" | "}
-                      Risk source: {String(cfg?.risk_mode || "custom")}
-                      {typeof cfg?.effective_trailing_stop_pct === "number"
-                        ? ` | trailing ${Number(cfg.effective_trailing_stop_pct).toFixed(2)}%`
-                        : ""}
-                      {typeof cfg?.effective_rr_ratio === "number"
-                        ? ` | rr ${Number(cfg.effective_rr_ratio).toFixed(2)}`
-                        : ""}
-                      {typeof cfg?.effective_atr_stop_multiplier === "number"
-                        ? ` | atr x${Number(cfg.effective_atr_stop_multiplier).toFixed(2)}`
-                        : ""}
-                    </div>
-                    {(() => {
-                      const ruleOverview = getStrategyRuleOverview(name);
-                      return (
-                        <div className="sc-rule-card">
-                          <div className="sc-rule-title">
-                            Built-in Entry Checks
+                    <div className="sc-hero-card">
+                      <div className="sc-hero-head">
+                        <div>
+                          <div className="sc-hero-kicker">Strategy Flight Deck</div>
+                          <div className="sc-hero-title">
+                            {focusMode
+                              ? "High-signal controls only"
+                              : "Full strategy control surface"}
                           </div>
-                          <ul className="sc-rule-list">
-                            {ruleOverview.entry.map((item, idx) => (
-                              <li
-                                key={`${name}-entry-${idx}`}
-                                className="sc-rule-item"
-                              >
-                                {item}
-                              </li>
-                            ))}
-                          </ul>
-                          <div className="sc-rule-title">
-                            Built-in Exit Checks
-                          </div>
-                          <ul className="sc-rule-list">
-                            {ruleOverview.exit.map((item, idx) => (
-                              <li
-                                key={`${name}-exit-${idx}`}
-                                className="sc-rule-item"
-                              >
-                                {item}
-                              </li>
-                            ))}
-                          </ul>
                         </div>
-                      );
-                    })()}
-                    {state.showProNotes && (
-                      <div className="sc-pro-card">
-                        <div className="sc-pro-title">
-                          Professional Playbook
-                        </div>
-                        <div className="sc-pro-grid">
-                          {getStrategyPlaybook(name).map((item) => (
-                            <div
-                              key={`${name}-${item.label}`}
-                              className="sc-pro-item"
-                            >
-                              <span className="sc-pro-key">{item.label}:</span>{" "}
-                              {item.guidance}
-                            </div>
-                          ))}
-                        </div>
+                        <span className="sc-core-count">
+                          {focusMode
+                            ? `${primaryFieldCount} core knobs`
+                            : `${focusLayout?.totalEditableFields || 0} live controls`}
+                        </span>
                       </div>
-                    )}
-                    {editableGroups.map(([groupLabel, groupFields]) => (
-                      <div key={groupLabel} className="sc-section">
-                        <div className="sc-section-label">{groupLabel}</div>
-                        <div className="sc-grid">
-                          {groupFields.map(([field, value]) => (
+                      <div className="sc-summary-strip">
+                        <span className="sc-summary-pill">
+                          Regimes {regimes}
+                        </span>
+                        <span className="sc-summary-pill">
+                          Risk {String(cfg?.risk_mode || "custom")}
+                        </span>
+                        <span className="sc-summary-pill">
+                          Exit {String(cfg?.exit_mode || cfg?.trailing_stop_mode || "custom")}
+                        </span>
+                        {typeof cfg?.effective_trailing_stop_pct === "number" && (
+                          <span className="sc-summary-pill">
+                            Trail {Number(cfg.effective_trailing_stop_pct).toFixed(2)}%
+                          </span>
+                        )}
+                        {typeof cfg?.effective_rr_ratio === "number" && (
+                          <span className="sc-summary-pill">
+                            RR {Number(cfg.effective_rr_ratio).toFixed(2)}
+                          </span>
+                        )}
+                        {typeof cfg?.effective_atr_stop_multiplier === "number" && (
+                          <span className="sc-summary-pill">
+                            ATR x{Number(cfg.effective_atr_stop_multiplier).toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="sc-hero-note">
+                        {focusMode
+                          ? "Front-load only the parameters that materially change trigger quality, risk shape, and live readiness."
+                          : "Deep view exposes every editable field group for full system tuning and diagnostics."}
+                      </div>
+                    </div>
+
+                    {!!focusLayout?.focusFields.length && (
+                      <div className="sc-focus-card">
+                        <div className="sc-section-heading">
+                          <div className="sc-section-title">Core Setup</div>
+                          <div className="sc-section-subtitle">
+                            Essential tuning and live configuration controls.
+                          </div>
+                        </div>
+                        <div className="sc-grid sc-grid-focus">
+                          {focusLayout.focusFields.map(([field, value]) => (
                             <StrategyFieldRenderer
                               key={field}
                               name={name}
@@ -439,7 +493,123 @@ export default function StrategySettings({
                           ))}
                         </div>
                       </div>
-                    ))}
+                    )}
+
+                    {focusMode && (
+                      <div className="sc-progressive-bar">
+                        {advancedFieldCount > 0 && (
+                          <button
+                            className={`sc-stack-btn ${visibleAdvanced ? "active" : ""}`}
+                            onClick={() => toggleAdvancedVisibility(name)}
+                          >
+                            {visibleAdvanced
+                              ? "Hide advanced controls"
+                              : `Open advanced controls (${advancedFieldCount})`}
+                          </button>
+                        )}
+                        <button
+                          className={`sc-stack-btn sc-stack-btn-secondary ${visibleReference ? "active" : ""}`}
+                          onClick={() => toggleReferenceVisibility(name)}
+                        >
+                          {visibleReference ? "Hide system notes" : "Show system notes"}
+                        </button>
+                        {focusMode && !!focusLayout?.advancedGroups.length && (
+                          <span className="sc-progressive-hint">
+                            Hidden lanes:{" "}
+                            {focusLayout.advancedGroups
+                              .map(([groupLabel]) => groupLabel)
+                              .join(" · ")}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {visibleAdvanced &&
+                      focusLayout?.advancedGroups.map(([groupLabel, groupFields]) => (
+                        <div key={groupLabel} className="sc-section sc-section-advanced">
+                          <div className="sc-section-heading">
+                            <div className="sc-section-title">{groupLabel}</div>
+                            <div className="sc-section-subtitle">
+                              Deep-dive controls for precise tuning.
+                            </div>
+                          </div>
+                          <div className="sc-grid">
+                            {groupFields.map(([field, value]) => (
+                              <StrategyFieldRenderer
+                                key={field}
+                                name={name}
+                                field={field}
+                                value={value}
+                                drafts={state.drafts}
+                                strategies={state.strategies}
+                                updateDraftField={state.updateDraftField}
+                                appendFormulaToken={state.appendFormulaToken}
+                                setDrafts={state.setDrafts}
+                                showProNotes={state.showProNotes}
+                                getFieldGuide={getFieldGuide}
+                                formatFieldLabel={formatFieldLabel}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+
+                    {visibleReference && (
+                      <div className="sc-reference-stack">
+                        {(() => {
+                          const ruleOverview = getStrategyRuleOverview(name);
+                          return (
+                            <div className="sc-rule-card">
+                              <div className="sc-rule-title">
+                                Built-in Entry Checks
+                              </div>
+                              <ul className="sc-rule-list">
+                                {ruleOverview.entry.map((item, idx) => (
+                                  <li
+                                    key={`${name}-entry-${idx}`}
+                                    className="sc-rule-item"
+                                  >
+                                    {item}
+                                  </li>
+                                ))}
+                              </ul>
+                              <div className="sc-rule-title">
+                                Built-in Exit Checks
+                              </div>
+                              <ul className="sc-rule-list">
+                                {ruleOverview.exit.map((item, idx) => (
+                                  <li
+                                    key={`${name}-exit-${idx}`}
+                                    className="sc-rule-item"
+                                  >
+                                    {item}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          );
+                        })()}
+                        {state.showProNotes && (
+                          <div className="sc-pro-card">
+                            <div className="sc-pro-title">
+                              Professional Playbook
+                            </div>
+                            <div className="sc-pro-grid">
+                              {getStrategyPlaybook(name).map((item) => (
+                                <div
+                                  key={`${name}-${item.label}`}
+                                  className="sc-pro-item"
+                                >
+                                  <span className="sc-pro-key">{item.label}:</span>{" "}
+                                  {item.guidance}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="sc-actions">
                       <button
                         className="sc-btn"

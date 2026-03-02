@@ -43,7 +43,15 @@ export default function AppTopbar({
         <span />
       </button>
 
-      <div className="topbar-spacer" />
+      <div className="topbar-command">
+        <span className="topbar-eyebrow">Operations Mesh</span>
+        <div className="topbar-command-copy">
+          <span className="topbar-title">Realtime trading control plane</span>
+          <span className="topbar-subtitle">
+            Tuning, diagnostics and execution in one focused workspace.
+          </span>
+        </div>
+      </div>
 
       <div className="topbar-status">
         <div className="connection-indicator">

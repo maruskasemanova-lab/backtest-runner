@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import ExternalWindowPortal from "../ExternalWindowPortal";
 import type {
   BooleanStateSetter,
@@ -10,7 +10,6 @@ type Props = {
   analyzerDecisionEventsCount: number;
   hasConditionsPanelData: boolean;
   conditionsPanelBadge: StrategyAnalyzerConditionsPanelBadge;
-  detachedToggleButtonStyle: CSSProperties;
   isConditionsDetached: boolean;
   isDecisionsDetached: boolean;
   setIsConditionsDetached: BooleanStateSetter;
@@ -24,7 +23,6 @@ export default function StrategyAnalyzerAttachedPanels({
   analyzerDecisionEventsCount,
   hasConditionsPanelData,
   conditionsPanelBadge,
-  detachedToggleButtonStyle,
   isConditionsDetached,
   isDecisionsDetached,
   setIsConditionsDetached,
@@ -34,54 +32,25 @@ export default function StrategyAnalyzerAttachedPanels({
 }: Props) {
   return (
     <>
-      <aside
-        style={{
-          flex: "0 0 380px",
-          width: "380px",
-          maxWidth: "100%",
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.75rem",
-          overflow: "hidden",
-        }}
-      >
+      <div className="sa-attached-stack">
         <div
-          className="card"
-          style={{
-            flex: hasConditionsPanelData ? "1 1 0" : "0 0 auto",
-            minHeight: hasConditionsPanelData ? 120 : 0,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            position: "relative",
-          }}
+          className={`card sa-stack-card ${hasConditionsPanelData ? "sa-stack-card-fill" : ""}`}
         >
-          <div
-            className="card-header"
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
-          >
+          <div className="card-header sa-stack-card-header">
             <span className="card-title">Entry Conditions</span>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                {conditionsPanelBadge ? (
-                  <span
-                    style={{
-                      color:
-                        conditionsPanelBadge.tone === "accent"
-                          ? "var(--accent-blue, #3b82f6)"
-                          : "var(--text-muted)",
-                      fontWeight: conditionsPanelBadge.tone === "accent" ? 600 : 500,
-                      fontSize: "0.78rem",
-                    }}
-                  >
-                    {conditionsPanelBadge.label}
-                  </span>
-                ) : null}
-              </span>
+            <div className="sa-stack-card-meta">
+              {conditionsPanelBadge ? (
+                <span
+                  className={`sa-badge-note ${
+                    conditionsPanelBadge.tone === "accent" ? "is-accent" : ""
+                  }`}
+                >
+                  {conditionsPanelBadge.label}
+                </span>
+              ) : null}
               <button
                 type="button"
-                style={detachedToggleButtonStyle}
+                className="sa-detach-btn"
                 onClick={() => setIsConditionsDetached((previous) => !previous)}
               >
                 {isConditionsDetached ? "Dock" : "Open window"}
@@ -89,36 +58,20 @@ export default function StrategyAnalyzerAttachedPanels({
             </div>
           </div>
           {isConditionsDetached ? (
-            <div style={{ padding: "0.75rem 1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>
-              Opened in separate window.
-            </div>
+            <div className="sa-stack-note">Opened in separate window.</div>
           ) : (
             entryConditionsContent
           )}
         </div>
 
-        <div
-          className="card decision-panel"
-          style={{
-            flex: "1 1 0",
-            minHeight: 120,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            className="card-header"
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
-          >
+        <div className="card decision-panel sa-stack-card sa-stack-card-fill">
+          <div className="card-header sa-stack-card-header">
             <span className="card-title">Decisions</span>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
-                {analyzerDecisionEventsCount} total
-              </span>
+            <div className="sa-stack-card-meta">
+              <span className="sa-badge-note">{analyzerDecisionEventsCount} total</span>
               <button
                 type="button"
-                style={detachedToggleButtonStyle}
+                className="sa-detach-btn"
                 onClick={() => setIsDecisionsDetached((previous) => !previous)}
               >
                 {isDecisionsDetached ? "Dock" : "Open window"}
@@ -126,14 +79,12 @@ export default function StrategyAnalyzerAttachedPanels({
             </div>
           </div>
           {isDecisionsDetached ? (
-            <div style={{ padding: "0.75rem 1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>
-              Opened in separate window.
-            </div>
+            <div className="sa-stack-note">Opened in separate window.</div>
           ) : (
             decisionsContent
           )}
         </div>
-      </aside>
+      </div>
 
       <ExternalWindowPortal
         isOpen={Boolean(isConditionsDetached)}
@@ -143,26 +94,12 @@ export default function StrategyAnalyzerAttachedPanels({
         height={780}
         onClose={() => setIsConditionsDetached(() => false)}
       >
-        <div
-          className="card"
-          style={{
-            margin: 0,
-            borderRadius: 0,
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            position: "relative",
-          }}
-        >
-          <div
-            className="card-header"
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
-          >
+        <div className="card sa-detached-surface">
+          <div className="card-header sa-stack-card-header">
             <span className="card-title">Entry Conditions</span>
             <button
               type="button"
-              style={detachedToggleButtonStyle}
+              className="sa-detach-btn"
               onClick={() => setIsConditionsDetached(() => false)}
             >
               Dock
@@ -180,29 +117,14 @@ export default function StrategyAnalyzerAttachedPanels({
         height={860}
         onClose={() => setIsDecisionsDetached(() => false)}
       >
-        <div
-          className="card decision-panel"
-          style={{
-            margin: 0,
-            borderRadius: 0,
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            className="card-header"
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
-          >
+        <div className="card decision-panel sa-detached-surface">
+          <div className="card-header sa-stack-card-header">
             <span className="card-title">Decisions</span>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
-                {analyzerDecisionEventsCount} total
-              </span>
+            <div className="sa-stack-card-meta">
+              <span className="sa-badge-note">{analyzerDecisionEventsCount} total</span>
               <button
                 type="button"
-                style={detachedToggleButtonStyle}
+                className="sa-detach-btn"
                 onClick={() => setIsDecisionsDetached(() => false)}
               >
                 Dock

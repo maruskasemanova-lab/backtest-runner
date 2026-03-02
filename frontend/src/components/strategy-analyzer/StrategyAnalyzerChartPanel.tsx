@@ -75,27 +75,19 @@ export default function StrategyAnalyzerChartPanel({
   const renderBars = chartBars.length > 0 ? chartBars : selectionBars;
 
   return (
-    <div className="card chart-container" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      <div className="card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div className="card chart-container sa-chart-panel">
+      <div className="card-header sa-chart-header">
         <span className="card-title">
           {hasRenderableBars ? `${ticker} - ${dateFrom} \u2192 ${dateTo}` : "Strategy Analyzer"}
         </span>
-        <div className="chart-toolbar" style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+        <div className="chart-toolbar sa-chart-toolbar">
           {isAnalyzerAttachedRun && analyzerDisplayPhase ? (
             <span className={`phase-badge ${String(analyzerDisplayPhase || "").toLowerCase()}`}>
               {analyzerDisplayPhase}
             </span>
           ) : null}
           {selectedRangeFrom && selectedRangeTo && (
-            <span
-              style={{
-                fontSize: "0.8rem",
-                color: "var(--accent-blue)",
-                fontWeight: 600,
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
+            <span className="sa-range-pill">
               {selectedRangeFrom.replace("T", " ")} &rarr; {selectedRangeTo.replace("T", " ")}
             </span>
           )}
@@ -103,14 +95,14 @@ export default function StrategyAnalyzerChartPanel({
             className={rangeSelectMode ? "btn btn-primary" : "btn btn-secondary"}
             onClick={onToggleRangeSelectMode}
             title={rangeSelectMode ? "Cancel range selection" : "Select range on chart"}
-            style={{ padding: "4px 14px", fontSize: "0.8rem", fontWeight: 600 }}
+            type="button"
           >
             {rangeSelectMode ? "Cancel Selection" : "Select Range"}
           </button>
         </div>
       </div>
 
-      <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+      <div className="sa-chart-stage">
         {hasRenderableBars ? (
           <>
             <CandlestickChart
@@ -135,16 +127,7 @@ export default function StrategyAnalyzerChartPanel({
             />
           </>
         ) : (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              height: "100%",
-              color: "var(--text-muted)",
-              fontSize: "0.9rem",
-            }}
-          >
+          <div className="sa-chart-empty">
             {loading ? "Loading bars..." : "Select a ticker and date range, then click Load Chart"}
           </div>
         )}

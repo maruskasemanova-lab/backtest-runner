@@ -19,6 +19,41 @@ import {
   toOptionalNumber,
 } from "./diagnostic-calendar-core";
 import { formatAdaptiveProfileList, resolveRunProfileFields } from "./diagnostic-calendar-profiles";
+import { resolveRunProfileIdentity } from "./diagnostic-calendar-report";
+
+export const dedupeRunsByProfile = (
+  runs: DiagnosticCalendarRun[],
+): DiagnosticCalendarRun[] => {
+  if (!Array.isArray(runs) || runs.length <= 1) return Array.isArray(runs) ? runs : [];
+
+  const byProfileKey = new Map<string, DiagnosticCalendarRun>();
+  const scoreRun = (run: DiagnosticCalendarRun | null | undefined): { pnlAbs: number; trades: number } => {
+    const trades = Math.max(0, Math.trunc(Number(run?.total_trades ?? 0) || 0));
+    const pnlAbs = Math.abs(Number(run?.pnl_dollars ?? 0) || 0);
+    return { pnlAbs, trades };
+  };
+  runs.forEach((run, index) => {
+    const identity = resolveRunProfileIdentity(run);
+    const profileKey = String(identity?.profileKey || "").trim().toLowerCase();
+    const fallbackKey = String(buildRunScopeKey(run) || `run-${index + 1}`).trim().toLowerCase();
+    const dedupeKey = profileKey || fallbackKey;
+    if (!dedupeKey) return;
+    const existing = byProfileKey.get(dedupeKey);
+    if (!existing) {
+      byProfileKey.set(dedupeKey, run);
+      return;
+    }
+    const existingScore = scoreRun(existing);
+    const nextScore = scoreRun(run);
+    const shouldReplace = nextScore.trades > existingScore.trades
+      || (nextScore.trades === existingScore.trades && nextScore.pnlAbs > existingScore.pnlAbs);
+    if (shouldReplace) {
+      byProfileKey.set(dedupeKey, run);
+    }
+  });
+
+  return [...byProfileKey.values()];
+};
 
 export const buildSelectedRunOptions = (
   selectedRuns: DiagnosticCalendarRun[],
@@ -70,18 +105,80 @@ export const buildSelectedRunTradeDetails = ({
   selectedResult: DiagnosticCalendarDayResult | null;
   selectedRunRecord: DiagnosticCalendarRun | null;
 }): DiagnosticCalendarTrade[] => {
+  const dedupeTradeList = (trades: DiagnosticCalendarTrade[]): DiagnosticCalendarTrade[] => {
+    if (!Array.isArray(trades) || trades.length <= 1) return Array.isArray(trades) ? trades : [];
+
+    const bySignature = new Map<string, DiagnosticCalendarTrade>();
+    trades.forEach((trade, index) => {
+      const tradeId = String(trade?.trade_id ?? "").trim().toLowerCase();
+      const strategy = String(trade?.strategy ?? "").trim().toLowerCase();
+      const side = String(trade?.side ?? "").trim().toLowerCase();
+      const entryTime = String(trade?.entry_time ?? "").trim();
+      const exitTime = String(trade?.exit_time ?? "").trim();
+      const entryReason = String(trade?.entry_reason ?? "").trim().toLowerCase();
+      const exitReason = String(trade?.exit_reason ?? "").trim().toLowerCase();
+      const barsHeldValue = Number(trade?.bars_held);
+      const barsHeld = Number.isFinite(barsHeldValue) ? String(Math.trunc(barsHeldValue)) : "";
+      const pnlValue = Number(trade?.pnl_dollars);
+      const pnl = Number.isFinite(pnlValue) ? pnlValue.toFixed(8) : "";
+      const signature = [
+        tradeId,
+        strategy,
+        side,
+        entryTime,
+        exitTime,
+        entryReason,
+        exitReason,
+        barsHeld,
+        pnl,
+      ].join("||");
+      const key = signature.replace(/\|/g, "") ? signature : `trade-${index}`;
+      if (bySignature.has(key)) return;
+      bySignature.set(key, trade);
+    });
+    return [...bySignature.values()];
+  };
+
   const allTrades = Array.isArray(selectedResult?.trade_details) ? selectedResult.trade_details : [];
   if (!allTrades.length || !selectedRunRecord) return allTrades;
 
   const selectedRunId = String(selectedRunRecord?.run_id || "").trim();
   const selectedReportDir = String(selectedRunRecord?.report_dir || "").trim();
 
-  return allTrades.filter((trade) => {
+  const directMatches = allTrades.filter((trade) => {
     const tradeRunId = String(trade?.run_id || "").trim();
     if (selectedRunId && tradeRunId !== selectedRunId) return false;
     if (!selectedReportDir) return true;
     return String(trade?.report_dir || "").trim() === selectedReportDir;
   });
+  if (directMatches.length) return directMatches;
+
+  const selectedProfileKey = String(resolveRunProfileIdentity(selectedRunRecord)?.profileKey || "").trim().toLowerCase();
+  if (!selectedProfileKey) return directMatches;
+
+  const dayRuns = Array.isArray(selectedResult?.runs) ? selectedResult.runs : [];
+  if (!dayRuns.length) return directMatches;
+
+  const runIdToProfileKey = new Map<string, string>();
+  const distinctProfileKeys = new Set<string>();
+  dayRuns.forEach((run) => {
+    const runId = String(run?.run_id || "").trim();
+    if (!runId) return;
+    const profileKey = String(resolveRunProfileIdentity(run)?.profileKey || "").trim().toLowerCase();
+    if (!profileKey) return;
+    if (!runIdToProfileKey.has(runId)) runIdToProfileKey.set(runId, profileKey);
+    distinctProfileKeys.add(profileKey);
+  });
+
+  const profileMatches = allTrades.filter((trade) => {
+    const tradeRunId = String(trade?.run_id || "").trim();
+    if (!tradeRunId) return false;
+    return runIdToProfileKey.get(tradeRunId) === selectedProfileKey;
+  });
+  if (profileMatches.length) return dedupeTradeList(profileMatches);
+
+  if (distinctProfileKeys.size === 1) return dedupeTradeList(allTrades);
+  return directMatches;
 };
 
 export const buildRunConfigSnapshotSections = ({

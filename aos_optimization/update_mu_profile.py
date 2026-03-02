@@ -18,7 +18,7 @@ if __name__ == "__main__":
 
     mu_config["context_aware_risk_enabled"] = True
     mu_config["context_risk_trailing_tighten_zone"] = 0.20
-    mu_config["context_risk_min_effective_rr"] = 1.0
+    mu_config["context_risk_min_effective_rr"] = 0.5
 
     mu_config["intraday_levels_enabled"] = True
     mu_config["intraday_levels_spike_detection_enabled"] = True
@@ -60,11 +60,17 @@ if __name__ == "__main__":
             sp["trading_hours"] = [9, 10, 11, 12, 13, 14, 15]
 
             ep = profile.get("execution_profile", {})
-            ep["max_position_notional_pct"] = 100.0
-            ep["max_fill_participation_rate"] = 1.0
-            ep["min_fill_ratio"] = 1.0
-            ep["context_aware_risk_enabled"] = True
-            ep["intraday_levels_enabled"] = True
+            if not isinstance(ep, dict):
+                ep = {}
+            positioning = ep.get("positioning", {})
+            if not isinstance(positioning, dict):
+                positioning = {}
+            positioning["max_position_notional_pct"] = 100.0
+            positioning["max_fill_participation_rate"] = 1.0
+            positioning["min_fill_ratio"] = 1.0
+            positioning["context_aware_risk_enabled"] = True
+            positioning["context_risk_min_effective_rr"] = 0.5
+            ep["positioning"] = positioning
             profile["execution_profile"] = ep
 
             if "adaptive_candidate" in sp:

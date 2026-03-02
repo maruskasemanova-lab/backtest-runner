@@ -96,10 +96,10 @@ function DiagnosticCalendarDayDetail({
                     {formatPct(dayMetrics.pnlPct)} / {formatUsd(dayMetrics.pnlDollars)}
                   </strong>
                 </div>
-                {Number(selectedResult.report_count ?? 0) > 0 ? (
+                {(selectedRuns.length || Number(selectedResult.report_count ?? 0)) > 0 ? (
                   <div className="diagnostic-row">
                     <span>Runs</span>
-                    <strong>{Number(selectedResult.report_count ?? 0)}</strong>
+                    <strong>{selectedRuns.length || Number(selectedResult.report_count ?? 0)}</strong>
                   </div>
                 ) : null}
                 {selectedRunOptions.length ? (

@@ -99,6 +99,63 @@ describe("diagnostic-calendar schema", () => {
     });
   });
 
+  it("accepts null split bounds when history is empty", () => {
+    expect(parseDiagnosticCalendarReport({
+      day_results: [],
+      split: {
+        end: null,
+        start: null,
+      },
+    })).toMatchObject({
+      day_results: [],
+      split: {
+        end: null,
+        start: null,
+      },
+    });
+  });
+
+  it("accepts null trade detail reason/time fields from history payloads", () => {
+    expect(parseDiagnosticCalendarReport({
+      day_results: [
+        {
+          date: "2026-02-24",
+          success: true,
+          total_trades: 1,
+          trade_details: [
+            {
+              trade_id: null,
+              run_id: null,
+              report_dir: null,
+              strategy: null,
+              side: null,
+              entry_reason: null,
+              entry_time: null,
+              exit_reason: null,
+              exit_time: null,
+              pnl_dollars: 39.2179,
+              bars_held: 3,
+            },
+          ],
+        },
+      ],
+    })).toMatchObject({
+      day_results: [
+        {
+          date: "2026-02-24",
+          trade_details: [
+            {
+              entry_reason: null,
+              entry_time: null,
+              exit_reason: null,
+              exit_time: null,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it("rejects invalid day result shapes with explicit path info", () => {
     expect(() => parseDiagnosticCalendarReport({
       day_results: [

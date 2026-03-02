@@ -23,39 +23,61 @@ export default function DataManagerDownloadCard({
   onEstimateCost,
   onDownload,
 }: DataManagerDownloadCardProps) {
+  const isParquetEligible = form.schema !== "ohlcv-1m" && form.schema !== "tcbbo";
+
   return (
     <div className="card dm-download-card">
       <div className="card-header">
         <span className="card-title">⬇ Download Data</span>
       </div>
       <div className="card-body">
+        <div className="dm-card-intro">
+          Pick the market feed, date coverage and output format first. High-signal inputs stay on
+          top, so the download intent is clear before you launch a job.
+        </div>
+
         <div className="dm-form-grid">
           <div className="dm-form-field dm-field-full">
-            <label>Ticker</label>
+            <label htmlFor="dm_download_ticker">Ticker</label>
             <input
+              id="dm_download_ticker"
+              name="ticker"
               type="text"
               value={form.ticker}
               onChange={(e) => setForm({ ...form, ticker: e.target.value.toUpperCase() })}
               placeholder="MU"
+              aria-describedby="dm_download_ticker_hint"
             />
+            <div className="dm-field-hint" id="dm_download_ticker_hint">
+              Use a single symbol per request. The value is normalized to uppercase.
+            </div>
           </div>
           <div className="dm-form-field">
-            <label>Schema</label>
+            <label htmlFor="dm_download_schema">Schema</label>
             <select
+              id="dm_download_schema"
+              name="schema"
               value={form.schema}
               onChange={(e) => setForm({ ...form, schema: e.target.value })}
+              aria-describedby="dm_download_schema_hint"
             >
               <option value="mbp-10">📊 L2 Depth (MBP-10)</option>
               <option value="ohlcv-1m">📈 OHLCV 1-Min</option>
               <option value="tcbbo">🧩 Options TCBBO (OPRA)</option>
               <option value="trades">⚡ Raw Trades</option>
             </select>
+            <div className="dm-field-hint" id="dm_download_schema_hint">
+              Choose the data shape first. It controls dataset availability and export options.
+            </div>
           </div>
           <div className="dm-form-field">
-            <label>Dataset</label>
+            <label htmlFor="dm_download_dataset">Dataset</label>
             <select
+              id="dm_download_dataset"
+              name="dataset"
               value={form.dataset}
               onChange={(e) => setForm({ ...form, dataset: e.target.value })}
+              aria-describedby="dm_download_dataset_hint"
             >
               {form.schema === "tcbbo" ? (
                 <option value="OPRA.PILLAR">OPRA Pillar</option>
@@ -66,18 +88,25 @@ export default function DataManagerDownloadCard({
                 </>
               )}
             </select>
+            <div className="dm-field-hint" id="dm_download_dataset_hint">
+              Match the venue to the selected schema so downstream storage stays consistent.
+            </div>
           </div>
           <div className="dm-form-field">
-            <label>Start Date</label>
+            <label htmlFor="dm_download_start_date">Start Date</label>
             <input
+              id="dm_download_start_date"
+              name="start_date"
               type="date"
               value={form.start_date}
               onChange={(e) => setForm({ ...form, start_date: e.target.value })}
             />
           </div>
           <div className="dm-form-field">
-            <label>End Date</label>
+            <label htmlFor="dm_download_end_date">End Date</label>
             <input
+              id="dm_download_end_date"
+              name="end_date"
               type="date"
               value={form.end_date}
               onChange={(e) => setForm({ ...form, end_date: e.target.value })}
@@ -85,15 +114,22 @@ export default function DataManagerDownloadCard({
           </div>
         </div>
 
-        {form.schema !== "ohlcv-1m" && form.schema !== "tcbbo" && (
-          <div className="dm-checkbox-row">
-            <label>
+        {isParquetEligible && (
+          <div className="dm-checkbox-row dm-toggle-card">
+            <label htmlFor="dm_download_convert_to_parquet">
+              <span className="dm-toggle-copy">
+                <strong>Convert to Parquet</strong>
+                <span className="dm-field-hint">
+                  Keep a faster analytics-ready copy next to the raw download.
+                </span>
+              </span>
               <input
+                id="dm_download_convert_to_parquet"
+                name="convert_to_parquet"
                 type="checkbox"
                 checked={form.convert_to_parquet}
                 onChange={(e) => setForm({ ...form, convert_to_parquet: e.target.checked })}
               />
-              Convert to Parquet
             </label>
           </div>
         )}
@@ -121,18 +157,20 @@ export default function DataManagerDownloadCard({
 
         <div className="dm-btn-row">
           <button
+            type="button"
             className="btn btn-secondary"
             onClick={onEstimateCost}
             disabled={estimating || downloading || !form.start_date || !form.end_date}
           >
-            {estimating ? "Estimating..." : "💲 Estimate"}
+            {estimating ? "Estimating..." : "Estimate Cost"}
           </button>
           <button
-            className="btn"
+            type="button"
+            className="btn btn-primary"
             onClick={onDownload}
             disabled={downloading || !form.start_date || !form.end_date}
           >
-            {downloading ? "⏳ Downloading..." : "⬇ Download"}
+            {downloading ? "Downloading..." : "Start Download"}
           </button>
         </div>
       </div>

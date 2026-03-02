@@ -10,8 +10,9 @@ import type {
 
 type Params = {
   bars: StrategyAnalyzerChartBarLike[];
+  attachedRunBars: StrategyAnalyzerChartBarLike[];
   isAnalyzerAttachedRun: boolean;
-  analyzerRunFinished: boolean;
+  analyzerRunTerminal: boolean;
   selectedRangeWindow: StrategyAnalyzerChartWindow | null;
   rangeScrubMeta: StrategyAnalyzerRangeScrubMeta;
   analyzerDecisionEvents: StrategyAnalyzerDecisionMarker[];
@@ -21,8 +22,9 @@ type Params = {
 
 export function useStrategyAnalyzerChartData({
   bars,
+  attachedRunBars,
   isAnalyzerAttachedRun,
-  analyzerRunFinished,
+  analyzerRunTerminal,
   selectedRangeWindow,
   rangeScrubMeta,
   analyzerDecisionEvents,
@@ -76,7 +78,20 @@ export function useStrategyAnalyzerChartData({
   // Uses cached runBarsByTime Map from timeline cache.
   const chartBars = useMemo<StrategyAnalyzerChartBarLike[]>(() => {
     const previewBars = Array.isArray(bars) ? bars : [];
-    if (!previewBars.length) return previewBars;
+    if (!previewBars.length) {
+      if (!isAnalyzerAttachedRun) return previewBars;
+      const attachedBars = (Array.isArray(attachedRunBars) ? attachedRunBars : []).filter((bar) =>
+        Number.isFinite(Number(bar?.time))
+      );
+      if (!selectedRangeWindow) return attachedBars;
+      const minTime = selectedRangeWindow.from - 1;
+      const maxTime = selectedRangeWindow.to + 1;
+      const filtered = attachedBars.filter((bar) => {
+        const t = Number(bar?.time);
+        return Number.isFinite(t) && t >= minTime && t <= maxTime;
+      });
+      return filtered.length ? filtered : attachedBars;
+    }
     if (!isAnalyzerAttachedRun || !selectedRangeWindow) return previewBars;
 
     const minTime = selectedRangeWindow.from - 1;
@@ -95,16 +110,17 @@ export function useStrategyAnalyzerChartData({
       }
       const runBar = runBarsByTime.get(t);
       if (runBar) return runBar;
-      // After run completes, bars not emitted via WS throttle should fall
-      // back to the preview bar (same OHLCV) instead of an empty placeholder.
-      if (analyzerRunFinished) return previewBar;
+      // After run reaches a terminal state (END_OF_DAY / COMPLETED / ERROR),
+      // bars not emitted via WS throttle should fall back to preview OHLCV.
+      if (analyzerRunTerminal) return previewBar;
       return { time: t, __wfPlaceholder: true };
     });
     return touchedSegment ? composedBars : previewBars;
   }, [
     bars,
+    attachedRunBars,
     isAnalyzerAttachedRun,
-    analyzerRunFinished,
+    analyzerRunTerminal,
     selectedRangeWindow,
     timelineCacheVersion,
     rangeScrubMeta,

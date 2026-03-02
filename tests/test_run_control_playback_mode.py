@@ -4,6 +4,9 @@ import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import numpy as np
+from fastapi.encoders import jsonable_encoder
+
 from src.services.run_control_service import RunControlDeps, play_run, step_run
 
 
@@ -150,3 +153,23 @@ def test_step_switches_trade_eval_mode_from_raw_payload_bool():
     assert result["trade_eval_mode"] == "intrabar_1s"
     assert runner.config.intrabar_execution_recalc_1s is True
     assert runner.config.intrabar_eval_step_seconds == 1
+
+
+def test_step_normalizes_numpy_datetime64_for_json_encoding():
+    class _NumpyRunner(_DummyRunner):
+        async def step(self):
+            return {
+                "success": True,
+                "bar_index": 1,
+                "bar_time": np.datetime64("2026-02-11T15:31:00"),
+            }
+
+    runner = _NumpyRunner()
+    deps = _build_deps(runner)
+
+    result = asyncio.run(step_run("r1", "MU", "2026-02-03", deps))
+    encoded = jsonable_encoder(result)
+
+    assert encoded["success"] is True
+    assert encoded["bar_index"] == 1
+    assert encoded["bar_time"] == "2026-02-11T15:31:00"

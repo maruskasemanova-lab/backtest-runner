@@ -309,6 +309,7 @@ Compatibility notes:
 
 - playback contract assumes the same backend process retains active run state across requests.
 - `play` accepts body or query speed format (`max`, `10hz`, integer ms) and optional `trade_eval_mode` (`standard|intrabar_1s|intrabar_5s`) to switch execution evaluation path without restarting run.
+- zero-delay `play` uses chunked batch transport only for `standard` mode; intrabar modes keep bar-by-bar transport to avoid eager full-range intrabar quote materialization on the API event loop.
 - `step` accepts optional body `trade_eval_mode` (`standard|intrabar_1s|intrabar_5s`) so single-step evaluation can switch checkpoint granularity without restarting run.
 - `restart` rewinds the existing in-memory run to bar zero (no re-load of source bars), clears remote strategy session state for that run+ticker, and reapplies stored session config before replay.
 - marker/event ordering must remain stable for frontend playback.
@@ -344,10 +345,10 @@ Purpose: Read and persist per-ticker AOS settings used by runner start and strat
 Compatibility notes:
 
 - `POST /api/aos-config/update` merges provided `config` object into existing ticker config.
-- Adaptive selection settings are file-backed (`aos_optimization/aos_config.json`) and applied on next `POST /api/run/start`.
+- Adaptive selection settings are persisted in DB-backed primary config snapshots (`config_snapshots` key `aos_config`) and applied on next `POST /api/run/start`.
 - Supported adaptive switch-guard keys include `adaptive.min_active_bars_before_switch` and `adaptive.switch_cooldown_bars`.
-- Strategy combination profiles are also file-backed under each ticker (`strategy_combo_profiles`, `active_strategy_combo_profile_id`) and active profile params are applied at run start.
-- Unified profiles are file-backed per ticker (`unified_profiles`, `active_unified_profile_id`) and carry both `strategy_profile` and `execution_profile` sections.
+- Strategy combination profiles are persisted in DB-backed `aos_config` ticker payload (`strategy_combo_profiles`, `active_strategy_combo_profile_id`) and active profile params are applied at run start.
+- Unified profiles are persisted in DB-backed `aos_config` ticker payload (`unified_profiles`, `active_unified_profile_id`) and carry both `strategy_profile` and `execution_profile` sections.
 
 ### `GET /api/strategy-combos/{ticker}` / `POST /api/strategy-combos/capture` / `POST /api/strategy-combos/apply`
 
@@ -395,26 +396,48 @@ Apply contract (`POST /api/profiles/apply`):
 - behavior: marks profile as active in DB-backed unified-profile state; can apply strategy params immediately (`apply_now`) and persist execution section into positioning config (`apply_execution`).
 - effect: next `POST /api/run/start` prioritizes active unified profile over legacy combo/adaptive split paths when active profile is resolved from DB-backed state in API flows.
 
+### `GET /api/aos-history/{ticker}`
+
+Purpose: return ticker-specific AOS active-profile evolution history from DB-backed store.
+
+Behavioral notes:
+
+- reads from local SQLite `aos_history_entries` via `SaaSStateStore` (no direct JSONL read on request path).
+- optional query `limit` (default `1000`, max `5000`) caps returned rows.
+- rows keep legacy payload shape used by frontend timeline:
+  - `timestamp`
+  - `ticker`
+  - `old_active_unified_profile_id` / `new_active_unified_profile_id`
+  - `old_active_adaptive_tuner_profile_id` / `new_active_adaptive_tuner_profile_id`
+  - `active_profile_snapshot`
+- legacy `aos_optimization/aos_history.jsonl` is treated as migration source only.
+
 ### `GET /api/live-trader/runs` / `GET /api/live-trader/events/{run_id}` / `GET /api/live-trader/snapshot/{run_id}`
 
-Purpose: expose JSONL artifacts from sibling realtime project (`ibkr-realtime-trader/artifacts`) for frontend live monitoring.
+Purpose: expose live-trader runtime streams from DB-backed event store for frontend monitoring.
 
 List contract (`GET /api/live-trader/runs`):
 
 - query: `limit`, `active_only`
-- returns discovered `run_id` values and per-stream file metadata (`runtime|decisions|signals|orders`)
-- sorted by latest artifact update timestamp
+- requires DB store support for `live_trader_events`; when backend is unavailable endpoint returns `503`.
+- returns discovered `run_id` values and per-stream stats (`runtime|decisions|signals|orders`)
+- sorted by latest ingested event timestamp
 - includes run `status` (`active|idle|finished|error`) and latest runtime summary (`profile_id`, `active_profile_id`, `execution_config`, latest `event`)
+- request path performs best-effort incremental ingest sync from sibling JSONL artifacts into SQLite `live_trader_events` before reading DB rows.
+- incremental ingest checkpoints are stored in `live_trader_ingest_state` (`source_path`, file mtime/size, byte offset) and unchanged files are skipped.
+- response includes `source_mode=sqlite_live_trader_events`.
 
 Events contract (`GET /api/live-trader/events/{run_id}`):
 
 - query: `stream` (`runtime|decisions|signals|orders`), `limit`
-- returns tail rows from selected stream as parsed JSON objects
+- requires DB store support for `live_trader_events`; when backend is unavailable endpoint returns `503`.
+- returns tail rows from selected stream as parsed JSON objects from DB-backed store (404 when stream has no records for run).
 
 Snapshot contract (`GET /api/live-trader/snapshot/{run_id}`):
 
 - query: `tail_limit`
-- returns per-stream existence/count/latest row for dashboard status cards
+- requires DB store support for `live_trader_events`; when backend is unavailable endpoint returns `503`.
+- returns per-stream existence/count/latest row for dashboard status cards from DB-backed store
 - includes aggregate `status` (`active|idle|finished|error`), `updated_at`, and top-level `runtime` latest summary
 
 ### `GET /api/reports/history/{ticker}`
@@ -505,7 +528,7 @@ Coverage/options contract (`GET /api/adaptive-tuner/options/{ticker}`):
 Profile apply contract (`POST /api/adaptive-tuner/profiles/apply`):
 
 - request: `ticker`, `profile_id`
-- behavior: applies selected profile candidate into active ticker adaptive settings in `aos_config.json`
+- behavior: applies selected profile candidate into active ticker adaptive settings in DB-backed primary `aos_config` snapshot
 - behavior detail: clears `active_unified_profile_id` for that ticker so unified/profile selectors fall back to current combo+adaptive derived active profile instead of stale explicit unified snapshots.
 - effect: next `POST /api/run/start` for ticker uses applied adaptive settings.
 - used by Adaptive Tuner, Adaptive Strategy Studio, and optional Backtest pre-run profile selection.
@@ -517,7 +540,7 @@ Important request fields (`POST /api/adaptive-tuner/run`):
 - scoring: `score_metric` (`pnl_pct|pnl_dollars|win_rate|trade_adjusted`)
 - reproducibility: `seed`
 - compatibility: `adaptive_version` (`1` = flat tuning, `2` = multi-dimensional vector discovery)
-- persistence: `persist_best` (when true, best candidate is saved into `aos_config.json`)
+- persistence: `persist_best` (when true, best candidate is saved into DB-backed primary `aos_config` snapshot)
 - L2 gating: `l2_required` (restrict evaluated dates to OHLCV+L2 overlap), `l2_confirm_enabled`, `l2_only`
 - quick approximation: `quick_mode`, `quick_max_days`, `quick_trial_boost`
   - when enabled, tuner samples representative days from eligible range and scales trial budget by multiplier for faster broad screening

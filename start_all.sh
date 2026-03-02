@@ -76,14 +76,19 @@ export BACKTEST_PREWARM_TICKER_SCOPE_L2_MAX_DAYS=0
 export BACKTEST_PROGRESSIVE_LOAD_ALLOW_COMPARABLE_MODE=1
 export BACKTEST_PROGRESSIVE_LOAD_COMPARABLE_INITIAL_DAYS=1
 export BACKTEST_PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS=1
-"$PYTHON_BIN" -m uvicorn api_server:app --host 0.0.0.0 --port 8002 --reload > runner_api.log 2>&1 &
+BACKTEST_RUNNER_RELOAD="${BACKTEST_RUNNER_RELOAD:-0}"
+RUNNER_ARGS=(api_server:app --host 0.0.0.0 --port 8002)
+if [[ "$BACKTEST_RUNNER_RELOAD" == "1" || "$BACKTEST_RUNNER_RELOAD" == "true" ]]; then
+    RUNNER_ARGS+=(--reload)
+fi
+"$PYTHON_BIN" -m uvicorn "${RUNNER_ARGS[@]}" > runner_api.log 2>&1 &
 RUNNER_PID=$!
 sleep 2
 
 # Start Frontend on port 5173
 echo "🖥️  Starting Frontend on port 5173..."
 cd /Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend
-npm run dev &
+npm run dev -- --host 0.0.0.0 --port 5173 &
 FRONTEND_PID=$!
 
 echo ""

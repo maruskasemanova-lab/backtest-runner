@@ -622,7 +622,7 @@ def test_resolve_execution_config_uses_positioning_profile_for_micro_confirmatio
     )
 
 
-def test_resolve_execution_config_uses_positioning_profile_for_context_risk_and_be_proof() -> (
+def test_resolve_execution_config_keeps_explicit_context_risk_and_be_proof_overrides() -> (
     None
 ):
     request = StartRunRequest(
@@ -650,13 +650,40 @@ def test_resolve_execution_config_uses_positioning_profile_for_context_risk_and_
     )
 
     trading_config = result["trading_config"]
-    assert trading_config["context_aware_risk_enabled"] is True
-    assert trading_config["context_risk_min_sl_pct"] == 0.55
+    assert trading_config["context_aware_risk_enabled"] is False
+    assert trading_config["context_risk_min_sl_pct"] == 0.50
     assert trading_config["context_risk_min_room_pct"] == 0.10
     assert trading_config["break_even_activation_use_levels"] is False
     assert trading_config["break_even_activation_use_l2"] is False
-    assert result["context_aware_risk_enabled"] is True
-    assert result["context_risk_min_sl_pct"] == 0.55
+    assert result["context_aware_risk_enabled"] is False
+    assert result["context_risk_min_sl_pct"] == 0.50
+
+
+def test_resolve_execution_config_keeps_explicit_context_risk_request_over_adaptive_profile() -> (
+    None
+):
+    request = StartRunRequest(
+        run_id="cfg-9b2b",
+        ticker="MU",
+        date="2026-02-10",
+        context_aware_risk_enabled=False,
+        context_risk_min_effective_rr=0.50,
+    )
+
+    result = resolve_execution_config(
+        request=request,
+        aos_applied={},
+        adaptive_profile_runtime={
+            "context_aware_risk_enabled": True,
+            "context_risk_min_effective_rr": 0.85,
+        },
+    )
+
+    trading_config = result["trading_config"]
+    assert trading_config["context_aware_risk_enabled"] is False
+    assert trading_config["context_risk_min_effective_rr"] == 0.50
+    assert result["context_aware_risk_enabled"] is False
+    assert result["context_risk_min_effective_rr"] == 0.50
 
 
 def test_resolve_execution_config_uses_positioning_profile_for_runtime_exit_formulas() -> (
@@ -732,6 +759,47 @@ def test_resolve_execution_config_applies_unified_profile_intraday_overrides() -
     assert trading_config["intraday_levels_entry_tolerance_pct"] == 0.12
     assert trading_config["intraday_levels_micro_confirmation_enabled"] is False
     assert trading_config["intraday_levels_memory_enabled"] is True
+
+
+def test_resolve_execution_config_applies_broad_intraday_profile_overrides() -> None:
+    request = StartRunRequest(
+        run_id="cfg-9c2",
+        ticker="MU",
+        date="2026-02-10",
+    )
+
+    result = resolve_execution_config(
+        request=request,
+        aos_applied={},
+        adaptive_profile_runtime={
+            "intraday_levels_entry_quality_enabled": False,
+            "intraday_levels_opening_range_enabled": False,
+            "intraday_levels_opening_range_minutes": 7,
+            "intraday_levels_rvol_filter_enabled": False,
+            "intraday_levels_rvol_lookback_bars": 8,
+            "intraday_levels_adaptive_window_enabled": False,
+            "intraday_levels_adaptive_window_min_bars": 2,
+            "intraday_levels_confluence_sizing_enabled": True,
+            "liquidity_sweep_detection_enabled": True,
+            "sweep_max_price_change_pct": 0.02,
+        },
+    )
+
+    trading_config = result["trading_config"]
+    assert trading_config["intraday_levels_entry_quality_enabled"] is False
+    assert trading_config["intraday_levels_opening_range_enabled"] is False
+    assert trading_config["intraday_levels_opening_range_minutes"] == 7
+    assert trading_config["intraday_levels_rvol_filter_enabled"] is False
+    assert trading_config["intraday_levels_rvol_lookback_bars"] == 8
+    assert trading_config["intraday_levels_adaptive_window_enabled"] is False
+    assert trading_config["intraday_levels_adaptive_window_min_bars"] == 2
+    assert trading_config["intraday_levels_confluence_sizing_enabled"] is True
+    assert trading_config["liquidity_sweep_detection_enabled"] is True
+    assert trading_config["sweep_max_price_change_pct"] == 0.02
+    assert trading_config["l2_confirm_enabled"] is True
+    assert result["requested_l2_confirm"] is True
+    assert result["liquidity_sweep_l2_auto_enabled"] is True
+    assert result["liquidity_sweep_l2_auto_source"] == "liquidity_sweep_guard"
 
 
 def test_resolve_execution_config_keeps_explicit_intraday_request_over_profile() -> (

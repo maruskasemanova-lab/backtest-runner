@@ -40,7 +40,7 @@ from .models import (
     MatchResponse,
     EvidenceResponse,
 )
-from .extractor import extract_snapshots_from_backtest, FeatureExtractor
+from .extractor import extract_snapshots_from_report_payloads
 from .clustering import discover_cluster_patterns
 from .sequential import discover_sequential_patterns
 from .library import PatternLibraryManager
@@ -193,14 +193,23 @@ async def run_discovery_job(
         # Phase 1: Extract snapshots
         job["progress"] = {"phase": "extracting_snapshots", "current": 0, "total": 100}
 
-        reports_dir = Path("reports")
-        snapshots = extract_snapshots_from_backtest(
+        report_payloads = await _fetch_report_payloads_from_runner(
             ticker=request.ticker,
             date_from=request.date_from,
             date_to=request.date_to,
-            reports_dir=reports_dir,
-            config=request.discovery_config,
         )
+        if report_payloads:
+            snapshots = extract_snapshots_from_report_payloads(
+                ticker=request.ticker,
+                date_from=request.date_from,
+                date_to=request.date_to,
+                report_payloads=report_payloads,
+                config=request.discovery_config,
+            )
+        else:
+            raise ValueError(
+                "No report payloads returned from runner report API; reports/ filesystem fallback was removed."
+            )
 
         job["progress"] = {"phase": "extracting_snapshots", "current": 30, "total": 100}
 
@@ -270,6 +279,93 @@ async def run_discovery_job(
         job["completed_at"] = datetime.utcnow().isoformat()
         job["errors"].append(str(e))
         job["results"] = None
+
+
+async def _fetch_report_payloads_from_runner(
+    *,
+    ticker: str,
+    date_from: str,
+    date_to: str,
+    limit: int = 5000,
+) -> List[Dict[str, Any]]:
+    ticker_upper = str(ticker or "").strip().upper()
+    if not ticker_upper:
+        return []
+
+    timeout = httpx.Timeout(12.0, connect=3.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            history_resp = await client.get(
+                f"{RUNNER_API_URL}/api/reports/history/{ticker_upper}",
+                params={
+                    "limit": max(1, min(int(limit or 5000), 5000)),
+                    "include_multi_day": "true",
+                    "include_zero_trade_runs": "true",
+                },
+            )
+            history_resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("Pattern discovery failed to fetch report history: %s", exc)
+            return []
+
+        history_payload = history_resp.json() if history_resp.content else {}
+        day_results = (
+            history_payload.get("day_results", [])
+            if isinstance(history_payload, dict)
+            else []
+        )
+        run_keys: List[str] = []
+        seen_run_keys: set[str] = set()
+        for day_row in day_results:
+            if not isinstance(day_row, dict):
+                continue
+            runs = day_row.get("runs", [])
+            if not isinstance(runs, list):
+                continue
+            for run_row in runs:
+                if not isinstance(run_row, dict):
+                    continue
+                run_key = str(run_row.get("run_key") or "").strip()
+                if not run_key or run_key in seen_run_keys:
+                    continue
+                seen_run_keys.add(run_key)
+                run_keys.append(run_key)
+
+        if not run_keys:
+            return []
+
+        semaphore = asyncio.Semaphore(8)
+
+        async def _fetch_one(run_key: str) -> Optional[Dict[str, Any]]:
+            async with semaphore:
+                try:
+                    resp = await client.get(
+                        f"{RUNNER_API_URL}/api/reports/run-snapshot",
+                        params={"run_key": run_key},
+                    )
+                    if resp.status_code >= 400:
+                        return None
+                    payload = resp.json() if resp.content else {}
+                except Exception:
+                    return None
+            if not isinstance(payload, dict):
+                return None
+            summary = payload.get("summary", {})
+            if not isinstance(summary, dict):
+                summary = {}
+            out = dict(summary)
+            markers = payload.get("markers", [])
+            if isinstance(markers, list):
+                out["markers"] = markers
+            out["run_key"] = run_key
+            if not out.get("ticker"):
+                out["ticker"] = ticker_upper
+            if not out.get("date"):
+                out["date"] = date_from if date_from == date_to else f"{date_from}_to_{date_to}"
+            return out
+
+        rows = await asyncio.gather(*(_fetch_one(run_key) for run_key in run_keys))
+    return [row for row in rows if isinstance(row, dict)]
 
 
 def _get_best_pattern_info(

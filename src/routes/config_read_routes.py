@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from src.routes.context import ApiServices, get_api_services
 from src.routes.unified_profile_user_store import (
@@ -109,32 +109,26 @@ async def get_unified_profiles(
 
 
 @router.get("/api/aos-history/{ticker}")
-async def get_aos_history(ticker: str):
-    """Get historical AOS changes for a specific ticker."""
-    import os
-    import json
+async def get_aos_history(
+    ticker: str,
+    limit: int = Query(default=1000, ge=1, le=5000),
+    services: ApiServices = Depends(get_api_services),
+):
+    """Get historical AOS changes for a specific ticker from DB-backed store."""
+    ticker_upper = str(ticker or "").strip().upper()
+    if not ticker_upper:
+        raise HTTPException(status_code=400, detail="ticker is required")
 
-    history_file = "aos_optimization/aos_history.jsonl"
-
-    if not os.path.exists(history_file):
+    store = getattr(services, "state_store", None)
+    list_fn = getattr(store, "list_aos_history_entries", None)
+    if not callable(list_fn):
         return []
-
-    results = []
-    ticker_upper = ticker.upper()
 
     try:
-        with open(history_file, "r") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if entry.get("ticker", "").upper() == ticker_upper:
-                        results.append(entry)
-                except json.JSONDecodeError:
-                    continue
-    except Exception as e:
-        print(f"Failed to read aos_history.jsonl: {e}")
-        return []
-
-    return results
+        rows = list_fn(ticker=ticker_upper, limit=limit)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read AOS history from store: {exc}",
+        ) from exc
+    return rows if isinstance(rows, list) else []

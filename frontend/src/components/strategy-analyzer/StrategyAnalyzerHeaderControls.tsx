@@ -1,5 +1,6 @@
 import type {
   StrategyAnalyzerAttachedRunState,
+  StrategyAnalyzerContextRiskPresetKey,
   StrategyAnalyzerOnPauseRun,
   StrategyAnalyzerOnRunControl,
   StrategyAnalyzerPlaybackProgress,
@@ -7,6 +8,7 @@ import type {
   StrategyAnalyzerTradeEvalMode,
   StrategyAnalyzerWfoVariantResult,
 } from "./types";
+import { STRATEGY_ANALYZER_CONTEXT_RISK_PRESET_OPTIONS } from "./strategyAnalyzerContextRiskPresets";
 
 type Props = {
   tickers: Array<{ ticker: string }>;
@@ -21,12 +23,14 @@ type Props = {
   barCount: number;
   warmupBars: number;
   onWarmupBarsChange: (value: number) => void;
+  contextRiskPresetKey: StrategyAnalyzerContextRiskPresetKey;
+  onContextRiskPresetChange: (value: StrategyAnalyzerContextRiskPresetKey) => void;
   isAnalyzerAttachedRun: boolean;
   analyzerTradeEvalMode: StrategyAnalyzerTradeEvalMode;
   onAnalyzerTradeEvalModeChange: (value: StrategyAnalyzerTradeEvalMode) => void;
   runLoading: boolean;
   isPlayingRun: boolean;
-  analyzerRunFinished: boolean;
+  analyzerRunTerminal: boolean;
   onPlayRun?: StrategyAnalyzerOnRunControl;
   onPauseRun?: StrategyAnalyzerOnPauseRun;
   onStepRun?: StrategyAnalyzerOnRunControl;
@@ -52,12 +56,14 @@ export default function StrategyAnalyzerHeaderControls({
   barCount,
   warmupBars,
   onWarmupBarsChange,
+  contextRiskPresetKey,
+  onContextRiskPresetChange,
   isAnalyzerAttachedRun,
   analyzerTradeEvalMode,
   onAnalyzerTradeEvalModeChange,
   runLoading,
   isPlayingRun,
-  analyzerRunFinished,
+  analyzerRunTerminal,
   onPlayRun,
   onPauseRun,
   onStepRun,
@@ -70,163 +76,168 @@ export default function StrategyAnalyzerHeaderControls({
   onSelectWfoVariant,
 }: Props) {
   return (
-    <div className="card" style={{ padding: "0.75rem 1rem" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-        <label style={{ fontWeight: 600, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-          Ticker
+    <div className="card sa-command-deck">
+      <div className="sa-toolbar">
+        <label className="sa-control-field sa-control-field-tight">
+          <span className="sa-control-label">Ticker</span>
+          <select
+            className="chart-timeframe sa-control-input"
+            value={ticker}
+            onChange={(e) => onTickerChange(e.target.value)}
+          >
+            {tickers.map((t) => (
+              <option key={t.ticker} value={t.ticker}>
+                {t.ticker}
+              </option>
+            ))}
+            {tickers.length === 0 && <option value={ticker}>{ticker}</option>}
+          </select>
         </label>
-        <select
-          className="chart-timeframe"
-          value={ticker}
-          onChange={(e) => onTickerChange(e.target.value)}
-          style={{ minWidth: 90 }}
-        >
-          {tickers.map((t) => (
-            <option key={t.ticker} value={t.ticker}>
-              {t.ticker}
-            </option>
-          ))}
-          {tickers.length === 0 && <option value={ticker}>{ticker}</option>}
-        </select>
 
-        <label style={{ fontWeight: 600, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-          From
+        <label className="sa-control-field sa-control-field-tight">
+          <span className="sa-control-label">From</span>
+          <input
+            className="sa-control-input"
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+          />
         </label>
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-          style={{
-            padding: "4px 8px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--border-color)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            fontSize: "0.85rem",
-          }}
-        />
 
-        <label style={{ fontWeight: 600, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-          To
+        <label className="sa-control-field sa-control-field-tight">
+          <span className="sa-control-label">To</span>
+          <input
+            className="sa-control-input"
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+          />
         </label>
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-          style={{
-            padding: "4px 8px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--border-color)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            fontSize: "0.85rem",
-          }}
-        />
+
+        <label className="sa-control-field sa-control-field-tight sa-control-field-small">
+          <span className="sa-control-label">Warmup</span>
+          <input
+            className="sa-control-input"
+            type="number"
+            min={0}
+            step={1}
+            value={warmupBars}
+            onChange={(e) => {
+              const raw = Number(e.target.value);
+              onWarmupBarsChange(Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0);
+            }}
+            title="How many bars before the selected range to preload for warmup"
+          />
+        </label>
+
+        <label className="sa-control-field sa-control-field-tight sa-control-field-wide">
+          <span className="sa-control-label">Config</span>
+          <select
+            className="chart-timeframe sa-control-input"
+            value={contextRiskPresetKey}
+            onChange={(e) =>
+              onContextRiskPresetChange(e.target.value as StrategyAnalyzerContextRiskPresetKey)
+            }
+            disabled={runLoading || isPlayingRun}
+            title="Context-risk preset used for new Strategy Analyzer runs"
+          >
+            {STRATEGY_ANALYZER_CONTEXT_RISK_PRESET_OPTIONS.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <button
+          type="button"
           className="btn btn-primary"
           onClick={loadBars}
           disabled={loading || !ticker || !dateFrom || !dateTo}
-          style={{ padding: "6px 16px", fontSize: "0.85rem", fontWeight: 600 }}
         >
           {loading ? "Loading..." : "Load Chart"}
         </button>
 
-        {barCount > 0 && (
-          <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-            {barCount.toLocaleString()} bars
-          </span>
-        )}
-
-        <label style={{ fontWeight: 600, fontSize: "0.8rem", color: "var(--text-secondary)" }}>
-          Warmup bars
-        </label>
-        <input
-          type="number"
-          min={0}
-          step={1}
-          value={warmupBars}
-          onChange={(e) => {
-            const raw = Number(e.target.value);
-            onWarmupBarsChange(Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0);
-          }}
-          style={{
-            width: 84,
-            padding: "4px 8px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--border-color)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            fontSize: "0.8rem",
-          }}
-          title="How many bars before the selected range to preload for warmup"
-        />
+        {barCount > 0 ? (
+          <span className="sa-meta-pill">{barCount.toLocaleString()} bars</span>
+        ) : null}
 
         {isAnalyzerAttachedRun ? (
           <>
-            <div style={{ width: 1, alignSelf: "stretch", background: "var(--border-color)" }} />
-            <label style={{ fontWeight: 600, fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-              Eval
+            <span className="sa-toolbar-divider" aria-hidden="true" />
+
+            <label className="sa-control-field sa-control-field-tight">
+              <span className="sa-control-label">Eval</span>
+              <select
+                className="chart-timeframe sa-control-input"
+                value={analyzerTradeEvalMode}
+                onChange={(e) =>
+                  onAnalyzerTradeEvalModeChange(e.target.value as StrategyAnalyzerTradeEvalMode)
+                }
+                disabled={runLoading || isPlayingRun}
+                title="Walking-forward evaluation mode for Play"
+              >
+                <option value="standard">1m (standard)</option>
+                <option value="intrabar_1s">Intrabar 1s</option>
+                <option value="intrabar_5s">Intrabar 5s</option>
+              </select>
             </label>
-            <select
-              className="chart-timeframe"
-              value={analyzerTradeEvalMode}
-              onChange={(e) => onAnalyzerTradeEvalModeChange(e.target.value as StrategyAnalyzerTradeEvalMode)}
-              disabled={runLoading || isPlayingRun}
-              style={{ minWidth: 118, fontSize: "0.78rem", padding: "4px 8px" }}
-              title="Walking-forward evaluation mode for Play"
-            >
-              <option value="standard">1m (standard)</option>
-              <option value="intrabar_1s">Intrabar 1s</option>
-              <option value="intrabar_5s">Intrabar 5s</option>
-            </select>
+
             <button
+              type="button"
               className="btn btn-primary"
-              onClick={() => void onPlayRun?.({ trade_eval_mode: analyzerTradeEvalMode })}
-              disabled={runLoading || isPlayingRun || analyzerRunFinished}
-              style={{ padding: "6px 12px", fontSize: "0.8rem", fontWeight: 700 }}
+              onClick={() =>
+                void onPlayRun?.({
+                  trade_eval_mode: analyzerTradeEvalMode,
+                  speed_ms: "max",
+                })
+              }
+              disabled={runLoading || isPlayingRun || analyzerRunTerminal}
               title="Play analyzer run"
             >
               ▶ Play
             </button>
+
             <button
+              type="button"
               className="btn btn-secondary"
               onClick={() => void onPauseRun?.()}
               disabled={runLoading || !isPlayingRun}
-              style={{ padding: "6px 12px", fontSize: "0.8rem", fontWeight: 700 }}
               title="Pause analyzer run"
             >
               ⏸ Pause
             </button>
+
             <button
+              type="button"
               className="btn btn-secondary"
               onClick={() => void onStepRun?.({ trade_eval_mode: analyzerTradeEvalMode })}
-              disabled={runLoading || isPlayingRun || analyzerRunFinished}
-              style={{ padding: "6px 12px", fontSize: "0.8rem", fontWeight: 700 }}
+              disabled={runLoading || isPlayingRun || analyzerRunTerminal}
               title="Step one bar"
             >
               Step
             </button>
+
             <button
+              type="button"
               className="btn btn-secondary"
               onClick={() => void onClearAnalyzerRun()}
               disabled={runLoading}
-              style={{ padding: "6px 12px", fontSize: "0.8rem", fontWeight: 700 }}
               title="Clear analyzer run"
             >
               Clear
             </button>
+
             {rankedWfoResults.length > 0 ? (
-              <>
-                <label style={{ fontWeight: 600, fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-                  WFO
-                </label>
+              <label className="sa-control-field sa-control-field-tight sa-control-field-wide">
+                <span className="sa-control-label">WFO</span>
                 <select
-                  className="chart-timeframe"
-                  value={selectedWfoVariantId || bestWfoVariantId || rankedWfoResults[0]?.id || ""}
+                  className="chart-timeframe sa-control-input"
+                  value={
+                    selectedWfoVariantId || bestWfoVariantId || rankedWfoResults[0]?.id || ""
+                  }
                   onChange={(e) => void onSelectWfoVariant(e.target.value)}
                   disabled={runLoading || isPlayingRun}
-                  style={{ minWidth: 220, fontSize: "0.74rem", padding: "4px 8px" }}
                   title="Select evaluated WFO variant"
                 >
                   {rankedWfoResults.map((variant) => {
@@ -243,19 +254,11 @@ export default function StrategyAnalyzerHeaderControls({
                     );
                   })}
                 </select>
-              </>
+              </label>
             ) : null}
+
             {analyzerPlaybackProgress ? (
-              <span
-                style={{
-                  fontSize: "0.78rem",
-                  color: "var(--text-muted)",
-                  display: "inline-flex",
-                  gap: 8,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
+              <span className="sa-meta-inline">
                 {analyzerPlaybackProgress.isInitializing ? (
                   <span>
                     Initializing warmup {analyzerPlaybackProgress.warmupDone}/
@@ -273,7 +276,7 @@ export default function StrategyAnalyzerHeaderControls({
                 </span>
               </span>
             ) : attachedRunState ? (
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+              <span className="sa-meta-inline">
                 {Number(attachedRunState.current_bar_index || 0)}/
                 {Number(attachedRunState.total_bars || 0)} (
                 {Number(attachedRunState.progress_pct || 0).toFixed(1)}%)

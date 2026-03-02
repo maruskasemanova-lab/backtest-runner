@@ -48,7 +48,11 @@ from src.routes.context import ApiServices
 from src.routes.system_routes import router as system_router
 from src.routes.l2_routes import router as l2_router
 from src.routes.data_loader_routes import router as data_loader_router
-from src.routes.live_trader_routes import router as live_trader_router
+from src.routes.live_trader_routes import (
+    router as live_trader_router,
+    get_live_trader_events as route_get_live_trader_events,
+    get_live_trader_snapshot as route_get_live_trader_snapshot,
+)
 from src.routes.config_read_routes import router as config_read_router
 from src.routes.config_write_routes import router as config_write_router
 from src.routes.run_routes import router as run_router
@@ -70,9 +74,6 @@ from src.models.tuner_requests import AdaptiveTunerRequest
 from src.services.live_trader_service import (
     read_jsonl_tail,
     parse_utc_iso,
-    discover_live_trader_runs,
-    live_trader_events_payload,
-    live_trader_snapshot_payload,
 )
 from src.services.run_registry import RunRegistry
 from src.services.config_write_service import (
@@ -181,6 +182,12 @@ from src.services.profile_options_service import (
 )
 from src.services.ws_hub_service import WebSocketHub
 from src.services.local_config_service import LocalConfigService
+from src.services.file_store_migration_service import (
+    ensure_primary_config_snapshots,
+    migrate_aos_history_jsonl_to_store,
+    migrate_reports_to_run_reports_store,
+    sync_live_trader_artifacts_to_store,
+)
 from src.security.network_policy import (
     StrategyApiPolicyError,
     cors_allow_origins_from_env,
@@ -395,9 +402,56 @@ else:
 app.state.v2_services = v2_services
 app.state.run_reports_store = _run_reports_store
 app.state.run_reports_source_mode = _run_reports_source_mode
+app.state.saas_state_store = v2_services.store
 app.state.runtime_metrics = runtime_metrics
 app.state.connected_clients = connected_clients
 app.state.max_ws_clients = MAX_WS_CLIENTS
+api_services.state_store = v2_services.store
+
+AUTO_MIGRATE_FILE_STORAGE = service_parse_bool_value(
+    os.getenv("BACKTEST_AUTO_MIGRATE_FILE_STORAGE"),
+    True,
+)
+REPORTS_DIR = Path(__file__).resolve().parent / "reports"
+AOS_HISTORY_JSONL_PATH = (
+    Path(__file__).resolve().parent / "aos_optimization" / "aos_history.jsonl"
+)
+
+
+def _run_file_storage_migrations() -> None:
+    state_store = getattr(v2_services, "store", None)
+    if state_store is None:
+        return
+    local_cfg = _local_config_service()
+    config_stats = ensure_primary_config_snapshots(
+        store=state_store,
+        load_aos_config=lambda: local_cfg.load_aos_config(None),
+        load_positioning_config=lambda: local_cfg.load_positioning_config(None),
+        logger=logger,
+    )
+    aos_history_stats = migrate_aos_history_jsonl_to_store(
+        history_path=AOS_HISTORY_JSONL_PATH,
+        store=state_store,
+        logger=logger,
+    )
+    report_stats = migrate_reports_to_run_reports_store(
+        reports_dir=REPORTS_DIR,
+        run_reports_store=_run_reports_store,
+        logger=logger,
+        overwrite_existing=False,
+    )
+    live_stats = sync_live_trader_artifacts_to_store(
+        artifacts_dir=LIVE_TRADER_ARTIFACTS_DIR,
+        store=state_store,
+        logger=logger,
+    )
+    logger.info(
+        "file->db migration stats config=%s aos_history=%s reports=%s live=%s",
+        config_stats,
+        aos_history_stats,
+        report_stats,
+        live_stats,
+    )
 
 
 @app.middleware("http")
@@ -690,31 +744,95 @@ def _resolve_aos_config_path(
 def _load_aos_config(
     aos_config_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    return _local_config_service().load_aos_config(aos_config_path)
+    if aos_config_path is not None:
+        return _local_config_service().load_aos_config(aos_config_path)
+
+    store = getattr(v2_services, "store", None)
+    get_snapshot = getattr(store, "get_config_snapshot", None)
+    if not callable(get_snapshot):
+        raise RuntimeError("DB config snapshot store is not configured for aos_config")
+    try:
+        row = get_snapshot(config_key="aos_config")
+    except Exception as exc:
+        raise RuntimeError(f"Failed reading aos_config snapshot from DB: {exc}") from exc
+    if isinstance(row, dict):
+        payload = row.get("payload")
+        if isinstance(payload, dict):
+            return payload
+    raise RuntimeError(
+        "aos_config snapshot is missing in DB. Run scripts/migrate_file_storage_to_db.py once."
+    )
 
 
 def _load_positioning_config(
     positioning_config_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    return _local_config_service().load_positioning_config(positioning_config_path)
+    if positioning_config_path is not None:
+        return _local_config_service().load_positioning_config(positioning_config_path)
+
+    store = getattr(v2_services, "store", None)
+    get_snapshot = getattr(store, "get_config_snapshot", None)
+    if not callable(get_snapshot):
+        raise RuntimeError(
+            "DB config snapshot store is not configured for positioning_config"
+        )
+    try:
+        row = get_snapshot(config_key="positioning_config")
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed reading positioning_config snapshot from DB: {exc}"
+        ) from exc
+    if isinstance(row, dict):
+        payload = row.get("payload")
+        if isinstance(payload, dict):
+            return payload
+    raise RuntimeError(
+        "positioning_config snapshot is missing in DB. Run scripts/migrate_file_storage_to_db.py once."
+    )
 
 
 def _save_positioning_config(
     config: Dict[str, Any],
     positioning_config_path: Optional[Union[str, Path]] = None,
 ) -> bool:
-    return _local_config_service().save_positioning_config(
-        config, positioning_config_path
-    )
+    if positioning_config_path is not None:
+        return _local_config_service().save_positioning_config(
+            config,
+            positioning_config_path,
+        )
+
+    store = getattr(v2_services, "store", None)
+    upsert_snapshot = getattr(store, "upsert_config_snapshot", None)
+    if not callable(upsert_snapshot):
+        logger.error(
+            "DB config snapshot store is not configured for positioning_config write"
+        )
+        return False
+
+    try:
+        upsert_snapshot(
+            config_key="positioning_config",
+            payload=config if isinstance(config, dict) else {},
+            source="api_save",
+        )
+    except Exception as exc:
+        logger.error("Failed persisting positioning_config snapshot to DB: %s", exc)
+        return False
+    return True
 
 
 def _get_ticker_positioning_config(
     ticker: str,
     positioning_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    effective_positioning = (
+        positioning_config
+        if isinstance(positioning_config, dict)
+        else _load_positioning_config()
+    )
     return _local_config_service().get_ticker_positioning_config(
         ticker=ticker,
-        positioning_config=positioning_config,
+        positioning_config=effective_positioning,
     )
 
 
@@ -722,7 +840,91 @@ def _save_aos_config(
     config: Dict[str, Any],
     aos_config_path: Optional[Union[str, Path]] = None,
 ) -> bool:
-    return _local_config_service().save_aos_config(config, aos_config_path)
+    resolved_default = _resolve_aos_config_path(None)
+    resolved_target = (
+        _resolve_aos_config_path(aos_config_path)
+        if aos_config_path is not None
+        else resolved_default
+    )
+    is_primary_config = resolved_target == resolved_default
+    if not is_primary_config:
+        return _local_config_service().save_aos_config(config, aos_config_path)
+
+    old_config = _load_aos_config()
+    store = getattr(v2_services, "store", None)
+    upsert_snapshot = getattr(store, "upsert_config_snapshot", None)
+    if not callable(upsert_snapshot):
+        logger.error("DB config snapshot store is not configured for aos_config write")
+        return False
+
+    try:
+        upsert_snapshot(
+            config_key="aos_config",
+            payload=config if isinstance(config, dict) else {},
+            source="api_save",
+        )
+    except Exception as exc:
+        logger.error("Failed persisting aos_config snapshot to DB: %s", exc)
+        return False
+
+    record_history = getattr(store, "record_aos_history_entry", None)
+    if callable(record_history):
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        old_tickers = old_config.get("tickers", {}) if isinstance(old_config, dict) else {}
+        new_tickers = config.get("tickers", {}) if isinstance(config, dict) else {}
+        if isinstance(old_tickers, dict) and isinstance(new_tickers, dict):
+            for ticker, new_ticker_data in new_tickers.items():
+                ticker_upper = str(ticker or "").strip().upper()
+                if not ticker_upper or not isinstance(new_ticker_data, dict):
+                    continue
+                old_ticker_data = old_tickers.get(ticker_upper, {})
+                if not isinstance(old_ticker_data, dict):
+                    old_ticker_data = {}
+
+                old_unified = old_ticker_data.get("active_unified_profile_id")
+                new_unified = new_ticker_data.get("active_unified_profile_id")
+                old_adaptive = old_ticker_data.get("active_adaptive_tuner_profile_id")
+                new_adaptive = new_ticker_data.get("active_adaptive_tuner_profile_id")
+                if old_unified == new_unified and old_adaptive == new_adaptive:
+                    continue
+
+                unified_profiles = new_ticker_data.get("unified_profiles", [])
+                active_profile_snapshot = (
+                    next(
+                        (
+                            row
+                            for row in unified_profiles
+                            if isinstance(row, dict)
+                            and str(row.get("profile_id") or "").strip()
+                            == str(new_unified or "").strip()
+                        ),
+                        {},
+                    )
+                    if isinstance(unified_profiles, list)
+                    else {}
+                )
+                history_entry = {
+                    "timestamp": now_iso,
+                    "ticker": ticker_upper,
+                    "old_active_unified_profile_id": old_unified,
+                    "new_active_unified_profile_id": new_unified,
+                    "old_active_adaptive_tuner_profile_id": old_adaptive,
+                    "new_active_adaptive_tuner_profile_id": new_adaptive,
+                    "active_profile_snapshot": (
+                        active_profile_snapshot
+                        if isinstance(active_profile_snapshot, dict)
+                        else {}
+                    ),
+                }
+                try:
+                    record_history(
+                        ticker=ticker_upper,
+                        entry=history_entry,
+                        source="api_save",
+                    )
+                except Exception as exc:
+                    logger.warning("Failed writing AOS history entry to DB: %s", exc)
+    return True
 
 
 def _create_isolated_tuner_aos_config(
@@ -771,13 +973,24 @@ def _parse_utc_iso(value: Any) -> Optional[datetime]:
 def _discover_live_trader_runs(
     limit: int = 20, active_only: bool = False
 ) -> List[Dict[str, Any]]:
-    return discover_live_trader_runs(
-        LIVE_TRADER_ARTIFACTS_DIR,
-        limit=limit,
-        active_only=active_only,
-        active_window_seconds=LIVE_RUN_ACTIVE_WINDOW_SECONDS,
+    store = getattr(v2_services, "store", None)
+    list_runs = getattr(store, "list_live_trader_runs", None)
+    if not callable(list_runs):
+        return []
+    sync_live_trader_artifacts_to_store(
+        artifacts_dir=LIVE_TRADER_ARTIFACTS_DIR,
+        store=store,
         logger=logger,
     )
+    try:
+        rows = list_runs(
+            limit=limit,
+            active_only=active_only,
+            active_window_seconds=LIVE_RUN_ACTIVE_WINDOW_SECONDS,
+        )
+    except Exception:
+        return []
+    return rows if isinstance(rows, list) else []
 
 
 _normalize_strategy_selection_mode = service_normalize_strategy_selection_mode
@@ -1397,6 +1610,12 @@ async def _run_adaptive_tuner_job(
 
 # ============ API Endpoints ============
 
+if AUTO_MIGRATE_FILE_STORAGE:
+    try:
+        _run_file_storage_migrations()
+    except Exception as exc:
+        logger.warning("Automatic file->DB migration failed: %s", exc)
+
 app.include_router(system_router)
 app.include_router(l2_router)
 app.include_router(data_loader_router)
@@ -1417,23 +1636,20 @@ async def get_live_trader_events(
     limit: int = 200,
 ):
     """Backward-compatible helper for direct test invocation."""
-    return live_trader_events_payload(
-        LIVE_TRADER_ARTIFACTS_DIR,
+    return await route_get_live_trader_events(
         run_id,
         stream=stream,
         limit=limit,
-        logger=logger,
+        services=api_services,
     )
 
 
 async def get_live_trader_snapshot(run_id: str, tail_limit: int = 200):
     """Backward-compatible helper for direct test invocation."""
-    return live_trader_snapshot_payload(
-        LIVE_TRADER_ARTIFACTS_DIR,
+    return await route_get_live_trader_snapshot(
         run_id,
         tail_limit=tail_limit,
-        active_window_seconds=LIVE_RUN_ACTIVE_WINDOW_SECONDS,
-        logger=logger,
+        services=api_services,
     )
 
 
@@ -1523,4 +1739,8 @@ if frontend_path.exists():
 
 # ============ Main ============
 if __name__ == "__main__":
-    uvicorn.run("api_server:app", host="0.0.0.0", port=8002, reload=True)
+    runner_reload = service_parse_bool_value(
+        os.getenv("BACKTEST_RUNNER_RELOAD"),
+        False,
+    )
+    uvicorn.run("api_server:app", host="0.0.0.0", port=8002, reload=runner_reload)

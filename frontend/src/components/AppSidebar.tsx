@@ -40,6 +40,7 @@ function AppSidebar({
   sidebarWidth,
 }: AppSidebarProps) {
   const clampedSidebarWidth = clampSidebarWidth(sidebarWidth);
+  const activeViewMeta = VIEW_TABS.find((tab) => tab.id === activeView) ?? VIEW_TABS[0];
 
   return (
     <>
@@ -53,6 +54,12 @@ function AppSidebar({
             <span className="sidebar-brand-name">Backtest Runner</span>
             <span className="sidebar-brand-tagline">Trading Workspace</span>
           </div>
+        </div>
+        <div className="sidebar-brand-meta">
+          <span className="sidebar-brand-chip">Control Surface</span>
+          <span className="sidebar-brand-chip sidebar-brand-chip-active">
+            {activeViewMeta.label}
+          </span>
         </div>
 
         <nav className="sidebar-main-nav">
@@ -76,6 +83,10 @@ function AppSidebar({
           <>
             <div className="sidebar-divider" />
             <div className="sidebar-section-nav" ref={sidebarRailRef}>
+              <div className="sidebar-control-header">
+                <span className="sidebar-control-kicker">Control Lanes</span>
+                <span className="sidebar-control-mode">{activeViewMeta.label}</span>
+              </div>
               {runtimeNotice ? <div className="sidebar-notice">{runtimeNotice}</div> : null}
 
               {sidebarNavItems.map((item, itemIndex) => {
