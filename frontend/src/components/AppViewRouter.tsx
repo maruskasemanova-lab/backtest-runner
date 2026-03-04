@@ -153,8 +153,13 @@ function AppViewRouterRender({
   selectedIntradayLevels,
   closeIntradayLevelsDialog,
 }: AppViewRouterProps) {
+  const appViewClassName =
+    activeView === 'strategy-analyzer'
+      ? 'app-view app-view-strategy-analyzer'
+      : 'app-view';
+
   return (
-    <div className="app-view">
+    <div className={appViewClassName}>
       {activeView === 'data-manager' ? (
         <DataManager downloadProgress={downloadProgress} />
       ) : activeView === 'strategy-analyzer' ? (

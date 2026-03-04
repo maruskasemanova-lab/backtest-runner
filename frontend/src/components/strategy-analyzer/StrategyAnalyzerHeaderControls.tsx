@@ -47,6 +47,7 @@ type Props = {
   selectedWfoVariantId: string | null;
   bestWfoVariantId: string | null;
   onSelectWfoVariant: (variantId: string) => void;
+  layout?: "deck" | "rail";
 };
 
 export default function StrategyAnalyzerHeaderControls({
@@ -86,9 +87,13 @@ export default function StrategyAnalyzerHeaderControls({
   selectedWfoVariantId,
   bestWfoVariantId,
   onSelectWfoVariant,
+  layout = "deck",
 }: Props) {
+  const commandDeckClassName =
+    layout === "rail" ? "card sa-command-deck sa-command-deck-rail" : "card sa-command-deck";
+
   return (
-    <div className="card sa-command-deck">
+    <div className={commandDeckClassName}>
       <div className="sa-toolbar">
         <label className="sa-control-field sa-control-field-tight">
           <span className="sa-control-label">Ticker</span>

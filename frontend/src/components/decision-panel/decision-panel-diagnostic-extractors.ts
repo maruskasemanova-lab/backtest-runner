@@ -113,14 +113,29 @@ export const extractLevelContext = (
     metadata?.level_context,
     marker?.level_context,
   ]);
+  
+  const signalMetadata = findFirstObjectRecord([
+    details?.metadata,
+    details?.signal_metadata,
+    metadata,
+  ]);
 
   if (!payload) {
     return { hasAny: false, payload: {}, checks: {}, reasons: [] };
   }
 
+  // Augment stats with fallback data from signal metadata if available (e.g. for LevelFade)
+  const stats = findFirstObjectRecord([payload.stats]) || {};
+  if (stats.near_tested_levels_count === 0 && signalMetadata?.level_tests != null) {
+    stats.near_tested_levels_count = signalMetadata.level_tests;
+  }
+  if (stats.near_confluence_score === 0 && signalMetadata?.level_confluence != null) {
+    stats.near_confluence_score = signalMetadata.level_confluence;
+  }
+
   return {
     hasAny: true,
-    payload,
+    payload: { ...payload, stats },
     checks: findFirstObjectRecord([payload.checks]) || {},
     reasons: toStringArray(payload.reasons),
   };

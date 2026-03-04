@@ -58,6 +58,12 @@ const BIN_OPTIONS = [0.25, 0.5, 1, 2];
 const formatPrice = (value: number): string => `$${value.toFixed(2)}`;
 const formatInt = (value: number): string => Math.round(value).toLocaleString();
 const formatDayHeader = (day: string): string => (day.length >= 10 ? day.slice(5) : day);
+const formatBarsAsDuration = (bars: number): string => {
+  const totalMinutes = Math.max(0, Math.trunc(Number(bars) || 0));
+  const hours = Math.trunc(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+};
 
 const heatAlpha = (value: number, max: number): number => {
   if (max <= 0) return 0;
@@ -212,6 +218,9 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
             Zdroj: `daily_price_heatmap_levels` (kumulativne hodnoty k jednotlivym dnom).
           </div>
           <div className="sa-heatmap-note">
+            `Bars` = počet 1m sviečok (čas = bars v minútach). Top tabuľky sú pre posledný deň v range ({payload?.latest_as_of_date || "n/a"}).
+          </div>
+          <div className="sa-heatmap-note">
             Tabulky nižšie sú scrollovateľné cez celý cenový rozsah a dni ({days.length}).
           </div>
           {payload?.latest_as_of_date ? (
@@ -253,6 +262,7 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
                   <tr>
                     <th>Price</th>
                     <th>Bars</th>
+                    <th>Time</th>
                     <th>Share</th>
                   </tr>
                 </thead>
@@ -261,6 +271,7 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
                     <tr key={`time-${item.price_bin}`}>
                       <td>{formatPrice(item.price_bin)}</td>
                       <td>{formatInt(item.cumulative_bars)}</td>
+                      <td>{formatBarsAsDuration(item.cumulative_bars)}</td>
                       <td>{Number(item.share_pct || 0).toFixed(2)}%</td>
                     </tr>
                   ))}

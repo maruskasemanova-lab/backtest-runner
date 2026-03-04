@@ -16,7 +16,7 @@ export default function StrategyAnalyzerEntryConditionsContent({
   isScrubbingLiveEval,
 }: Props) {
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", position: "relative" }}>
+    <div className="sa-entry-conditions-surface">
       <StrategyConditionsPanel
         marker={effectiveConditionsMarker}
         liveAnalysis={stableConditionsLiveAnalysis}

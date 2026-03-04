@@ -525,6 +525,16 @@ h3,
   overflow: auto;
 }
 
+.app-main-strategy-analyzer::before,
+.app-main-strategy-analyzer::after {
+  opacity: 0.35;
+}
+
+.app-view.app-view-strategy-analyzer {
+  padding: 0 10px 10px;
+  overflow: hidden;
+}
+
 .app-content {
   gap: 22px;
   padding: 0 0 4px;
@@ -803,6 +813,10 @@ h3,
   .app-view {
     padding: 0 16px 16px;
   }
+
+  .app-view.app-view-strategy-analyzer {
+    padding: 0 8px 8px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -817,6 +831,10 @@ h3,
 
   .app-shell-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-view.app-view-strategy-analyzer {
+    padding: 0 6px 6px;
   }
 }
 

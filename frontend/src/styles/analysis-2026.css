@@ -339,10 +339,10 @@
 .sa-shell {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   height: 100%;
-  min-height: calc(100vh - 290px);
-  padding: 4px 0 12px;
+  min-height: 100%;
+  padding: 0;
 }
 
 .sa-alert-card {
@@ -367,10 +367,11 @@
 
 .sa-workspace {
   flex: 1;
+  height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 2.1fr) minmax(320px, 360px);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 30vw, 480px);
+  gap: 12px;
   align-items: stretch;
 }
 
@@ -408,6 +409,10 @@
   gap: 10px;
 }
 
+.sa-utility-rail .sa-heatmap-summary-grid {
+  grid-template-columns: 1fr;
+}
+
 .sa-heatmap-panel {
   border: 1px solid rgba(117, 137, 160, 0.14);
   border-radius: 16px;
@@ -438,6 +443,11 @@
   text-align: right;
 }
 
+.sa-utility-rail .sa-heatmap-summary-table th,
+.sa-utility-rail .sa-heatmap-summary-table td {
+  white-space: nowrap;
+}
+
 .sa-heatmap-summary-table th:first-child,
 .sa-heatmap-summary-table td:first-child {
   text-align: left;
@@ -451,11 +461,19 @@
   background: rgba(255, 255, 255, 0.64);
 }
 
+.sa-utility-rail .sa-heatmap-scroll {
+  max-height: 300px;
+}
+
 .sa-heatmap-table {
   width: 100%;
   min-width: 640px;
   border-collapse: collapse;
   font-size: 0.72rem;
+}
+
+.sa-utility-rail .sa-heatmap-table {
+  min-width: 560px;
 }
 
 .sa-heatmap-table th,
@@ -491,7 +509,22 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+}
+
+.sa-heatmap-card::before {
+  display: none;
+}
+
+.sa-chart-column {
+  overflow: hidden;
+}
+
+.sa-utility-rail {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
 }
 
 .sa-command-deck {
@@ -503,6 +536,37 @@
   align-items: flex-end;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.sa-command-deck-rail .sa-toolbar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.sa-command-deck-rail .sa-control-field,
+.sa-command-deck-rail .sa-control-field-tight,
+.sa-command-deck-rail .sa-control-field-small,
+.sa-command-deck-rail .sa-control-field-wide {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 100%;
+}
+
+.sa-command-deck-rail .sa-toolbar-divider {
+  width: 100%;
+  height: 1px;
+  align-self: auto;
+  background: linear-gradient(
+    90deg,
+    rgba(117, 137, 160, 0),
+    rgba(117, 137, 160, 0.24),
+    rgba(117, 137, 160, 0)
+  );
+}
+
+.sa-command-deck-rail .btn {
+  width: 100%;
 }
 
 .sa-control-field {
@@ -572,7 +636,7 @@
 
 .sa-chart-panel {
   flex: 1;
-  min-height: clamp(520px, 68vh, 860px);
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -732,9 +796,9 @@
 .sa-attached-stack {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   min-height: 0;
-  flex: 1;
+  flex: 0 0 auto;
 }
 
 .sa-stack-card {
@@ -742,6 +806,11 @@
   flex-direction: column;
   min-height: 140px;
   overflow: hidden;
+}
+
+.sa-stack-card::before {
+  height: 44px;
+  opacity: 0.42;
 }
 
 .sa-stack-card-fill {
@@ -752,10 +821,28 @@
   justify-content: space-between;
 }
 
+.sa-stack-card-header-compact {
+  padding: 9px 10px 6px;
+  gap: 8px;
+}
+
+.sa-stack-card-header-compact .card-title {
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+}
+
+.sa-stack-card-meta-compact {
+  gap: 6px;
+}
+
 .sa-badge-note {
   color: var(--text-muted);
   font-size: 0.76rem;
   font-weight: 700;
+}
+
+.sa-stack-card-meta-compact .sa-badge-note {
+  font-size: 0.67rem;
 }
 
 .sa-badge-note.is-accent {
@@ -772,6 +859,73 @@
   font-size: 0.74rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.sa-detach-btn-compact {
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  font-size: 0.68rem;
+}
+
+.sa-entry-conditions-surface {
+  min-height: 0;
+  overflow: visible;
+  position: relative;
+}
+
+.sa-stack-card-decisions .card-body {
+  padding: 8px 10px 10px;
+}
+
+.sa-stack-card-decisions .decision-list-tabs {
+  padding: 4px 10px 0;
+  gap: 6px;
+}
+
+.sa-stack-card-decisions .decision-list-tab {
+  padding: 6px 8px;
+  border-radius: 10px;
+  font-size: 0.66rem;
+}
+
+.sa-stack-card-decisions .decision-list {
+  padding: 8px 10px;
+  gap: 8px;
+}
+
+.sa-stack-card-decisions .decision-item {
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+
+.sa-stack-card-decisions .decision-detail {
+  padding: 8px 10px;
+  max-height: 190px;
+}
+
+.sa-stack-card-decisions .decision-detail-header {
+  margin-bottom: 8px;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.sa-stack-card-decisions .decision-detail-header-actions {
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sa-stack-card-decisions .decision-detail h4 {
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.sa-stack-card-decisions .decision-detail-expand-btn {
+  min-height: 28px;
+  padding: 4px 7px;
+  font-size: 0.64rem;
+  border-radius: 10px;
 }
 
 .sa-stack-note {
@@ -791,7 +945,7 @@
 
 @media (max-width: 1280px) {
   .sa-workspace {
-    grid-template-columns: minmax(0, 1.8fr) minmax(280px, 340px);
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
   }
 
   .sa-control-field-wide {
@@ -810,6 +964,11 @@
 
   .sa-chart-panel {
     min-height: clamp(460px, 62vh, 760px);
+  }
+
+  .sa-utility-rail {
+    overflow: visible;
+    padding-right: 0;
   }
 }
 

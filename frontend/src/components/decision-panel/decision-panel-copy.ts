@@ -12,8 +12,8 @@ export const COST_LABEL_BY_KEY = {
 export const DECISION_REASON_TRANSLATIONS = {
   sk: {
     fallback_original: "Pôvodná hodnota zo stratégie",
-    strategy_take_profit: "TP zo stratégie",
-    strategy_stop_loss: "SL zo stratégie",
+    strategy_take_profit: "Vypočítané priamo špecifickou logikou zvolenej stratégie",
+    strategy_stop_loss: "Vypočítané priamo špecifickou logikou zvolenej stratégie",
     fixed_stop_loss_pct: "Fixný percentuálny SL",
     capped_fixed_floor: "SL orezaný minimálnou podlahou",
     anchored: "Ukotvené na úroveň",
@@ -27,8 +27,8 @@ export const DECISION_REASON_TRANSLATIONS = {
   },
   en: {
     fallback_original: "Original strategy value",
-    strategy_take_profit: "Strategy take profit",
-    strategy_stop_loss: "Strategy stop loss",
+    strategy_take_profit: "Computed by the strategy's native logic",
+    strategy_stop_loss: "Computed by the strategy's native logic",
     fixed_stop_loss_pct: "Fixed stop loss pct",
     capped_fixed_floor: "Capped fixed floor",
     anchored: "Anchored to level",

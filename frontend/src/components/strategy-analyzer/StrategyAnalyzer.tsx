@@ -415,45 +415,6 @@ export default function StrategyAnalyzer({
   /* ── render ────────────────────────────────────────────────────── */
   return (
     <div className="strategy-analyzer sa-shell">
-      <StrategyAnalyzerHeaderControls
-        tickers={tickers}
-        ticker={ticker}
-        onTickerChange={handleTickerChange}
-        dateFrom={dateFrom}
-        dateTo={dateTo}
-        setDateFrom={setDateFrom}
-        setDateTo={setDateTo}
-        loadBars={loadBars}
-        loading={loading}
-        barCount={barCount}
-        warmupBars={warmupBars}
-        onWarmupBarsChange={setWarmupBars}
-        includeExtendedHours={includeExtendedHours}
-        onIncludeExtendedHoursChange={setIncludeExtendedHours}
-        comparableMode={comparableMode}
-        onComparableModeChange={setComparableMode}
-        coldStartEachDay={coldStartEachDay}
-        onColdStartEachDayChange={setColdStartEachDay}
-        contextRiskPresetKey={contextRiskPresetKey}
-        onContextRiskPresetChange={setContextRiskPresetKey}
-        isAnalyzerAttachedRun={isAnalyzerAttachedRun}
-        analyzerTradeEvalMode={analyzerTradeEvalMode}
-        onAnalyzerTradeEvalModeChange={setAnalyzerTradeEvalMode}
-        runLoading={runLoading || wfoIsRunning}
-        isPlayingRun={isPlayingRun}
-        analyzerRunTerminal={analyzerRunTerminal}
-        onPlayRun={onPlayRun}
-        onPauseRun={onPauseRun}
-        onStepRun={onStepRun}
-        onClearAnalyzerRun={handleClearAnalyzerRun}
-        analyzerPlaybackProgress={analyzerPlaybackProgress}
-        attachedRunState={attachedRunState}
-        rankedWfoResults={rankedWfoResults}
-        selectedWfoVariantId={selectedWfoVariantId}
-        bestWfoVariantId={bestWfoVariantId}
-        onSelectWfoVariant={handleSelectWfoVariant}
-      />
-
       {/* ── Error ──────────────────────────────────────────────── */}
       {error && (
         <div className="card sa-alert-card">
@@ -467,10 +428,6 @@ export default function StrategyAnalyzer({
           </button>
         </div>
       )}
-
-      {bars.length > 0 ? (
-        <StrategyAnalyzerPriceHeatmap bars={bars} ticker={ticker} dateFrom={dateFrom} dateTo={dateTo} />
-      ) : null}
 
       <div className={`sa-workspace ${isAnalyzerAttachedRun ? "is-attached" : ""}`}>
         <div className="sa-chart-column">
@@ -504,6 +461,46 @@ export default function StrategyAnalyzer({
         </div>
 
         <aside className="sa-utility-rail">
+          <StrategyAnalyzerHeaderControls
+            tickers={tickers}
+            ticker={ticker}
+            onTickerChange={handleTickerChange}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            setDateFrom={setDateFrom}
+            setDateTo={setDateTo}
+            loadBars={loadBars}
+            loading={loading}
+            barCount={barCount}
+            warmupBars={warmupBars}
+            onWarmupBarsChange={setWarmupBars}
+            includeExtendedHours={includeExtendedHours}
+            onIncludeExtendedHoursChange={setIncludeExtendedHours}
+            comparableMode={comparableMode}
+            onComparableModeChange={setComparableMode}
+            coldStartEachDay={coldStartEachDay}
+            onColdStartEachDayChange={setColdStartEachDay}
+            contextRiskPresetKey={contextRiskPresetKey}
+            onContextRiskPresetChange={setContextRiskPresetKey}
+            isAnalyzerAttachedRun={isAnalyzerAttachedRun}
+            analyzerTradeEvalMode={analyzerTradeEvalMode}
+            onAnalyzerTradeEvalModeChange={setAnalyzerTradeEvalMode}
+            runLoading={runLoading || wfoIsRunning}
+            isPlayingRun={isPlayingRun}
+            analyzerRunTerminal={analyzerRunTerminal}
+            onPlayRun={onPlayRun}
+            onPauseRun={onPauseRun}
+            onStepRun={onStepRun}
+            onClearAnalyzerRun={handleClearAnalyzerRun}
+            analyzerPlaybackProgress={analyzerPlaybackProgress}
+            attachedRunState={attachedRunState}
+            rankedWfoResults={rankedWfoResults}
+            selectedWfoVariantId={selectedWfoVariantId}
+            bestWfoVariantId={bestWfoVariantId}
+            onSelectWfoVariant={handleSelectWfoVariant}
+            layout="rail"
+          />
+
           <StrategyAnalyzerRangeActions
             selectedRangeFrom={selectedRangeFrom}
             selectedRangeTo={selectedRangeTo}
@@ -526,6 +523,10 @@ export default function StrategyAnalyzer({
             bestWfoVariantId={bestWfoVariantId}
             onSelectWfoVariant={handleSelectWfoVariant}
           />
+
+          {bars.length > 0 ? (
+            <StrategyAnalyzerPriceHeatmap bars={bars} ticker={ticker} dateFrom={dateFrom} dateTo={dateTo} />
+          ) : null}
 
           {isAnalyzerAttachedRun ? (
             <StrategyAnalyzerAttachedPanels

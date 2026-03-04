@@ -33,12 +33,10 @@ export default function StrategyAnalyzerAttachedPanels({
   return (
     <>
       <div className="sa-attached-stack">
-        <div
-          className={`card sa-stack-card ${hasConditionsPanelData ? "sa-stack-card-fill" : ""}`}
-        >
-          <div className="card-header sa-stack-card-header">
+        <div className="card sa-stack-card sa-stack-card-entry">
+          <div className="card-header sa-stack-card-header sa-stack-card-header-compact">
             <span className="card-title">Entry Conditions</span>
-            <div className="sa-stack-card-meta">
+            <div className="sa-stack-card-meta sa-stack-card-meta-compact">
               {conditionsPanelBadge ? (
                 <span
                   className={`sa-badge-note ${
@@ -50,7 +48,7 @@ export default function StrategyAnalyzerAttachedPanels({
               ) : null}
               <button
                 type="button"
-                className="sa-detach-btn"
+                className="sa-detach-btn sa-detach-btn-compact"
                 onClick={() => setIsConditionsDetached((previous) => !previous)}
               >
                 {isConditionsDetached ? "Dock" : "Open window"}
@@ -64,14 +62,14 @@ export default function StrategyAnalyzerAttachedPanels({
           )}
         </div>
 
-        <div className="card decision-panel sa-stack-card sa-stack-card-fill">
-          <div className="card-header sa-stack-card-header">
+        <div className="card decision-panel sa-stack-card sa-stack-card-fill sa-stack-card-decisions">
+          <div className="card-header sa-stack-card-header sa-stack-card-header-compact">
             <span className="card-title">Decisions</span>
-            <div className="sa-stack-card-meta">
+            <div className="sa-stack-card-meta sa-stack-card-meta-compact">
               <span className="sa-badge-note">{analyzerDecisionEventsCount} total</span>
               <button
                 type="button"
-                className="sa-detach-btn"
+                className="sa-detach-btn sa-detach-btn-compact"
                 onClick={() => setIsDecisionsDetached((previous) => !previous)}
               >
                 {isDecisionsDetached ? "Dock" : "Open window"}
@@ -95,11 +93,11 @@ export default function StrategyAnalyzerAttachedPanels({
         onClose={() => setIsConditionsDetached(() => false)}
       >
         <div className="card sa-detached-surface">
-          <div className="card-header sa-stack-card-header">
+          <div className="card-header sa-stack-card-header sa-stack-card-header-compact">
             <span className="card-title">Entry Conditions</span>
             <button
               type="button"
-              className="sa-detach-btn"
+              className="sa-detach-btn sa-detach-btn-compact"
               onClick={() => setIsConditionsDetached(() => false)}
             >
               Dock
@@ -118,13 +116,13 @@ export default function StrategyAnalyzerAttachedPanels({
         onClose={() => setIsDecisionsDetached(() => false)}
       >
         <div className="card decision-panel sa-detached-surface">
-          <div className="card-header sa-stack-card-header">
+          <div className="card-header sa-stack-card-header sa-stack-card-header-compact">
             <span className="card-title">Decisions</span>
-            <div className="sa-stack-card-meta">
+            <div className="sa-stack-card-meta sa-stack-card-meta-compact">
               <span className="sa-badge-note">{analyzerDecisionEventsCount} total</span>
               <button
                 type="button"
-                className="sa-detach-btn"
+                className="sa-detach-btn sa-detach-btn-compact"
                 onClick={() => setIsDecisionsDetached(() => false)}
               >
                 Dock

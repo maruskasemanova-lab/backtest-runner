@@ -624,6 +624,7 @@ function App() {
     quotaSnapshot?.usage && quotaSnapshot?.limits
       ? `${quotaSnapshot.usage.active_runs || 0}/${quotaSnapshot.limits.concurrent_runs || 0} lanes`
       : `${activeRuns.length} tracked`;
+  const isStrategyAnalyzerView = activeView === 'strategy-analyzer';
 
   const webMcpSnapshotBase = useMemo(
     () => ({
@@ -697,7 +698,7 @@ function App() {
       />
 
       {/* Main Content Area */}
-      <div className="app-main">
+      <div className={`app-main${isStrategyAnalyzerView ? ' app-main-strategy-analyzer' : ''}`}>
         {/* Slim Top Bar */}
         <AppTopbar
           isConnected={isConnected}
@@ -710,49 +711,51 @@ function App() {
           onSignOut={handleAuthSignOut}
         />
 
-        <section className="app-shell-hero" aria-label="Workspace overview">
-          <div className="app-shell-copy">
-            <span className="app-shell-eyebrow">2026 Trading Desk</span>
-            <h1 className="app-shell-title">
-              <span className="app-shell-title-icon" aria-hidden="true">
-                {currentViewMeta.icon}
-              </span>
-              <span>{currentViewMeta.label}</span>
-            </h1>
-            <p className="app-shell-subtitle">
-              Clearer control surfaces for tuning, diagnostics, and live execution without
-              burying the core state.
-            </p>
-          </div>
-          <div className="app-shell-metrics">
-            <div className="app-shell-pill">
-              <span className="app-shell-pill-label">Sync</span>
-              <strong>{shellSyncLabel}</strong>
+        {!isStrategyAnalyzerView ? (
+          <section className="app-shell-hero" aria-label="Workspace overview">
+            <div className="app-shell-copy">
+              <span className="app-shell-eyebrow">2026 Trading Desk</span>
+              <h1 className="app-shell-title">
+                <span className="app-shell-title-icon" aria-hidden="true">
+                  {currentViewMeta.icon}
+                </span>
+                <span>{currentViewMeta.label}</span>
+              </h1>
+              <p className="app-shell-subtitle">
+                Clearer control surfaces for tuning, diagnostics, and live execution without
+                burying the core state.
+              </p>
             </div>
-            <div className="app-shell-pill">
-              <span className="app-shell-pill-label">Symbol</span>
-              <strong>{shellTargetLabel}</strong>
+            <div className="app-shell-metrics">
+              <div className="app-shell-pill">
+                <span className="app-shell-pill-label">Sync</span>
+                <strong>{shellSyncLabel}</strong>
+              </div>
+              <div className="app-shell-pill">
+                <span className="app-shell-pill-label">Symbol</span>
+                <strong>{shellTargetLabel}</strong>
+              </div>
+              <div className="app-shell-pill">
+                <span className="app-shell-pill-label">Run</span>
+                <strong>{shellRunLabel}</strong>
+              </div>
+              <div className="app-shell-pill">
+                <span className="app-shell-pill-label">Phase</span>
+                <strong>{shellPhaseLabel}</strong>
+              </div>
+              <div className="app-shell-pill">
+                <span className="app-shell-pill-label">Capacity</span>
+                <strong>{shellQuotaLabel}</strong>
+              </div>
+              <div className="app-shell-pill">
+                <span className="app-shell-pill-label">Plan</span>
+                <strong>{String(planTier || 'free').toUpperCase()}</strong>
+              </div>
             </div>
-            <div className="app-shell-pill">
-              <span className="app-shell-pill-label">Run</span>
-              <strong>{shellRunLabel}</strong>
-            </div>
-            <div className="app-shell-pill">
-              <span className="app-shell-pill-label">Phase</span>
-              <strong>{shellPhaseLabel}</strong>
-            </div>
-            <div className="app-shell-pill">
-              <span className="app-shell-pill-label">Capacity</span>
-              <strong>{shellQuotaLabel}</strong>
-            </div>
-            <div className="app-shell-pill">
-              <span className="app-shell-pill-label">Plan</span>
-              <strong>{String(planTier || 'free').toUpperCase()}</strong>
-            </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
-        {showAdSlot ? (
+        {showAdSlot && !isStrategyAnalyzerView ? (
           <section className="ad-slot">
             <span className="ad-label">Sponsored</span>
             <span className="ad-text">Upgrade to PREMIUM for ad-free workspace and higher limits.</span>

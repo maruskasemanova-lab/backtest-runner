@@ -103,10 +103,89 @@ export default function DecisionPanelDetailCoreSections({
         String(selectedMarker.marker_type || ""),
       ) && (
         <>
-          <div className="detail-item">
-            {renderDetailLabel("Exit Reason")}
-            <span className="detail-value">{details.exit_reason || "Unknown"}</span>
-          </div>
+          {(() => {
+            const slReason = String(details.exit_reason || "");
+            const isStrategySL = slReason === "strategy_stop_loss";
+            const isCappedFixedFloor = slReason.startsWith("capped_fixed_floor");
+            const isFixedStopLossPct = slReason.startsWith("fixed_stop_loss_pct");
+
+            if (!isStrategySL && !isCappedFixedFloor && !isFixedStopLossPct) return null;
+
+            const signalMeta = (details.signal_metadata || metadata || {}) as Record<string, unknown>;
+            const sideStr = String(selectedMarker.side || signalMeta.flow_direction || "");
+            const isLong = sideStr.toLowerCase().includes("long") || sideStr.toLowerCase().includes("support");
+
+            let mathFormula = "";
+
+            if (isCappedFixedFloor || isFixedStopLossPct) {
+               const riskControls = ((details.risk_controls || signalMeta.risk_controls || metadata?.risk_controls || {}) as Record<string, unknown>);
+               const minSlPct = riskControls.context_risk_min_sl_pct ?? riskControls.min_sl_pct ?? "N/A";
+               const fixedPct = riskControls.fixed_stop_loss_pct ?? "N/A";
+               
+               if (isCappedFixedFloor) {
+                 const val = slReason.split(":")[1] || minSlPct;
+                 mathFormula = `max(Strategy SL, Minimum Floor SL [${val}%])`;
+               } else {
+                 const val = slReason.split(":")[1] || fixedPct;
+                 mathFormula = `Entry ± Fixed ${val}%`;
+               }
+            } else if (isStrategySL && signalMeta.stop_type === "hybrid_price_space") {
+              const atrStop = signalMeta.atr_stop;
+              const levelStop = signalMeta.level_stop;
+              if (atrStop != null && levelStop != null) {
+                mathFormula = isLong 
+                  ? `max(ATR Stop: $${atrStop}, Level Stop: $${levelStop})`
+                  : `min(ATR Stop: $${atrStop}, Level Stop: $${levelStop})`;
+              }
+            }
+
+            if (!mathFormula) return null;
+
+            return (
+              <div className="detail-item">
+                {renderDetailLabel("SL Logic")}
+                <span className="detail-value" style={{ fontSize: "0.9em", color: "var(--text-secondary)" }}>
+                  {mathFormula}
+                </span>
+              </div>
+            );
+          })()}
+          {(() => {
+            const tpReason = String(details.exit_reason || "");
+            if (tpReason !== "strategy_take_profit") return null;
+
+            const signalMeta = (details.signal_metadata || metadata || {}) as Record<string, unknown>;
+            if (signalMeta.stop_type !== "hybrid_price_space") return null;
+
+            const sideStr = String(selectedMarker.side || signalMeta.flow_direction || "");
+            const isLong = sideStr.toLowerCase().includes("long") || sideStr.toLowerCase().includes("support");
+
+            const pocPrice = signalMeta.poc_price;
+            
+            // Try explicit RR from details/risk_controls first, then metadata
+            let effectiveRr = (details.risk_controls as Record<string, unknown>)?.effective_rr;
+            if (effectiveRr == null) {
+               effectiveRr = details.risk_reward ?? signalMeta.effective_rr;
+            }
+            
+            const rr = Number(effectiveRr || 0).toFixed(2);
+            
+            let mathFormula = `Entry ± (Risk × ${rr} R:R)`;
+            if (pocPrice != null) {
+              mathFormula = isLong
+                ? `min(Base TP [RR ${rr}], POC: $${pocPrice})`
+                : `max(Base TP [RR ${rr}], POC: $${pocPrice})`;
+            }
+
+            return (
+              <div className="detail-item">
+                {renderDetailLabel("TP Logic")}
+                <span className="detail-value" style={{ fontSize: "0.9em", color: "var(--text-secondary)" }}>
+                   {mathFormula}
+                </span>
+              </div>
+            );
+          })()}
           {(details.pnl_dollars != null || details.pnl_usd != null) && (
             <div className="detail-item">
               {renderDetailLabel("PnL")}
