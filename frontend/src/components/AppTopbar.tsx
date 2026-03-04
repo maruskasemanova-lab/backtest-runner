@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { AuthSnapshot } from '../auth/supabaseAuth';
 
 type QuotaSnapshot = {
@@ -20,7 +21,8 @@ type AppTopbarProps = {
   onSignOut: () => void;
 };
 
-export default function AppTopbar({
+// Extracted into a named function for easier debugging and memoization wrapper below.
+function AppTopbarRender({
   isConnected,
   planTier,
   quotaSnapshot,
@@ -99,3 +101,5 @@ export default function AppTopbar({
     </header>
   );
 }
+
+export default memo(AppTopbarRender);

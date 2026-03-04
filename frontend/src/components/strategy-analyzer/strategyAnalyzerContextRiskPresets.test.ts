@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_STRATEGY_ANALYZER_CONTEXT_RISK_PRESET,
   STRATEGY_ANALYZER_CONTEXT_RISK_PRESET_OPTIONS,
+  resolveContextRiskPresetFromRunKey,
+  resolveContextRiskPresetFromVariantKey,
   resolveStrategyAnalyzerContextRiskOverrides,
   strategyAnalyzerContextRiskRunIdToken,
 } from "./strategyAnalyzerContextRiskPresets";
@@ -32,5 +34,22 @@ describe("strategyAnalyzerContextRiskPresets", () => {
   it("contains visible baseline option label", () => {
     const labels = STRATEGY_ANALYZER_CONTEXT_RISK_PRESET_OPTIONS.map((item) => item.label);
     expect(labels).toContain("baseline (room=0.08, rr=0.50)");
+  });
+
+  it("maps diagnostic variant keys to analyzer presets", () => {
+    expect(resolveContextRiskPresetFromVariantKey("variant:no_context_risk")).toBe("no_context_risk");
+    expect(resolveContextRiskPresetFromVariantKey("variant:relaxed_context_35")).toBe("relaxed_context_35");
+    expect(resolveContextRiskPresetFromVariantKey("variant:baseline")).toBe("baseline");
+    expect(resolveContextRiskPresetFromVariantKey("variant:context_risk_off_n/a_n/a")).toBe("no_context_risk");
+    expect(resolveContextRiskPresetFromVariantKey("variant:context_risk_on_0.0800_0.5000")).toBe("baseline");
+    expect(resolveContextRiskPresetFromVariantKey("variant:unknown")).toBeNull();
+  });
+
+  it("maps analyzer run keys back to context-risk presets", () => {
+    expect(resolveContextRiskPresetFromRunKey("analyzer-no_context_risk-1:MU:2026-01-29")).toBe("no_context_risk");
+    expect(resolveContextRiskPresetFromRunKey("analyzer-relaxed_context_35-1:MU:2026-01-29")).toBe("relaxed_context_35");
+    expect(resolveContextRiskPresetFromRunKey("analyzer-baseline-1:MU:2026-01-29")).toBe("baseline");
+    expect(resolveContextRiskPresetFromRunKey("analyzer-default-1:MU:2026-01-29")).toBe("current_defaults");
+    expect(resolveContextRiskPresetFromRunKey("other-run:MU:2026-01-29")).toBeNull();
   });
 });

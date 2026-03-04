@@ -23,6 +23,9 @@ type Params = {
   ticker: string;
   strategyApiUrl: string;
   analyzerTradeEvalMode: StrategyAnalyzerTradeEvalMode;
+  includeExtendedHours: boolean;
+  comparableMode: boolean;
+  coldStartEachDay: boolean;
   contextRiskPresetKey: StrategyAnalyzerContextRiskPresetKey;
   rangePlaybackMeta: StrategyAnalyzerRangePlaybackMeta;
   onOpenStoredRunSnapshot?: (runKey: string) => Promise<boolean>;
@@ -226,6 +229,9 @@ export function useStrategyAnalyzerWfo({
   ticker,
   strategyApiUrl,
   analyzerTradeEvalMode,
+  includeExtendedHours,
+  comparableMode,
+  coldStartEachDay,
   contextRiskPresetKey,
   rangePlaybackMeta,
   onOpenStoredRunSnapshot,
@@ -277,8 +283,10 @@ export function useStrategyAnalyzerWfo({
         trade_start_time: dateTimeLocalToUtcIso(effectiveTradeStartLocal),
         trade_end_time: dateTimeLocalToUtcIso(effectiveTradeEndLocal),
         strategy_api_url: strategyApiUrl || defaultStrategyApiUrl,
-        include_extended_hours: true,
+        include_extended_hours: includeExtendedHours,
         trade_eval_mode: analyzerTradeEvalMode,
+        comparable_mode: comparableMode,
+        cold_start_each_day: comparableMode ? true : coldStartEachDay,
         ...contextRiskOverrides,
       };
       return {
@@ -293,6 +301,9 @@ export function useStrategyAnalyzerWfo({
       ticker,
       strategyApiUrl,
       analyzerTradeEvalMode,
+      includeExtendedHours,
+      comparableMode,
+      coldStartEachDay,
       contextRiskPresetKey,
     ],
   );

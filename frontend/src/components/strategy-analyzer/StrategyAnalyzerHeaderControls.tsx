@@ -23,6 +23,12 @@ type Props = {
   barCount: number;
   warmupBars: number;
   onWarmupBarsChange: (value: number) => void;
+  includeExtendedHours: boolean;
+  onIncludeExtendedHoursChange: (value: boolean) => void;
+  comparableMode: boolean;
+  onComparableModeChange: (value: boolean) => void;
+  coldStartEachDay: boolean;
+  onColdStartEachDayChange: (value: boolean) => void;
   contextRiskPresetKey: StrategyAnalyzerContextRiskPresetKey;
   onContextRiskPresetChange: (value: StrategyAnalyzerContextRiskPresetKey) => void;
   isAnalyzerAttachedRun: boolean;
@@ -56,6 +62,12 @@ export default function StrategyAnalyzerHeaderControls({
   barCount,
   warmupBars,
   onWarmupBarsChange,
+  includeExtendedHours,
+  onIncludeExtendedHoursChange,
+  comparableMode,
+  onComparableModeChange,
+  coldStartEachDay,
+  onColdStartEachDayChange,
   contextRiskPresetKey,
   onContextRiskPresetChange,
   isAnalyzerAttachedRun,
@@ -127,6 +139,48 @@ export default function StrategyAnalyzerHeaderControls({
               onWarmupBarsChange(Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0);
             }}
             title="How many bars before the selected range to preload for warmup"
+          />
+        </label>
+
+        <label
+          className="sa-control-field sa-control-field-tight"
+          style={{ minWidth: "auto" }}
+          title="Include pre/post market hours in analyzer run"
+        >
+          <span className="sa-control-label">Ext Hours</span>
+          <input
+            type="checkbox"
+            checked={includeExtendedHours}
+            onChange={(e) => onIncludeExtendedHoursChange(Boolean(e.target.checked))}
+            disabled={runLoading || isPlayingRun}
+          />
+        </label>
+
+        <label
+          className="sa-control-field sa-control-field-tight"
+          style={{ minWidth: "auto" }}
+          title="Comparable mode: deterministic cold-start behavior for reproducible runs"
+        >
+          <span className="sa-control-label">Comparable</span>
+          <input
+            type="checkbox"
+            checked={comparableMode}
+            onChange={(e) => onComparableModeChange(Boolean(e.target.checked))}
+            disabled={runLoading || isPlayingRun}
+          />
+        </label>
+
+        <label
+          className="sa-control-field sa-control-field-tight"
+          style={{ minWidth: "auto" }}
+          title="Reset strategy state at each market day start"
+        >
+          <span className="sa-control-label">Cold/Day</span>
+          <input
+            type="checkbox"
+            checked={coldStartEachDay || comparableMode}
+            onChange={(e) => onColdStartEachDayChange(Boolean(e.target.checked))}
+            disabled={runLoading || isPlayingRun || comparableMode}
           />
         </label>
 

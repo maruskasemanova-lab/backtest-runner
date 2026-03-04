@@ -394,10 +394,11 @@ class MarketContextProvider:
     ) -> List[MetricRow]:
         metrics_rows: List[MetricRow] = []
         closes: List[float] = []
-        highs: List[float] = []
-        lows: List[float] = []
         volumes: List[float] = []
         returns: List[float] = []
+        
+        session_high: Optional[float] = None
+        session_low: Optional[float] = None
 
         for row in normalized_bars:
             (
@@ -420,9 +421,11 @@ class MarketContextProvider:
                         returns.append(change)
                 closes.append(close_px)
             if high_px is not None:
-                highs.append(high_px)
+                if session_high is None or high_px > session_high:
+                    session_high = high_px
             if low_px is not None:
-                lows.append(low_px)
+                if session_low is None or low_px < session_low:
+                    session_low = low_px
             if volume is not None:
                 volumes.append(volume)
 
@@ -461,8 +464,6 @@ class MarketContextProvider:
             avg_volume_5 = self._average(volumes[-5:])
             avg_volume_20 = self._average(volumes[-20:])
             session_open = closes[0] if closes else None
-            session_high = max(highs) if highs else None
-            session_low = min(lows) if lows else None
 
             metrics_rows.append(
                 (
@@ -522,6 +523,8 @@ class MarketContextProvider:
         if pl is not None:
             try:
                 return self._build_contexts_polars(normalized_bars)
-            except Exception:
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
                 pass
         return self._build_contexts_fallback(normalized_bars)

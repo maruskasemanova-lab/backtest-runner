@@ -206,6 +206,18 @@ export const buildRunConfigSnapshotSections = ({
   return sections;
 };
 
+const RUN_KEY_RANGE_PATTERN = /^(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})$/;
+
+const extractRunKeyDateRange = (
+  runKey: string | null | undefined,
+): { dateFrom: string; dateTo: string } | null => {
+  if (!runKey) return null;
+  const datePart = String(runKey).trim().split(":").pop() || "";
+  const match = datePart.match(RUN_KEY_RANGE_PATTERN);
+  if (!match) return null;
+  return { dateFrom: match[1], dateTo: match[2] };
+};
+
 export const buildSelectedDayAnalyzerPayload = ({
   selectedDate,
   selectedRunRecord,
@@ -220,11 +232,21 @@ export const buildSelectedDayAnalyzerPayload = ({
   if (!normalizedTicker) return null;
   const selectedRunKey = String(selectedRunRecord?.run_key || "").trim() || null;
   const selectedRunId = String(selectedRunRecord?.run_id || "").trim() || null;
+  const selectedProfileKey = String(resolveRunProfileIdentity(selectedRunRecord)?.profileKey || "")
+    .trim()
+    .toLowerCase();
+  const selectedVariantKey = selectedProfileKey.startsWith("variant:")
+    ? selectedProfileKey
+    : null;
+  const dateRange = extractRunKeyDateRange(selectedRunKey);
   return {
     ticker: normalizedTicker,
     isoDate: selectedDate,
     runKey: selectedRunKey,
     runId: selectedRunId,
+    variantKey: selectedVariantKey,
+    dateFrom: dateRange?.dateFrom ?? null,
+    dateTo: dateRange?.dateTo ?? null,
   };
 };
 

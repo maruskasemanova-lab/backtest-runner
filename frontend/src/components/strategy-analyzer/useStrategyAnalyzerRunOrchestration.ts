@@ -21,6 +21,9 @@ type Params = {
   ticker: string;
   strategyApiUrl: string;
   analyzerTradeEvalMode: StrategyAnalyzerTradeEvalMode;
+  includeExtendedHours: boolean;
+  comparableMode: boolean;
+  coldStartEachDay: boolean;
   contextRiskPresetKey: StrategyAnalyzerContextRiskPresetKey;
   rangePlaybackMeta: StrategyAnalyzerRangePlaybackMeta;
   onStartRun?: StrategyAnalyzerOnStartRun;
@@ -39,6 +42,7 @@ async function ensurePrewarmed(
   ticker: string,
   dateFrom: string,
   dateTo: string,
+  includeExtendedHours: boolean,
 ): Promise<void> {
   const payload = {
     ticker,
@@ -46,7 +50,7 @@ async function ensurePrewarmed(
     date_to: dateTo,
     prewarm_scope: "range",
     allow_mock_data: false,
-    include_extended_hours: true,
+    include_extended_hours: includeExtendedHours,
   };
   try {
     const statusResp = await fetch("/api/run/prewarm/status", {
@@ -76,6 +80,9 @@ export function useStrategyAnalyzerRunOrchestration({
   ticker,
   strategyApiUrl,
   analyzerTradeEvalMode,
+  includeExtendedHours,
+  comparableMode,
+  coldStartEachDay,
   contextRiskPresetKey,
   rangePlaybackMeta,
   onStartRun,
@@ -101,14 +108,14 @@ export function useStrategyAnalyzerRunOrchestration({
     const dateFrom = effectiveStartLocal.slice(0, 10);
     const dateTo = effectiveEndLocal.slice(0, 10);
 
-    const prewarmKey = `${ticker}:${dateFrom}:${dateTo}`;
+    const prewarmKey = `${ticker}:${dateFrom}:${dateTo}:${includeExtendedHours ? "ext" : "rth"}`;
     if (prewarmKey === lastPrewarmKeyRef.current) return;
 
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       if (controller.signal.aborted) return;
       try {
-        await ensurePrewarmed(ticker, dateFrom, dateTo);
+        await ensurePrewarmed(ticker, dateFrom, dateTo, includeExtendedHours);
         lastPrewarmKeyRef.current = prewarmKey;
       } catch {
         // Non-critical
@@ -119,7 +126,7 @@ export function useStrategyAnalyzerRunOrchestration({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [selectedRangeFrom, selectedRangeTo, ticker, rangePlaybackMeta]);
+  }, [selectedRangeFrom, selectedRangeTo, ticker, rangePlaybackMeta, includeExtendedHours]);
 
   const handleStartTest = useCallback(async () => {
     if (!selectedRangeFrom || !selectedRangeTo || !ticker) return;
@@ -137,8 +144,8 @@ export function useStrategyAnalyzerRunOrchestration({
       // Ensure bars are cached before /api/run/start.
       // If background prewarm already completed, this returns instantly (cache hit).
       // If prewarm is still in-flight, this joins the existing request (dedup).
-      await ensurePrewarmed(ticker, dateFrom, dateTo);
-      lastPrewarmKeyRef.current = `${ticker}:${dateFrom}:${dateTo}`;
+      await ensurePrewarmed(ticker, dateFrom, dateTo, includeExtendedHours);
+      lastPrewarmKeyRef.current = `${ticker}:${dateFrom}:${dateTo}:${includeExtendedHours ? "ext" : "rth"}`;
 
       const payload: StrategyAnalyzerStartRunPayload = {
         run_id: `analyzer-${strategyAnalyzerContextRiskRunIdToken(contextRiskPresetKey)}-${Date.now()}`,
@@ -150,8 +157,10 @@ export function useStrategyAnalyzerRunOrchestration({
         trade_start_time: dateTimeLocalToUtcIso(effectiveTradeStartLocal),
         trade_end_time: dateTimeLocalToUtcIso(effectiveTradeEndLocal),
         strategy_api_url: strategyApiUrl || defaultStrategyApiUrl,
-        include_extended_hours: true,
+        include_extended_hours: includeExtendedHours,
         trade_eval_mode: analyzerTradeEvalMode,
+        comparable_mode: comparableMode,
+        cold_start_each_day: comparableMode ? true : coldStartEachDay,
         // Hint for frontend start handler: analyzer should start immediately
         // (skip queued v2 orchestration path and use direct /api/run/start).
         __client_hint: "strategy_analyzer",
@@ -189,6 +198,9 @@ export function useStrategyAnalyzerRunOrchestration({
     ticker,
     strategyApiUrl,
     analyzerTradeEvalMode,
+    includeExtendedHours,
+    comparableMode,
+    coldStartEachDay,
     contextRiskPresetKey,
     rangePlaybackMeta,
     onStartRun,

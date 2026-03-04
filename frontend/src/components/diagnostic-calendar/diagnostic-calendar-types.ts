@@ -81,7 +81,12 @@ export type StrategyAnalyzerPayload = {
   isoDate: string;
   runId?: string | null;
   runKey?: string | null;
+  variantKey?: string | null;
   ticker: string;
+  /** Original run date-range start (from multi-day run_key). */
+  dateFrom?: string | null;
+  /** Original run date-range end (from multi-day run_key). */
+  dateTo?: string | null;
 };
 
 export type DiagnosticCalendarSnapshotSection = {

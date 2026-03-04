@@ -273,16 +273,6 @@ const CandlestickChart = forwardRef<CandlestickChartHandle, CandlestickChartProp
     setTooltip,
   });
 
-  useCandlestickChartSelectedMarkerFocus({
-    chartRef,
-    candleSeriesRef,
-    chartContainerRef,
-    selectedMarker,
-    bars,
-    lastFocusedMarkerKeyRef,
-    setTooltip,
-  });
-
   useCandlestickChartSeriesMarkers({
     candleSeriesRef,
     bars,
@@ -298,6 +288,16 @@ const CandlestickChart = forwardRef<CandlestickChartHandle, CandlestickChartProp
     bars,
     chartState,
     setError,
+  });
+
+  useCandlestickChartSelectedMarkerFocus({
+    chartRef,
+    candleSeriesRef,
+    chartContainerRef,
+    selectedMarker,
+    bars,
+    lastFocusedMarkerKeyRef,
+    setTooltip,
   });
 
   useCandlestickChartExternalRangeSync({

@@ -55,6 +55,7 @@ export const mergeRunStateWithStreamBar = (
   if (!previousState) return null;
 
   const totalBars = Number(previousState.total_bars || 0);
+  const previousCurrentRaw = Number(previousState.current_bar_index || 0);
   const streamIndex = Number(bar?.bar_index);
   const legacyIndex = Number(bar?.index);
 
@@ -62,11 +63,16 @@ export const mergeRunStateWithStreamBar = (
     ? streamIndex + 1
     : (Number.isFinite(legacyIndex)
         ? legacyIndex + 1
-        : Number(previousState.current_bar_index || 0) + 1);
+        : previousCurrentRaw + 1);
 
-  const current = totalBars > 0
+  const previousCurrent = totalBars > 0
+    ? Math.min(totalBars, Math.max(0, previousCurrentRaw))
+    : Math.max(0, previousCurrentRaw);
+  const nextCurrent = totalBars > 0
     ? Math.min(totalBars, Math.max(0, rawCurrent))
     : Math.max(0, rawCurrent);
+  // Stream updates can arrive late/out of order; never regress processed progress.
+  const current = Math.max(previousCurrent, nextCurrent);
   const progress = totalBars > 0
     ? Math.min(100, Math.max(0, (current / totalBars) * 100))
     : 0;
@@ -83,26 +89,42 @@ export const upsertStreamChartBar = (
   nextBar: CandlestickChartBar,
 ): CandlestickChartBar[] => {
   if (!previousBars.length) return [nextBar];
-  const lastBar = previousBars[previousBars.length - 1];
+  const lastIndex = previousBars.length - 1;
+  const lastBar = previousBars[lastIndex];
   if (Math.abs(Number(lastBar?.time || 0) - Number(nextBar.time || 0)) < 0.0001) {
-    const updatedBars = [...previousBars];
-    updatedBars[updatedBars.length - 1] = nextBar;
+    // Same-minute update: shallow-copy only to satisfy React immutability.
+    // We copy the reference array but only replace the tail element.
+    const updatedBars = previousBars.slice();
+    updatedBars[lastIndex] = nextBar;
     return updatedBars;
   }
-  return [...previousBars, nextBar];
+  // Append: use concat which is faster than spread for large arrays.
+  return previousBars.concat(nextBar);
 };
 
 export const upsertDecisionMarker = (
   previousMarkers: StrategyAnalyzerDecisionMarker[],
   nextMarker: StrategyAnalyzerDecisionMarker,
 ): StrategyAnalyzerDecisionMarker[] => {
-  const markerIndex = previousMarkers.findIndex((marker) => marker.id === nextMarker.id);
-  if (markerIndex !== -1) {
-    const updatedMarkers = [...previousMarkers];
-    updatedMarkers[markerIndex] = { ...previousMarkers[markerIndex], ...nextMarker };
-    return updatedMarkers;
+  // Fast path: during streaming, markers almost always arrive new (append).
+  // Check for duplicate only if the marker has an id.
+  if (nextMarker.id) {
+    // Check last element first (most common during sequential streaming)
+    const lastIndex = previousMarkers.length - 1;
+    if (lastIndex >= 0 && previousMarkers[lastIndex].id === nextMarker.id) {
+      const updatedMarkers = previousMarkers.slice();
+      updatedMarkers[lastIndex] = { ...previousMarkers[lastIndex], ...nextMarker };
+      return updatedMarkers;
+    }
+    // Full scan only as fallback for out-of-order updates
+    const markerIndex = previousMarkers.findIndex((marker) => marker.id === nextMarker.id);
+    if (markerIndex !== -1) {
+      const updatedMarkers = previousMarkers.slice();
+      updatedMarkers[markerIndex] = { ...previousMarkers[markerIndex], ...nextMarker };
+      return updatedMarkers;
+    }
   }
-  return [...previousMarkers, nextMarker];
+  return previousMarkers.concat(nextMarker);
 };
 
 export const scoreMarkerMatch = (

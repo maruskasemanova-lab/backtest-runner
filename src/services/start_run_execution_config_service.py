@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any, Dict
 
+from src.services.config_fingerprint_utils import compute_config_fingerprint
+
 from src.services.execution_config.positioning_specs import (
     _BOOL_POSITIONING_SPECS,
     _FLOAT_POSITIONING_SPECS,
@@ -868,7 +870,7 @@ def resolve_execution_config(
         stop_loss_runtime=stop_loss_runtime,
     )
 
-    return {
+    result = {
         "requested_l2_only": l2_cfg["requested_l2_only"],
         "requested_l2_confirm": l2_cfg["requested_l2_confirm"],
         "l2_min_delta": l2_cfg["l2_min_delta"],
@@ -901,3 +903,5 @@ def resolve_execution_config(
         **context_risk_cfg,
         "trading_config": trading_config_payload,
     }
+    result["config_fingerprint"] = compute_config_fingerprint(result)
+    return result

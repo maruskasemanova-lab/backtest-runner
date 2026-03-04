@@ -1,17 +1,10 @@
 {
-  "strategy": "momentum",
+  "strategy": "evidence_scalp",
   "params": {
-    "min_distance_pct": 0.4,
-    "max_distance_pct": 3.0,
-    "bars_since_vwap_threshold": 5,
-    "volume_confirm": true,
-    "volume_lookback": 20,
-    "volume_stop_pct": 0.7,
-    "trailing_stop_pct": 0.4,
-    "min_confidence": 60,
+    "min_confidence": 68,
     "long_only": false
   },
-  "backup_strategy": "vwap_magnet",
+  "backup_strategy": "evidence_scalp",
   "regime_filter": [
     "TRENDING",
     "MIXED",
@@ -19,22 +12,22 @@
   ],
   "avoid_days": [],
   "long_only": false,
-  "min_confidence": 60,
-  "max_daily_trades": 0,
+  "min_confidence": 68,
+  "max_daily_trades": 3,
   "l2": {
-    "min_delta": 2200.0,
-    "min_imbalance": 0.02,
+    "min_delta": 0.0,
+    "min_imbalance": 0.05,
     "min_signed_aggression": 0.05,
-    "min_directional_consistency": 0.35,
+    "min_directional_consistency": 0.40,
     "confirm_enabled": true,
     "lookback_bars": 3
   },
-  "notes": "Hybrid profile (2026-02-20): regime-aware routing with TRENDING/MIXED/CHOPPY, L2 confirmation gate enabled, intrabar confirmation for scalp strategy, break-even + adverse-flow + time-exit capital protection.",
+  "notes": "MU v4: Merged from v3_robust + level_fade strategy. Added level_fade to MIXED/CHOPPY. Re-enabled CHOPPY regime (gated by level_fade quality filters + intraday_levels). Kept all v3 hardening intact.",
   "strategy_selection_mode": "all_enabled",
-  "max_active_strategies": 5,
+  "max_active_strategies": 3,
   "liquidity_sweep_detection_enabled": true,
   "l2_confirm_enabled": true,
-  "tcbbo_gate_enabled": true,
+  "tcbbo_gate_enabled": false,
   "trading_hours": [
     10,
     11,
@@ -46,63 +39,56 @@
   "time_filter_enabled": true,
   "adaptive": {
     "version": 2,
-    "flow_bias_enabled": true,
+    "flow_bias_enabled": false,
     "use_ohlcv_fallbacks": false,
     "min_active_bars_before_switch": 0,
     "switch_cooldown_bars": 5,
-    "evidence_base_threshold": 42.0,
-    "evidence_min_confirming_sources": 2,
+    "evidence_base_threshold": 60.0,
+    "evidence_min_confirming_sources": 3,
     "context_exit_response": {
-      "flow_reversal_move_to_breakeven": false,
-      "flow_reversal_exit_when_losing": false,
-      "regime_flip_tighten_stop_pct": 0.5,
-      "regime_flip_shorten_time_pct": 0.5,
+      "flow_reversal_move_to_breakeven": true,
+      "flow_reversal_exit_when_losing": true,
+      "regime_flip_tighten_stop_pct": 0.6,
+      "regime_flip_shorten_time_pct": 0.6,
       "regime_flip_exit_when_losing": true,
-      "regime_flip_exit_loss_threshold_pct": 0.3,
-      "momentum_stall_time_multiplier": 0.7
+      "regime_flip_exit_loss_threshold_pct": 0.15,
+      "momentum_stall_time_multiplier": 0.5
     },
     "regime_preferences": {
       "TRENDING": [
         "momentum_flow",
-        "volume_profile",
-        "vwap_magnet",
-        "gap_liquidity"
+        "evidence_scalp"
       ],
       "MIXED": [
-        "volume_profile",
+        "evidence_scalp",
         "mean_reversion",
-        "vwap_magnet",
-        "absorption_reversal",
-        "gap_liquidity"
+        "level_fade"
       ],
       "CHOPPY": [
-        "mean_reversion",
-        "vwap_magnet",
-        "absorption_reversal",
-        "exhaustion_fade",
-        "gap_liquidity"
+        "evidence_scalp",
+        "level_fade"
       ]
     }
   },
   "v2_strategy_param_overrides": {
-    "min_confidence": 50.0
+    "min_confidence": 68.0
   },
   "momentum_diversification": {
     "fail_fast_exit_enabled": true,
     "route_enabled": true,
     "enabled": true,
     "min_flow_score": 75.0,
-    "min_directional_consistency": 0.35,
-    "min_signed_aggression": 0.04,
-    "min_imbalance": 0.04,
-    "min_cvd": 3000.0,
-    "min_directional_price_change_pct": 0.05,
-    "min_price_trend_efficiency": 0.35,
-    "min_last_bar_body_ratio": 0.3,
-    "min_last_bar_close_location": 0.7,
-    "min_delta_acceleration": 1500.0,
-    "min_delta_price_divergence": -0.45,
-    "route_flow_score_impulse": 68.0,
+    "min_directional_consistency": 0.40,
+    "min_signed_aggression": 0.05,
+    "min_imbalance": 0.05,
+    "min_cvd": 0.0,
+    "min_directional_price_change_pct": 0.06,
+    "min_price_trend_efficiency": 0.40,
+    "min_last_bar_body_ratio": 0.35,
+    "min_last_bar_close_location": 0.70,
+    "min_delta_acceleration": 0.0,
+    "min_delta_price_divergence": -0.30,
+    "route_flow_score_impulse": 75.0,
     "fail_fast_max_bars": 5,
     "apply_to_strategies": [
       "momentum_flow"
@@ -111,34 +97,30 @@
   "regime_strategy_map": {
     "TRENDING": [
       "momentum_flow",
-      "volume_profile",
-      "vwap_magnet"
+      "evidence_scalp"
     ],
     "MIXED": [
-      "volume_profile",
+      "evidence_scalp",
       "mean_reversion",
-      "vwap_magnet",
-      "absorption_reversal"
+      "level_fade"
     ],
     "CHOPPY": [
-      "mean_reversion",
-      "vwap_magnet",
-      "absorption_reversal",
-      "exhaustion_fade"
+      "evidence_scalp",
+      "level_fade"
     ]
   },
   "mu_choppy_hard_block_enabled": false,
   "include_extended_hours": true,
   "apply_positioning_config_on_start": false,
-  "intraday_levels_entry_tolerance_pct": 0.12,
-  "intraday_levels_break_cooldown_bars": 3,
+  "intraday_levels_entry_tolerance_pct": 0.40,
+  "intraday_levels_break_cooldown_bars": 4,
   "intraday_levels_rotation_max_tests": 2,
   "intraday_levels_rotation_volume_max_ratio": 1.0,
   "intraday_levels_recent_bounce_lookback_bars": 6,
   "intraday_levels_require_recent_bounce_for_mean_reversion": true,
   "intraday_levels_momentum_break_max_age_bars": 3,
-  "intraday_levels_momentum_min_room_pct": 0.12,
-  "intraday_levels_momentum_min_broken_ratio": 0.2,
+  "intraday_levels_momentum_min_room_pct": 0.15,
+  "intraday_levels_momentum_min_broken_ratio": 0.3,
   "intraday_levels_min_confluence_score": 2,
   "intraday_levels_micro_confirmation_enabled": true,
   "intraday_levels_rvol_filter_enabled": true,
@@ -150,14 +132,18 @@
   "account_size_usd": 10000.0,
   "max_fill_participation_rate": 1.0,
   "min_fill_ratio": 1.0,
-  "context_risk_trailing_tighten_zone": 0.2,
-  "context_risk_min_room_pct": 0.08,
-  "context_risk_min_effective_rr": 0.5,
+  "context_risk_trailing_tighten_zone": 0.15,
+  "context_risk_min_room_pct": 0.15,
+  "context_risk_min_effective_rr": 0.80,
   "intraday_levels_enabled": true,
   "intraday_levels_spike_detection_enabled": true,
   "intraday_levels_gap_analysis_enabled": true,
   "adverse_flow_exit_enabled": true,
-  "adverse_flow_threshold": 0.15,
-  "adverse_flow_consistency_threshold": 0.3,
-  "adverse_book_pressure_threshold": 0.1
+  "adverse_flow_threshold": 0.10,
+  "adverse_flow_consistency_threshold": 0.20,
+  "adverse_book_pressure_threshold": 0.06,
+  "time_exit_bars": 15,
+  "choppy_time_exit_bars": 8,
+  "stale_trade_be_bars": 8,
+  "stale_trade_be_pnl_threshold_pct": 0.05
 }

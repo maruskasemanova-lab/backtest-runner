@@ -15,6 +15,7 @@ export default function StrategyAnalyzerScrubSlider({
 
   return (
     <div
+      data-webmcp="strategy-analyzer-scrub-slider"
       style={{
         borderTop: "1px solid var(--border-color)",
         padding: "0.65rem 0.85rem 0.75rem",
@@ -66,6 +67,7 @@ export default function StrategyAnalyzerScrubSlider({
           <button
             type="button"
             className="btn btn-secondary"
+            data-webmcp="strategy-analyzer-scrub-latest"
             onClick={() => focusSelectedRangeOffset(rangeScrubMeta.progressedMaxOffset)}
             disabled={rangeScrubMeta.clampedOffset >= rangeScrubMeta.progressedMaxOffset}
             style={{ padding: "2px 8px", fontSize: "0.72rem", fontWeight: 700 }}
@@ -80,6 +82,7 @@ export default function StrategyAnalyzerScrubSlider({
         <button
           type="button"
           className="btn btn-secondary"
+          data-webmcp="strategy-analyzer-scrub-prev"
           onClick={() => moveSelectedRangeByStep(-1)}
           disabled={rangeScrubMeta.clampedOffset <= 0}
           style={{ padding: "4px 10px", fontSize: "0.78rem", fontWeight: 700 }}
@@ -89,6 +92,7 @@ export default function StrategyAnalyzerScrubSlider({
         </button>
         <input
           type="range"
+          data-webmcp="strategy-analyzer-scrub-range"
           min={0}
           max={rangeScrubMeta.fullMaxOffset}
           step={Math.max(1, Math.trunc(Number(rangeScrubMeta.sliderStepBars) || 1))}
@@ -110,6 +114,7 @@ export default function StrategyAnalyzerScrubSlider({
         <button
           type="button"
           className="btn btn-secondary"
+          data-webmcp="strategy-analyzer-scrub-next"
           onClick={() => moveSelectedRangeByStep(1)}
           disabled={rangeScrubMeta.clampedOffset >= rangeScrubMeta.progressedMaxOffset}
           style={{ padding: "4px 10px", fontSize: "0.78rem", fontWeight: 700 }}

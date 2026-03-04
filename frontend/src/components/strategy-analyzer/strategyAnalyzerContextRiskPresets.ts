@@ -65,3 +65,33 @@ export const strategyAnalyzerContextRiskRunIdToken = (
   if (presetKey === "current_defaults") return "default";
   return presetKey;
 };
+
+export const resolveContextRiskPresetFromVariantKey = (
+  variantKey: string | null | undefined,
+): StrategyAnalyzerContextRiskPresetKey | null => {
+  const normalized = String(variantKey || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "variant:no_context_risk" || normalized.startsWith("variant:context_risk_off_")) {
+    return "no_context_risk";
+  }
+  if (normalized === "variant:relaxed_context_35" || normalized === "variant:context_risk_on_0.0200_0.3500") {
+    return "relaxed_context_35";
+  }
+  if (normalized === "variant:baseline" || normalized === "variant:context_risk_on_0.0800_0.5000") {
+    return "baseline";
+  }
+  return null;
+};
+
+export const resolveContextRiskPresetFromRunKey = (
+  runKey: string | null | undefined,
+): StrategyAnalyzerContextRiskPresetKey | null => {
+  const normalizedRunKey = String(runKey || "").trim().toLowerCase();
+  if (!normalizedRunKey) return null;
+  const runId = normalizedRunKey.split(":")[0] || normalizedRunKey;
+  if (runId.includes("no_context_risk")) return "no_context_risk";
+  if (runId.includes("relaxed_context_35")) return "relaxed_context_35";
+  if (runId.includes("baseline")) return "baseline";
+  if (runId.includes("analyzer-default")) return "current_defaults";
+  return null;
+};

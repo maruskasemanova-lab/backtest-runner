@@ -10,6 +10,9 @@ type DiagnosticCalendarProps = {
     isoDate: string;
     runKey?: string | null;
     runId?: string | null;
+    variantKey?: string | null;
+    dateFrom?: string | null;
+    dateTo?: string | null;
   }) => void;
 };
 

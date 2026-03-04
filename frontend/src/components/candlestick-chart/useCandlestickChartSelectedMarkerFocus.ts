@@ -68,15 +68,19 @@ export default function useCandlestickChartSelectedMarkerFocus({
     const windowSize = 40;
     const fromIndex = Math.max(0, closestIndex - windowSize);
     const toIndex = Math.min(bars.length - 1, closestIndex + windowSize);
-    const fromTime = bars[fromIndex]?.time;
-    const toTime = bars[toIndex]?.time;
+    const fromTime = Number(bars[fromIndex]?.time);
+    const toTime = Number(bars[toIndex]?.time);
 
-    if (fromTime && toTime && chartRef.current) {
-      chartRef.current.timeScale().setVisibleRange({
-        from: fromTime,
-        to: toTime,
-      });
-      lastFocusedMarkerKeyRef.current = markerFocusKey || `${fromTime}-${toTime}`;
+    if (Number.isFinite(fromTime) && Number.isFinite(toTime) && toTime > fromTime && chartRef.current) {
+      try {
+        chartRef.current.timeScale().setVisibleRange({
+          from: fromTime,
+          to: toTime,
+        });
+        lastFocusedMarkerKeyRef.current = markerFocusKey || `${fromTime}-${toTime}`;
+      } catch {
+        // Ignore range-focus errors when chart has not fully initialized.
+      }
     }
 
     // Show tooltip for chart-driven selection only. Decision-panel selection opens detail dialog.

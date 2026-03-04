@@ -24,5 +24,12 @@ class RunRegistry:
         if runner is None:
             if not stateful_run_api_supported():
                 raise HTTPException(503, stateful_run_api_unsupported_detail())
-            raise HTTPException(404, f"Run not found: {run_key}")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_code": "RUN_NOT_FOUND",
+                    "message": f"Run not found: {run_key}",
+                    "hint": "May have been flushed to DB. Use DB-backed endpoints for completed runs."
+                }
+            )
         return run_key, runner

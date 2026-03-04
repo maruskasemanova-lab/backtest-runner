@@ -84,6 +84,7 @@ const buildRiskControlsCandidates = ({
     { path: "details.signal_metadata.risk_controls", value: details?.signal_metadata?.risk_controls },
     { path: "signal_metadata.risk_controls", value: signalMetadata?.risk_controls },
     { path: "market_context.risk_controls", value: marketContext?.risk_controls },
+    { path: "risk_controls", value: details?.risk_controls ?? signalMetadata?.risk_controls ?? marketContext?.risk_controls }, // Fallback to details payload
   ];
 };
 
@@ -133,6 +134,8 @@ const buildContextRiskCandidates = ({
     { path: "signal_metadata.risk_controls.context_risk", value: signalMetadata?.risk_controls?.context_risk },
     { path: "market_context.risk_controls.context_risk", value: marketContext?.risk_controls?.context_risk },
     { path: "resolved_risk_controls.context_risk", value: riskControls?.context_risk },
+    { path: "signal_metadata.context_risk", value: signalMetadata?.context_risk },
+    { path: "market_context.context_risk", value: marketContext?.context_risk },
   ];
 };
 
@@ -163,6 +166,7 @@ const buildBreakEvenCandidates = ({
   { path: "details.market_context.break_even", value: details?.market_context?.break_even },
   { path: "signal_metadata.break_even", value: signalMetadata?.break_even },
   { path: "market_context.break_even", value: marketContext?.break_even },
+  { path: "break_even", value: details?.break_even ?? signalMetadata?.break_even ?? marketContext?.break_even },
 ];
 
 export const resolveBreakEven = (params: BaseResolutionParams): ResolutionResult => {

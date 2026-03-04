@@ -6,6 +6,11 @@ export type DiagnosticAnalyzerOpenDayRequest = {
   ticker: string;
   isoDate: string;
   runKey?: string | null;
+  variantKey?: string | null;
+  /** Original run date-range start (from multi-day run_key). */
+  dateFrom?: string | null;
+  /** Original run date-range end (from multi-day run_key). */
+  dateTo?: string | null;
 };
 
 export type InitialAppUrlState = {
@@ -46,6 +51,10 @@ const URL_PARAM_VIEW = 'view';
 const URL_PARAM_ANALYZER_TICKER = 'sa_ticker';
 const URL_PARAM_ANALYZER_DAY = 'sa_day';
 const URL_PARAM_ANALYZER_RUN_KEY = 'sa_run_key';
+const URL_PARAM_ANALYZER_VARIANT = 'sa_variant';
+const URL_PARAM_ANALYZER_DATE_FROM = 'sa_date_from';
+const URL_PARAM_ANALYZER_DATE_TO = 'sa_date_to';
+const URL_PARAM_DIAGNOSTIC_VARIANT = 'diag_variant';
 
 export const SIDEBAR_NAV_ITEMS = [
   { id: 'dates', label: 'Date Range', icon: '🗓', sectionId: 'run-config', runConfigMode: 'dates', focusFieldId: 'date_from', rangeLabel: 'A1' },
@@ -115,6 +124,13 @@ export const readInitialAppUrlState = (): InitialAppUrlState => {
   const urlTicker = String(params.get(URL_PARAM_ANALYZER_TICKER) || '').trim().toUpperCase();
   const urlDay = normalizeIsoDay(params.get(URL_PARAM_ANALYZER_DAY));
   const urlRunKey = String(params.get(URL_PARAM_ANALYZER_RUN_KEY) || '').trim();
+  const urlVariantKey = String(
+    params.get(URL_PARAM_ANALYZER_VARIANT) || params.get(URL_PARAM_DIAGNOSTIC_VARIANT) || '',
+  )
+    .trim()
+    .toLowerCase();
+  const urlDateFrom = normalizeIsoDay(params.get(URL_PARAM_ANALYZER_DATE_FROM)) || null;
+  const urlDateTo = normalizeIsoDay(params.get(URL_PARAM_ANALYZER_DATE_TO)) || null;
   const hasAnalyzerTickerPreset = activeView === 'strategy-analyzer' && Boolean(urlTicker);
   const hasAnalyzerPreset = hasAnalyzerTickerPreset && Boolean(urlDay);
 
@@ -127,6 +143,9 @@ export const readInitialAppUrlState = (): InitialAppUrlState => {
           ticker: urlTicker,
           isoDate: String(urlDay),
           runKey: urlRunKey || null,
+          variantKey: urlVariantKey || null,
+          dateFrom: urlDateFrom,
+          dateTo: urlDateTo,
         }
       : null,
   };
@@ -136,6 +155,9 @@ export const buildStrategyAnalyzerDayUrl = (params: {
   ticker: string;
   isoDate: string;
   runKey?: string | null;
+  variantKey?: string | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
 }): string => {
   if (typeof window === 'undefined') return '';
   const nextUrl = new URL(window.location.href);
@@ -145,6 +167,15 @@ export const buildStrategyAnalyzerDayUrl = (params: {
   const runKey = String(params.runKey || '').trim();
   if (runKey) nextUrl.searchParams.set(URL_PARAM_ANALYZER_RUN_KEY, runKey);
   else nextUrl.searchParams.delete(URL_PARAM_ANALYZER_RUN_KEY);
+  const variantKey = String(params.variantKey || '').trim().toLowerCase();
+  if (variantKey) nextUrl.searchParams.set(URL_PARAM_ANALYZER_VARIANT, variantKey);
+  else nextUrl.searchParams.delete(URL_PARAM_ANALYZER_VARIANT);
+  const dateFrom = String(params.dateFrom || '').trim();
+  if (dateFrom) nextUrl.searchParams.set(URL_PARAM_ANALYZER_DATE_FROM, dateFrom);
+  else nextUrl.searchParams.delete(URL_PARAM_ANALYZER_DATE_FROM);
+  const dateTo = String(params.dateTo || '').trim();
+  if (dateTo) nextUrl.searchParams.set(URL_PARAM_ANALYZER_DATE_TO, dateTo);
+  else nextUrl.searchParams.delete(URL_PARAM_ANALYZER_DATE_TO);
   return nextUrl.toString();
 };
 

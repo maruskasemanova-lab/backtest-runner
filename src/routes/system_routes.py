@@ -255,6 +255,9 @@ def _extract_profile_metadata(payload: Dict[str, Any]) -> Dict[str, Optional[str
         execution_config.get("unified_profile_name"),
         unified_meta.get("profile_name"),
     )
+    config_fingerprint = _first_profile_token(
+        execution_config.get("config_fingerprint"),
+    )
     return {
         "unified_profile_id": unified_profile_id,
         "unified_profile_name": unified_profile_name,
@@ -262,6 +265,7 @@ def _extract_profile_metadata(payload: Dict[str, Any]) -> Dict[str, Optional[str
         "adaptive_profile_name": adaptive_profile_name,
         "strategy_combo_profile_id": strategy_combo_profile_id,
         "strategy_combo_profile_name": strategy_combo_profile_name,
+        "config_fingerprint": config_fingerprint,
     }
 
 
@@ -890,6 +894,7 @@ def _build_history_day_rows(
                 "strategy_combo_profile_name": profile_meta.get(
                     "strategy_combo_profile_name"
                 ),
+                "config_fingerprint": profile_meta.get("config_fingerprint"),
             }
         )
     return rows
@@ -925,6 +930,7 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
                 "strategy_combo_profile_ids": set(),
                 "strategy_combo_profile_names": set(),
                 "profile_match_modes": set(),
+                "config_fingerprints": set(),
             }
             by_day[day] = bucket
 
@@ -979,6 +985,9 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
         profile_match_mode = str(row.get("profile_match_mode") or "").strip()
         if profile_match_mode:
             bucket["profile_match_modes"].add(profile_match_mode)
+        config_fingerprint = str(row.get("config_fingerprint") or "").strip()
+        if config_fingerprint:
+            bucket["config_fingerprints"].add(config_fingerprint)
 
         bucket["runs"].append(
             {
@@ -1095,6 +1104,7 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
             "strategy_combo_profile_ids": strategy_combo_profile_ids,
             "strategy_combo_profile_names": strategy_combo_profile_names,
             "profile_match_modes": profile_match_modes,
+            "config_fingerprints": sorted(bucket.get("config_fingerprints", set())),
             "unified_profile_id": _resolve_profile_values(set(unified_profile_ids)),
             "unified_profile_name": _resolve_profile_values(set(unified_profile_names)),
             "adaptive_profile_id": _resolve_profile_values(set(adaptive_profile_ids)),

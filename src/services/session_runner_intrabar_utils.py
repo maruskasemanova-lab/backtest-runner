@@ -294,6 +294,151 @@ class IntrabarQuoteProvider:
         quote_rows.sort(key=lambda item: item["s"])
         return quote_rows
 
+    def preload_quotes_for_range(
+        self,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+        l2_manager: Any,
+        cache: QuoteCache,
+    ) -> None:
+        if l2_manager is None:
+            return
+
+        ts_start_utc = self._to_utc_datetime(start_time).replace(second=0, microsecond=0)
+        ts_end_utc = self._to_utc_datetime(end_time).replace(second=59, microsecond=999999)
+        
+        from datetime import timedelta
+        current_dt = ts_start_utc
+        
+        while current_dt <= ts_end_utc:
+            chunk_end_dt = current_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+            if chunk_end_dt > ts_end_utc:
+                chunk_end_dt = ts_end_utc
+                
+            try:
+                frames = l2_manager.get_intrabar_frames(
+                    ticker=self._ticker,
+                    start_time=current_dt,
+                    end_time=chunk_end_dt,
+                )
+                if not self._frame_is_empty(frames):
+                    multi_quote_rows = self._extract_multi_minute_quote_rows(frames)
+                    
+                    grouped: Dict[int, List[QuoteRow]] = {}
+                    for row in multi_quote_rows:
+                        mk = row["m"]
+                        if mk not in grouped:
+                            grouped[mk] = []
+                        grouped[mk].append({"s": row["s"], "bid": row["bid"], "ask": row["ask"]})
+                        
+                    for minute_key, minute_rows in grouped.items():
+                        minute_rows.sort(key=lambda item: item["s"])
+                        cache[minute_key] = minute_rows
+                        
+            except Exception as exc:
+                self._logger.warning("Intrabar quote preload chunk failed for %s @ %s..%s: %s", self._ticker, current_dt, chunk_end_dt, exc)
+            
+            # Move to next day
+            current_dt = (current_dt + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def _extract_multi_minute_quote_rows(self, frames: Any) -> List[Dict[str, Any]]:
+        used_polars = False
+        quote_rows: List[Dict[str, Any]] = []
+
+        if pl is not None:
+            try:
+                pl_frame = (
+                    frames if isinstance(frames, pl.DataFrame) else pl.from_pandas(frames)
+                )
+                pl_quotes = (
+                    pl_frame.with_columns(
+                        [
+                            pl.col("has_book_coverage")
+                            .cast(pl.Boolean, strict=False)
+                            .fill_null(False)
+                            .alias("has_book_coverage"),
+                            pl.col("top_bid_px")
+                            .cast(pl.Float64, strict=False)
+                            .alias("bid"),
+                            pl.col("top_ask_px")
+                            .cast(pl.Float64, strict=False)
+                            .alias("ask"),
+                            pl.col("ts_sec")
+                            .map_elements(
+                                lambda ts: (
+                                    int(self._to_utc_datetime(ts).replace(second=0, microsecond=0).timestamp())
+                                    if ts is not None
+                                    else None
+                                ),
+                                return_dtype=pl.Int64,
+                            )
+                            .alias("m"),
+                            pl.col("ts_sec")
+                            .map_elements(
+                                lambda ts: (
+                                    self._to_utc_datetime(ts).second
+                                    if ts is not None
+                                    else None
+                                ),
+                                return_dtype=pl.Int64,
+                            )
+                            .alias("s"),
+                        ]
+                    )
+                    .filter(pl.col("has_book_coverage"))
+                    .filter((pl.col("bid") > 0.0) | (pl.col("ask") > 0.0))
+                    .filter(pl.col("s").is_not_null() & pl.col("m").is_not_null())
+                    .select(["m", "s", "bid", "ask"])
+                )
+                quote_rows = [
+                    {
+                        "m": int(row["m"]),
+                        "s": int(row["s"]),
+                        "bid": round(float(row["bid"]), 6),
+                        "ask": round(float(row["ask"]), 6),
+                    }
+                    for row in pl_quotes.to_dicts()
+                ]
+                used_polars = True
+            except Exception as exc:
+                self._log_deep_debug("[INTRABAR-DEEP-DEBUG] polars preload fallback for %s: %s", self._ticker, exc)
+
+        if used_polars:
+            return quote_rows
+
+        for _, row in frames.iterrows():
+            if not bool(row.get("has_book_coverage", False)):
+                continue
+
+            try:
+                bid = float(row.get("top_bid_px", 0.0) or 0.0)
+                ask = float(row.get("top_ask_px", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+
+            if bid <= 0.0 and ask <= 0.0:
+                continue
+
+            ts_sec = row.get("ts_sec")
+            try:
+                dt = self._to_utc_datetime(ts_sec)
+                second = int(dt.second)
+                minute_key = int(dt.replace(second=0, microsecond=0).timestamp())
+            except Exception:
+                continue
+
+            quote_rows.append(
+                {
+                    "m": minute_key,
+                    "s": second,
+                    "bid": round(bid, 6),
+                    "ask": round(ask, 6),
+                }
+            )
+
+        return quote_rows
+
     @staticmethod
     def _sample_row(frames: Any) -> Dict[str, Any]:
         if hasattr(frames, "iloc"):

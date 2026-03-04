@@ -12,7 +12,9 @@ from src.services.run_control_service import (
     get_markers,
     get_processed_bars,
     get_run_state,
+    get_run_status,
     get_run_summary,
+    get_run_summary_db,
     list_runs,
     pause_run,
     play_run,
@@ -197,6 +199,28 @@ async def get_run_summary_endpoint(
 ):
     """Get session summary."""
     return get_run_summary(run_id, ticker, date, services.build_run_control_deps())
+
+
+@router.get("/api/run/{run_id}/{ticker}/{date}/summary-db")
+async def get_run_summary_db_endpoint(
+    run_id: str,
+    ticker: str,
+    date: str,
+    services: ApiServices = Depends(get_api_services),
+):
+    """Get session summary, falling back to database if not in RAM."""
+    return get_run_summary_db(run_id, ticker, date, services.build_run_control_deps())
+
+
+@router.get("/api/run/{run_id}/{ticker}/{date}/run-status")
+async def get_run_status_endpoint(
+    run_id: str,
+    ticker: str,
+    date: str,
+    services: ApiServices = Depends(get_api_services),
+):
+    """Check if run is active in RAM or flushed to DB."""
+    return get_run_status(run_id, ticker, date, services.build_run_control_deps())
 
 
 @router.delete("/api/run/{run_id}/{ticker}/{date}")

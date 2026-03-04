@@ -84,6 +84,7 @@ import { useRunControlActions } from './hooks/useRunControlActions';
 import { useRunSnapshotActions } from './hooks/useRunSnapshotActions';
 import { useSidebarInteractions } from './hooks/useSidebarInteractions';
 import { useRunWebSocket } from './hooks/useRunWebSocket';
+import { publishWebMcpSnapshot } from './webmcp';
 
 function App() {
   const [initialUrlState] = useState<InitialAppUrlState>(() => readInitialAppUrlState());
@@ -236,17 +237,37 @@ function App() {
   }, []);
 
   const handleOpenDiagnosticDayInAnalyzer = useCallback(
-    ({ ticker, isoDate, runKey }: { ticker: string; isoDate: string; runKey?: string | null }) => {
+    ({
+      ticker,
+      isoDate,
+      runKey,
+      variantKey,
+      dateFrom,
+      dateTo,
+    }: {
+      ticker: string;
+      isoDate: string;
+      runKey?: string | null;
+      variantKey?: string | null;
+      dateFrom?: string | null;
+      dateTo?: string | null;
+    }) => {
       const normalizedTicker = String(ticker || '').trim().toUpperCase();
       const normalizedDate = normalizeIsoDay(isoDate);
       if (!normalizedDate) return;
       const normalizedRunKey = String(runKey || '').trim();
+      const normalizedVariantKey = String(variantKey || '').trim().toLowerCase();
+      const normalizedDateFrom = normalizeIsoDay(dateFrom) || null;
+      const normalizedDateTo = normalizeIsoDay(dateTo) || null;
       const fallbackTicker = String(selectedTicker || 'MU').trim().toUpperCase() || 'MU';
       const nextTicker = normalizedTicker || fallbackTicker;
       const nextUrl = buildStrategyAnalyzerDayUrl({
         ticker: nextTicker,
         isoDate: normalizedDate,
         runKey: normalizedRunKey || null,
+        variantKey: normalizedVariantKey || null,
+        dateFrom: normalizedDateFrom,
+        dateTo: normalizedDateTo,
       });
       if (typeof window !== 'undefined' && nextUrl) {
         // Force URL-based open to avoid transient handoff/loading flicker between views.
@@ -259,6 +280,9 @@ function App() {
         ticker: nextTicker,
         isoDate: normalizedDate,
         runKey: normalizedRunKey || null,
+        variantKey: normalizedVariantKey || null,
+        dateFrom: normalizedDateFrom,
+        dateTo: normalizedDateTo,
       });
       setActiveView('strategy-analyzer');
       setIsNavOpen(false);
@@ -353,11 +377,16 @@ function App() {
     setIsNavOpen(false);
   }, [activeView]);
   
+  // Stable ref for bars so handleEvaluateIntrabarSlice doesn't recreate on every tick.
+  const barsRef2 = useRef(bars);
+  useEffect(() => { barsRef2.current = bars; }, [bars]);
+
   // Handle new bar from WebSocket
   const handleEvaluateIntrabarSlice = useCallback<StrategyAnalyzerOnEvaluateIntrabarSlice>(async (ts: number) => {
     if (!activeRunApiBase) return null;
     // Find the minute bar that contains this checkpoint timestamp
-    const targetBar = bars.find(b => b.time <= ts && ts < b.time + 60);
+    const currentBars = barsRef2.current;
+    const targetBar = currentBars.find(b => b.time <= ts && ts < b.time + 60);
     if (!targetBar) return null;
     
     try {
@@ -382,7 +411,7 @@ function App() {
       console.error("Intrabar eval failed", e);
       return null;
     }
-  }, [activeRunApiBase, activeRunId, activeRunTicker, bars]);
+  }, [activeRunApiBase, activeRunId, activeRunTicker]);
 
   // Handle new bar from WebSocket
   const handleNewBar = useCallback((bar: StrategyAnalyzerRunBarLike | null | undefined) => {
@@ -595,6 +624,59 @@ function App() {
     quotaSnapshot?.usage && quotaSnapshot?.limits
       ? `${quotaSnapshot.usage.active_runs || 0}/${quotaSnapshot.limits.concurrent_runs || 0} lanes`
       : `${activeRuns.length} tracked`;
+
+  const webMcpSnapshotBase = useMemo(
+    () => ({
+      active_view: activeView,
+      active_tab: activeTab,
+      selected_ticker: selectedTicker,
+      run_key: runKey,
+      run_phase: runState?.phase ? String(runState.phase) : null,
+      timeframe,
+      chart_state:
+        chartState && Number.isFinite(Number(chartState.from)) && Number.isFinite(Number(chartState.to))
+          ? { from: Number(chartState.from), to: Number(chartState.to) }
+          : null,
+      price_range: priceRange && typeof priceRange === 'object' ? priceRange : null,
+      bars: Array.isArray(bars) ? bars : [],
+      displayed_bars: Array.isArray(displayedBars) ? displayedBars : [],
+      current_bar: currentBar && typeof currentBar === 'object' ? currentBar : null,
+      decision_events: Array.isArray(decisionEvents) ? decisionEvents : [],
+      selected_marker: selectedMarker && typeof selectedMarker === 'object' ? selectedMarker : null,
+      latest_bar_analysis:
+        latestBarAnalysis && typeof latestBarAnalysis === 'object' ? latestBarAnalysis : null,
+    }),
+    [
+      activeView,
+      activeTab,
+      selectedTicker,
+      runKey,
+      runState?.phase,
+      timeframe,
+      chartState,
+      priceRange,
+      bars,
+      displayedBars,
+      currentBar,
+      decisionEvents,
+      selectedMarker,
+      latestBarAnalysis,
+    ],
+  );
+
+  useEffect(() => {
+    publishWebMcpSnapshot({
+      ...webMcpSnapshotBase,
+      snapshot_updated_at_utc: new Date().toISOString(),
+    });
+  }, [webMcpSnapshotBase]);
+
+  useEffect(
+    () => () => {
+      publishWebMcpSnapshot(null);
+    },
+    [],
+  );
 
   return (
     <div className="app-container">

@@ -111,11 +111,6 @@ export default function useCandlestickChartBarSeriesData({
         applyFullBarDataset([]);
         return;
       }
-      const containsWhitespaceBars = bars.some((bar) => Boolean(bar?.__wfPlaceholder));
-      if (containsWhitespaceBars) {
-        applyFullBarDataset(bars);
-        return;
-      }
 
       const nextLastBar = bars[bars.length - 1];
       const nextLastTime = Number(nextLastBar?.time);

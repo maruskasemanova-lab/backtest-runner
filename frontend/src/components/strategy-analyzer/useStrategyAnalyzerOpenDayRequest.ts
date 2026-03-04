@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import type { StrategyAnalyzerContextRiskPresetKey, StrategyAnalyzerTradeEvalMode } from "./types";
+import {
+  resolveContextRiskPresetFromRunKey,
+  resolveContextRiskPresetFromVariantKey,
+} from "./strategyAnalyzerContextRiskPresets";
 
 const handledOpenDayAutoLoadRequestIds = new Set<number>();
 
@@ -7,6 +12,11 @@ export type StrategyAnalyzerOpenDayRequest = {
   ticker: string;
   isoDate: string;
   runKey?: string | null;
+  variantKey?: string | null;
+  /** Original run date-range start (from multi-day run_key). */
+  dateFrom?: string | null;
+  /** Original run date-range end (from multi-day run_key). */
+  dateTo?: string | null;
 };
 
 type UseStrategyAnalyzerOpenDayRequestArgs = {
@@ -27,6 +37,9 @@ type UseStrategyAnalyzerOpenDayRequestArgs = {
   setSelectedRangeTo: (value: string | null) => void;
   setRangeScrubOffset: (value: number) => void;
   setAnalyzerRunKey: (value: string | null) => void;
+  setContextRiskPresetKey: (value: StrategyAnalyzerContextRiskPresetKey) => void;
+  setComparableMode: (value: boolean) => void;
+  setAnalyzerTradeEvalMode: (value: StrategyAnalyzerTradeEvalMode) => void;
   resetForTickerChange: () => void;
   resetSelectionForNewData: () => void;
   loading: boolean;
@@ -53,6 +66,9 @@ export const useStrategyAnalyzerOpenDayRequest = ({
   setSelectedRangeTo,
   setRangeScrubOffset,
   setAnalyzerRunKey,
+  setContextRiskPresetKey,
+  setComparableMode,
+  setAnalyzerTradeEvalMode,
   resetForTickerChange,
   resetSelectionForNewData,
   loading,
@@ -91,6 +107,24 @@ export const useStrategyAnalyzerOpenDayRequest = ({
       .toUpperCase();
     const targetTicker = requestedTicker || "MU";
     const requestedRunKey = String(openDayRequest.runKey || "").trim();
+    const requestedVariantKey = String(openDayRequest.variantKey || "").trim().toLowerCase();
+    // Use the original multi-day range when available so the user can re-run
+    // with the same warm-start state that produced the Diagnostics results.
+    const effectiveDateFrom = String(openDayRequest.dateFrom || "").trim() || targetDate;
+    const effectiveDateTo = String(openDayRequest.dateTo || "").trim() || targetDate;
+    const isMultiDayRange = effectiveDateFrom !== effectiveDateTo;
+
+    const inferredContextRiskPreset = resolveContextRiskPresetFromVariantKey(requestedVariantKey)
+      || resolveContextRiskPresetFromRunKey(requestedRunKey);
+    if (inferredContextRiskPreset) {
+      setContextRiskPresetKey(inferredContextRiskPreset);
+    }
+
+    // Match the run settings that produced the Diagnostics results:
+    // - comparable_mode ensures cold-start + no checkpoint loading
+    // - standard eval mode avoids slow intrabar 5s evaluation
+    setComparableMode(true);
+    setAnalyzerTradeEvalMode("standard");
 
     const applyPreviewSelection = () => {
       setError(null);
@@ -101,13 +135,15 @@ export const useStrategyAnalyzerOpenDayRequest = ({
       } else {
         resetSelectionForNewData();
       }
-      setDateFrom(targetDate);
-      setDateTo(targetDate);
-      setRangeSelectMode(false);
+      setDateFrom(effectiveDateFrom);
+      setDateTo(effectiveDateTo);
+      setRangeSelectMode(isMultiDayRange);
       setPendingOpenDayAutoLoad({
         requestId: openDayRequest.requestId,
         ticker: targetTicker,
         isoDate: targetDate,
+        dateFrom: isMultiDayRange ? effectiveDateFrom : null,
+        dateTo: isMultiDayRange ? effectiveDateTo : null,
       });
       onOpenDayRequestHandled?.(openDayRequest.requestId);
     };
@@ -128,9 +164,9 @@ export const useStrategyAnalyzerOpenDayRequest = ({
             setTicker(targetTicker);
             onTickerChange(targetTicker);
           }
-          setDateFrom(targetDate);
-          setDateTo(targetDate);
-          setRangeSelectMode(false);
+          setDateFrom(effectiveDateFrom);
+          setDateTo(effectiveDateTo);
+          setRangeSelectMode(isMultiDayRange);
           setSelectedRangeFrom(`${targetDate}T00:00`);
           setSelectedRangeTo(`${targetDate}T23:59`);
           setRangeScrubOffset(0);
@@ -172,6 +208,9 @@ export const useStrategyAnalyzerOpenDayRequest = ({
     setSelectedRangeFrom,
     setSelectedRangeTo,
     setTicker,
+    setContextRiskPresetKey,
+    setComparableMode,
+    setAnalyzerTradeEvalMode,
   ]);
 
   useEffect(() => {
@@ -179,13 +218,16 @@ export const useStrategyAnalyzerOpenDayRequest = ({
     const targetDate = String(pendingOpenDayAutoLoad.isoDate || "").trim();
     const targetTicker = String(pendingOpenDayAutoLoad.ticker || "").trim().toUpperCase();
     const requestId = pendingOpenDayAutoLoad.requestId;
+    // When opened from Diagnostics with a multi-day range, expect the full range
+    const expectedDateFrom = String(pendingOpenDayAutoLoad.dateFrom || targetDate).trim();
+    const expectedDateTo = String(pendingOpenDayAutoLoad.dateTo || targetDate).trim();
     if (!targetDate) {
       setPendingOpenDayAutoLoad(null);
       return;
     }
     if (loading) return;
     if (targetTicker && String(ticker || "").trim().toUpperCase() !== targetTicker) return;
-    if (dateFrom !== targetDate || dateTo !== targetDate) return;
+    if (dateFrom !== expectedDateFrom || dateTo !== expectedDateTo) return;
 
     let cancelled = false;
     if (handledOpenDayAutoLoadRequestIds.has(requestId)) {

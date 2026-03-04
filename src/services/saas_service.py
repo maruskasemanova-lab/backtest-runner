@@ -368,6 +368,23 @@ class SaaSStateStore:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS daily_price_heatmap_levels (
+                    ticker TEXT NOT NULL,
+                    as_of_date TEXT NOT NULL,
+                    bin_size REAL NOT NULL,
+                    price_bin REAL NOT NULL,
+                    day_bars INTEGER NOT NULL,
+                    day_volume REAL NOT NULL,
+                    cumulative_bars INTEGER NOT NULL,
+                    cumulative_volume REAL NOT NULL,
+                    total_bars_to_date INTEGER NOT NULL,
+                    total_volume_to_date REAL NOT NULL,
+                    cumulative_bar_share REAL NOT NULL,
+                    cumulative_volume_share REAL NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (ticker, as_of_date, bin_size, price_bin)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_jobs_status_created
                     ON jobs(status, created_at);
                 CREATE INDEX IF NOT EXISTS idx_jobs_user_status
@@ -396,6 +413,10 @@ class SaaSStateStore:
                     ON live_trader_events(run_id, event_ts DESC, id DESC);
                 CREATE INDEX IF NOT EXISTS idx_live_trader_ingest_run_stream
                     ON live_trader_ingest_state(run_id, stream, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_daily_price_heatmap_lookup
+                    ON daily_price_heatmap_levels(ticker, as_of_date, bin_size, cumulative_bars DESC, cumulative_volume DESC);
+                CREATE INDEX IF NOT EXISTS idx_daily_price_heatmap_level_timeline
+                    ON daily_price_heatmap_levels(ticker, bin_size, price_bin, as_of_date);
                 """
             )
             self._ensure_column("jobs", "idempotency_key", "TEXT")
@@ -804,6 +825,68 @@ class SaaSStateStore:
                     "run_key": str(row["run_key"] or ""),
                     "summary": summary_payload,
                     "updated_at": row["updated_at"],
+                }
+            )
+        return payload_rows
+
+    def list_daily_price_heatmap_rows(
+        self,
+        *,
+        ticker: str,
+        date_from: str,
+        date_to: str,
+        bin_size: float,
+    ) -> list[Dict[str, Any]]:
+        ticker_token = str(ticker or "").strip().upper()
+        start_token = str(date_from or "").strip()
+        end_token = str(date_to or "").strip()
+        if not ticker_token or not start_token or not end_token:
+            return []
+        try:
+            normalized_bin = float(bin_size)
+        except (TypeError, ValueError):
+            return []
+        if normalized_bin <= 0:
+            return []
+        with self._lock:
+            cur = self._conn.cursor()
+            rows = cur.execute(
+                """
+                SELECT
+                    as_of_date,
+                    price_bin,
+                    day_bars,
+                    day_volume,
+                    cumulative_bars,
+                    cumulative_volume,
+                    total_bars_to_date,
+                    total_volume_to_date,
+                    cumulative_bar_share,
+                    cumulative_volume_share
+                FROM daily_price_heatmap_levels
+                WHERE ticker = ?
+                  AND bin_size = ?
+                  AND as_of_date >= ?
+                  AND as_of_date <= ?
+                ORDER BY as_of_date ASC, price_bin DESC
+                """,
+                (ticker_token, normalized_bin, start_token, end_token),
+            ).fetchall()
+
+        payload_rows: list[Dict[str, Any]] = []
+        for row in rows:
+            payload_rows.append(
+                {
+                    "as_of_date": str(row["as_of_date"] or ""),
+                    "price_bin": float(row["price_bin"] or 0.0),
+                    "day_bars": int(row["day_bars"] or 0),
+                    "day_volume": float(row["day_volume"] or 0.0),
+                    "cumulative_bars": int(row["cumulative_bars"] or 0),
+                    "cumulative_volume": float(row["cumulative_volume"] or 0.0),
+                    "total_bars_to_date": int(row["total_bars_to_date"] or 0),
+                    "total_volume_to_date": float(row["total_volume_to_date"] or 0.0),
+                    "cumulative_bar_share": float(row["cumulative_bar_share"] or 0.0),
+                    "cumulative_volume_share": float(row["cumulative_volume_share"] or 0.0),
                 }
             )
         return payload_rows

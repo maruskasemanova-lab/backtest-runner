@@ -61,11 +61,13 @@ Authenticated FE start behavior:
 24. AOS profile-change timeline (`/api/aos-history/{ticker}`) is DB-backed via `aos_history_entries`; legacy `aos_history.jsonl` is treated as migration input.
 25. Live trader monitoring endpoints are strict DB-backed (`live_trader_events`) and return `503` when the DB store backend is unavailable; sibling `ibkr-realtime-trader/artifacts` JSONL files are ingest input only.
 26. Live-trader JSONL ingest is incremental and checkpointed in `live_trader_ingest_state` (`source_path` + byte offset/mtime/size), so unchanged files are skipped and only appended complete lines are parsed.
+27. Daily cumulative price-clustering heatmaps are persisted in local SQLite table `daily_price_heatmap_levels`; `scripts/recompute_daily_price_heatmaps.py` rebuilds these rows per `ticker + as_of_date + bin_size + price_bin` so each day includes all prior days up to and including that day (time/bars + volume metrics).
 
 ## Session And State Model
 
 - Runner key: `run_id:ticker:date_or_range`.
 - Strategy session keying: `run_id + ticker + date`.
+- Successful `play` completion auto-flushes run from in-memory active registry after summary persistence.
 - Checkpoint behavior:
 - warm start: load checkpoint + session-scoped reset
 - cold start: full reset
@@ -121,5 +123,6 @@ Authenticated FE start behavior:
 - `AdaptiveTuner.tsx` quick approximation controls: optional sampled-day tuning (`quick_mode`) with configurable `quick_max_days` and `quick_trial_boost`.
 - `LiveTraderMonitor.tsx`: live stream monitor tab that reads realtime trader artifact streams (`runtime|decisions|signals|orders`) via runner API.
 - `diagnostic-calendar/DiagnosticCalendar.tsx` + `StrategyAnalyzer.tsx`: Diagnostics day/run selection can open persisted run playback snapshots by `run_key` from run-reports store, enabling read-only analyzer view without rerunning strategy.
+- `StrategyAnalyzerPriceHeatmap.tsx`: heatmap panel now reads precomputed DB payload from `/api/chart-preview/heatmap-daily-cumulative` (`daily_price_heatmap_levels`) instead of recomputing clusters from in-memory preview bars.
 
 For concrete file ownership and symbol inventory, use generated domain packs.

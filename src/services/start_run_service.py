@@ -177,6 +177,11 @@ def _to_json_compatible(value: Any) -> Any:
         except Exception:
             pass
 
+    import numpy as np
+    import pandas as pd
+    if isinstance(value, np.datetime64):
+        return pd.Timestamp(value).isoformat()
+
     return str(value)
 
 

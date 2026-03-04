@@ -325,90 +325,107 @@ class OrderFlowEngine:
         start_dt_utc: datetime,
         end_dt_utc: datetime,
     ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, Any]]:
-        # Load one chunk per request; downstream computations reuse it to keep
-        # serverless memory/IO bounded on multi-day ranges.
-        chunk = self._load_chunk(ticker, start_dt_utc, end_dt_utc)
-        trade_map, trade_stats = self.compute_trade_flow(
-            ticker,
-            start_dt_utc,
-            end_dt_utc,
-            chunk=chunk,
-        )
-        book_map, book_stats = self.compute_book_pressure(
-            ticker,
-            start_dt_utc,
-            end_dt_utc,
-            chunk=chunk,
-        )
-
+        # Process day-by-day to keep serverless memory/IO bounded on multi-day ranges.
+        from datetime import timedelta
+        
         feature_map: Dict[int, Dict[str, Any]] = {}
-        all_keys = sorted(set(trade_map.keys()) | set(book_map.keys()))
+        total_trade_stats = {"trade_minutes": 0, "trade_events": 0}
+        total_book_stats = {"depth_minutes": 0}
+        
+        current_dt = start_dt_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        ts_end_utc = end_dt_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
+
         running_cumulative = 0.0
         prev_delta = 0.0
         prev_day_key: str | None = None
-        for minute_key in all_keys:
-            day_key = self._market_day_key_from_minute_key(minute_key)
-            if prev_day_key != day_key:
-                running_cumulative = 0.0
-                prev_delta = 0.0
-                prev_day_key = day_key
-            trade = trade_map.get(minute_key, {})
-            book = book_map.get(minute_key, {})
+        
+        while current_dt <= ts_end_utc:
+            chunk_end_dt = current_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+            if chunk_end_dt > ts_end_utc:
+                chunk_end_dt = ts_end_utc
+                
+            chunk = self._load_chunk(ticker, current_dt, chunk_end_dt)
+            if not chunk.empty:
+                trade_map, trade_stats = self.compute_trade_flow(
+                    ticker,
+                    current_dt,
+                    chunk_end_dt,
+                    chunk=chunk,
+                )
+                book_map, book_stats = self.compute_book_pressure(
+                    ticker,
+                    current_dt,
+                    chunk_end_dt,
+                    chunk=chunk,
+                )
+                
+                total_trade_stats["trade_minutes"] += int(trade_stats.get("trade_minutes", 0))
+                total_trade_stats["trade_events"] += int(trade_stats.get("trade_events", 0))
+                total_book_stats["depth_minutes"] += int(book_stats.get("depth_minutes", 0))
 
-            delta = float(trade.get("delta", 0.0))
-            running_cumulative = float(
-                trade.get("cumulative_delta", running_cumulative + delta)
-            )
-            delta_acceleration = float(
-                trade.get("delta_acceleration", delta - prev_delta)
-            )
-            prev_delta = delta
+                all_keys = sorted(set(trade_map.keys()) | set(book_map.keys()))
+                
+                for minute_key in all_keys:
+                    day_key = self._market_day_key_from_minute_key(minute_key)
+                    if prev_day_key != day_key:
+                        running_cumulative = 0.0
+                        prev_delta = 0.0
+                        prev_day_key = day_key
+                    trade = trade_map.get(minute_key, {})
+                    book = book_map.get(minute_key, {})
 
-            snapshot = OrderFlowSnapshot(
-                delta=delta,
-                cumulative_delta=running_cumulative,
-                imbalance=float(trade.get("imbalance", 0.0)),
-                signed_aggression=float(trade.get("signed_aggression", 0.0)),
-                absorption_rate=float(trade.get("absorption_rate", 0.0)),
-                bid_depth_total=float(book.get("bid_depth_total", 0.0)),
-                ask_depth_total=float(book.get("ask_depth_total", 0.0)),
-                book_pressure=float(book.get("book_pressure", 0.0)),
-                book_pressure_delta=float(book.get("book_pressure_delta", 0.0)),
-                top_heavy_bid=float(book.get("top_heavy_bid", 0.0)),
-                top_heavy_ask=float(book.get("top_heavy_ask", 0.0)),
-                delta_price_divergence=float(trade.get("delta_price_divergence", 0.0)),
-                delta_acceleration=delta_acceleration,
-                trade_ticks=int(trade.get("trade_ticks", 0)),
-                book_updates=int(book.get("book_updates", 0)),
-            )
+                    delta = float(trade.get("delta", 0.0))
+                    running_cumulative = float(
+                        trade.get("cumulative_delta", running_cumulative + delta)
+                    )
+                    delta_acceleration = float(
+                        trade.get("delta_acceleration", delta - prev_delta)
+                    )
+                    prev_delta = delta
 
-            feature_map[minute_key] = {
-                # Schema version
-                "l2_schema_version": L2_SCHEMA_VERSION,
-                # Existing payload fields (units: shares)
-                "l2_delta": snapshot.delta,
-                "l2_buy_volume": float(trade.get("buy_volume", 0.0)),
-                "l2_sell_volume": float(trade.get("sell_volume", 0.0)),
-                "l2_volume": float(trade.get("volume", 0.0)),
-                "l2_imbalance": snapshot.imbalance,
-                # Additional flow-rich fields
-                "l2_signed_aggression": snapshot.signed_aggression,
-                "l2_absorption_rate": snapshot.absorption_rate,
-                "l2_cumulative_delta": snapshot.cumulative_delta,
-                "l2_delta_price_divergence": snapshot.delta_price_divergence,
-                "l2_delta_acceleration": snapshot.delta_acceleration,
-                # Book fields
-                "l2_bid_depth_total": snapshot.bid_depth_total,
-                "l2_ask_depth_total": snapshot.ask_depth_total,
-                "l2_book_pressure": snapshot.book_pressure,
-                "l2_book_pressure_change": snapshot.book_pressure_delta,
-                "l2_top_heavy_bid": snapshot.top_heavy_bid,
-                "l2_top_heavy_ask": snapshot.top_heavy_ask,
-                # Quality metrics
-                "l2_quality_trade_ticks": snapshot.trade_ticks,
-                "l2_quality_book_updates": snapshot.book_updates,
-                "l2_quality_flags": list(snapshot.quality_flags),
-            }
+                    snapshot = OrderFlowSnapshot(
+                        delta=delta,
+                        cumulative_delta=running_cumulative,
+                        imbalance=float(trade.get("imbalance", 0.0)),
+                        signed_aggression=float(trade.get("signed_aggression", 0.0)),
+                        absorption_rate=float(trade.get("absorption_rate", 0.0)),
+                        bid_depth_total=float(book.get("bid_depth_total", 0.0)),
+                        ask_depth_total=float(book.get("ask_depth_total", 0.0)),
+                        book_pressure=float(book.get("book_pressure", 0.0)),
+                        book_pressure_delta=float(book.get("book_pressure_delta", 0.0)),
+                        top_heavy_bid=float(book.get("top_heavy_bid", 0.0)),
+                        top_heavy_ask=float(book.get("top_heavy_ask", 0.0)),
+                        delta_price_divergence=float(trade.get("delta_price_divergence", 0.0)),
+                        delta_acceleration=delta_acceleration,
+                        trade_ticks=int(trade.get("trade_ticks", 0)),
+                        book_updates=int(book.get("book_updates", 0)),
+                    )
+
+                    feature_map[minute_key] = {
+                        "l2_schema_version": L2_SCHEMA_VERSION,
+                        "l2_delta": snapshot.delta,
+                        "l2_buy_volume": float(trade.get("buy_volume", 0.0)),
+                        "l2_sell_volume": float(trade.get("sell_volume", 0.0)),
+                        "l2_volume": float(trade.get("volume", 0.0)),
+                        "l2_imbalance": snapshot.imbalance,
+                        "l2_signed_aggression": snapshot.signed_aggression,
+                        "l2_absorption_rate": snapshot.absorption_rate,
+                        "l2_cumulative_delta": snapshot.cumulative_delta,
+                        "l2_delta_price_divergence": snapshot.delta_price_divergence,
+                        "l2_delta_acceleration": snapshot.delta_acceleration,
+                        "l2_bid_depth_total": snapshot.bid_depth_total,
+                        "l2_ask_depth_total": snapshot.ask_depth_total,
+                        "l2_book_pressure": snapshot.book_pressure,
+                        "l2_book_pressure_change": snapshot.book_pressure_delta,
+                        "l2_top_heavy_bid": snapshot.top_heavy_bid,
+                        "l2_top_heavy_ask": snapshot.top_heavy_ask,
+                        "l2_quality_trade_ticks": snapshot.trade_ticks,
+                        "l2_quality_book_updates": snapshot.book_updates,
+                        "l2_quality_flags": list(snapshot.quality_flags),
+                    }
+            
+            # Move to next day
+            current_dt = (current_dt + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
         # Calculate coverage ratio
         expected_minutes = int((end_dt_utc - start_dt_utc).total_seconds() / 60)
@@ -440,10 +457,9 @@ class OrderFlowEngine:
         stats = {
             "has_l2": bool(feature_map),
             "covered_minutes": len(feature_map),
-            "trade_minutes": int(trade_stats.get("trade_minutes", 0)),
-            "trade_events": int(trade_stats.get("trade_events", 0)),
-            "depth_minutes": int(book_stats.get("depth_minutes", 0)),
-            # Keep backwards-compatible naming for API responses.
-            "footprint_bars": int(trade_stats.get("trade_minutes", 0)),
+            "trade_minutes": int(total_trade_stats.get("trade_minutes", 0)),
+            "trade_events": int(total_trade_stats.get("trade_events", 0)),
+            "depth_minutes": int(total_book_stats.get("depth_minutes", 0)),
+            "footprint_bars": int(total_trade_stats.get("trade_minutes", 0)),
         }
         return feature_map, stats

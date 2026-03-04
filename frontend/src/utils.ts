@@ -22,22 +22,47 @@ export const clampInt = (value, fallback, min, max) =>
 
 // ─── Timestamp helpers ────────────────────────────────────────────
 
+const normalizeEpochSeconds = (value) => {
+  if (!Number.isFinite(value)) return null;
+  // Backends may emit epoch in ms/us/ns. Normalize down to seconds.
+  let normalized = Number(value);
+  let divisions = 0;
+  while (Math.abs(normalized) >= 1e11 && divisions < 4) {
+    normalized /= 1000;
+    divisions += 1;
+  }
+  return normalized;
+};
+
+const parseIsoTimestampToSeconds = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const normalized = raw.replace(/(\.\d{3})\d+/, "$1");
+  // Backend often returns ISO timestamps without timezone suffix.
+  // Treat those as UTC to avoid local-time drift (e.g., +01:00 => -1h range end).
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  const isoLike = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(normalized);
+  const parseTarget = !hasTimezone && isoLike ? `${normalized}Z` : normalized;
+  const parsed = Date.parse(parseTarget);
+  return Number.isNaN(parsed) ? null : parsed / 1000;
+};
+
 export const toUnixSeconds = (value) => {
   if (value === null || value === undefined) return null;
   if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 1e12 ? value / 1000 : value;
+    return normalizeEpochSeconds(value);
   }
   if (typeof value === "string") {
     const numeric = Number(value);
     if (Number.isFinite(numeric)) {
-      return numeric > 1e12 ? numeric / 1000 : numeric;
+      return normalizeEpochSeconds(numeric);
     }
-    const normalized = value.replace(/(\.\d{3})\d+/, "$1");
-    const parsed = Date.parse(normalized);
-    if (!Number.isNaN(parsed)) return parsed / 1000;
+    const parsedIsoSeconds = parseIsoTimestampToSeconds(value);
+    if (Number.isFinite(parsedIsoSeconds)) return parsedIsoSeconds;
   }
   if (typeof value === "object" && value !== null) {
-    if (typeof value.timestamp === "number") return value.timestamp;
+    if (value.timestamp !== undefined) return toUnixSeconds(value.timestamp);
+    if (value.time !== undefined) return toUnixSeconds(value.time);
     if (
       Number.isFinite(value.year) &&
       Number.isFinite(value.month) &&

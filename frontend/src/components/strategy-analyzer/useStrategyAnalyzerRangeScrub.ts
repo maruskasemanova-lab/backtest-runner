@@ -17,6 +17,7 @@ import { unixSecondsToDateTimeLocal, unixSecondsToLabel } from "./utils";
 type Params = {
   isAnalyzerAttachedRun: boolean;
   isPlayingRun: boolean;
+  scrubIdentityKey?: string | null;
   rangePlaybackMeta: StrategyAnalyzerRangePlaybackMeta;
   timelineCacheVersion: number;
   timelineCacheRef: StrategyAnalyzerTimelineCacheRef;
@@ -27,6 +28,7 @@ type Params = {
 export function useStrategyAnalyzerRangeScrub({
   isAnalyzerAttachedRun,
   isPlayingRun,
+  scrubIdentityKey = null,
   rangePlaybackMeta,
   timelineCacheVersion,
   timelineCacheRef,
@@ -153,6 +155,29 @@ export function useStrategyAnalyzerRangeScrub({
   const progressedMaxOffset = rangeScrubBase?.progressedMaxOffset ?? 0;
   const previousProgressedMaxOffsetRef = useRef(0);
   const hasObservedProgressedMaxRef = useRef(false);
+  const autoJumpedIdentityRef = useRef<string | null>(null);
+
+  // Default newly attached snapshots to latest processed point so users
+  // immediately see end-state markers (entries/exits/TP) instead of bar 0.
+  useEffect(() => {
+    if (!isAnalyzerAttachedRun || isPlayingRun || !rangeScrubBase) return;
+    if (rangeScrubBase.progressedMaxOffset <= 0) return;
+    const identity =
+      String(scrubIdentityKey || "").trim() ||
+      `${rangeScrubBase.startTime}|${rangeScrubBase.endTime}|${rangeScrubBase.tradeTotalBars}`;
+    if (!identity) return;
+    if (autoJumpedIdentityRef.current === identity) return;
+    autoJumpedIdentityRef.current = identity;
+    setRangeScrubOffset((prev) =>
+      prev === 0 ? rangeScrubBase.progressedMaxOffset : prev
+    );
+  }, [
+    isAnalyzerAttachedRun,
+    isPlayingRun,
+    scrubIdentityKey,
+    rangeScrubBase,
+    setRangeScrubOffset,
+  ]);
 
   // Keep tail-follow behavior even when playback has just stopped:
   // if user was already on the previous end and new bars arrive late

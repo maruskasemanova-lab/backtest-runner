@@ -301,6 +301,28 @@ Behavioral notes:
 - in default `coverage_only` mode, endpoint also performs short-range OHLCV probe (L2 disabled) to catch calendar/file-range false positives such as market holidays with zero bars.
 - common `error_kind` values include: `no_ohlcv_data`, `missing_l2_coverage`, `no_l2_aligned_bars`, `no_l2_data`.
 
+### `GET /api/chart-preview/bars` / `GET /api/chart-preview/heatmap-daily-cumulative`
+
+Purpose: analyzer-friendly read-only preview payloads that do not start a run.
+
+`GET /api/chart-preview/bars` contract:
+
+- query: `ticker`, `date_from`, `date_to` (`YYYY-MM-DD`, inclusive).
+- returns raw OHLCV bars for chart preview only.
+- attempts one catalog rescan when range files are not found before returning `404`.
+
+`GET /api/chart-preview/heatmap-daily-cumulative` contract:
+
+- query: `ticker`, `date_from`, `date_to`, optional `bin_size` (default `0.5`).
+- source: SQLite `daily_price_heatmap_levels` (precomputed by `scripts/recompute_daily_price_heatmaps.py`).
+- returns day-axis cumulative heatmap payload:
+  - `days[]` (`as_of_date` values),
+  - `rows[]` (`price_bin`, `cumulative_bars[]`, `cumulative_volume[]`),
+  - `latest_as_of_date`, `latest_summary`,
+  - `top_by_time[]`, `top_by_volume[]`.
+- if the store has no rows for requested ticker/range/bin-size, returns `200` with empty arrays (no fallback recompute on request path).
+- returns `503` when DB state store is unavailable.
+
 ### `POST /api/run/{run_id}/{ticker}/{date}/step|play|pause|resume|stop|restart`
 
 Purpose: Control progression of an initialized run.
@@ -310,6 +332,7 @@ Compatibility notes:
 - playback contract assumes the same backend process retains active run state across requests.
 - `play` accepts body or query speed format (`max`, `10hz`, integer ms) and optional `trade_eval_mode` (`standard|intrabar_1s|intrabar_5s`) to switch execution evaluation path without restarting run.
 - zero-delay `play` uses chunked batch transport only for `standard` mode; intrabar modes keep bar-by-bar transport to avoid eager full-range intrabar quote materialization on the API event loop.
+- when `play` reaches a successful terminal state (all bars processed, no run error), runner is auto-flushed from `active_runners` after summary persistence to prevent unbounded in-memory run accumulation.
 - `step` accepts optional body `trade_eval_mode` (`standard|intrabar_1s|intrabar_5s`) so single-step evaluation can switch checkpoint granularity without restarting run.
 - `restart` rewinds the existing in-memory run to bar zero (no re-load of source bars), clears remote strategy session state for that run+ticker, and reapplies stored session config before replay.
 - marker/event ordering must remain stable for frontend playback.
@@ -498,6 +521,24 @@ Response notes:
   - `summary` (same summary object but `playback_snapshot.payload_b64` removed from response)
   - `snapshot_meta` and `report_saved_at`
 - if snapshot payload is missing (older run rows), endpoint returns `404` with guidance to rerun once with snapshot persistence enabled.
+
+### SQLite Analytics Table: `daily_price_heatmap_levels` (offline recompute)
+
+Purpose: persist day-by-day cumulative price clustering so heatmap queries can be served from DB without re-scanning raw OHLCV every time.
+
+Storage contract:
+
+- primary key: `(ticker, as_of_date, bin_size, price_bin)`
+- cumulative semantics: each row for `as_of_date=D` includes bars/volume from all prior trading days plus day `D` itself (inclusive).
+- key fields:
+  - `day_bars`, `day_volume` (increment for that specific day/bin)
+  - `cumulative_bars`, `cumulative_volume` (inclusive cumulative values)
+  - `total_bars_to_date`, `total_volume_to_date` (ticker/bin-size totals at day D)
+  - `cumulative_bar_share`, `cumulative_volume_share` (within-day cumulative share)
+- maintenance command:
+  - `python3 scripts/recompute_daily_price_heatmaps.py`
+  - supports `--tickers`, `--bin-sizes`, and `--regular-session-only`
+  - default bin sizes: `0.25,0.5,1,2`
 
 ### `GET /api/system/l2/runtime` / `POST /api/system/l2/runtime`
 

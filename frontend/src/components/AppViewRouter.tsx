@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { IntradayLevelsDialogSelection } from '../intradayLevelsUtils';
 import CandlestickChart, {
@@ -34,6 +35,9 @@ type AnalyzerOpenDayRequest = {
   ticker: string;
   isoDate: string;
   runKey?: string | null;
+  variantKey?: string | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
 } | null;
 
 type ActiveRun = {
@@ -72,6 +76,9 @@ type AppViewRouterProps = {
     ticker: string;
     isoDate: string;
     runKey?: string | null;
+    variantKey?: string | null;
+    dateFrom?: string | null;
+    dateTo?: string | null;
   }) => void;
   timeframe: string;
   setTimeframe: Dispatch<SetStateAction<string>>;
@@ -96,7 +103,8 @@ type AppViewRouterProps = {
   closeIntradayLevelsDialog: () => void;
 };
 
-export default function AppViewRouter({
+// Extracted into a named function for easier debugging and memoization wrapper below.
+function AppViewRouterRender({
   activeView,
   downloadProgress,
   selectedTicker,
@@ -370,3 +378,5 @@ export default function AppViewRouter({
     </div>
   );
 }
+
+export default memo(AppViewRouterRender);

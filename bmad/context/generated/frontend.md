@@ -20,18 +20,18 @@ Own playback UI, chart rendering, and operational diagnostics.
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `frontend/src/main.tsx` | yes | 64 | `58ebada 2026-02-27` |
-| `frontend/src/App.tsx` | yes | 735 | `d064025 2026-03-01` |
+| `frontend/src/main.tsx` | yes | 64 | `51e9988 2026-03-02` |
+| `frontend/src/App.tsx` | yes | 817 | `51e9988 2026-03-02` |
 | `frontend/src/auth/supabaseAuth.ts` | yes | 385 | `b9accc6 2026-02-18` |
 | `frontend/src/components/CandlestickChart.tsx` | yes | 346 | `8892e7b 2026-02-25` |
-| `frontend/src/components/decision-panel/DecisionPanel.tsx` | yes | 284 | `58ebada 2026-02-27` |
+| `frontend/src/components/decision-panel/DecisionPanel.tsx` | yes | 284 | `51e9988 2026-03-02` |
 | `frontend/src/components/SessionSummary.tsx` | yes | 327 | `58ebada 2026-02-27` |
 | `frontend/src/components/RunConfig.tsx` | yes | 347 | `d064025 2026-03-01` |
 | `frontend/src/components/PlaybackControls.tsx` | yes | 262 | `b9accc6 2026-02-18` |
 | `frontend/src/components/DataManager.tsx` | yes | 345 | `0248cab 2026-02-28` |
 | `frontend/src/components/AdaptiveStrategyStudio.tsx` | yes | 352 | `d064025 2026-03-01` |
-| `frontend/src/components/diagnostic-calendar/DiagnosticCalendar.tsx` | yes | 105 | `d064025 2026-03-01` |
-| `frontend/src/components/StrategySettings.tsx` | yes | 658 | `d064025 2026-03-01` |
+| `frontend/src/components/diagnostic-calendar/DiagnosticCalendar.tsx` | yes | 108 | `51e9988 2026-03-02` |
+| `frontend/src/components/StrategySettings.tsx` | yes | 658 | `51e9988 2026-03-02` |
 | `frontend/src/components/AOSOptimizations.tsx` | yes | 404 | `58ebada 2026-02-27` |
 | `frontend/src/components/IntrabarPanel.tsx` | yes | 186 | `b9accc6 2026-02-18` |
 

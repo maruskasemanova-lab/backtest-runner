@@ -4,9 +4,11 @@ import StrategyAnalyzerAttachedPanels from "./StrategyAnalyzerAttachedPanels";
 import StrategyAnalyzerChartPanel from "./StrategyAnalyzerChartPanel";
 import StrategyAnalyzerDecisionsContent from "./StrategyAnalyzerDecisionsContent";
 import StrategyAnalyzerEntryConditionsContent from "./StrategyAnalyzerEntryConditionsContent";
+import StrategyAnalyzerPriceHeatmap from "./StrategyAnalyzerPriceHeatmap";
 import StrategyAnalyzerUnifiedConfigWrapper from "./StrategyAnalyzerUnifiedConfigWrapper";
 import StrategyAnalyzerHeaderControls from "./StrategyAnalyzerHeaderControls";
 import StrategyAnalyzerRangeActions from "./StrategyAnalyzerRangeActions";
+import { filterMarkersByChartWindow } from "./filterMarkersByChartWindow";
 import type {
   StrategyAnalyzerChartHandle,
   StrategyAnalyzerAttachedRunState,
@@ -39,6 +41,8 @@ import {
 } from "./useStrategyAnalyzerOpenDayRequest";
 import { useStrategyAnalyzerWfo } from "./useStrategyAnalyzerWfo";
 import { DEFAULT_STRATEGY_ANALYZER_CONTEXT_RISK_PRESET } from "./strategyAnalyzerContextRiskPresets";
+
+const TERMINAL_RUN_PHASES = new Set(["COMPLETED", "END_OF_DAY", "ERROR", "FAILED", "STOPPED"]);
 
 interface StrategyAnalyzerProps {
   selectedTicker: string | null;
@@ -104,6 +108,9 @@ export default function StrategyAnalyzer({
   const chartRef = useRef<StrategyAnalyzerChartHandle | null>(null);
   const [rangeScrubOffset, setRangeScrubOffset] = useState(0);
   const [analyzerTradeEvalMode, setAnalyzerTradeEvalMode] = useState<StrategyAnalyzerTradeEvalMode>("intrabar_5s");
+  const [includeExtendedHours, setIncludeExtendedHours] = useState(true);
+  const [comparableMode, setComparableMode] = useState(false);
+  const [coldStartEachDay, setColdStartEachDay] = useState(false);
   const [contextRiskPresetKey, setContextRiskPresetKey] = useState<StrategyAnalyzerContextRiskPresetKey>(
     DEFAULT_STRATEGY_ANALYZER_CONTEXT_RISK_PRESET,
   );
@@ -183,10 +190,21 @@ export default function StrategyAnalyzer({
   );
   const analyzerDecisionEvents: StrategyAnalyzerDecisionMarker[] = isAnalyzerAttachedRun ? decisionEvents : [];
   const analyzerRunPhase = isAnalyzerAttachedRun ? String(attachedRunState?.phase || "").trim() : "";
+  const analyzerProcessedBars = isAnalyzerAttachedRun
+    ? Math.max(0, Math.trunc(Number(attachedRunState?.current_bar_index || 0)))
+    : 0;
+  const analyzerTotalBars = isAnalyzerAttachedRun
+    ? Math.max(0, Math.trunc(Number(attachedRunState?.total_bars || 0)))
+    : 0;
+  const analyzerProgressLooksComplete =
+    isAnalyzerAttachedRun &&
+    !attachedRunState?.is_running &&
+    analyzerTotalBars > 0 &&
+    analyzerProcessedBars >= analyzerTotalBars;
   const analyzerRunTerminal =
     isAnalyzerAttachedRun &&
     !attachedRunState?.is_running &&
-    ["COMPLETED", "END_OF_DAY", "ERROR", "FAILED", "STOPPED"].includes(analyzerRunPhase);
+    (TERMINAL_RUN_PHASES.has(analyzerRunPhase) || analyzerProgressLooksComplete);
   const { timelineCacheVersion } = useStrategyAnalyzerTimelineCache({
     isAnalyzerAttachedRun,
     rangePlaybackMeta,
@@ -194,6 +212,12 @@ export default function StrategyAnalyzer({
     attachedRunBars,
     timelineCacheRef,
   });
+  const scrubIdentityKey = useMemo(() => {
+    if (!isAnalyzerAttachedRun || !rangePlaybackMeta) return null;
+    return `${String(analyzerRunKey || "").trim()}|${Number(rangePlaybackMeta.tradeStartTs)}|${Number(
+      rangePlaybackMeta.tradeEndTs,
+    )}`;
+  }, [isAnalyzerAttachedRun, rangePlaybackMeta, analyzerRunKey]);
   const {
     rangeScrubBase,
     rangeScrubMeta,
@@ -202,6 +226,7 @@ export default function StrategyAnalyzer({
   } = useStrategyAnalyzerRangeScrub({
     isAnalyzerAttachedRun,
     isPlayingRun,
+    scrubIdentityKey,
     rangePlaybackMeta,
     timelineCacheVersion,
     timelineCacheRef,
@@ -218,7 +243,9 @@ export default function StrategyAnalyzer({
   });
   const analyzerDisplayPhase = analyzerPlaybackProgress?.isInitializing
     ? "INITIALIZING"
-    : analyzerRunPhase;
+    : analyzerRunTerminal && !TERMINAL_RUN_PHASES.has(analyzerRunPhase)
+      ? "COMPLETED"
+      : analyzerRunPhase;
   const { analyzerChartMarkers, chartBars } = useStrategyAnalyzerChartData({
     bars,
     attachedRunBars,
@@ -230,12 +257,19 @@ export default function StrategyAnalyzer({
     timelineCacheVersion,
     timelineCacheRef,
   });
+  const analyzerDecisionEventsForDisplay = useMemo(
+    () => filterMarkersByChartWindow(analyzerDecisionEvents, selectedRangeWindow),
+    [analyzerDecisionEvents, selectedRangeWindow],
+  );
   const { runLoading, handleStartTest, handleClearAnalyzerRun } = useStrategyAnalyzerRunOrchestration({
     selectedRangeFrom,
     selectedRangeTo,
     ticker,
     strategyApiUrl,
     analyzerTradeEvalMode,
+    includeExtendedHours,
+    comparableMode,
+    coldStartEachDay,
     contextRiskPresetKey,
     rangePlaybackMeta,
     onStartRun,
@@ -265,6 +299,9 @@ export default function StrategyAnalyzer({
     ticker,
     strategyApiUrl,
     analyzerTradeEvalMode,
+    includeExtendedHours,
+    comparableMode,
+    coldStartEachDay,
     contextRiskPresetKey,
     rangePlaybackMeta,
     onOpenStoredRunSnapshot,
@@ -303,6 +340,11 @@ export default function StrategyAnalyzer({
     setIsDecisionsDetached(false);
   }, [isAnalyzerAttachedRun]);
 
+  useEffect(() => {
+    if (!comparableMode) return;
+    setColdStartEachDay(true);
+  }, [comparableMode]);
+
   useStrategyAnalyzerOpenDayRequest({
     openDayRequest,
     onOpenDayRequestHandled,
@@ -321,6 +363,9 @@ export default function StrategyAnalyzer({
     setSelectedRangeTo,
     setRangeScrubOffset,
     setAnalyzerRunKey,
+    setContextRiskPresetKey,
+    setComparableMode,
+    setAnalyzerTradeEvalMode,
     resetForTickerChange,
     resetSelectionForNewData,
     loading,
@@ -361,7 +406,7 @@ export default function StrategyAnalyzer({
 
   const decisionsContent = (
     <StrategyAnalyzerDecisionsContent
-      analyzerDecisionEvents={analyzerDecisionEvents}
+      analyzerDecisionEvents={analyzerDecisionEventsForDisplay}
       selectedMarker={selectedMarker}
       onDecisionSelectMarker={onDecisionSelectMarker}
     />
@@ -383,6 +428,12 @@ export default function StrategyAnalyzer({
         barCount={barCount}
         warmupBars={warmupBars}
         onWarmupBarsChange={setWarmupBars}
+        includeExtendedHours={includeExtendedHours}
+        onIncludeExtendedHoursChange={setIncludeExtendedHours}
+        comparableMode={comparableMode}
+        onComparableModeChange={setComparableMode}
+        coldStartEachDay={coldStartEachDay}
+        onColdStartEachDayChange={setColdStartEachDay}
         contextRiskPresetKey={contextRiskPresetKey}
         onContextRiskPresetChange={setContextRiskPresetKey}
         isAnalyzerAttachedRun={isAnalyzerAttachedRun}
@@ -416,6 +467,10 @@ export default function StrategyAnalyzer({
           </button>
         </div>
       )}
+
+      {bars.length > 0 ? (
+        <StrategyAnalyzerPriceHeatmap bars={bars} ticker={ticker} dateFrom={dateFrom} dateTo={dateTo} />
+      ) : null}
 
       <div className={`sa-workspace ${isAnalyzerAttachedRun ? "is-attached" : ""}`}>
         <div className="sa-chart-column">
@@ -475,7 +530,7 @@ export default function StrategyAnalyzer({
           {isAnalyzerAttachedRun ? (
             <StrategyAnalyzerAttachedPanels
               ticker={ticker}
-              analyzerDecisionEventsCount={analyzerDecisionEvents.length}
+              analyzerDecisionEventsCount={analyzerDecisionEventsForDisplay.length}
               hasConditionsPanelData={hasConditionsPanelData}
               conditionsPanelBadge={conditionsPanelBadge}
               isConditionsDetached={isConditionsDetached}

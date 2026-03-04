@@ -607,6 +607,31 @@ class SessionRunner:
 
         build_started = time_module.perf_counter()
         should_attach_intrabar_quotes = bool(self._should_attach_intrabar_quotes(False))
+
+        if should_attach_intrabar_quotes and self.bars:
+            try:
+                import time as tmp_time
+                preload_start = tmp_time.time()
+                start_ts, _ = self._resolve_bar_runtime_context(self.bars[0])
+                end_ts, _ = self._resolve_bar_runtime_context(self.bars[-1])
+                self._intrabar_quote_provider.preload_quotes_for_range(
+                    start_time=start_ts,
+                    end_time=end_ts,
+                    l2_manager=self.l2_manager,
+                    cache=self._intrabar_quote_cache,
+                )
+                try:
+                    with open('/tmp/perf.txt', 'a') as f:
+                        f.write(f"PRELOAD_PERF: Preloading took {tmp_time.time() - preload_start:.2f}s for entire range\n")
+                except Exception:
+                    pass
+            except Exception as e:
+                try:
+                    with open('/tmp/perf.txt', 'a') as f:
+                        f.write(f"PRELOAD_PERF error: {e}\n")
+                except Exception:
+                    pass
+
         frame_intrabar_rows = 0
         frame_intrabar_points = 0
         rows: List[Dict[str, Any]] = []

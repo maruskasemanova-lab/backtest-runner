@@ -57,6 +57,70 @@ def _runner_run_key(runner: Any) -> Optional[str]:
     return f"{run_id}:{ticker}:{date_label}"
 
 
+def _runner_completed_successfully(runner: Any) -> bool:
+    bars = getattr(runner, "bars", None)
+    try:
+        total_bars = len(bars) if bars is not None else 0
+    except Exception:
+        total_bars = 0
+    if total_bars <= 0:
+        return False
+
+    try:
+        current_bar_index = int(getattr(runner, "current_bar_index", 0) or 0)
+    except Exception:
+        current_bar_index = 0
+    if current_bar_index < total_bars:
+        return False
+
+    if bool(getattr(runner, "is_running", False)):
+        return False
+
+    phase = str(getattr(runner, "phase", "") or "").strip().upper()
+    if phase == "ERROR":
+        return False
+
+    progressive_error = str(
+        getattr(runner, "_progressive_loading_last_error", "") or ""
+    ).strip()
+    if progressive_error:
+        return False
+
+    return True
+
+
+async def _flush_runner_from_memory(
+    *,
+    run_key: str,
+    runner: Any,
+    deps: RunControlDeps,
+) -> None:
+    if hasattr(runner, "close_http_session"):
+        try:
+            await runner.close_http_session()
+        except Exception as exc:
+            deps.logger.error(
+                "Failed to close HTTP session while flushing run %s: %s", run_key, exc
+            )
+
+    try:
+        await deps.clear_remote_strategy_sessions(
+            runner.config.strategy_api_url,
+            runner.config.run_id,
+            runner.config.ticker,
+        )
+    except Exception as exc:
+        deps.logger.error(
+            "Failed to clear remote strategy sessions while flushing run %s: %s",
+            run_key,
+            exc,
+        )
+
+    active_runner = deps.active_runners.get(run_key)
+    if active_runner is runner:
+        deps.active_runners.pop(run_key, None)
+
+
 async def _read_raw_request_payload(
     raw_request: Optional[Request],
 ) -> Optional[Dict[str, Any]]:
@@ -335,7 +399,7 @@ async def play_run(
     speed_ms: Optional[Union[int, str]] = None,
     raw_request: Optional[Request] = None,
 ):
-    _, runner = deps.run_registry.require(run_id, ticker, date)
+    run_key, runner = deps.run_registry.require(run_id, ticker, date)
     payload = await _read_raw_request_payload(raw_request)
 
     raw_speed = None
@@ -390,7 +454,11 @@ async def play_run(
     runner.last_run_speed = raw_speed
 
     async def _run_and_maybe_save():
-        await runner.run_all(speed_ms=raw_speed)
+        try:
+            await runner.run_all(speed_ms=raw_speed)
+        except Exception as exc:
+            deps.logger.error("run_all failed for %s: %s", run_key, exc)
+            return
 
         try:
             await _persist_runner_summary_to_store(runner, deps)
@@ -402,13 +470,25 @@ async def play_run(
         if getattr(runner, "_checkpoint_auto_save", False):
             url = getattr(runner, "_checkpoint_strategy_url", "")
             if url:
-                await deps.save_remote_checkpoint(
-                    url,
-                    run_id=runner.config.run_id,
-                    ticker=runner.config.ticker,
-                    date_from=runner.config.date_from or runner.config.date,
-                    date_to=runner.config.date_to or runner.config.date,
-                )
+                try:
+                    await deps.save_remote_checkpoint(
+                        url,
+                        run_id=runner.config.run_id,
+                        ticker=runner.config.ticker,
+                        date_from=runner.config.date_from or runner.config.date,
+                        date_to=runner.config.date_to or runner.config.date,
+                    )
+                except Exception as exc:
+                    deps.logger.error(
+                        "Failed to auto-save checkpoint for %s: %s", run_key, exc
+                    )
+
+        if _runner_completed_successfully(runner):
+            await _flush_runner_from_memory(
+                run_key=run_key,
+                runner=runner,
+                deps=deps,
+            )
 
     asyncio.create_task(_run_and_maybe_save())
     return {
@@ -678,6 +758,72 @@ def get_chart_annotations(run_id: str, ticker: str, date: str, deps: RunControlD
 def get_run_summary(run_id: str, ticker: str, date: str, deps: RunControlDeps):
     _, runner = deps.run_registry.require(run_id, ticker, date)
     return runner.get_summary()
+
+
+def get_run_summary_db(run_id: str, ticker: str, date: str, deps: RunControlDeps):
+    run_key = deps.run_registry.build_key(run_id, ticker, date)
+    
+    # Check RAM first
+    runner = deps.active_runners.get(run_key)
+    if runner is not None:
+        return runner.get_summary()
+
+    # Fallback to DB
+    store = getattr(deps, "run_reports_store", None)
+    if store is not None and hasattr(store, "get_run_summary"):
+        try:
+            db_result = store.get_run_summary(run_key=run_key)
+            if db_result and "summary" in db_result:
+                return db_result["summary"]
+        except Exception as exc:
+            deps.logger.error("Failed to read run summary from DB for %s: %s", run_key, exc)
+
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "error_code": "RUN_NOT_FOUND",
+            "message": f"Run summary not found in RAM or DB: {run_key}",
+            "hint": "Ensure the run actually completed and flushed correctly."
+        }
+    )
+
+
+def get_run_status(run_id: str, ticker: str, date: str, deps: RunControlDeps):
+    run_key = deps.run_registry.build_key(run_id, ticker, date)
+    
+    # Check RAM first
+    runner = deps.active_runners.get(run_key)
+    if runner is not None:
+        state = runner.get_state()
+        return {
+            "run_key": run_key,
+            "state": "running" if state.get("is_running") else "active_in_ram",
+            "phase": state.get("phase"),
+            "persisted": False
+        }
+
+    # Check DB
+    store = getattr(deps, "run_reports_store", None)
+    if store is not None and hasattr(store, "get_run_summary"):
+        try:
+            db_result = store.get_run_summary(run_key=run_key)
+            if db_result and "summary" in db_result:
+                return {
+                    "run_key": run_key,
+                    "state": "flushed_to_db",
+                    "phase": db_result["summary"].get("phase", "completed"),
+                    "persisted": True
+                }
+        except Exception:
+            pass
+
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "error_code": "RUN_NOT_FOUND",
+            "message": f"Run not found anywhere: {run_key}"
+        }
+    )
 
 
 async def delete_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):

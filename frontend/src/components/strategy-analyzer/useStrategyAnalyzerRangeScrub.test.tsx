@@ -83,6 +83,7 @@ function useRangeScrubHarness() {
   const hook = useStrategyAnalyzerRangeScrub({
     isAnalyzerAttachedRun: true,
     isPlayingRun: false,
+    scrubIdentityKey: "mu:range:2026-02-13",
     rangePlaybackMeta,
     timelineCacheVersion,
     timelineCacheRef,
@@ -122,20 +123,12 @@ function useRangeScrubHarness() {
 }
 
 describe("useStrategyAnalyzerRangeScrub", () => {
-  it("keeps following the tail when late bars arrive after playback stops", async () => {
+  it("auto-opens on latest progressed point and follows tail when late bars arrive", async () => {
     const { result } = renderHook(() => useRangeScrubHarness());
 
     await waitFor(() => {
       expect(result.current.rangeScrubMeta?.progressedMaxOffset).toBe(9);
     });
-    await waitFor(() => {
-      expect(result.current.rangeScrubOffset).toBe(0);
-    });
-
-    act(() => {
-      result.current.setRangeScrubOffset(9);
-    });
-
     await waitFor(() => {
       expect(result.current.rangeScrubOffset).toBe(9);
     });
@@ -156,7 +149,7 @@ describe("useStrategyAnalyzerRangeScrub", () => {
     const { result } = renderHook(() => useRangeScrubHarness());
 
     await waitFor(() => {
-      expect(result.current.rangeScrubOffset).toBe(0);
+      expect(result.current.rangeScrubOffset).toBe(9);
     });
 
     act(() => {

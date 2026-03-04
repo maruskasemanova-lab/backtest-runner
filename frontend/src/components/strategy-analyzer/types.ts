@@ -93,6 +93,8 @@ export type StrategyAnalyzerStartRunPayload = {
   strategy_api_url: string;
   include_extended_hours: boolean;
   trade_eval_mode: StrategyAnalyzerTradeEvalMode;
+  comparable_mode?: boolean;
+  cold_start_each_day?: boolean;
   context_aware_risk_enabled?: boolean;
   context_risk_min_room_pct?: number;
   context_risk_min_effective_rr?: number;

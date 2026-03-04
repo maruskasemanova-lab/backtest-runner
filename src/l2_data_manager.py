@@ -1155,13 +1155,19 @@ class L2DataManager:
                 try:
                     c_min = cached.index.min()
                     c_max = cached.index.max()
-                    # Reuse cached data when requested window overlaps cached coverage.
-                    # Intrabar extraction tolerates partial-minute coverage (missing seconds
-                    # simply yield fewer quote checkpoints), so strict full-window coverage
-                    # is unnecessary and causes expensive reloads.
-                    if c_min <= end_time and c_max >= start_time:
+                    # We reuse runtime cache ONLY when the requested timestamp is fully covered.
+                    # Raw tick files often have no opening or closing rows (like 00:00:00),
+                    # so strict full-window coverage is unnecessary and causes expensive reloads.
+                    # Use accurate day-level bounds comparison to avoid false misses:
+                    c_min_day = c_min.normalize()
+                    c_max_day = c_max.normalize()
+                    req_start_day = start_time.normalize()
+                    req_end_day = end_time.normalize()
+
+                    if c_min_day <= req_start_day and c_max_day >= req_end_day:
                         self._intrabar_runtime_data.move_to_end(ticker)
-                        return cached
+                        mask = (cached.index >= start_time) & (cached.index <= end_time)
+                        return cached.loc[mask].copy()
                 except Exception:
                     pass
 
@@ -1189,4 +1195,7 @@ class L2DataManager:
             ):
                 self._intrabar_runtime_data.popitem(last=False)
 
-        return loaded
+        # Critical Fix: Slice the loaded dataframe strictly to the requested timeframe!
+        # Otherwise, the caller might accidentally process overlapping cached multi-day chunks.
+        mask = (loaded.index >= start_time) & (loaded.index <= end_time)
+        return loaded.loc[mask].copy()
