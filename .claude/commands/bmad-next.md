@@ -1,3 +1,10 @@
+---
+description: Select the next highest-priority BMAD backlog story and prepare domain-scoped implementation context.
+argument-hint: "[optional-story-id]"
+allowed-tools: Read, Grep, Glob
+model: sonnet
+---
+
 Select and prepare the next backlog story.
 
 Context:

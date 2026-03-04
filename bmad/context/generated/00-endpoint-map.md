@@ -5,7 +5,7 @@ Generated from mapped Python files in `component-map.json`.
 | Domain | Method | Path | Handler | File | Line |
 |---|---|---|---|---|---:|
 | `orchestration` | `DELETE` | `/api/data-loader/entry` | `delete_data_entry` | `src/routes/data_loader_routes.py` | 256 |
-| `orchestration` | `DELETE` | `/api/run/{run_id}/{ticker}/{date}` | `delete_run_endpoint` | `src/routes/run_routes.py` | 227 |
+| `orchestration` | `DELETE` | `/api/run/{run_id}/{ticker}/{date}` | `delete_run_endpoint` | `src/routes/run_routes.py` | 234 |
 | `orchestration` | `DELETE` | `/datasets/{dataset_id}` | `v2_delete_user_dataset` | `src/routes/v2_routes.py` | 2040 |
 | `orchestration` | `DELETE` | `/strategies/adaptive/{profile_id}` | `v2_delete_adaptive_strategy` | `src/routes/v2_routes.py` | 2453 |
 | `orchestration` | `GET` | `/` | `root` | `src/routes/system_routes.py` | 1419 |
@@ -33,15 +33,15 @@ Generated from mapped Python files in `component-map.json`.
 | `orchestration` | `GET` | `/api/profiles/{ticker}` | `get_unified_profiles` | `src/routes/config_read_routes.py` | 95 |
 | `orchestration` | `GET` | `/api/reports/history/{ticker}` | `get_saved_run_history` | `src/routes/system_routes.py` | 1521 |
 | `orchestration` | `GET` | `/api/reports/run-snapshot` | `get_run_playback_snapshot` | `src/routes/system_routes.py` | 1769 |
-| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/bar-details/{minute_key}` | `get_bar_details_endpoint` | `src/routes/run_routes.py` | 139 |
+| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/bar-details/{minute_key}` | `get_bar_details_endpoint` | `src/routes/run_routes.py` | 146 |
 | `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/bars` | `get_processed_bars_endpoint` | `src/routes/run_routes.py` | 128 |
-| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/chart-annotations` | `get_chart_annotations_endpoint` | `src/routes/run_routes.py` | 181 |
-| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/markers` | `get_markers_endpoint` | `src/routes/run_routes.py` | 167 |
-| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/run-status` | `get_run_status_endpoint` | `src/routes/run_routes.py` | 216 |
+| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/chart-annotations` | `get_chart_annotations_endpoint` | `src/routes/run_routes.py` | 188 |
+| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/markers` | `get_markers_endpoint` | `src/routes/run_routes.py` | 174 |
+| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/run-status` | `get_run_status_endpoint` | `src/routes/run_routes.py` | 223 |
 | `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/state` | `get_run_state_endpoint` | `src/routes/run_routes.py` | 31 |
-| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/summary` | `get_run_summary_endpoint` | `src/routes/run_routes.py` | 194 |
-| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/summary-db` | `get_run_summary_db_endpoint` | `src/routes/run_routes.py` | 205 |
-| `orchestration` | `GET` | `/api/runs` | `list_runs_endpoint` | `src/routes/run_routes.py` | 238 |
+| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/summary` | `get_run_summary_endpoint` | `src/routes/run_routes.py` | 201 |
+| `orchestration` | `GET` | `/api/run/{run_id}/{ticker}/{date}/summary-db` | `get_run_summary_db_endpoint` | `src/routes/run_routes.py` | 212 |
+| `orchestration` | `GET` | `/api/runs` | `list_runs_endpoint` | `src/routes/run_routes.py` | 245 |
 | `orchestration` | `GET` | `/api/strategy-combos/{ticker}` | `get_strategy_combos` | `src/routes/config_read_routes.py` | 29 |
 | `orchestration` | `GET` | `/api/strategy-overrides` | `get_strategy_overrides` | `src/routes/config_read_routes.py` | 14 |
 | `orchestration` | `GET` | `/api/strategy-overrides/{ticker}` | `get_ticker_overrides` | `src/routes/config_read_routes.py` | 20 |
@@ -71,7 +71,7 @@ Generated from mapped Python files in `component-map.json`.
 | `orchestration` | `POST` | `/api/run/prewarm` | `prewarm_run_endpoint` | `src/routes/run_start_routes.py` | 102 |
 | `orchestration` | `POST` | `/api/run/prewarm/status` | `prewarm_status_endpoint` | `src/routes/run_start_routes.py` | 111 |
 | `orchestration` | `POST` | `/api/run/start` | `start_run_endpoint` | `src/routes/run_start_routes.py` | 93 |
-| `orchestration` | `POST` | `/api/run/{run_id}/{ticker}/{date}/intrabar_eval` | `evaluate_intrabar_slice_endpoint` | `src/routes/run_routes.py` | 153 |
+| `orchestration` | `POST` | `/api/run/{run_id}/{ticker}/{date}/intrabar_eval` | `evaluate_intrabar_slice_endpoint` | `src/routes/run_routes.py` | 160 |
 | `orchestration` | `POST` | `/api/run/{run_id}/{ticker}/{date}/pause` | `pause_run_endpoint` | `src/routes/run_routes.py` | 84 |
 | `orchestration` | `POST` | `/api/run/{run_id}/{ticker}/{date}/play` | `play_run_endpoint` | `src/routes/run_routes.py` | 62 |
 | `orchestration` | `POST` | `/api/run/{run_id}/{ticker}/{date}/restart` | `restart_run_endpoint` | `src/routes/run_routes.py` | 117 |

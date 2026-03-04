@@ -1,3 +1,10 @@
+---
+description: Draft a BMAD story from the template with concrete domain mapping, contracts, and acceptance criteria.
+argument-hint: "[task]"
+allowed-tools: Read, Grep, Glob
+model: sonnet
+---
+
 Draft a story for this task using the project template.
 
 Task:

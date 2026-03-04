@@ -56,6 +56,8 @@ def test_get_processed_bars_normalizes_numpy_values_for_json() -> None:
 
     assert payload["current_index"] == 1
     assert payload["total_bars"] == 2
+    assert payload["mode"] == "full"
+    assert payload["since_index"] is None
     assert payload["bars"][0]["timestamp"].startswith("2026-02-13T14:31:00")
     assert payload["bars"][0]["close"] == 101.25
     assert payload["bars"][0]["sizes"] == [1, 2, 3]
@@ -63,3 +65,27 @@ def test_get_processed_bars_normalizes_numpy_values_for_json() -> None:
 
     encoded = jsonable_encoder(payload)
     assert encoded["bars"][0]["nested"]["day"] == "2026-02-13"
+
+
+def test_get_processed_bars_supports_delta_since_index() -> None:
+    runner = _DummyRunner()
+    deps = _build_deps(runner)
+
+    payload = get_processed_bars("r1", "MU", "2026-02-13", deps, since_index=1)
+
+    assert payload["mode"] == "delta"
+    assert payload["since_index"] == 1
+    assert payload["bars"] == []
+    assert payload["current_index"] == 1
+    assert payload["total_bars"] == 2
+
+
+def test_get_processed_bars_delta_since_index_clamped_to_zero() -> None:
+    runner = _DummyRunner()
+    deps = _build_deps(runner)
+
+    payload = get_processed_bars("r1", "MU", "2026-02-13", deps, since_index=-50)
+
+    assert payload["mode"] == "delta"
+    assert payload["since_index"] == 0
+    assert len(payload["bars"]) == 1

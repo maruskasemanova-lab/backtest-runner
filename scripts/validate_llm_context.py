@@ -29,6 +29,10 @@ REQUIRED_DOCS = [
     ROOT / "docs" / "llm" / "invariants-and-validation.md",
 ]
 
+REQUIRED_CLAUDE_CONFIG = [
+    ROOT / ".claude" / "settings.json",
+]
+
 REQUIRED_COMMANDS = [
     ROOT / ".claude" / "commands" / "bmad-system-map.md",
     ROOT / ".claude" / "commands" / "bmad-next.md",
@@ -52,6 +56,30 @@ def resolve_path(raw_path: str) -> Path:
     return (ROOT / p).resolve()
 
 
+def _parse_simple_frontmatter(content: str) -> Dict[str, str] | None:
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+
+    end_idx = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            end_idx = idx
+            break
+    if end_idx is None:
+        return None
+
+    result: Dict[str, str] = {}
+    for line in lines[1:end_idx]:
+        if ":" not in line:
+            continue
+        key, raw_value = line.split(":", 1)
+        value = raw_value.strip().strip("\"'")
+        if key.strip():
+            result[key.strip()] = value
+    return result
+
+
 def _load_map() -> Dict[str, Any]:
     if not MAP_PATH.exists():
         raise FileNotFoundError(f"Missing map file: {MAP_PATH}")
@@ -70,6 +98,14 @@ def _check_command_content(
         return
 
     content = path.read_text(encoding="utf-8", errors="ignore")
+    frontmatter = _parse_simple_frontmatter(content)
+    if frontmatter is None:
+        errors.append(
+            f"Command {path.name} must include YAML frontmatter with at least description"
+        )
+    elif not frontmatter.get("description"):
+        errors.append(f"Command {path.name} frontmatter must include description")
+
     checks = [
         ("00-machine-index.json", "must reference machine index"),
         ("bmad/context/generated/", "must reference generated domain packs"),
@@ -168,6 +204,9 @@ def run_checks(strict: bool = False) -> Tuple[List[str], List[str]]:
     _check_mapped_files(config, errors, warnings, strict)
 
     for path in REQUIRED_DOCS:
+        _check_file_exists(path, errors)
+
+    for path in REQUIRED_CLAUDE_CONFIG:
         _check_file_exists(path, errors)
 
     for path in REQUIRED_COMMANDS:

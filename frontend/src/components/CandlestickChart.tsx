@@ -256,7 +256,7 @@ const CandlestickChart = forwardRef<CandlestickChartHandle, CandlestickChartProp
     setError,
   });
 
-  const { avgVolume, clickableMarkers } = useCandlestickChartMarkers({
+  const { clickableMarkers } = useCandlestickChartMarkers({
     bars,
     markers,
     icebergs,
@@ -277,7 +277,6 @@ const CandlestickChart = forwardRef<CandlestickChartHandle, CandlestickChartProp
     candleSeriesRef,
     bars,
     clickableMarkers,
-    avgVolume,
   });
 
   useCandlestickChartBarSeriesData({

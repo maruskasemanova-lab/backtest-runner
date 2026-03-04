@@ -46,6 +46,7 @@ def _build_minimal_repo(root: Path) -> None:
     _write(root / "docs/llm/functionality-map.md", "x")
     _write(root / "docs/llm/api-contracts.md", "x")
     _write(root / "docs/llm/invariants-and-validation.md", "x")
+    _write(root / ".claude/settings.json", "{}")
 
     command_names = [
         "bmad-system-map.md",
@@ -59,6 +60,10 @@ def _build_minimal_repo(root: Path) -> None:
         _write(
             root / ".claude/commands" / name,
             """
+---
+description: test command
+---
+
 use bmad/context/generated/00-machine-index.json
 use bmad/context/generated/orchestration.md
 ```yaml
@@ -87,6 +92,9 @@ def _patch_validator_paths(module, root: Path) -> None:
         root / "docs/llm/functionality-map.md",
         root / "docs/llm/api-contracts.md",
         root / "docs/llm/invariants-and-validation.md",
+    ]
+    module.REQUIRED_CLAUDE_CONFIG = [
+        root / ".claude/settings.json",
     ]
     module.REQUIRED_COMMANDS = [
         root / ".claude/commands/bmad-system-map.md",
@@ -132,3 +140,24 @@ def test_run_checks_fails_on_stale_generated_file(tmp_path: Path) -> None:
 
     errors, _ = module.run_checks(strict=False)
     assert any("Stale generated file" in err for err in errors)
+
+
+def test_run_checks_fails_on_missing_command_frontmatter(tmp_path: Path) -> None:
+    module = _load_validator_module()
+    _build_minimal_repo(tmp_path)
+    _patch_validator_paths(module, tmp_path)
+
+    command_path = tmp_path / ".claude/commands/bmad-implement.md"
+    command_path.write_text(
+        """
+use bmad/context/generated/00-machine-index.json
+use bmad/context/generated/orchestration.md
+```yaml
+key: value
+```
+""".strip(),
+        encoding="utf-8",
+    )
+
+    errors, _ = module.run_checks(strict=False)
+    assert any("frontmatter" in err for err in errors)

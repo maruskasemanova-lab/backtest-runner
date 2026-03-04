@@ -204,28 +204,33 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
     summary?.min_price_bin != null && summary?.max_price_bin != null
       ? `${formatPrice(summary.min_price_bin)} - ${formatPrice(summary.max_price_bin)}`
       : "n/a";
+  const latestAsOfDate = payload?.latest_as_of_date || "n/a";
+  const heatmapInfoTooltip = [
+    `${ticker} | ${dateFrom || "n/a"} -> ${dateTo || "n/a"} | Preview bars ${bars.length.toLocaleString()} | Range ${rangeText}`,
+    "Source: daily_price_heatmap_levels (daily cumulative values).",
+    "Bars = count of 1m candles (time = bars in minutes).",
+    `Top tables are based on the latest day in range (${latestAsOfDate}).`,
+    `Heatmap tables below are scrollable across full price range and ${days.length} day(s).`,
+  ].join("\n");
 
   return (
     <div className="card sa-heatmap-card">
       <div className="sa-heatmap-head">
         <div>
-          <div className="sa-section-kicker">Price Clustering</div>
-          <h3 className="sa-section-title">Heatmap exekucii podla ceny (DB cumulative)</h3>
-          <div className="sa-heatmap-meta">
-            {ticker} | {dateFrom || "n/a"} → {dateTo || "n/a"} | Preview bars {bars.length.toLocaleString()} | Range {rangeText}
+          <div className="sa-heatmap-heading-row">
+            <div>
+              <div className="sa-section-kicker">Price Clustering</div>
+              <h3 className="sa-section-title">Heatmap exekucii podla ceny (DB cumulative)</h3>
+            </div>
+            <button
+              type="button"
+              className="sa-heatmap-info-btn"
+              title={heatmapInfoTooltip}
+              aria-label="Heatmap info"
+            >
+              i
+            </button>
           </div>
-          <div className="sa-heatmap-note">
-            Zdroj: `daily_price_heatmap_levels` (kumulativne hodnoty k jednotlivym dnom).
-          </div>
-          <div className="sa-heatmap-note">
-            `Bars` = počet 1m sviečok (čas = bars v minútach). Top tabuľky sú pre posledný deň v range ({payload?.latest_as_of_date || "n/a"}).
-          </div>
-          <div className="sa-heatmap-note">
-            Tabulky nižšie sú scrollovateľné cez celý cenový rozsah a dni ({days.length}).
-          </div>
-          {payload?.latest_as_of_date ? (
-            <div className="sa-heatmap-note">Posledný dostupný deň v rozsahu: {payload.latest_as_of_date}</div>
-          ) : null}
         </div>
         <label className="sa-control-field sa-control-field-small" htmlFor="sa_heatmap_bin_size">
           <span className="sa-control-label">BIN SIZE</span>

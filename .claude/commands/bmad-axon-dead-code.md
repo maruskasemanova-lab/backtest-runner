@@ -1,3 +1,10 @@
+---
+description: Audit dead code with Axon-first triage and produce a safe, reversible cleanup plan.
+argument-hint: "[scope]"
+allowed-tools: Read, Grep, Glob, Bash(rg *), Bash(pytest *), mcp__axon__*
+model: sonnet
+---
+
 Run a BMAD + Axon dead-code audit and prepare a safe cleanup plan (and cleanup patch only when requested).
 
 Task:

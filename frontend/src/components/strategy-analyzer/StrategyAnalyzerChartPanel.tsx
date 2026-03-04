@@ -105,25 +105,34 @@ export default function StrategyAnalyzerChartPanel({
       <div className="sa-chart-stage">
         {hasRenderableBars ? (
           <>
-            <CandlestickChart
-              ref={chartRef}
-              bars={renderBars}
-              markers={analyzerChartMarkers}
-              icebergs={[]}
-              onMarkerClick={onChartMarkerClick}
-              onBarClick={onBarClick}
-              selectedMarker={selectedMarker}
-              chartState={analyzerChartState || selectedRangeWindow || null}
-              onChartStateChange={onChartStateChange}
-            />
-            <ChartRangeSelector
-              enabled={rangeSelectMode}
-              chartRef={chartRef}
-              bars={selectionBars}
-              onRangeSelected={onRangeSelected}
-              onSelectionClear={onSelectionClear}
-              selectedFrom={selectedRangeFrom}
-              selectedTo={selectedRangeTo}
+            <div className="sa-chart-viewport">
+              <div className="sa-chart-canvas">
+                <CandlestickChart
+                  ref={chartRef}
+                  bars={renderBars}
+                  markers={analyzerChartMarkers}
+                  icebergs={[]}
+                  onMarkerClick={onChartMarkerClick}
+                  onBarClick={onBarClick}
+                  selectedMarker={selectedMarker}
+                  chartState={analyzerChartState || selectedRangeWindow || null}
+                  onChartStateChange={onChartStateChange}
+                />
+              </div>
+              <ChartRangeSelector
+                enabled={rangeSelectMode}
+                chartRef={chartRef}
+                bars={selectionBars}
+                onRangeSelected={onRangeSelected}
+                onSelectionClear={onSelectionClear}
+                selectedFrom={selectedRangeFrom}
+                selectedTo={selectedRangeTo}
+              />
+            </div>
+            <StrategyAnalyzerScrubSlider
+              rangeScrubMeta={rangeScrubMeta}
+              focusSelectedRangeOffset={focusSelectedRangeOffset}
+              moveSelectedRangeByStep={moveSelectedRangeByStep}
             />
           </>
         ) : (
@@ -132,12 +141,6 @@ export default function StrategyAnalyzerChartPanel({
           </div>
         )}
       </div>
-
-      <StrategyAnalyzerScrubSlider
-        rangeScrubMeta={rangeScrubMeta}
-        focusSelectedRangeOffset={focusSelectedRangeOffset}
-        moveSelectedRangeByStep={moveSelectedRangeByStep}
-      />
     </div>
   );
 }

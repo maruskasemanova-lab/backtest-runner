@@ -1,3 +1,10 @@
+---
+description: Run C4x3 adaptive tuning workflow with up to 3 isolated strategy API instances and summarize winners.
+argument-hint: "[ticker-or-scope]"
+allowed-tools: Read, Grep, Bash(python3 *), Bash(pytest *), mcp__axon__*
+model: sonnet
+---
+
 # adaptive-tuning-c4x3
 
 Load and follow:

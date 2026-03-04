@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from 'react';
 import type { CandlestickChartBar } from '../components/CandlestickChart';
+import { upsertStreamChartBar } from '../app/appRunStateCollectionShared';
 
 const RUN_STATE_POLL_VISIBLE_MS = 1000;
 const RUN_STATE_POLL_HIDDEN_MS = 5000;
@@ -299,18 +300,47 @@ export const useRunControlActions = ({
 
         const processedCount = Number(state?.current_bar_index || 0);
         const localBarsCount = Number(barsLengthRef.current || 0);
-        const barsCountMismatch = processedCount !== localBarsCount;
+        const barsBehindCount = Math.max(0, processedCount - localBarsCount);
+        const barsAheadCount = Math.max(0, localBarsCount - processedCount);
+        const preferDeltaSync = Boolean(isPollingFallback || barsBehindCount > 0);
         const shouldSyncBars =
           (processedCount > 0 || localBarsCount > 0) &&
-          (isPollingFallback || barsCountMismatch);
+          (barsBehindCount > 0 || barsAheadCount > 0);
 
         if (shouldSyncBars) {
           try {
-            const barsResponse = await fetch(`${activeRunApiBase}/bars`);
+            const requestedSinceIndex = Math.max(0, localBarsCount);
+            const barsUrl =
+              preferDeltaSync && barsBehindCount > 0
+                ? `${activeRunApiBase}/bars?since_index=${requestedSinceIndex}`
+                : `${activeRunApiBase}/bars`;
+            const barsResponse = await fetch(barsUrl);
             if (barsResponse.ok) {
               const barsPayload = await barsResponse.json();
               const rawBars = Array.isArray(barsPayload?.bars) ? barsPayload.bars : [];
-              if (rawBars.length !== localBarsCount) {
+              const payloadMode = String(barsPayload?.mode || '').trim().toLowerCase();
+              const payloadSinceIndex = Number(barsPayload?.since_index);
+              const canApplyDelta =
+                barsBehindCount > 0 &&
+                preferDeltaSync &&
+                payloadMode === 'delta' &&
+                Number.isFinite(payloadSinceIndex) &&
+                payloadSinceIndex === requestedSinceIndex;
+
+              if (canApplyDelta) {
+                const nextChartBars = rawBars
+                  .map((bar: any) => toChartBar(bar))
+                  .filter(Boolean) as CandlestickChartBar[];
+                if (nextChartBars.length > 0) {
+                  setBars((prev) => {
+                    let next = prev;
+                    for (const chartBar of nextChartBars) {
+                      next = upsertStreamChartBar(next, chartBar);
+                    }
+                    return next;
+                  });
+                }
+              } else {
                 const chartBars = rawBars
                   .map((bar: any) => toChartBar(bar))
                   .filter(Boolean)

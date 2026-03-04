@@ -1,3 +1,10 @@
+---
+description: Create a BMAD-scoped implementation plan with explicit files, validation, and rollback strategy.
+argument-hint: "[task]"
+allowed-tools: Read, Grep, Glob, mcp__axon__*
+model: sonnet
+---
+
 Create a focused implementation plan using BMAD domain context.
 
 Task:

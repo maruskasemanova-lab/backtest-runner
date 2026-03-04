@@ -1,3 +1,10 @@
+---
+description: Route a task to the correct primary BMAD domain and surface cross-domain interface risks.
+argument-hint: "[task]"
+allowed-tools: Read, Grep, Glob, mcp__axon__*
+model: sonnet
+---
+
 Route this task to the right project domain before coding.
 
 Input task:

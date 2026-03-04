@@ -1,3 +1,10 @@
+---
+description: Implement tasks using strict BMAD domain routing, Axon-first analysis, and schema-first reporting.
+argument-hint: "[task]"
+allowed-tools: Read, Edit, Write, Grep, Glob, Bash(rg *), Bash(pytest *), mcp__axon__*
+model: sonnet
+---
+
 Implement the task with strict BMAD domain discipline.
 
 Task:

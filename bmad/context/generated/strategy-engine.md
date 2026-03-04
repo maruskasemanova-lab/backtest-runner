@@ -23,7 +23,7 @@ Own regime detection, signal generation, position management, learning component
 |---|---:|---:|---|
 | `../market_regime_detection/api_server.py` | yes | 1107 | `6267f1a 2026-03-04` |
 | `../market_regime_detection/src/api_models.py` | yes | 278 | `89d7179 2026-02-28` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 1108 | `6748856 2026-03-02` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 1110 | `6748856 2026-03-02` |
 | `../market_regime_detection/src/intraday_levels.py` | yes | 814 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 41 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/trading_orchestrator.py` | yes | 473 | `562a066 2026-02-25` |

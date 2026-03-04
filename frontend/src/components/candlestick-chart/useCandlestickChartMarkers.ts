@@ -17,7 +17,6 @@ type Params = {
 };
 
 type Result = {
-  avgVolume: number;
   clickableMarkers: CandlestickChartNormalizedMarker[];
 };
 
@@ -133,8 +132,6 @@ export default function useCandlestickChartMarkers({
           side,
           price: Number.isFinite(price) ? price : null,
           total_size: Number.isFinite(totalSize) ? totalSize : 0,
-          title: iceberg.title || `Iceberg ${side ? side.toUpperCase() : "UNKNOWN"}`,
-          description: iceberg.description || `Detected ${side || "unknown"} iceberg`,
           details: {
             ...(iceberg.details || {}),
             iceberg_side: side,
@@ -173,7 +170,6 @@ export default function useCandlestickChartMarkers({
   }, [markers, normalizeDecisionMarker, filteredIcebergMarkers]);
 
   return {
-    avgVolume,
     clickableMarkers,
   };
 }

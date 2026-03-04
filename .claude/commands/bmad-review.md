@@ -1,3 +1,10 @@
+---
+description: Perform risk-first BMAD review focused on regressions, invariants, contract breaks, and missing tests.
+argument-hint: "[scope]"
+allowed-tools: Read, Grep, Glob, Bash(pytest *), Bash(rg *), mcp__axon__*
+model: sonnet
+---
+
 Perform a risk-first code review for this task.
 
 Scope:

@@ -1,3 +1,10 @@
+---
+description: Perform Axon-first investigation, then implement minimal changes with domain and contract safety.
+argument-hint: "[task]"
+allowed-tools: Read, Edit, Write, Grep, Glob, Bash(rg *), Bash(pytest *), mcp__axon__*
+model: sonnet
+---
+
 Run an Axon-first investigation before implementation.
 
 Task:

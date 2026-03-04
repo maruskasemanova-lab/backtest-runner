@@ -13,14 +13,12 @@ type Params = {
   candleSeriesRef: CandlestickChartCandleSeriesRef;
   bars: CandlestickChartBar[];
   clickableMarkers: CandlestickChartNormalizedMarker[];
-  avgVolume: number;
 };
 
 export default function useCandlestickChartSeriesMarkers({
   candleSeriesRef,
   bars,
   clickableMarkers,
-  avgVolume,
 }: Params): void {
   useEffect(() => {
     if (!candleSeriesRef.current || !bars || bars.length === 0) return;
@@ -45,7 +43,7 @@ export default function useCandlestickChartSeriesMarkers({
           let position: CandlestickChartSeriesMarkerPosition = "aboveBar";
           let color = "#3b82f6";
           let shape: CandlestickChartSeriesMarkerShape = "circle";
-          let text = "";
+          let text: string | undefined;
 
           switch (m.marker_type) {
             case "entry_executed":
@@ -67,21 +65,17 @@ export default function useCandlestickChartSeriesMarkers({
               position = m.side === "long" ? "aboveBar" : "belowBar";
               color = palette.long; shape = "circle"; text = "TP";
               break;
-            case "iceberg_detected": {
-              const isMega = Number(m.total_size || 0) > avgVolume * 3;
+            case "iceberg_detected":
               if (m.side === "buy") {
                 position = "belowBar";
                 color = palette.ice_buy;
                 shape = "arrowUp";
-                text = isMega ? "❄️" : "▲";
               } else {
                 position = "aboveBar";
                 color = palette.ice_sell;
                 shape = "arrowDown";
-                text = isMega ? "❄️" : "▼";
               }
               break;
-            }
             case "regime_detected":
               position = "aboveBar";
               color = palette.blue;
@@ -92,8 +86,6 @@ export default function useCandlestickChartSeriesMarkers({
               position = "belowBar";
               color = palette.amber;
               shape = "square";
-              text =
-                typeof m.strategy === "string" ? m.strategy.substring(0, 3).toUpperCase() : "S";
               break;
           }
 
@@ -113,5 +105,5 @@ export default function useCandlestickChartSeriesMarkers({
     } catch (err: unknown) {
       console.error("Chart markers update error:", err);
     }
-  }, [avgVolume, bars, candleSeriesRef, clickableMarkers]);
+  }, [bars, candleSeriesRef, clickableMarkers]);
 }

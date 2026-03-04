@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-04T09:05:35.906240+00:00",
+  "generated_at": "2026-03-04T13:16:08.182473+00:00",
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -1459,7 +1459,7 @@
           "path": "src/routes/run_routes.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/run_routes.py",
           "exists": true,
-          "lines": 240,
+          "lines": 247,
           "last_commit": "0d50960 2026-03-04",
           "symbols": [
             {
@@ -1505,47 +1505,47 @@
             {
               "kind": "async_function",
               "name": "get_bar_details_endpoint",
-              "line": 139
+              "line": 146
             },
             {
               "kind": "async_function",
               "name": "evaluate_intrabar_slice_endpoint",
-              "line": 153
+              "line": 160
             },
             {
               "kind": "async_function",
               "name": "get_markers_endpoint",
-              "line": 167
+              "line": 174
             },
             {
               "kind": "async_function",
               "name": "get_chart_annotations_endpoint",
-              "line": 181
+              "line": 188
             },
             {
               "kind": "async_function",
               "name": "get_run_summary_endpoint",
-              "line": 194
+              "line": 201
             },
             {
               "kind": "async_function",
               "name": "get_run_summary_db_endpoint",
-              "line": 205
+              "line": 212
             },
             {
               "kind": "async_function",
               "name": "get_run_status_endpoint",
-              "line": 216
+              "line": 223
             },
             {
               "kind": "async_function",
               "name": "delete_run_endpoint",
-              "line": 227
+              "line": 234
             },
             {
               "kind": "async_function",
               "name": "list_runs_endpoint",
-              "line": 238
+              "line": 245
             }
           ],
           "routes": [
@@ -1601,55 +1601,55 @@
               "method": "GET",
               "path": "/api/run/{run_id}/{ticker}/{date}/bar-details/{minute_key}",
               "handler": "get_bar_details_endpoint",
-              "line": 139
+              "line": 146
             },
             {
               "method": "POST",
               "path": "/api/run/{run_id}/{ticker}/{date}/intrabar_eval",
               "handler": "evaluate_intrabar_slice_endpoint",
-              "line": 153
+              "line": 160
             },
             {
               "method": "GET",
               "path": "/api/run/{run_id}/{ticker}/{date}/markers",
               "handler": "get_markers_endpoint",
-              "line": 167
+              "line": 174
             },
             {
               "method": "GET",
               "path": "/api/run/{run_id}/{ticker}/{date}/chart-annotations",
               "handler": "get_chart_annotations_endpoint",
-              "line": 181
+              "line": 188
             },
             {
               "method": "GET",
               "path": "/api/run/{run_id}/{ticker}/{date}/summary",
               "handler": "get_run_summary_endpoint",
-              "line": 194
+              "line": 201
             },
             {
               "method": "GET",
               "path": "/api/run/{run_id}/{ticker}/{date}/summary-db",
               "handler": "get_run_summary_db_endpoint",
-              "line": 205
+              "line": 212
             },
             {
               "method": "GET",
               "path": "/api/run/{run_id}/{ticker}/{date}/run-status",
               "handler": "get_run_status_endpoint",
-              "line": 216
+              "line": 223
             },
             {
               "method": "DELETE",
               "path": "/api/run/{run_id}/{ticker}/{date}",
               "handler": "delete_run_endpoint",
-              "line": 227
+              "line": 234
             },
             {
               "method": "GET",
               "path": "/api/runs",
               "handler": "list_runs_endpoint",
-              "line": 238
+              "line": 245
             }
           ],
           "parse_error": null
@@ -2912,7 +2912,7 @@
           "path": "src/services/run_control_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/run_control_service.py",
           "exists": true,
-          "lines": 848,
+          "lines": 871,
           "last_commit": "0d50960 2026-03-04",
           "symbols": [
             {
@@ -3038,47 +3038,47 @@
             {
               "kind": "function",
               "name": "get_bar_details",
-              "line": 582
+              "line": 605
             },
             {
               "kind": "async_function",
               "name": "evaluate_intrabar_slice",
-              "line": 636
+              "line": 659
             },
             {
               "kind": "function",
               "name": "get_markers",
-              "line": 736
+              "line": 759
             },
             {
               "kind": "function",
               "name": "get_chart_annotations",
-              "line": 753
+              "line": 776
             },
             {
               "kind": "function",
               "name": "get_run_summary",
-              "line": 758
+              "line": 781
             },
             {
               "kind": "function",
               "name": "get_run_summary_db",
-              "line": 763
+              "line": 786
             },
             {
               "kind": "function",
               "name": "get_run_status",
-              "line": 791
+              "line": 814
             },
             {
               "kind": "async_function",
               "name": "delete_run",
-              "line": 829
+              "line": 852
             },
             {
               "kind": "function",
               "name": "list_runs",
-              "line": 847
+              "line": 870
             }
           ],
           "routes": [],
@@ -5209,7 +5209,7 @@
           "path": "../market_regime_detection/src/day_trading_manager.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/day_trading_manager.py",
           "exists": true,
-          "lines": 1108,
+          "lines": 1110,
           "last_commit": "6748856 2026-03-02",
           "symbols": [
             {
@@ -6402,7 +6402,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/App.tsx",
           "exists": true,
           "lines": 820,
-          "last_commit": "0d50960 2026-03-04",
+          "last_commit": "f894916 2026-03-04",
           "symbols": [],
           "routes": [],
           "parse_error": null
@@ -6421,7 +6421,7 @@
           "path": "frontend/src/components/CandlestickChart.tsx",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/components/CandlestickChart.tsx",
           "exists": true,
-          "lines": 346,
+          "lines": 345,
           "last_commit": "0d50960 2026-03-04",
           "symbols": [],
           "routes": [],
@@ -6545,7 +6545,7 @@
       "method": "DELETE",
       "path": "/api/run/{run_id}/{ticker}/{date}",
       "handler": "delete_run_endpoint",
-      "line": 227
+      "line": 234
     },
     {
       "domain": "orchestration",
@@ -6769,7 +6769,7 @@
       "method": "GET",
       "path": "/api/run/{run_id}/{ticker}/{date}/bar-details/{minute_key}",
       "handler": "get_bar_details_endpoint",
-      "line": 139
+      "line": 146
     },
     {
       "domain": "orchestration",
@@ -6785,7 +6785,7 @@
       "method": "GET",
       "path": "/api/run/{run_id}/{ticker}/{date}/chart-annotations",
       "handler": "get_chart_annotations_endpoint",
-      "line": 181
+      "line": 188
     },
     {
       "domain": "orchestration",
@@ -6793,7 +6793,7 @@
       "method": "GET",
       "path": "/api/run/{run_id}/{ticker}/{date}/markers",
       "handler": "get_markers_endpoint",
-      "line": 167
+      "line": 174
     },
     {
       "domain": "orchestration",
@@ -6801,7 +6801,7 @@
       "method": "GET",
       "path": "/api/run/{run_id}/{ticker}/{date}/run-status",
       "handler": "get_run_status_endpoint",
-      "line": 216
+      "line": 223
     },
     {
       "domain": "orchestration",
@@ -6817,7 +6817,7 @@
       "method": "GET",
       "path": "/api/run/{run_id}/{ticker}/{date}/summary",
       "handler": "get_run_summary_endpoint",
-      "line": 194
+      "line": 201
     },
     {
       "domain": "orchestration",
@@ -6825,7 +6825,7 @@
       "method": "GET",
       "path": "/api/run/{run_id}/{ticker}/{date}/summary-db",
       "handler": "get_run_summary_db_endpoint",
-      "line": 205
+      "line": 212
     },
     {
       "domain": "orchestration",
@@ -6833,7 +6833,7 @@
       "method": "GET",
       "path": "/api/runs",
       "handler": "list_runs_endpoint",
-      "line": 238
+      "line": 245
     },
     {
       "domain": "orchestration",
@@ -7073,7 +7073,7 @@
       "method": "POST",
       "path": "/api/run/{run_id}/{ticker}/{date}/intrabar_eval",
       "handler": "evaluate_intrabar_slice_endpoint",
-      "line": 153
+      "line": 160
     },
     {
       "domain": "orchestration",

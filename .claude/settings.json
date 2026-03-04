@@ -1,0 +1,28 @@
+{
+  "plansDirectory": ".claude/plans",
+  "respectGitignore": true,
+  "enabledMcpjsonServers": [
+    "axon",
+    "webmcp",
+    "python-refactoring"
+  ],
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pytest *)",
+      "Bash(rg *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(npx vite build)",
+      "mcp__*"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(rm *)",
+      "Bash(curl *)",
+      "Bash(wget *)"
+    ]
+  }
+}

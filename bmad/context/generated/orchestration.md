@@ -34,7 +34,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/routes/live_trader_routes.py` | yes | 164 | `51e9988 2026-03-02` |
 | `src/routes/config_read_routes.py` | yes | 134 | `51e9988 2026-03-02` |
 | `src/routes/config_write_routes.py` | yes | 111 | `d064025 2026-03-01` |
-| `src/routes/run_routes.py` | yes | 240 | `0d50960 2026-03-04` |
+| `src/routes/run_routes.py` | yes | 247 | `0d50960 2026-03-04` |
 | `src/routes/adaptive_tuner_routes.py` | yes | 38 | `da07c20 2026-02-12` |
 | `src/routes/run_start_routes.py` | yes | 345 | `1273b21 2026-02-23` |
 | `src/routes/v2_routes.py` | yes | 3195 | `6c4716f 2026-02-28` |
@@ -47,7 +47,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/services/live_trader_service.py` | yes | 272 | `1273b21 2026-02-23` |
 | `src/services/run_registry.py` | yes | 35 | `0d50960 2026-03-04` |
 | `src/services/config_write_service.py` | yes | 801 | `d064025 2026-03-01` |
-| `src/services/run_control_service.py` | yes | 848 | `0d50960 2026-03-04` |
+| `src/services/run_control_service.py` | yes | 871 | `0d50960 2026-03-04` |
 | `src/services/saas_service.py` | yes | 2269 | `0d50960 2026-03-04` |
 | `src/services/adaptive_tuner_orchestration_service.py` | yes | 177 | `1273b21 2026-02-23` |
 | `src/services/adaptive_tuner_worker_service.py` | yes | 672 | `1273b21 2026-02-23` |
@@ -216,10 +216,10 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 - `async_function` `stop_run_endpoint` (line 106)
 - `async_function` `restart_run_endpoint` (line 117)
 - `async_function` `get_processed_bars_endpoint` (line 128)
-- `async_function` `get_bar_details_endpoint` (line 139)
-- `async_function` `evaluate_intrabar_slice_endpoint` (line 153)
-- `async_function` `get_markers_endpoint` (line 167)
-- `async_function` `get_chart_annotations_endpoint` (line 181)
+- `async_function` `get_bar_details_endpoint` (line 146)
+- `async_function` `evaluate_intrabar_slice_endpoint` (line 160)
+- `async_function` `get_markers_endpoint` (line 174)
+- `async_function` `get_chart_annotations_endpoint` (line 188)
 - ... 5 more symbols
 
 ### `src/routes/adaptive_tuner_routes.py`

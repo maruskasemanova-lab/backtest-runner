@@ -145,5 +145,6 @@
   "time_exit_bars": 15,
   "choppy_time_exit_bars": 8,
   "stale_trade_be_bars": 8,
-  "stale_trade_be_pnl_threshold_pct": 0.05
+  "stale_trade_be_pnl_threshold_pct": 0.05,
+  "flat_roundtrip_cost": 0.5
 }

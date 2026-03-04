@@ -4,10 +4,10 @@ Persistent context for Claude Code in this repository.
 
 ## Project Context
 
-`backtest-runner` is the orchestration/API layer (port `8002`) for intraday backtests.  
+`backtest-runner` is the orchestration/API layer (port `8002`) for intraday backtests.
 It drives bar playback, optional L2 enrichment, strategy API session calls (`market_regime_detection`, port `8001`), and frontend telemetry (`frontend`, port `5173`).
 
-The most sensitive area is Adaptive Tuning + AOS config persistence (`aos_optimization/aos_config.json`), because tuner trials intentionally rewrite ticker config during evaluation.
+Most sensitive subsystem: Adaptive Tuning + AOS persistence (`aos_optimization/aos_config.json`) because tuner trials intentionally rewrite ticker config during evaluation.
 
 ## Source Of Truth (Read In Order)
 
@@ -19,13 +19,13 @@ The most sensitive area is Adaptive Tuning + AOS config persistence (`aos_optimi
 6. `bmad/context/generated/<domain>.md`
 7. `bmad/context/generated/00-machine-index.json`
 8. `bmad/context/generated/00-endpoint-map.md`
-9. `docs/llm/adaptive-tuning-c4x3.md` (only for C4-like/parallel adaptive tuning tasks)
+9. `docs/llm/adaptive-tuning-c4x3.md` (only for C4-like/parallel adaptive tuning requests)
 
-If docs conflict with code, code wins. Update docs in the same change.
+If docs conflict with code, code is authoritative. Update docs in the same change.
 
 ## Domain Routing
 
-Pick one primary domain from `bmad/context/component-map.json`:
+Pick exactly one primary domain from `bmad/context/component-map.json`:
 
 - `orchestration`
 - `strategy-engine`
@@ -33,9 +33,30 @@ Pick one primary domain from `bmad/context/component-map.json`:
 - `optimization-validation`
 - `frontend`
 
-For adaptive tuner behavior and AOS file semantics, primary domain is typically `orchestration`.
+For adaptive tuner behavior and AOS semantics, primary domain is usually `orchestration`.
 
-## Repo Map (High Level)
+## Core Invariants (Do Not Break)
+
+- No look-ahead bias in bars, L2 features, or decision logic.
+- No same-bar signal execution (`signal_bar_index < entry_bar_index`).
+- Runner/strategy API contracts remain backward compatible unless intentionally versioned.
+- `comparable_mode=true` forces cold start and ignores warm-start checkpoint loading.
+- L2 sessionized cumulative metrics reset per market day when enabled.
+
+## Command / Agent / Skill Workflow
+
+- Commands live in `.claude/commands/` and should include YAML frontmatter (`description` minimum).
+- Reusable procedural guardrails live in `.claude/skills/`.
+- Complex multi-step tasks can be delegated by command to an agent in `.claude/agents/`.
+- Prefer command entry points; use agents for bounded delegation; use skills for reusable deterministic workflows.
+
+Relevant project artifacts:
+
+- Command: `.claude/commands/bmad-orchestrate.md`
+- Agent: `.claude/agents/bmad-orchestration-agent.md`
+- Skill: `.claude/skills/bmad-context-guard/SKILL.md`
+
+## Repo Map (High-Level)
 
 - `api_server.py`: runner API, adaptive tuner jobs, AOS/profile endpoints, run lifecycle.
 - `session_runner.py`: bar stepping/playback, marker lifecycle, summary/report integration.
@@ -52,17 +73,17 @@ See also `docs/REPO_MAP.md` (generated).
 ## Quick Commands
 
 - Install backend deps: `python3 -m pip install -r requirements.txt`
-- Start strategy API (`8001`): `cd /Users/hotovo/.gemini/antigravity/scratch/market_regime_detection && python -m uvicorn api_server:app --port 8001 --reload`
+- Start strategy API (`8001`):
+  - `cd /Users/hotovo/.gemini/antigravity/scratch/market_regime_detection && python -m uvicorn api_server:app --port 8001 --reload`
 - Start runner API (`8002`): `python -m uvicorn api_server:app --port 8002 --reload`
 - Start frontend (`5173`): `cd frontend && npm run dev`
 - Generate context pack: `python3 scripts/generate_context_pack.py`
 - Validate context pack: `python3 scripts/validate_llm_context.py`
 - Strict validation: `python3 scripts/validate_llm_context.py --strict`
-- Adaptive tuner tests: `pytest tests/test_adaptive_tuner_api.py`
 
-## Adaptive Tuning Engine (Critical)
+## Adaptive Tuning (Critical Notes)
 
-### Entry Points
+### Entry points
 
 - `POST /api/adaptive-tuner/run`
 - `GET /api/adaptive-tuner/{job_id}`
@@ -70,90 +91,35 @@ See also `docs/REPO_MAP.md` (generated).
 - `GET /api/adaptive-tuner/options/{ticker}`
 - `POST /api/adaptive-tuner/profiles/apply`
 
-### Runtime Flow
+### File semantics (`aos_optimization/aos_config.json`)
 
-1. Validate ticker/date range and resolve `effective_dates` (optionally OHLCV∩L2 overlap when `l2_required=true`).
-2. Optional quick mode samples representative days (`quick_max_days`) and inflates trial budget (`quick_trial_boost`).
-3. Create in-memory job record in `adaptive_tuner_jobs`.
-4. Spawn async worker:
-   - v1: `_run_adaptive_tuner_job`
-   - v2: `_run_v2_adaptive_tuner_job`
-5. For each trial, worker builds candidate config and **temporarily writes it to `aos_config.json`**.
-6. Candidate is evaluated by running backtests day-by-day via `start_run(...)` + `runner.run_all(...)`.
-7. Best trial is tracked; final profile entry is saved to `adaptive_tuner_profiles` (max 30).
-8. If `persist_best=true`, best candidate is also applied into active ticker config; otherwise profile is saved without forcing active config replacement (unless no active profile exists yet).
+- Source of truth path: `AOS_CONFIG_PATH` in this repo.
+- Writes are whole-file rewrites via `_save_aos_config(...)`, not append-only logs.
+- Tuner workers intentionally write temporary trial configs.
+- On normal completion, final config/profile is rewritten.
+- On handled exceptions, worker attempts to restore original config.
+- Hard crashes mid-job can leave temporary config persisted.
 
-### v1 vs v2
-
-- v1 tunes adaptive selection controls (mode/top-n/switch hysteresis/flow-bias/fallback toggles).
-- v2 adds multidimensional vector search (strategy set, regime filter sets, L2 thresholds, evidence params, per-strategy params, time windows, exit thresholds) plus optional vector analysis.
-- v2 treats `grid` request as `random` due combinatorial explosion.
-
-### Scoring
-
-- Metrics: `pnl_pct`, `pnl_dollars`, `win_rate`, `trade_adjusted`, `robust`.
-- `robust` penalizes instability/low-quality trade distributions; v2 uses temporal fold logic when enough days are available.
-
-## AOS File Semantics (`aos_optimization/aos_config.json`)
-
-### Source Of Truth
-
-- Path: `AOS_CONFIG_PATH = <repo>/aos_optimization/aos_config.json`
-- Helpers:
-  - read: `_load_aos_config()` -> `load_json_file(...)`
-  - write: `_save_aos_config(...)` -> `save_json_file(...)`
-- Writes replace the whole JSON payload (pretty-printed), no append-only journal.
-
-### Endpoints/Flows That Write This File
-
-- `POST /api/aos-config/update`: merge ticker config patch and save.
-- `POST /api/strategy-combos/capture`: add combo profile (and optionally mark active), save.
-- `POST /api/strategy-combos/apply`: set active combo profile, save.
-- `POST /api/adaptive-tuner/profiles/apply`: applies selected tuned candidate into ticker config + sets active profile id, save.
-- `POST /api/adaptive-tuner/run` workers: repeatedly save temporary per-trial configs, then save final config/profile.
-
-### What `POST /api/run/start` Does
-
-- Reads AOS config (`_apply_aos_optimizations`) and applies settings to strategy API/runtime.
-- Does **not** persist AOS file itself.
-- But frontend `RunConfig` may call `/api/aos-config/update` and `/api/adaptive-tuner/profiles/apply` just before `run/start`, so a user-triggered run can mutate AOS indirectly.
-
-### Overwrite/Restore Behavior During Tuning
-
-- During tuner execution, temporary trial candidates are intentionally written to disk.
-- On normal completion, final config is rewritten with profile list + optional persisted best candidate.
-- On handled exception, worker attempts to restore `original_config`.
-- If process crashes hard mid-job, temporary config may remain on disk.
-
-### Concurrency Caveat
+### Concurrency caveat
 
 - Parallel tuner slots are capped at 3 (`MAX_PARALLEL_ADAPTIVE_TUNERS`).
-- Trial-level candidate writes use isolated per-job AOS files; final merge writes to primary AOS under merge lock.
-- For true isolation, run parallel jobs on distinct `strategy_api_url` ports.
+- For full isolation of external strategy runtime behavior, use distinct `strategy_api_url` ports.
 
-### Standard C4x3 Workflow
+### Standard C4x3 workflow
 
-When user requests "like c4" or "3 independent tunings", follow:
-- `docs/llm/adaptive-tuning-c4x3.md`
-
-## Invariants (Do Not Break)
-
-- No look-ahead bias in bars, L2 features, or decision logic.
-- No same-bar signal execution (`signal_bar_index < entry_bar_index`).
-- Runner/strategy API contracts remain backward compatible unless intentionally versioned.
-- `comparable_mode=true` forces cold start and ignores warm-start checkpoint loading.
-- L2 sessionized cumulative metrics reset per market day when enabled.
+When asked for "like c4" or "3 independent tunings", follow `docs/llm/adaptive-tuning-c4x3.md`.
 
 ## Required Change Protocol
 
 1. Route task to one primary domain.
-2. Load domain pack + machine index.
-3. Implement minimal viable change.
-4. Run required validation commands and domain tests.
-5. Report: files changed, contract deltas, tests run/results, residual risks.
+2. Load primary generated domain pack + machine index.
+3. Use Axon first when available (`query -> context -> impact`).
+4. Implement minimal viable change.
+5. Run required validation commands + impacted domain tests.
+6. Report: changed files, contract deltas, tests run/results, residual risks.
 
 ## Validation Before Final Answer
 
 - `python3 scripts/generate_context_pack.py`
 - `python3 scripts/validate_llm_context.py`
-- impacted domain tests from `bmad/context/component-map.json`
+- domain-specific `pytest` targets from `bmad/context/component-map.json`

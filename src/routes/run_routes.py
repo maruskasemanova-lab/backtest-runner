@@ -1,6 +1,6 @@
 from typing import Optional, Union
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 
 from src.models.run_requests import PlayRequest
 from src.routes.context import ApiServices, get_api_services
@@ -129,10 +129,17 @@ async def get_processed_bars_endpoint(
     run_id: str,
     ticker: str,
     date: str,
+    since_index: Optional[int] = Query(default=None, ge=0),
     services: ApiServices = Depends(get_api_services),
 ):
-    """Get all processed bars so far."""
-    return get_processed_bars(run_id, ticker, date, services.build_run_control_deps())
+    """Get processed bars, optionally only new bars from since_index."""
+    return get_processed_bars(
+        run_id,
+        ticker,
+        date,
+        services.build_run_control_deps(),
+        since_index=since_index,
+    )
 
 
 @router.get("/api/run/{run_id}/{ticker}/{date}/bar-details/{minute_key}")

@@ -6,6 +6,11 @@ __pycache__/
 .claude/*
 !.claude/commands/
 !.claude/commands/**
+!.claude/settings.json
+!.claude/skills/
+!.claude/skills/**
+!.claude/agents/
+!.claude/agents/**
 .claude/settings.local.json
 .codex/
 .cache/

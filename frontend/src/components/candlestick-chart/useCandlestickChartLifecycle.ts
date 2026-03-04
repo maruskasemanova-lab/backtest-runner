@@ -136,7 +136,7 @@ export default function useCandlestickChartLifecycle({
       candleSeriesRef.current = candleSeries;
       volumeSeriesRef.current = volumeSeries;
 
-      const handleResize = () => {
+      const syncChartSize = () => {
         if (chartContainerRef.current && chartRef.current) {
           chartRef.current.applyOptions({
             width: chartContainerRef.current.clientWidth,
@@ -145,7 +145,17 @@ export default function useCandlestickChartLifecycle({
         }
       };
 
-      window.addEventListener("resize", handleResize);
+      syncChartSize();
+      window.addEventListener("resize", syncChartSize);
+      const resizeObserver =
+        typeof ResizeObserver === "undefined"
+          ? null
+          : new ResizeObserver(() => {
+              syncChartSize();
+            });
+      if (resizeObserver && chartContainerRef.current) {
+        resizeObserver.observe(chartContainerRef.current);
+      }
 
       const handleWheel = (e: WheelEvent) => {
         isUserInteracting.current = true;
@@ -189,7 +199,8 @@ export default function useCandlestickChartLifecycle({
       chartContainerRef.current.addEventListener("wheel", handleWheel, { passive: false });
 
       return () => {
-        window.removeEventListener("resize", handleResize);
+        window.removeEventListener("resize", syncChartSize);
+        resizeObserver?.disconnect();
         if (chartContainerRef.current) {
           chartContainerRef.current.removeEventListener("wheel", handleWheel);
           chartContainerRef.current.removeEventListener("mousedown", handleMouseDown);

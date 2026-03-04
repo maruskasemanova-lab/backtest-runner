@@ -122,8 +122,11 @@
   grid-template-columns: repeat(4, 1fr);
   gap: var(--spacing-md);
   padding: var(--spacing-md);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(243, 247, 251, 0.76));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.72),
+    rgba(243, 247, 251, 0.76)
+  );
   border-top: 1px solid rgba(117, 137, 160, 0.12);
 }
 
@@ -388,6 +391,29 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.sa-heatmap-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sa-heatmap-info-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(117, 137, 160, 0.22);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sa-heatmap-meta {
@@ -669,6 +695,21 @@
   position: relative;
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.sa-chart-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sa-chart-canvas {
+  width: 100%;
+  height: 100%;
 }
 
 .sa-chart-empty {
@@ -680,6 +721,201 @@
   color: var(--text-muted);
   font-size: 0.9rem;
   text-align: center;
+}
+
+/* ── Scrub slider bar (sits below chart viewport) ────────── */
+.sa-scrub-overlay {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  width: 100%;
+  pointer-events: auto;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-card, #0f172a) 78%, transparent);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border: 1px solid color-mix(in srgb, var(--accent-blue, #3b82f6) 18%, transparent);
+  box-shadow:
+    0 2px 12px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+  touch-action: none;
+  user-select: none;
+}
+
+.sa-scrub-overlay-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sa-scrub-overlay-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--text-muted, #94a3b8) 28%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-card, #0f172a) 60%, transparent);
+  color: var(--text-secondary, #cbd5e1);
+  cursor: pointer;
+  transition: all 120ms ease;
+  flex-shrink: 0;
+}
+
+.sa-scrub-overlay-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-blue, #3b82f6) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-blue, #3b82f6) 40%, transparent);
+  color: var(--accent-blue, #3b82f6);
+}
+
+.sa-scrub-overlay-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.sa-scrub-overlay-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.sa-scrub-overlay-btn--latest {
+  margin-left: 2px;
+}
+
+.sa-scrub-overlay-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary, #cbd5e1);
+  white-space: nowrap;
+  min-width: 42px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.sa-scrub-overlay-pct {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--accent-blue, #3b82f6);
+  white-space: nowrap;
+  min-width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Track area: stacks progress + slider */
+.sa-scrub-overlay-track-area {
+  flex: 1;
+  min-width: 80px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Progress bar (thin line above slider) */
+.sa-scrub-overlay-progress {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted, #94a3b8) 18%, transparent);
+  overflow: hidden;
+}
+
+.sa-scrub-overlay-progress-bar {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-blue, #3b82f6) 70%, white 10%),
+    color-mix(in srgb, var(--accent-blue, #3b82f6) 50%, #22d3ee 30%)
+  );
+  transition: transform 140ms linear;
+  border-radius: 999px;
+}
+
+/* Radix Slider */
+.sa-scrub-overlay-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  touch-action: none;
+  width: 100%;
+  height: 18px;
+  cursor: pointer;
+}
+
+.sa-scrub-overlay-slider-track {
+  position: relative;
+  flex-grow: 1;
+  border-radius: 999px;
+  height: 4px;
+  background: color-mix(in srgb, var(--text-muted, #94a3b8) 22%, transparent);
+}
+
+.sa-scrub-overlay-slider-range {
+  position: absolute;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-blue, #3b82f6) 80%, white 10%),
+    color-mix(in srgb, var(--accent-blue, #3b82f6) 60%, #22d3ee 30%)
+  );
+}
+
+.sa-scrub-overlay-thumb-anchor {
+  outline: none;
+}
+
+.sa-scrub-overlay-thumb {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background: var(--accent-blue, #3b82f6);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent-blue, #3b82f6) 25%, transparent),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+  cursor: grab;
+  outline: none;
+}
+
+.sa-scrub-overlay-thumb:active {
+  cursor: grabbing;
+}
+
+/* Legacy classes kept for backward compat if referenced elsewhere */
+.sa-scrub-progress-root {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted, #94a3b8) 24%, transparent);
+  overflow: hidden;
+  margin-bottom: 7px;
+}
+
+.sa-scrub-progress-indicator {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-blue, #3b82f6) 84%, white 16%),
+    color-mix(in srgb, var(--accent-blue, #3b82f6) 60%, #22d3ee 40%)
+  );
+  transition: transform 140ms linear;
+}
+
+.sa-scrub-slider-root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  touch-action: none;
+  width: 100%;
+  height: 24px;
 }
 
 .sa-range-card {
@@ -963,7 +1199,7 @@
   }
 
   .sa-chart-panel {
-    min-height: clamp(460px, 62vh, 760px);
+    min-height: 0;
   }
 
   .sa-utility-rail {

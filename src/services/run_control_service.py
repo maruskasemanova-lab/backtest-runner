@@ -569,13 +569,36 @@ async def restart_run(run_id: str, ticker: str, date: str, deps: RunControlDeps)
     return {"success": True, "restarted": True, "state": runner.get_state()}
 
 
-def get_processed_bars(run_id: str, ticker: str, date: str, deps: RunControlDeps):
+def get_processed_bars(
+    run_id: str,
+    ticker: str,
+    date: str,
+    deps: RunControlDeps,
+    since_index: Optional[int] = None,
+):
     _, runner = deps.run_registry.require(run_id, ticker, date)
     bars = _safe_runner_processed_bars(runner)
+    total_bars = len(getattr(runner, "bars", []) or [])
+    current_index = int(getattr(runner, "current_bar_index", 0) or 0)
+    payload_mode = "full"
+    normalized_since: Optional[int] = None
+
+    if since_index is not None:
+        payload_mode = "delta"
+        normalized_since = max(0, int(since_index))
+        if normalized_since <= len(bars):
+            bars = bars[normalized_since:]
+        else:
+            # Defensive fallback: client requested an index beyond current
+            # progress; return empty delta instead of forcing full resend.
+            bars = []
+
     return {
         "bars": _to_json_compatible(bars),
-        "current_index": runner.current_bar_index,
-        "total_bars": len(runner.bars),
+        "current_index": current_index,
+        "total_bars": total_bars,
+        "mode": payload_mode,
+        "since_index": normalized_since,
     }
 
 

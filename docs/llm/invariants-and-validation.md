@@ -60,5 +60,6 @@ pytest /Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/t
 
 - Generated machine index contains both services and route catalog entries.
 - Each domain pack includes critical invariants and test targets.
-- `.claude/commands` files include schema-first output expectations.
+- `.claude/settings.json` exists and explicitly allowlists approved project MCP servers.
+- Required `.claude/commands` include YAML frontmatter with `description` and schema-first output expectations.
 - Validation scripts pass without errors.

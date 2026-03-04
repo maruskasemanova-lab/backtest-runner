@@ -21,9 +21,9 @@ Own playback UI, chart rendering, and operational diagnostics.
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
 | `frontend/src/main.tsx` | yes | 64 | `51e9988 2026-03-02` |
-| `frontend/src/App.tsx` | yes | 820 | `0d50960 2026-03-04` |
+| `frontend/src/App.tsx` | yes | 820 | `f894916 2026-03-04` |
 | `frontend/src/auth/supabaseAuth.ts` | yes | 385 | `b9accc6 2026-02-18` |
-| `frontend/src/components/CandlestickChart.tsx` | yes | 346 | `0d50960 2026-03-04` |
+| `frontend/src/components/CandlestickChart.tsx` | yes | 345 | `0d50960 2026-03-04` |
 | `frontend/src/components/decision-panel/DecisionPanel.tsx` | yes | 284 | `51e9988 2026-03-02` |
 | `frontend/src/components/SessionSummary.tsx` | yes | 327 | `58ebada 2026-02-27` |
 | `frontend/src/components/RunConfig.tsx` | yes | 347 | `d064025 2026-03-01` |

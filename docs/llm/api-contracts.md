@@ -360,6 +360,7 @@ Compatibility notes:
 - summary fields are consumed by diagnostics history and regression workflows.
 - `total_pnl_pct` in runner summary is normalized from `total_pnl_dollars / account_size_usd` to keep percent and dollar PnL directionally consistent.
 - run `state` payload includes `selection_warnings[]` (resolved from strategy-selection responses) so FE can surface strict-selection config gaps without fallback.
+- `bars` endpoint supports optional query `since_index` (non-negative integer). When provided, response returns only processed bars from that index onward with metadata `mode="delta"` and echoed `since_index`; without query it returns full processed bars with `mode="full"`.
 
 ### `GET /api/aos-config` / `GET /api/aos-config/{ticker}` / `POST /api/aos-config/update`
 
