@@ -34,12 +34,12 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/routes/live_trader_routes.py` | yes | 164 | `51e9988 2026-03-02` |
 | `src/routes/config_read_routes.py` | yes | 134 | `51e9988 2026-03-02` |
 | `src/routes/config_write_routes.py` | yes | 111 | `d064025 2026-03-01` |
-| `src/routes/run_routes.py` | yes | 262 | `065f203 2026-03-04` |
+| `src/routes/run_routes.py` | yes | 262 | `d3c9c9d 2026-03-05` |
 | `src/routes/adaptive_tuner_routes.py` | yes | 38 | `da07c20 2026-02-12` |
 | `src/routes/run_start_routes.py` | yes | 345 | `1273b21 2026-02-23` |
 | `src/routes/v2_routes.py` | yes | 3195 | `6c4716f 2026-02-28` |
 | `src/models/config_requests.py` | yes | 47 | `b9accc6 2026-02-18` |
-| `src/models/run_requests.py` | yes | 274 | `0248cab 2026-02-28` |
+| `src/models/run_requests.py` | yes | 275 | `0248cab 2026-02-28` |
 | `src/models/tuner_requests.py` | yes | 95 | `1273b21 2026-02-23` |
 | `src/security/auth.py` | yes | 279 | `1273b21 2026-02-23` |
 | `src/security/network_policy.py` | yes | 139 | `51e9988 2026-03-02` |
@@ -47,7 +47,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/services/live_trader_service.py` | yes | 272 | `1273b21 2026-02-23` |
 | `src/services/run_registry.py` | yes | 35 | `0d50960 2026-03-04` |
 | `src/services/config_write_service.py` | yes | 801 | `d064025 2026-03-01` |
-| `src/services/run_control_service.py` | yes | 974 | `065f203 2026-03-04` |
+| `src/services/run_control_service.py` | yes | 974 | `d3c9c9d 2026-03-05` |
 | `src/services/saas_service.py` | yes | 2269 | `0d50960 2026-03-04` |
 | `src/services/adaptive_tuner_orchestration_service.py` | yes | 177 | `1273b21 2026-02-23` |
 | `src/services/adaptive_tuner_worker_service.py` | yes | 672 | `1273b21 2026-02-23` |
@@ -59,7 +59,7 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 | `src/services/strategy_api_updates_service.py` | yes | 267 | `d064025 2026-03-01` |
 | `src/services/strategy_api_profiles_service.py` | yes | 950 | `51e9988 2026-03-02` |
 | `src/services/strategy_api_session_service.py` | yes | 530 | `d064025 2026-03-01` |
-| `src/services/start_run_service.py` | yes | 1184 | `0d50960 2026-03-04` |
+| `src/services/start_run_service.py` | yes | 1198 | `0d50960 2026-03-04` |
 | `src/services/start_run_data_service.py` | yes | 1501 | `d064025 2026-03-01` |
 | `src/services/start_run_execution_config_service.py` | yes | 907 | `0d50960 2026-03-04` |
 | `src/services/start_run_local_aos_service.py` | yes | 90 | `1273b21 2026-02-23` |
@@ -265,8 +265,8 @@ Own run lifecycle, API contracts, data routing, and integration to strategy serv
 
 ### `src/models/run_requests.py`
 - `class` `StartRunRequest` (line 6)
-- `class` `PrewarmRunRequest` (line 240)
-- `class` `PlayRequest` (line 267)
+- `class` `PrewarmRunRequest` (line 241)
+- `class` `PlayRequest` (line 268)
 
 ### `src/models/tuner_requests.py`
 - `class` `AdaptiveTunerRequest` (line 6)

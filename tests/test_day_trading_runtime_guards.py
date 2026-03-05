@@ -106,7 +106,7 @@ def test_daily_loss_limit_counts_unrealized_pnl() -> None:
     assert session.phase == SessionPhase.END_OF_DAY
 
 
-def test_consecutive_losses_trigger_bar_cooldown() -> None:
+def test_consecutive_losses_do_not_trigger_bar_cooldown() -> None:
     manager = DayTradingManager(
         regime_detection_minutes=0,
         max_trades_per_day=10,
@@ -141,14 +141,54 @@ def test_consecutive_losses_trigger_bar_cooldown() -> None:
         )
 
     assert session.consecutive_losses == 2
-    assert session.loss_cooldown_until_bar_index >= 0
+    assert session.loss_cooldown_until_bar_index == -1
 
     probe_bar = _bar(start + timedelta(minutes=3), close=99.5)
     session.bars.append(probe_bar)
     result = manager._process_trading_bar(session, probe_bar, probe_bar.timestamp)
 
-    assert result.get("action") == "consecutive_loss_cooldown"
-    assert result.get("cooldown_bars_remaining", 0) > 0
+    assert result.get("action") != "consecutive_loss_cooldown"
+    assert result.get("cooldown_bars_remaining") in (None, 0)
+
+
+def test_daily_trade_limit_no_longer_blocks_entries() -> None:
+    manager = DayTradingManager(
+        regime_detection_minutes=0,
+        max_trades_per_day=1,
+        trade_cooldown_bars=0,
+    )
+    session = manager.get_or_create_session("run", "MU", "2026-02-03")
+    session.phase = SessionPhase.TRADING
+    session.selected_strategy = "momentum_flow"
+    session.micro_regime = "TRENDING_UP"
+
+    start = datetime(2026, 2, 3, 15, 0, tzinfo=timezone.utc)
+    signal = _signal(start)
+    manager._open_position(
+        session=session,
+        signal=signal,
+        entry_price=100.0,
+        entry_time=start,
+        signal_bar_index=0,
+        entry_bar_index=0,
+        entry_bar_volume=200_000.0,
+    )
+    session.bars.append(_bar(start, close=100.0))
+    manager._close_position(
+        session=session,
+        exit_price=101.0,
+        exit_time=start,
+        reason="unit_test_trade_cap_removed",
+        bar_volume=200_000.0,
+    )
+    assert len(session.trades) == 1
+
+    probe_bar = _bar(start + timedelta(minutes=1), close=100.5)
+    session.bars.append(probe_bar)
+    result = manager._process_trading_bar(session, probe_bar, probe_bar.timestamp)
+
+    assert result.get("action") != "trade_limit_reached"
+    assert "Max trades per day" not in str(result.get("reason", ""))
 
 
 def test_unknown_micro_regime_blocks_new_signals() -> None:

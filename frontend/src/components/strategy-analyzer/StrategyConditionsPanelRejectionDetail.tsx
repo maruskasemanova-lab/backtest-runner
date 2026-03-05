@@ -278,6 +278,7 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
     const todBoost = safeNum(d.tod_threshold_boost);
     const hwBoost = safeNum(d.headwind_threshold_boost);
     const thrReason = typeof d.threshold_used_reason === "string" ? d.threshold_used_reason : null;
+    const fixedThresholdMode = Boolean(thrReason && thrReason.toLowerCase().startsWith("fixed("));
     const isHeadwind = gate === "cross_asset_headwind";
     const direction = resolveDirectionFromRejection(d);
     const isLong = direction === "bullish";
@@ -325,22 +326,27 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
         </div>
 
         {/* Threshold adjustments */}
-        {(todBoost != null || hwBoost != null || thrReason) && (
+        {((todBoost != null || hwBoost != null || thrReason) && (
           <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", fontSize: "0.52rem", color: "var(--text-muted)", marginBottom: 4, background: "rgba(0,0,0,0.1)", padding: "3px 6px", borderRadius: 3 }}>
             <span style={{ fontWeight: 600 }}>Thr adjustments:</span>
-            {todBoost != null && todBoost !== 0 && (
+            {!fixedThresholdMode && todBoost != null && todBoost !== 0 && (
               <span title="Time of Day adjustment" style={{ color: todBoost > 0 ? "var(--accent-red, #ef4444)" : "var(--accent-green, #22c55e)", cursor: "help" }}>
                 ToD {todBoost > 0 ? "+" : ""}{todBoost.toFixed(0)}
               </span>
             )}
-            {hwBoost != null && hwBoost !== 0 && (
+            {!fixedThresholdMode && hwBoost != null && hwBoost !== 0 && (
               <span title="Headwind correction" style={{ color: "var(--accent-red, #ef4444)", cursor: "help" }}>
                 HW +{hwBoost.toFixed(1)}
               </span>
             )}
+            {fixedThresholdMode && (
+              <span style={{ color: "var(--accent-green, #22c55e)" }}>
+                fixed threshold active
+              </span>
+            )}
             {thrReason && <span style={{ fontStyle: "italic" }}>({thrReason})</span>}
           </div>
-        )}
+        ))}
 
         {reasoning && <FormattedReasoning reasoning={reasoning} />}
       </div>

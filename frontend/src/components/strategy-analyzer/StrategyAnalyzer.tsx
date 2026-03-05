@@ -300,6 +300,7 @@ export default function StrategyAnalyzer({
     setError,
     setRangeScrubOffset,
     setAnalyzerRunKey,
+    thresholdOverridesPayload: hasPendingOverrides ? buildThresholdPayload(thresholdOverrides) : undefined,
   });
   const {
     wfoEnabled,

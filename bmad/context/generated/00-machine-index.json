@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-04T20:45:53.137712+00:00",
+  "generated_at": "2026-03-05T18:00:58.134426+00:00",
   "project": {
     "name": "Backtest Runner + Market Regime Detection",
     "summary": "Dual-service intraday backtesting platform with L2 flow-aware strategy execution and React frontend.",
@@ -1460,7 +1460,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/routes/run_routes.py",
           "exists": true,
           "lines": 262,
-          "last_commit": "065f203 2026-03-04",
+          "last_commit": "d3c9c9d 2026-03-05",
           "symbols": [
             {
               "kind": "async_function",
@@ -2535,7 +2535,7 @@
           "path": "src/models/run_requests.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/models/run_requests.py",
           "exists": true,
-          "lines": 274,
+          "lines": 275,
           "last_commit": "0248cab 2026-02-28",
           "symbols": [
             {
@@ -2546,12 +2546,12 @@
             {
               "kind": "class",
               "name": "PrewarmRunRequest",
-              "line": 240
+              "line": 241
             },
             {
               "kind": "class",
               "name": "PlayRequest",
-              "line": 267
+              "line": 268
             }
           ],
           "routes": [],
@@ -2924,7 +2924,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/run_control_service.py",
           "exists": true,
           "lines": 974,
-          "last_commit": "065f203 2026-03-04",
+          "last_commit": "d3c9c9d 2026-03-05",
           "symbols": [
             {
               "kind": "class",
@@ -3720,7 +3720,7 @@
           "path": "src/services/start_run_service.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/src/services/start_run_service.py",
           "exists": true,
-          "lines": 1184,
+          "lines": 1198,
           "last_commit": "0d50960 2026-03-04",
           "symbols": [
             {
@@ -3886,12 +3886,12 @@
             {
               "kind": "async_function",
               "name": "prewarm_run_data",
-              "line": 929
+              "line": 943
             },
             {
               "kind": "async_function",
               "name": "get_prewarm_status",
-              "line": 1095
+              "line": 1109
             }
           ],
           "routes": [],
@@ -4735,7 +4735,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/api_server.py",
           "exists": true,
           "lines": 1135,
-          "last_commit": "6267f1a 2026-03-04",
+          "last_commit": "56c4990 2026-03-05",
           "symbols": [
             {
               "kind": "function",
@@ -5241,7 +5241,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/day_trading_manager.py",
           "exists": true,
           "lines": 1110,
-          "last_commit": "6748856 2026-03-02",
+          "last_commit": "56c4990 2026-03-05",
           "symbols": [
             {
               "kind": "class",
@@ -5400,7 +5400,7 @@
           "path": "../market_regime_detection/src/ensemble_combiner.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/ensemble_combiner.py",
           "exists": true,
-          "lines": 461,
+          "lines": 469,
           "last_commit": "a0fc856 2026-02-23",
           "symbols": [
             {
@@ -5584,7 +5584,7 @@
           "path": "../market_regime_detection/src/evidence_decision.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/evidence_decision.py",
           "exists": true,
-          "lines": 530,
+          "lines": 538,
           "last_commit": "018eb2b 2026-02-24",
           "symbols": [
             {
@@ -5621,33 +5621,33 @@
           "path": "../market_regime_detection/src/strategies/base_strategy.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/strategies/base_strategy.py",
           "exists": true,
-          "lines": 699,
-          "last_commit": "89d7179 2026-02-28",
+          "lines": 709,
+          "last_commit": "56c4990 2026-03-05",
           "symbols": [
             {
               "kind": "class",
               "name": "SignalType",
-              "line": 17
+              "line": 18
             },
             {
               "kind": "class",
               "name": "Regime",
-              "line": 25
+              "line": 26
             },
             {
               "kind": "class",
               "name": "Signal",
-              "line": 32
+              "line": 33
             },
             {
               "kind": "class",
               "name": "Position",
-              "line": 63
+              "line": 64
             },
             {
               "kind": "class",
               "name": "BaseStrategy",
-              "line": 203
+              "line": 204
             }
           ],
           "routes": [],
@@ -5658,7 +5658,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/strategies/momentum_flow.py",
           "exists": true,
           "lines": 185,
-          "last_commit": "97fd90d 2026-02-25",
+          "last_commit": "56c4990 2026-03-05",
           "symbols": [
             {
               "kind": "class",
@@ -5674,7 +5674,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/strategies/absorption_reversal.py",
           "exists": true,
           "lines": 186,
-          "last_commit": "a0fc856 2026-02-23",
+          "last_commit": "56c4990 2026-03-05",
           "symbols": [
             {
               "kind": "class",
@@ -5689,7 +5689,7 @@
           "path": "../market_regime_detection/src/strategies/exhaustion_fade.py",
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/src/strategies/exhaustion_fade.py",
           "exists": true,
-          "lines": 178,
+          "lines": 207,
           "last_commit": "a0fc856 2026-02-23",
           "symbols": [
             {
@@ -6423,7 +6423,7 @@
           "absolute_path": "/Users/hotovo/.gemini/antigravity/scratch/backtest-runner/frontend/src/main.tsx",
           "exists": true,
           "lines": 73,
-          "last_commit": "51e9988 2026-03-02",
+          "last_commit": "d3c9c9d 2026-03-05",
           "symbols": [],
           "routes": [],
           "parse_error": null

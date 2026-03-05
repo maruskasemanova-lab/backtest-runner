@@ -643,7 +643,7 @@ Key settings passed from runner:
 - intraday-level runtime gating: same `intraday_levels_*` tracker + entry-quality fields used by runner start payload
 - strategy selection: `strategy_selection_mode`, `max_active_strategies`
 - momentum diversification override transport: `momentum_diversification_json` (JSON string; strategy API validates/normalizes into session defaults, including optional `sleeves[]` multi-sleeve definitions with per-sleeve thresholds)
-- profile-driven runtime overrides: optional `regime_detection_minutes` / `regime_refresh_bars` cadence, optional `max_daily_trades` (`0` => unlimited for that session), and optional `mu_choppy_hard_block_enabled` (session override for MU CHOPPY guard)
+- profile-driven runtime overrides: optional `regime_detection_minutes` / `regime_refresh_bars` cadence, optional legacy `max_daily_trades` transport (`0` => unlimited if consumed by custom logic; base runtime no longer enforces a daily trade-count gate), and optional `mu_choppy_hard_block_enabled` (session override for MU CHOPPY guard)
 - reset policy: `cold_start_each_day`
 
 ### `POST /api/session/bar`

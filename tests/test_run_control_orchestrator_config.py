@@ -98,14 +98,14 @@ def test_update_orchestrator_config_accepts_logger_only_integration_deps(monkeyp
             "run-123",
             "MU",
             "2026-02-09_to_2026-02-09",
-            {"base_threshold": 49.5},
+            {"base_threshold": 49.5, "use_fixed_threshold": True},
             deps,
         )
     )
 
     assert result == {"ok": True}
     assert captured["strategy_api_url"] == "http://localhost:8001"
-    assert captured["config"] == {"base_threshold": 49.5}
+    assert captured["config"] == {"base_threshold": 49.5, "use_fixed_threshold": True}
     assert hasattr(captured["deps"], "logger")
 
 

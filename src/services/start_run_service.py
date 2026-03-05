@@ -694,6 +694,20 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         record_phase_ms=_record_phase_ms,
     )
 
+    threshold_overrides = getattr(request, "threshold_overrides", None)
+    if isinstance(threshold_overrides, dict) and threshold_overrides:
+        from src.services.run_control_service import _strategy_api_session_deps
+        from src.services.strategy_api_session_service import apply_orchestrator_config
+        
+        phase_started = perf_counter()
+        integration_deps = _strategy_api_session_deps(deps.logger)
+        await apply_orchestrator_config(
+            strategy_api_url=request.strategy_api_url,
+            config=threshold_overrides,
+            deps=integration_deps,
+        )
+        _record_phase_ms("apply_threshold_overrides", phase_started)
+
     if not load_phase.bars:
         raise HTTPException(400, "No data available for the specified date/range")
 

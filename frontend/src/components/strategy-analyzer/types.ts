@@ -98,6 +98,7 @@ export type StrategyAnalyzerStartRunPayload = {
   context_aware_risk_enabled?: boolean;
   context_risk_min_room_pct?: number;
   context_risk_min_effective_rr?: number;
+  threshold_overrides?: any;
   __client_hint?: "strategy_analyzer";
 };
 

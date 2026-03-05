@@ -20,7 +20,7 @@ Own playback UI, chart rendering, and operational diagnostics.
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `frontend/src/main.tsx` | yes | 73 | `51e9988 2026-03-02` |
+| `frontend/src/main.tsx` | yes | 73 | `d3c9c9d 2026-03-05` |
 | `frontend/src/App.tsx` | yes | 820 | `f894916 2026-03-04` |
 | `frontend/src/auth/supabaseAuth.ts` | yes | 385 | `b9accc6 2026-02-18` |
 | `frontend/src/components/CandlestickChart.tsx` | yes | 345 | `065f203 2026-03-04` |

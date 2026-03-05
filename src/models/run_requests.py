@@ -235,6 +235,7 @@ class StartRunRequest(BaseModel):
     # Optional regime filter override: list of allowed regimes (e.g. ["TRENDING", "CHOPPY"]).
     # Empty list = allow all regimes. None = use ticker-specific default from aos_config.json.
     regime_filter: Optional[List[str]] = None
+    threshold_overrides: Optional[Dict[str, Any]] = None
 
 
 class PrewarmRunRequest(BaseModel):

@@ -15,7 +15,7 @@ End-to-end behavior map across `backtest-runner` and `market_regime_detection`.
    Parquet-backed OHLCV files are loaded through `src/parquet_compat.py` using a Polars lazy scan path before the existing pandas/list-of-bars compatibility boundary.
    When the requested run range is backed only by parquet files, `start_run_data_service` now materializes bars directly from Polars into runner bar dicts without first building a pandas DataFrame.
    L2 precomputed feature files and TCBBO options-flow parquet ingestion also use projected Polars-backed reads now; the old full-file parquet fallback path was removed for those runtime reads.
-3. Runner configures strategy session via `POST /api/session/config` (risk/L2 + strategy-selection settings, plus optional profile runtime overrides like daily-trade cap and MU choppy hard-block switch).
+3. Runner configures strategy session via `POST /api/session/config` (risk/L2 + strategy-selection settings, plus optional profile runtime overrides like legacy `max_daily_trades` transport and MU choppy hard-block switch).
 4. Runner creates `SessionRunner` and stores it in active run registry.
    Strategy-analyzer market context precomputes scalar metrics once per run, stores them as compact tuple rows, and assembles `recent_bars` lazily per requested bar instead of pre-materializing snapshots for the full session.
 5. On `step/play`, runner sends bars to strategy session endpoints:

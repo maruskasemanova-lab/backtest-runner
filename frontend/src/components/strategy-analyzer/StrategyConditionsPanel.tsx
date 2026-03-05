@@ -1,9 +1,10 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, BarChart2, Target, Crosshair, Zap, AlertTriangle } from "lucide-react";
 import { extractStrategyConditionsPanelData } from "./StrategyConditionsPanelData";
 import { StrategyConditionsPanelRejectionDetail as RejectionDetail } from "./StrategyConditionsPanelRejectionDetail";
 import { InteractiveMiniBar, MiniBar, SectionLabel, safeNum } from "./StrategyConditionsPanelShared";
 import type { ThresholdOverrides, ThresholdOverrideKey } from "./useStrategyAnalyzerThresholdOverrides";
+import { resolveActivationMinimumUpdates } from "./strategyAnalyzerActivationMinimums";
 
 /* ── gate badge (compact) ────────────────────────────────────────── */
 
@@ -31,6 +32,24 @@ function GateBadge({ label, passed }: { label: string; passed: boolean | null })
   );
 }
 
+function thresholdHeadlineFromDetails(d: any): string {
+  const subtype = typeof d?.rejection_subtype === "string" ? d.rejection_subtype : "";
+  const subtypeLabels: Record<string, string> = {
+    score_below_trade_threshold: "Score príliš nízky na vstup",
+    margin_insufficient: "Nedostatočný margin nad model threshold",
+    ensemble_execute_false: "Model vstup zamietol (execute=false)",
+    headwind_or_trade_threshold: "Trade threshold / headwind blokuje vstup",
+  };
+  if (subtypeLabels[subtype]) return subtypeLabels[subtype];
+
+  const score = safeNum(d?.combined_score) ?? safeNum(d?.combined_norm_0_100);
+  const threshold = safeNum(d?.threshold_used) ?? safeNum(d?.trade_gate_threshold);
+  if (score != null && threshold != null && score >= threshold) {
+    return "Vstup zamietnutý mimo čistého score prahu";
+  }
+  return "Score príliš nízky na vstup";
+}
+
 /* ── rejection detail renderer ────────────────────────────────────── */
 
 /* ── main panel ───────────────────────────────────────────────────── */
@@ -52,6 +71,8 @@ export default function StrategyConditionsPanel({
   onThresholdOverrideChange,
   hasPendingOverrides,
 }: StrategyConditionsPanelProps) {
+  const [autoSetActivationMinimums, setAutoSetActivationMinimums] = useState(false);
+  const lastAutoApplyKeyRef = useRef<string>("");
   const rawData = useMemo(() => extractStrategyConditionsPanelData(marker, liveAnalysis), [marker, liveAnalysis]);
 
   // Local re-evaluation: override gate results based on current threshold overrides
@@ -100,17 +121,26 @@ export default function StrategyConditionsPanel({
       }
     }
 
-    // ── Re-evaluate threshold gate ──
-    // When bypass_all_entry_gates is on, force-pass the threshold gate too
-    if (thresholdOverrides.bypass_all_entry_gates === true && patched.rejectionGate === "threshold") {
+    // ── Master bypass: clear ALL rejections when bypass_all_entry_gates is on ──
+    if (thresholdOverrides.bypass_all_entry_gates === true) {
       patched.passed = true;
       patched.rejectionGate = null;
       patched.rejectionReason = null;
       patched.rejectionDetails = null;
     }
-    // Use overridden base_threshold if set, otherwise fall back to backend's own threshold
-    const effectiveThreshold = thresholdOverrides.base_threshold ?? patched.threshold;
-    if (effectiveThreshold != null && patched.combinedScore != null) {
+
+    // ── Re-evaluate threshold gate ──
+    // When use_fixed_threshold is on, use the base_threshold override as the
+    // effective threshold (ignoring dynamic adjustments like ToD/transition).
+    const useFixed = thresholdOverrides.use_fixed_threshold === true;
+    const effectiveThreshold = useFixed
+      ? (thresholdOverrides.base_threshold ?? patched.threshold)
+      : (thresholdOverrides.base_threshold ?? patched.threshold);
+    // When fixed threshold is on, also update the displayed threshold
+    if (useFixed && thresholdOverrides.base_threshold != null) {
+      patched.threshold = thresholdOverrides.base_threshold;
+    }
+    if (effectiveThreshold != null && patched.combinedScore != null && !thresholdOverrides.bypass_all_entry_gates) {
       const scorePasses = patched.combinedScore >= effectiveThreshold;
 
       if (scorePasses && patched.rejectionGate === "threshold") {
@@ -220,6 +250,55 @@ export default function StrategyConditionsPanel({
 
     return patched;
   }, [rawData, thresholdOverrides, isThresholdInteractive]);
+
+  const applyAutoActivationMinimums = () => {
+    if (!data || !isThresholdInteractive || typeof onThresholdOverrideChange !== "function") return;
+
+    const detectionKey = [
+      String(data.source || "").trim(),
+      String(data.markerType || "").trim(),
+      String(data.selectedStrategy || "").trim().toLowerCase() || "unknown",
+      String(data.barTimestamp ?? ""),
+      String(data.rejectionGate ?? ""),
+      String(data.signalDirection ?? ""),
+      data.combinedScore != null ? String(Number(data.combinedScore).toFixed(4)) : "na",
+    ].join("|");
+    if (!detectionKey) return;
+    if (lastAutoApplyKeyRef.current === detectionKey) return;
+
+    let updated = false;
+    if (thresholdOverrides?.use_fixed_threshold !== true) {
+      onThresholdOverrideChange("use_fixed_threshold", true);
+      updated = true;
+    }
+
+    const updates = resolveActivationMinimumUpdates({
+      data,
+      currentOverrides: thresholdOverrides,
+    });
+    for (const update of updates) {
+      onThresholdOverrideChange(update.key, update.value);
+      updated = true;
+    }
+
+    if (updated || updates.length === 0) {
+      lastAutoApplyKeyRef.current = detectionKey;
+    }
+  };
+
+  useEffect(() => {
+    if (!autoSetActivationMinimums) {
+      lastAutoApplyKeyRef.current = "";
+    }
+  }, [autoSetActivationMinimums]);
+
+  useEffect(() => {
+    if (!autoSetActivationMinimums) return;
+    applyAutoActivationMinimums();
+  }, [
+    autoSetActivationMinimums,
+    applyAutoActivationMinimums,
+  ]);
 
   if (!data) {
     return (
@@ -570,6 +649,76 @@ export default function StrategyConditionsPanel({
                 );
               })()}
 
+              {/* Fixed threshold toggle — disables dynamic adjustments */}
+              {(() => {
+                const fixedOn = thresholdOverrides?.use_fixed_threshold === true;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onThresholdOverrideChange?.("use_fixed_threshold", !fixedOn)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 5,
+                      width: "100%",
+                      padding: "4px 8px",
+                      marginTop: 3,
+                      marginBottom: 2,
+                      border: `1px solid ${fixedOn ? "var(--accent-amber, #f59e0b)" : "var(--border-primary, rgba(255,255,255,0.08))"}`,
+                      borderRadius: 4,
+                      background: fixedOn ? "rgba(245, 158, 11, 0.12)" : "transparent",
+                      color: fixedOn ? "var(--accent-amber, #f59e0b)" : "var(--text-secondary)",
+                      cursor: "pointer",
+                      fontSize: "0.6rem",
+                      fontWeight: 700,
+                      letterSpacing: "0.03em",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.65rem" }}>{fixedOn ? "📌" : "📊"}</span>
+                    {fixedOn ? "FIXED THRESHOLD — ON (no ToD/transition adj.)" : "Fixed Threshold (disable dynamic adj.)"}
+                  </button>
+                );
+              })()}
+
+              {(() => {
+                const autoOn = autoSetActivationMinimums;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !autoSetActivationMinimums;
+                      setAutoSetActivationMinimums(next);
+                      if (next) {
+                        applyAutoActivationMinimums();
+                      }
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 5,
+                      width: "100%",
+                      padding: "4px 8px",
+                      marginTop: 3,
+                      marginBottom: 2,
+                      border: `1px solid ${autoOn ? "var(--accent-green, #22c55e)" : "var(--border-primary, rgba(255,255,255,0.08))"}`,
+                      borderRadius: 4,
+                      background: autoOn ? "rgba(34, 197, 94, 0.10)" : "transparent",
+                      color: autoOn ? "var(--accent-green, #22c55e)" : "var(--text-secondary)",
+                      cursor: "pointer",
+                      fontSize: "0.6rem",
+                      fontWeight: 700,
+                      letterSpacing: "0.03em",
+                    }}
+                    title="When enabled, each detected strategy snapshot auto-sets threshold overrides to exact minimum activation values."
+                  >
+                    <span style={{ fontSize: "0.65rem" }}>{autoOn ? "↧" : "↦"}</span>
+                    {autoOn ? "AUTO MIN ACTIVATION — ON" : "Auto-Set Min Activation"}
+                  </button>
+                );
+              })()}
+
               {/* Feature flag toggles */}
               <div style={{
                 display: "grid",
@@ -793,8 +942,9 @@ export default function StrategyConditionsPanel({
             {data.sweepDetected === true && <GateBadge label="Sweep" passed={true} />}
           </div>
           {data.rejectionGate && (() => {
+            const thresholdHeadline = thresholdHeadlineFromDetails(data.rejectionDetails);
             const gateLabels: Record<string, string> = {
-              threshold: "Score príliš nízky na vstup",
+              threshold: thresholdHeadline,
               confirming_sources: "Málo potvrdzujúcich zdrojov",
               l2_confirmation: "L2 flow nepotvrdil smer",
               tcbbo_confirmation: "Options flow nepodporuje",

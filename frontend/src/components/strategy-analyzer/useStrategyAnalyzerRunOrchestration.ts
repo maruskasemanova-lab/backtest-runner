@@ -33,6 +33,7 @@ type Params = {
   setError: (value: string | null) => void;
   setRangeScrubOffset: (value: number) => void;
   setAnalyzerRunKey: (value: string | null) => void;
+  thresholdOverridesPayload?: any;
 };
 
 /** Ensure data for the given date range is cached on the backend.
@@ -92,6 +93,7 @@ export function useStrategyAnalyzerRunOrchestration({
   setError,
   setRangeScrubOffset,
   setAnalyzerRunKey,
+  thresholdOverridesPayload,
 }: Params) {
   const [runLoading, setRunLoading] = useState(false);
   const lastPrewarmKeyRef = useRef("");
@@ -177,6 +179,7 @@ export function useStrategyAnalyzerRunOrchestration({
         // (skip queued v2 orchestration path and use direct /api/run/start).
         __client_hint: "strategy_analyzer",
         ...contextRiskOverrides,
+        threshold_overrides: thresholdOverridesPayload,
       };
       if (typeof onStartRun === "function") {
         const result = await onStartRun(payload);

@@ -34,6 +34,8 @@ export type ThresholdOverrides = {
   pullback_quality_gate_enabled?: boolean | null;
   momentum_diversification_gate_enabled?: boolean | null;
   bypass_all_entry_gates?: boolean | null;
+  // Fixed threshold mode — disables all dynamic threshold adjustments
+  use_fixed_threshold?: boolean | null;
 };
 
 export type ThresholdOverrideKey = keyof ThresholdOverrides;
@@ -53,6 +55,7 @@ const _BOOLEAN_KEYS = new Set<string>([
   "pullback_quality_gate_enabled",
   "momentum_diversification_gate_enabled",
   "bypass_all_entry_gates",
+  "use_fixed_threshold",
 ]);
 
 type Args = {
@@ -95,7 +98,7 @@ export function useStrategyAnalyzerThresholdOverrides({
       } else if (key === "strategy_weight") {
         payload[key] = Math.max(0, Math.min(1, (val as number) / 100));
       } else if (key === "min_confirming_sources") {
-        payload[key] = Math.round(Math.max(1, Math.min(5, val as number)));
+        payload[key] = Math.round(Math.max(0, Math.min(5, val as number)));
       } else if (key === "base_risk_pct") {
         payload[key] = Math.max(0.0001, Math.min(0.05, (val as number) / 10000));
       } else if (key === "min_margin_over_threshold" || key === "single_source_min_margin") {

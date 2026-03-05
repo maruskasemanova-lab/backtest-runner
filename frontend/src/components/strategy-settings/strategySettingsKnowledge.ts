@@ -96,7 +96,7 @@ export const DEFAULT_BUILTIN_RULE_OVERVIEW: StrategyRuleOverview = {
     "Strategy is enabled and current regime is allowed.",
     "No active position conflict for this strategy (or pyramiding limits respected).",
     "Signal must pass confidence/evidence threshold and risk sanity checks.",
-    "Runtime gates apply: cooldown, max trades/day, L2 gate, diversification gate.",
+    "Runtime gates apply: cooldown, L2 gate, diversification gate.",
   ],
   exit: [
     "Hard exits: stop-loss, take-profit, trailing stop policy.",
@@ -116,7 +116,7 @@ export const BUILTIN_RULE_OVERVIEW: Record<string, StrategyRuleOverview> = {
     exit: ["Stop-loss / take-profit / trailing policy from effective risk+exit config.", "Momentum fail-fast can close when flow deteriorates quickly.", "Adverse flow and time exit policies run continuously.", "Optional custom exit formula can force close by your own rule."]
   },
   exhaustion_fade: {
-    entry: ["Requires exhaustion profile (delta/sweep) and absorption divergence.", "Uses min_delta_zscore, max_sweep_intensity, min_absorption_rate, min_divergence.", "Book pressure and confidence filters reduce weak countertrend entries.", "Runtime trade-limit and cooldown gates still apply."],
+    entry: ["Requires exhaustion profile (delta/sweep) and absorption divergence.", "Uses min_delta_zscore, max_sweep_intensity, min_absorption_rate, min_divergence.", "Book pressure and confidence filters reduce weak countertrend entries.", "Runtime cooldown and session guard gates still apply."],
     exit: ["RR and trailing define baseline fade exit shape.", "Risk module can tighten/loosen stops by risk mode.", "Adverse flow and fail-fast can pre-empt target exits.", "Optional custom exit formula can terminate position immediately."]
   },
   iceberg_defense: {
