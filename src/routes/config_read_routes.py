@@ -6,8 +6,29 @@ from src.routes.context import ApiServices, get_api_services
 from src.routes.unified_profile_user_store import (
     build_user_unified_profile_options_payload,
 )
+from src.services.config_domain import (
+    TickerConfigRepositoryDeps,
+    build_ticker_display_payload,
+    load_ticker_config_aggregate,
+)
 
 router = APIRouter()
+
+
+def _build_ticker_config_repository_deps(
+    services: ApiServices,
+) -> TickerConfigRepositoryDeps:
+    config_write_deps = services.build_config_write_deps()
+    return TickerConfigRepositoryDeps(
+        load_aos_config=services.load_aos_config,
+        get_ticker_positioning_config=services.get_ticker_positioning_config,
+        normalize_strategy_combo_profiles=(
+            config_write_deps.normalize_strategy_combo_profiles
+        ),
+        normalize_unified_profiles=config_write_deps.normalize_unified_profiles,
+        normalize_tuner_profiles=config_write_deps.normalize_tuner_profiles,
+        positioning_config_keys=services.positioning_config_keys,
+    )
 
 
 @router.get("/api/strategy-overrides")
@@ -46,27 +67,11 @@ async def get_ticker_aos_config(
     ticker: str, services: ApiServices = Depends(get_api_services)
 ):
     """Get AOS config for a specific ticker."""
-    config = services.load_aos_config()
-    ticker_config = config.get("tickers", {}).get(ticker.upper(), {})
-    if not isinstance(ticker_config, dict):
-        ticker_config = {}
-
-    positioning_cfg = services.get_ticker_positioning_config(ticker)
-    legacy_positioning: Dict[str, Any] = {}
-    for key in services.positioning_config_keys:
-        if key in ticker_config:
-            legacy_positioning[key] = ticker_config.get(key)
-
-    if legacy_positioning:
-        merged_positioning = dict(legacy_positioning)
-        merged_positioning.update(positioning_cfg)
-        positioning_cfg = merged_positioning
-
-    if positioning_cfg:
-        payload = dict(ticker_config)
-        payload["positioning"] = positioning_cfg
-        return payload
-    return ticker_config
+    aggregate = load_ticker_config_aggregate(
+        ticker=ticker,
+        deps=_build_ticker_config_repository_deps(services),
+    )
+    return build_ticker_display_payload(aggregate)
 
 
 @router.get("/api/positioning-config")
@@ -99,12 +104,13 @@ async def get_unified_profiles(
 ):
     """Get saved unified strategy+execution profiles for a ticker."""
     base_payload = services.build_unified_profile_options_payload(ticker)
+    config_write_deps = services.build_config_write_deps()
     return build_user_unified_profile_options_payload(
         request=request,
         ticker=ticker,
         base_payload=base_payload,
         load_aos_config=services.load_aos_config,
-        normalize_unified_profiles=services.build_config_write_deps().normalize_unified_profiles,
+        normalize_unified_profiles=config_write_deps.normalize_unified_profiles,
     )
 
 

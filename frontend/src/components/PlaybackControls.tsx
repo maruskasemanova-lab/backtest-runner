@@ -16,6 +16,18 @@ function PlaybackControls({
   const progress = runState?.progress_pct || 0;
   const currentBar = runState?.current_bar_index || 0;
   const totalBars = runState?.total_bars || 0;
+  const speedOptions = [
+    { value: 'max', label: 'MAX' },
+    { value: '10hz', label: '10/s' },
+    { value: '5hz', label: '5/s' },
+    { value: '1hz', label: '1/s' },
+    { value: 200, label: '0.2s' },
+  ];
+  const tradeModeOptions = [
+    { value: 'intrabar_5s', label: '5s Intrabar' },
+    { value: 'standard', label: 'Fast (bar)' },
+    { value: 'intrabar_1s', label: '1s Intrabar' },
+  ];
   
   // Helper to get label for speed
   const getSpeedLabel = (s) => {
@@ -34,11 +46,11 @@ function PlaybackControls({
   };
   
   return (
-    <div className="card">
+    <div className="card playback-card">
       <div className="card-header">
         <span className="card-title">Playback</span>
         {isPlaying && (
-          <span style={{ color: 'var(--accent-green)', fontSize: '0.8rem' }}>
+          <span className="playback-status">
             ▶ Running
           </span>
         )}
@@ -112,146 +124,41 @@ function PlaybackControls({
         </div>
         
         {/* Simple Speed Control */}
-        <div style={{ marginTop: '10px' }}>
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            fontSize: '0.8rem',
-            color: 'var(--text-secondary)',
-            marginBottom: '8px'
-          }}>
-            <span>Speed</span>
-            <span>{getSpeedLabel(speed)}</span>
+        <div className="playback-control-group">
+          <div className="playback-control-meta">
+            <span className="playback-control-label">Speed</span>
+            <span className="playback-control-value">{getSpeedLabel(speed)}</span>
           </div>
-          
-          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-            <button 
-              style={{
-                padding: '4px 8px',
-                fontSize: '0.7rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                background: speed === 'max' ? 'var(--accent-blue)' : 'transparent',
-                color: speed === 'max' ? 'white' : 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-              onClick={() => onSpeedChange('max')}
-            >
-              MAX
-            </button>
-            <button 
-              style={{
-                padding: '4px 8px',
-                fontSize: '0.7rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                background: speed === '10hz' ? 'var(--accent-blue)' : 'transparent',
-                color: speed === '10hz' ? 'white' : 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-              onClick={() => onSpeedChange('10hz')}
-            >
-              10/s
-            </button>
-            <button 
-              style={{
-                padding: '4px 8px',
-                fontSize: '0.7rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                background: speed === '5hz' ? 'var(--accent-blue)' : 'transparent',
-                color: speed === '5hz' ? 'white' : 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-              onClick={() => onSpeedChange('5hz')}
-            >
-              5/s
-            </button>
-            <button 
-              style={{
-                padding: '4px 8px',
-                fontSize: '0.7rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                background: speed === '1hz' ? 'var(--accent-blue)' : 'transparent',
-                color: speed === '1hz' ? 'white' : 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-              onClick={() => onSpeedChange('1hz')}
-            >
-              1/s
-            </button>
-            <button 
-              style={{
-                padding: '4px 8px',
-                fontSize: '0.7rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                background: speed === 200 ? 'var(--accent-blue)' : 'transparent',
-                color: speed === 200 ? 'white' : 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-              onClick={() => onSpeedChange(200)}
-            >
-              0.2s
-            </button>
+          <div className="ui-segmented playback-segmented" role="group" aria-label="Playback speed">
+            {speedOptions.map((option) => (
+              <button
+                key={String(option.value)}
+                type="button"
+                className={`ui-segmented-option${speed === option.value ? ' is-active' : ''}`}
+                onClick={() => onSpeedChange(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        <div style={{ marginTop: '10px' }}>
-          <div style={{ 
-            display: 'flex',
-            justifyContent: 'space-between',
-            fontSize: '0.8rem',
-            color: 'var(--text-secondary)',
-            marginBottom: '8px'
-          }}>
-            <span>Trade Eval</span>
-            <span>{getTradeModeLabel(tradeEvaluationMode)}</span>
+        <div className="playback-control-group">
+          <div className="playback-control-meta">
+            <span className="playback-control-label">Trade Eval</span>
+            <span className="playback-control-value">{getTradeModeLabel(tradeEvaluationMode)}</span>
           </div>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            <button
-              style={{
-                padding: '4px 8px',
-                fontSize: '0.7rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                background: tradeEvaluationMode === 'intrabar_5s' ? 'var(--accent-blue)' : 'transparent',
-                color: tradeEvaluationMode === 'intrabar_5s' ? 'white' : 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-              onClick={() => onTradeEvaluationModeChange('intrabar_5s')}
-            >
-              5s Intrabar
-            </button>
-            <button
-              style={{
-                padding: '4px 8px',
-                fontSize: '0.7rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                background: tradeEvaluationMode === 'standard' ? 'var(--accent-blue)' : 'transparent',
-                color: tradeEvaluationMode === 'standard' ? 'white' : 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-              onClick={() => onTradeEvaluationModeChange('standard')}
-            >
-              Fast (bar)
-            </button>
-            <button
-              style={{
-                padding: '4px 8px',
-                fontSize: '0.7rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                background: tradeEvaluationMode === 'intrabar_1s' ? 'var(--accent-blue)' : 'transparent',
-                color: tradeEvaluationMode === 'intrabar_1s' ? 'white' : 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-              onClick={() => onTradeEvaluationModeChange('intrabar_1s')}
-            >
-              1s Intrabar
-            </button>
+          <div className="ui-segmented playback-segmented" role="group" aria-label="Trade evaluation mode">
+            {tradeModeOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`ui-segmented-option${tradeEvaluationMode === option.value ? ' is-active' : ''}`}
+                onClick={() => onTradeEvaluationModeChange(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>

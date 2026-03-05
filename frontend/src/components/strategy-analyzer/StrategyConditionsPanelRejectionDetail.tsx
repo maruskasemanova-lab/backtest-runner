@@ -1,12 +1,19 @@
+import type { ReactNode } from "react";
 import { Layers } from "lucide-react";
 
 import { StrategyConditionsPanelFormattedReasoning as FormattedReasoning } from "./StrategyConditionsPanelFormattedReasoning";
-import { MiniBar, SectionLabel, safeNum } from "./StrategyConditionsPanelShared";
+import {
+  MiniBar,
+  SectionLabel,
+  cx,
+  safeNum,
+} from "./StrategyConditionsPanelShared";
 
 const CHECK_EXPLANATIONS: Record<string, string> = {
   rvol_minimum: "Relatívny objem (RVOL) presahuje minimálnu hranicu pre vstup",
   near_tested_level: "Cena je optimálne blízko testovanej úrovne (level)",
-  minimum_confluence_score: "Dostatočná súhra viacerých indikátorov (confluence)",
+  minimum_confluence_score:
+    "Dostatočná súhra viacerých indikátorov (confluence)",
   rotation_level_tests_range: "Počet otestovaní rotačnej úrovne je v norme",
   rotation_level_unbroken: "Rotačná úroveň nebola trvalo prelomená",
   tracker_enabled: "Sledovanie úrovní (Level tracker) je aktívne",
@@ -20,7 +27,8 @@ const CHECK_EXPLANATIONS: Record<string, string> = {
   rotation_volume_ratio_available: "Pomer objemov pre rotáciu je dostupný",
   rotation_volume_exhaustion: "Vyčerpanie objemu ukazuje na možný obrat",
   no_recent_volume_break: "Žiadne nedávne silné prelomenia s vysokým objemom",
-  rotation_prefers_non_trending_poc_migration: "Presun POC (Point of Control) nenaznačuje silný trend proti rotácii",
+  rotation_prefers_non_trending_poc_migration:
+    "Presun POC (Point of Control) nenaznačuje silný trend proti rotácii",
   gap_fill_bias_aligned: "Smerovanie k vyplneniu gapu súhlasí so signálom",
 };
 
@@ -28,8 +36,22 @@ function resolveDirectionToken(raw: unknown): "bullish" | "bearish" | null {
   if (raw == null) return null;
   const token = String(raw).trim().toLowerCase();
   if (!token) return null;
-  if (token === "buy" || token === "long" || token === "bullish" || token.includes("bullish")) return "bullish";
-  if (token === "sell" || token === "short" || token === "bearish" || token.includes("bearish")) return "bearish";
+  if (
+    token === "buy" ||
+    token === "long" ||
+    token === "bullish" ||
+    token.includes("bullish")
+  ) {
+    return "bullish";
+  }
+  if (
+    token === "sell" ||
+    token === "short" ||
+    token === "bearish" ||
+    token.includes("bearish")
+  ) {
+    return "bearish";
+  }
   return null;
 }
 
@@ -46,6 +68,22 @@ function resolveDirectionFromRejection(d: any): "bullish" | "bearish" | null {
   );
 }
 
+function ToneNote({
+  strategy,
+  children,
+}: {
+  strategy?: string | null;
+  children: ReactNode;
+}) {
+  return (
+    <div className="sa-detail-note">
+      {strategy && <span className="sa-detail-note__strong">{strategy}</span>}
+      {strategy && " · "}
+      {children}
+    </div>
+  );
+}
+
 export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
   if (!d || typeof d !== "object" || !d.gate) return null;
   const gate = String(d.gate);
@@ -55,70 +93,75 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
     const actual = safeNum(d.actual_confirming_sources) ?? 0;
     const required = safeNum(d.required_confirming_sources) ?? 0;
     const pct = required > 0 ? Math.min(100, (actual / required) * 100) : 0;
-    const missing = Math.max(0, required - actual);
-    const alignedKeys: string[] = Array.isArray(d.aligned_source_keys) ? d.aligned_source_keys : [];
-    const nonAlignedSources: any[] = Array.isArray(d.non_aligned_source_keys) ? d.non_aligned_source_keys : [];
-    const signalDir = typeof d.signal_direction === "string" ? d.signal_direction.toLowerCase() : null;
+    const alignedKeys: string[] = Array.isArray(d.aligned_source_keys)
+      ? d.aligned_source_keys
+      : [];
+    const nonAlignedSources: any[] = Array.isArray(d.non_aligned_source_keys)
+      ? d.non_aligned_source_keys
+      : [];
+    const signalDir =
+      typeof d.signal_direction === "string"
+        ? d.signal_direction.toLowerCase()
+        : null;
 
     return (
-      <div style={{ marginTop: 3 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: "0.6rem", lineHeight: 1.2, marginBottom: 2 }}>
-          <span style={{ color: "var(--text-secondary)" }}>
-            {strategy && <span style={{ fontWeight: 600 }}>{strategy}</span>}
+      <div className="sa-detail-block">
+        <div className="sa-detail-row">
+          <span className="sa-detail-meta">
+            {strategy && (
+              <span className="sa-detail-note__strong">{strategy}</span>
+            )}
           </span>
-          <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: "var(--accent-red, #ef4444)" }}>
+          <span className="sa-detail-value is-danger">
             {actual}/{required} ({pct.toFixed(0)}%)
           </span>
         </div>
-        <div style={{ position: "relative", height: 5, borderRadius: 3, background: "var(--bg-tertiary, rgba(255,255,255,0.06))", overflow: "visible" }}>
-          <div style={{ height: "100%", width: `${pct}%`, borderRadius: 3, background: pct >= 100 ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)", opacity: 0.8, transition: "width 0.08s ease-out" }} />
-          <div style={{ position: "absolute", top: -1, bottom: -1, left: "100%", width: 1.5, background: "var(--text-muted, #888)", borderRadius: 1, opacity: 0.5 }} title={`Required: ${required}`} />
+        <div className="sa-track">
+          <div
+            className={cx(
+              "sa-track__fill",
+              pct >= 100 ? "is-success" : "is-danger",
+            )}
+            style={{ width: `${pct}%` }}
+          />
+          <div
+            className="sa-track__threshold is-end"
+            title={`Required: ${required}`}
+          />
         </div>
         {(alignedKeys.length > 0 || nonAlignedSources.length > 0) && (
-          <div style={{ display: "flex", gap: 3, flexWrap: "wrap", marginTop: 4 }}>
-            {alignedKeys.map((key: string) => (
-              <span
-                key={key}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 2,
-                  padding: "0px 4px",
-                  borderRadius: 2,
-                  fontSize: "0.52rem",
-                  lineHeight: 1.5,
-                  background: "rgba(34, 197, 94, 0.08)",
-                  color: "var(--accent-green, #22c55e)",
-                  border: "1px solid rgba(34, 197, 94, 0.18)",
-                }}
-              >
-                <span style={{ fontSize: "0.48rem" }}>{"\u2713"}</span>
+          <div className="sa-tag-row is-spaced">
+            {alignedKeys.map((key) => (
+              <span key={key} className="sa-pill is-success is-compact">
+                <span className="sa-pill__icon">✓</span>
                 {key.replace(/_/g, " ")}
               </span>
             ))}
-            {nonAlignedSources.map((src: any) => {
-              const key = String(src?.key || "");
-              const dir = String(src?.direction || "").toLowerCase();
-              const isOpposing = dir && signalDir && dir !== signalDir && dir !== "neutral";
+            {nonAlignedSources.map((source) => {
+              const key = String(source?.key || "");
+              const direction = String(source?.direction || "").toLowerCase();
+              const isOpposing = Boolean(
+                direction &&
+                signalDir &&
+                direction !== signalDir &&
+                direction !== "neutral",
+              );
               return (
                 <span
                   key={key}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 2,
-                    padding: "0px 4px",
-                    borderRadius: 2,
-                    fontSize: "0.52rem",
-                    lineHeight: 1.5,
-                    background: isOpposing ? "rgba(239, 68, 68, 0.06)" : "rgba(148, 163, 184, 0.06)",
-                    color: isOpposing ? "var(--accent-red, #ef4444)" : "var(--text-muted, #94a3b8)",
-                    border: `1px solid ${isOpposing ? "rgba(239, 68, 68, 0.15)" : "rgba(148, 163, 184, 0.12)"}`,
-                  }}
+                  className={cx(
+                    "sa-pill",
+                    isOpposing ? "is-danger" : "is-neutral",
+                    "is-compact",
+                  )}
                 >
-                  <span style={{ fontSize: "0.48rem" }}>{isOpposing ? "\u2717" : "\u2013"}</span>
+                  <span className="sa-pill__icon">
+                    {isOpposing ? "✗" : "–"}
+                  </span>
                   {key.replace(/_/g, " ")}
-                  {dir && <span style={{ opacity: 0.7, marginLeft: 1 }}>({dir})</span>}
+                  {direction && (
+                    <span className="sa-pill__meta-inline">({direction})</span>
+                  )}
                 </span>
               );
             })}
@@ -129,40 +172,40 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
   }
 
   if (gate === "l2_confirmation") {
-    const lm = d.l2_metrics;
-    const reason = lm && typeof lm === "object" && typeof lm.reason === "string" ? lm.reason : null;
+    const metrics = d.l2_metrics;
+    const reason =
+      metrics &&
+      typeof metrics === "object" &&
+      typeof metrics.reason === "string"
+        ? metrics.reason
+        : null;
     return (
-      <div style={{ marginTop: 2, fontSize: "0.58rem", color: "var(--text-secondary)" }}>
-        {strategy && (
-          <>
-            <span style={{ fontWeight: 600 }}>{strategy}</span> ·{" "}
-          </>
-        )}
+      <ToneNote strategy={strategy}>
         L2 flow not confirming{reason ? `: ${reason}` : ""}
-      </div>
+      </ToneNote>
     );
   }
 
   if (gate === "tcbbo_confirmation") {
-    const tm = d.tcbbo_metrics;
-    const reason = tm && typeof tm === "object" && typeof tm.reason === "string" ? tm.reason : null;
+    const metrics = d.tcbbo_metrics;
+    const reason =
+      metrics &&
+      typeof metrics === "object" &&
+      typeof metrics.reason === "string"
+        ? metrics.reason
+        : null;
     return (
-      <div style={{ marginTop: 2, fontSize: "0.58rem", color: "var(--text-secondary)" }}>
-        {strategy && (
-          <>
-            <span style={{ fontWeight: 600 }}>{strategy}</span> ·{" "}
-          </>
-        )}
+      <ToneNote strategy={strategy}>
         TCBBO options flow not aligned{reason ? `: ${reason}` : ""}
-      </div>
+      </ToneNote>
     );
   }
 
   if (gate === "mu_choppy_filter") {
     return (
-      <div style={{ marginTop: 2, fontSize: "0.58rem", color: "var(--text-secondary)" }}>
+      <ToneNote>
         Choppy regime block{d.micro_regime ? ` (${d.micro_regime})` : ""}
-      </div>
+      </ToneNote>
     );
   }
 
@@ -170,47 +213,69 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
     const risk = safeNum(d.risk_pct);
     const min = safeNum(d.min_required);
     return (
-      <div style={{ marginTop: 2, fontSize: "0.58rem", color: "var(--text-secondary)" }}>
+      <ToneNote>
         Sweep risk too low{risk != null ? `: ${(risk * 100).toFixed(2)}%` : ""}
         {min != null ? ` (min ${(min * 100).toFixed(0)}%)` : ""}
-      </div>
+      </ToneNote>
     );
   }
 
   if (gate === "intraday_levels_entry_quality" || gate === "level_quality") {
-    const lc = d.level_context && typeof d.level_context === "object" ? d.level_context : d;
-    const stats = lc.stats && typeof lc.stats === "object" ? lc.stats : {};
-    const cfg = lc.config && typeof lc.config === "object" ? lc.config : {};
-    const checks = lc.checks && typeof lc.checks === "object" ? lc.checks : {};
-    const softFailedSet = new Set<string>(Array.isArray(lc.soft_failed_checks) ? lc.soft_failed_checks : []);
+    const levelContext =
+      d.level_context && typeof d.level_context === "object"
+        ? d.level_context
+        : d;
+    const stats =
+      levelContext.stats && typeof levelContext.stats === "object"
+        ? levelContext.stats
+        : {};
+    const config =
+      levelContext.config && typeof levelContext.config === "object"
+        ? levelContext.config
+        : {};
+    const checks =
+      levelContext.checks && typeof levelContext.checks === "object"
+        ? levelContext.checks
+        : {};
+    const softFailedSet = new Set<string>(
+      Array.isArray(levelContext.soft_failed_checks)
+        ? levelContext.soft_failed_checks
+        : [],
+    );
 
     const confluence = safeNum(stats.near_confluence_score);
-    const minConfluence = safeNum(cfg.min_confluence_score ?? lc.min_confluence_score);
+    const minConfluence = safeNum(
+      config.min_confluence_score ?? levelContext.min_confluence_score,
+    );
 
-    const checkItems = Object.entries(checks).map(([k, v]) => ({
-      key: k,
-      label: k.replace(/_/g, " "),
-      passed: v === true,
-      warning: v === false && softFailedSet.has(k),
-      tooltip: CHECK_EXPLANATIONS[k] || "No detailed description available",
+    const checkItems = Object.entries(checks).map(([key, value]) => ({
+      key,
+      label: key.replace(/_/g, " "),
+      passed: value === true,
+      warning: value === false && softFailedSet.has(key),
+      tooltip: CHECK_EXPLANATIONS[key] || "No detailed description available",
     }));
+
     checkItems.sort((a, b) => {
-      const sortOrder = (item: any) => (!item.passed && !item.warning ? 0 : !item.passed && item.warning ? 1 : 2);
+      const sortOrder = (item: { passed: boolean; warning: boolean }) =>
+        !item.passed && !item.warning
+          ? 0
+          : !item.passed && item.warning
+            ? 1
+            : 2;
       if (sortOrder(a) !== sortOrder(b)) return sortOrder(a) - sortOrder(b);
       return a.label.localeCompare(b.label);
     });
 
     return (
-      <div style={{ marginTop: 4 }}>
-        <SectionLabel icon={<Layers size={10} />}>Kontext & Úrovne</SectionLabel>
+      <div className="sa-detail-block is-top-spaced">
+        <SectionLabel icon={<Layers size={10} />}>
+          Kontext & Úrovne
+        </SectionLabel>
 
-        {strategy && (
-          <div style={{ fontSize: "0.6rem", color: "var(--text-secondary)", marginBottom: 4, fontWeight: 600 }}>
-            {strategy}
-          </div>
-        )}
+        {strategy && <div className="sa-detail-heading">{strategy}</div>}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "2px 0", marginBottom: 6 }}>
+        <div className="sa-grid-single is-spaced-lg">
           {confluence != null && (
             <MiniBar
               label="Confluence Score"
@@ -226,41 +291,43 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
               label="Volume Ratio"
               value={safeNum(stats.volume_ratio)}
               max={Math.max(safeNum(stats.volume_ratio) || 0, 1.5)}
-              threshold={safeNum(cfg.min_volume_ratio)}
+              threshold={safeNum(config.min_volume_ratio)}
               suffix="x"
               showThresholdLine
             />
           )}
-          {stats.recent_touches != null && <MiniBar label="Recent Touches" value={safeNum(stats.recent_touches)} max={10} suffix="" />}
+          {stats.recent_touches != null && (
+            <MiniBar
+              label="Recent Touches"
+              value={safeNum(stats.recent_touches)}
+              max={10}
+              suffix=""
+            />
+          )}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px 6px" }}>
+        <div className="sa-detail-grid">
           {checkItems.map((item) => {
-            const color = item.passed ? "var(--accent-green, #22c55e)" : item.warning ? "var(--accent-yellow, #eab308)" : "var(--accent-red, #ef4444)";
-            const bg = item.passed ? "rgba(34, 197, 94, 0.08)" : item.warning ? "rgba(234, 179, 8, 0.08)" : "rgba(239, 68, 68, 0.08)";
-            const border = item.passed ? "rgba(34, 197, 94, 0.18)" : item.warning ? "rgba(234, 179, 8, 0.18)" : "rgba(239, 68, 68, 0.18)";
-            const icon = item.passed ? "\u2713" : item.warning ? "\u26A0" : "\u2717";
+            const toneClass = item.passed
+              ? "is-success"
+              : item.warning
+                ? "is-warning"
+                : "is-danger";
+            const icon = item.passed ? "✓" : item.warning ? "⚠" : "✗";
 
             return (
               <div
                 key={item.key}
                 title={item.tooltip}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 3,
-                  padding: "3px 5px",
-                  borderRadius: 3,
-                  fontSize: "0.52rem",
-                  lineHeight: 1.2,
-                  background: bg,
-                  color,
-                  border: `1px solid ${border}`,
-                  cursor: "help",
-                }}
+                className={cx("sa-detail-card", toneClass)}
               >
-                <span style={{ fontSize: "0.55rem", fontWeight: 700 }}>{icon}</span>
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: item.passed ? 500 : 600 }}>
+                <span className="sa-detail-card__icon">{icon}</span>
+                <span
+                  className={cx(
+                    "sa-detail-card__label",
+                    !item.passed && "is-strong",
+                  )}
+                >
                   {item.label}
                 </span>
               </div>
@@ -273,80 +340,90 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
 
   if (gate === "threshold" || gate === "cross_asset_headwind") {
     const score = safeNum(d.combined_score) ?? safeNum(d.combined_norm_0_100);
-    const thr = safeNum(d.threshold_used) ?? safeNum(d.trade_gate_threshold);
+    const threshold =
+      safeNum(d.threshold_used) ?? safeNum(d.trade_gate_threshold);
     const reasoning = typeof d.reasoning === "string" ? d.reasoning : null;
     const todBoost = safeNum(d.tod_threshold_boost);
-    const hwBoost = safeNum(d.headwind_threshold_boost);
-    const thrReason = typeof d.threshold_used_reason === "string" ? d.threshold_used_reason : null;
-    const fixedThresholdMode = Boolean(thrReason && thrReason.toLowerCase().startsWith("fixed("));
+    const headwindBoost = safeNum(d.headwind_threshold_boost);
+    const thresholdReason =
+      typeof d.threshold_used_reason === "string"
+        ? d.threshold_used_reason
+        : null;
+    const fixedThresholdMode = Boolean(
+      thresholdReason && thresholdReason.toLowerCase().startsWith("fixed("),
+    );
     const isHeadwind = gate === "cross_asset_headwind";
     const direction = resolveDirectionFromRejection(d);
     const isLong = direction === "bullish";
-    const scoreGap = score != null && thr != null ? score - thr : null;
-    const scorePassed = score != null && thr != null && score >= thr;
+    const scoreGap =
+      score != null && threshold != null ? score - threshold : null;
+    const scorePassed =
+      score != null && threshold != null && score >= threshold;
 
     return (
-      <div style={{ marginTop: 4 }}>
-        {/* Compact score vs threshold summary (not duplicating the full bars) */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+      <div className="sa-detail-block is-top-spaced">
+        <div className="sa-inline-wrap is-spaced-md">
           {direction && (
             <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 3,
-                padding: "1px 5px",
-                borderRadius: 3,
-                fontSize: "0.55rem",
-                fontWeight: 700,
-                background: isLong ? "rgba(34, 197, 94, 0.12)" : "rgba(239, 68, 68, 0.12)",
-                color: isLong ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)",
-                border: `1px solid ${isLong ? "rgba(34, 197, 94, 0.25)" : "rgba(239, 68, 68, 0.25)"}`,
-              }}
+              className={cx("sa-pill", isLong ? "is-success" : "is-danger")}
             >
               {isLong ? "▲ LONG" : "▼ SHORT"}
             </span>
           )}
-          {score != null && thr != null && (
-            <span style={{
-              fontSize: "0.56rem",
-              fontWeight: 600,
-              fontVariantNumeric: "tabular-nums",
-              color: scorePassed ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)",
-            }}>
-              {score.toFixed(1)} / {thr.toFixed(0)} thr
-              {scoreGap != null && ` (${scoreGap >= 0 ? "+" : ""}${scoreGap.toFixed(1)})`}
+          {score != null && threshold != null && (
+            <span
+              className={cx(
+                "sa-detail-value",
+                scorePassed ? "is-success" : "is-danger",
+              )}
+            >
+              {score.toFixed(1)} / {threshold.toFixed(0)} thr
+              {scoreGap != null &&
+                ` (${scoreGap >= 0 ? "+" : ""}${scoreGap.toFixed(1)})`}
             </span>
           )}
           {isHeadwind && (
-            <span style={{ fontSize: "0.52rem", color: "var(--text-muted)", fontStyle: "italic" }}>
-              headwind adjusted
-            </span>
+            <span className="sa-detail-hint">headwind adjusted</span>
           )}
         </div>
 
-        {/* Threshold adjustments */}
-        {((todBoost != null || hwBoost != null || thrReason) && (
-          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", fontSize: "0.52rem", color: "var(--text-muted)", marginBottom: 4, background: "rgba(0,0,0,0.1)", padding: "3px 6px", borderRadius: 3 }}>
-            <span style={{ fontWeight: 600 }}>Thr adjustments:</span>
+        {(todBoost != null || headwindBoost != null || thresholdReason) && (
+          <div className="sa-adjustment-row">
+            <span className="sa-adjustment-row__title">Thr adjustments:</span>
             {!fixedThresholdMode && todBoost != null && todBoost !== 0 && (
-              <span title="Time of Day adjustment" style={{ color: todBoost > 0 ? "var(--accent-red, #ef4444)" : "var(--accent-green, #22c55e)", cursor: "help" }}>
-                ToD {todBoost > 0 ? "+" : ""}{todBoost.toFixed(0)}
+              <span
+                title="Time of Day adjustment"
+                className={cx(
+                  "sa-adjustment-row__item",
+                  todBoost > 0 ? "is-danger" : "is-success",
+                )}
+              >
+                ToD {todBoost > 0 ? "+" : ""}
+                {todBoost.toFixed(0)}
               </span>
             )}
-            {!fixedThresholdMode && hwBoost != null && hwBoost !== 0 && (
-              <span title="Headwind correction" style={{ color: "var(--accent-red, #ef4444)", cursor: "help" }}>
-                HW +{hwBoost.toFixed(1)}
-              </span>
-            )}
+            {!fixedThresholdMode &&
+              headwindBoost != null &&
+              headwindBoost !== 0 && (
+                <span
+                  title="Headwind correction"
+                  className="sa-adjustment-row__item is-danger"
+                >
+                  HW +{headwindBoost.toFixed(1)}
+                </span>
+              )}
             {fixedThresholdMode && (
-              <span style={{ color: "var(--accent-green, #22c55e)" }}>
+              <span className="sa-adjustment-row__item is-success">
                 fixed threshold active
               </span>
             )}
-            {thrReason && <span style={{ fontStyle: "italic" }}>({thrReason})</span>}
+            {thresholdReason && (
+              <span className="sa-adjustment-row__meta">
+                ({thresholdReason})
+              </span>
+            )}
           </div>
-        ))}
+        )}
 
         {reasoning && <FormattedReasoning reasoning={reasoning} />}
       </div>
@@ -357,9 +434,5 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
   if (strategy) fallbackParts.push(strategy);
   if (typeof d.reason === "string") fallbackParts.push(d.reason);
   if (!fallbackParts.length) return null;
-  return (
-    <div style={{ marginTop: 2, fontSize: "0.58rem", color: "var(--text-secondary)" }}>
-      {fallbackParts.join(" · ")}
-    </div>
-  );
+  return <div className="sa-detail-note">{fallbackParts.join(" · ")}</div>;
 }

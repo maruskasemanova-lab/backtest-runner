@@ -397,6 +397,37 @@
         "Per-strategy regression tests are added or updated."
       ],
       "prompt_seed": "Refactor large strategy generate_signal methods into shared helpers while preserving behavior."
+    },
+    {
+      "id": "BR-08",
+      "epic": "EPIC-06",
+      "title": "AOS configuration control plane modularization",
+      "priority": "P0",
+      "domain": "orchestration",
+      "status": "todo",
+      "files": [
+        "api_server.py",
+        "src/routes/config_read_routes.py",
+        "src/routes/config_write_routes.py",
+        "src/routes/unified_profile_user_store.py",
+        "src/services/config_write_service.py",
+        "src/services/profile_options_service.py",
+        "src/services/strategy_api_profiles_service.py",
+        "src/services/start_run_bootstrap_phase_service.py",
+        "src/services/start_run_execution_config_service.py",
+        "src/services/local_config_service.py",
+        "src/services/saas_service.py",
+        "src/services/config_domain",
+        "frontend/src/components/AOSOptimizations.tsx",
+        "frontend/src/components/run-config/useRunConfigProfiles.ts",
+        "frontend/src/components/adaptive-studio/hooks/useAdaptiveStudioData.ts"
+      ],
+      "acceptance": [
+        "One canonical resolver defines effective ticker-config precedence across run-start and profile/read endpoints.",
+        "One canonical repository owns persisted AOS/profile state behind backward-compatible APIs.",
+        "Saved, active, effective, and published config state are explicit and auditable."
+      ],
+      "prompt_seed": "Modularize AOS and ticker configuration into a DB-first control plane with a canonical resolver/repository while preserving current endpoints and deterministic run-start behavior."
     }
   ]
 }

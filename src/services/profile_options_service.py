@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from fastapi import HTTPException
+
+from src.services.config_domain import (
+    TickerConfigRepositoryDeps,
+    load_ticker_config_aggregate,
+)
 
 
 def extract_tuner_candidate(profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,18 +237,21 @@ def build_strategy_combo_options_payload(
     ticker_upper = str(ticker or "").upper().strip()
     if not ticker_upper:
         raise HTTPException(400, "ticker is required")
-    aos_cfg = load_aos_config()
-    ticker_cfg = aos_cfg.get("tickers", {}).get(ticker_upper, {})
-    profiles = normalize_strategy_combo_profiles(
-        ticker_cfg.get("strategy_combo_profiles", [])
-    )
-    active_profile_id = (
-        str(ticker_cfg.get("active_strategy_combo_profile_id", "")).strip() or None
+    aggregate = load_ticker_config_aggregate(
+        ticker=ticker_upper,
+        deps=TickerConfigRepositoryDeps(
+            load_aos_config=load_aos_config,
+            get_ticker_positioning_config=lambda *_args, **_kwargs: {},
+            normalize_strategy_combo_profiles=normalize_strategy_combo_profiles,
+            normalize_unified_profiles=lambda value: [],
+            normalize_tuner_profiles=lambda value: [],
+            positioning_config_keys=(),
+        ),
     )
     return {
         "ticker": ticker_upper,
-        "profiles": profiles,
-        "active_profile_id": active_profile_id,
+        "profiles": aggregate.strategy_combo_profiles,
+        "active_profile_id": aggregate.active_strategy_combo_profile_id,
     }
 
 
@@ -267,11 +275,16 @@ def build_adaptive_tuner_options_payload(
     l2_range = range_summary_from_days(l2_days)
     overlap_range = range_summary_from_days(overlap_days)
 
-    aos_cfg = load_aos_config()
-    ticker_cfg = aos_cfg.get("tickers", {}).get(ticker_upper, {})
-    profiles = normalize_tuner_profiles(ticker_cfg.get("adaptive_tuner_profiles", []))
-    active_profile_id = (
-        str(ticker_cfg.get("active_adaptive_tuner_profile_id", "")).strip() or None
+    aggregate = load_ticker_config_aggregate(
+        ticker=ticker_upper,
+        deps=TickerConfigRepositoryDeps(
+            load_aos_config=load_aos_config,
+            get_ticker_positioning_config=lambda *_args, **_kwargs: {},
+            normalize_strategy_combo_profiles=lambda value: [],
+            normalize_unified_profiles=lambda value: [],
+            normalize_tuner_profiles=normalize_tuner_profiles,
+            positioning_config_keys=(),
+        ),
     )
 
     default_from = overlap_range.get("start") or ohlcv_range.get("start")
@@ -286,8 +299,8 @@ def build_adaptive_tuner_options_payload(
         "default_date_from": default_from,
         "default_date_to": default_to,
         "has_l2_overlap": bool(overlap_days),
-        "profiles": profiles,
-        "active_profile_id": active_profile_id,
+        "profiles": aggregate.adaptive_tuner_profiles,
+        "active_profile_id": aggregate.active_adaptive_tuner_profile_id,
     }
 
 
@@ -301,6 +314,7 @@ def build_unified_profile_options_payload(
     normalize_strategy_selection_mode: Callable[[Any], str],
     normalize_clamped_int: Callable[..., int],
     get_ticker_positioning_config: Callable[[str], Dict[str, Any]],
+    positioning_config_keys: Iterable[str] = (),
     parse_utc_iso: Callable[[Any], Optional[datetime]],
     max_profiles: int = 60,
 ) -> Dict[str, Any]:
@@ -308,12 +322,20 @@ def build_unified_profile_options_payload(
     if not ticker_upper:
         raise HTTPException(400, "ticker is required")
 
-    aos_cfg = load_aos_config()
-    ticker_cfg = aos_cfg.get("tickers", {}).get(ticker_upper, {})
-    if not isinstance(ticker_cfg, dict):
-        ticker_cfg = {}
+    aggregate = load_ticker_config_aggregate(
+        ticker=ticker_upper,
+        deps=TickerConfigRepositoryDeps(
+            load_aos_config=load_aos_config,
+            get_ticker_positioning_config=get_ticker_positioning_config,
+            normalize_strategy_combo_profiles=normalize_strategy_combo_profiles,
+            normalize_unified_profiles=normalize_unified_profiles,
+            normalize_tuner_profiles=normalize_tuner_profiles,
+            positioning_config_keys=positioning_config_keys,
+        ),
+    )
+    ticker_cfg = aggregate.ticker_config
 
-    stored_profiles = normalize_unified_profiles(ticker_cfg.get("unified_profiles", []))
+    stored_profiles = aggregate.unified_profiles
     derived_profiles = build_legacy_unified_profile_variants(
         ticker_upper,
         ticker_cfg,
@@ -321,7 +343,7 @@ def build_unified_profile_options_payload(
         normalize_tuner_profiles=normalize_tuner_profiles,
         normalize_strategy_selection_mode=normalize_strategy_selection_mode,
         normalize_clamped_int=normalize_clamped_int,
-        get_ticker_positioning_config=get_ticker_positioning_config,
+        get_ticker_positioning_config=lambda _ticker: dict(aggregate.positioning),
         parse_utc_iso=parse_utc_iso,
         max_profiles=max_profiles,
     )
@@ -335,16 +357,10 @@ def build_unified_profile_options_payload(
         seen_profile_ids.add(profile_id)
         merged_profiles.append(profile)
 
-    active_profile_id = (
-        str(ticker_cfg.get("active_unified_profile_id", "")).strip() or None
-    )
+    active_profile_id = aggregate.active_unified_profile_id
     if not active_profile_id:
-        active_combo_id = normalize_profile_ref_token(
-            ticker_cfg.get("active_strategy_combo_profile_id", "")
-        )
-        active_adaptive_id = normalize_profile_ref_token(
-            ticker_cfg.get("active_adaptive_tuner_profile_id", "")
-        )
+        active_combo_id = aggregate.active_strategy_combo_profile_id or ""
+        active_adaptive_id = aggregate.active_adaptive_tuner_profile_id or ""
         derived_active = derived_unified_profile_id(
             ticker_upper,
             active_combo_id,

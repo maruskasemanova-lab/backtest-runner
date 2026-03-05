@@ -20,35 +20,41 @@ interface OrderFlowSettingsProps {
   onRemoveMomentumSleeve: (index: number) => void;
 }
 
-export function OrderFlowSettings({ 
-  config, 
+export function OrderFlowSettings({
+  config,
   handleChange,
   momentumSleeves,
   onMomentumSleeveChange,
   onAddMomentumSleeve,
-  onRemoveMomentumSleeve
+  onRemoveMomentumSleeve,
 }: OrderFlowSettingsProps) {
   return (
     <>
-      <div className="subsection-group" style={{ marginTop: 12 }}>
-        <div className="tw-panel-title" style={{ marginBottom: 6 }}>
-          Advanced Flow & Sweeps
-        </div>
-        <label className="field-row" htmlFor="liquidity_sweep_detection_enabled">
+      <div className="subsection-group ui-mt-md">
+        <div className="tw-panel-title ui-mb-xs">Advanced Flow & Sweeps</div>
+        <label
+          className="field-row"
+          htmlFor="liquidity_sweep_detection_enabled"
+        >
           <input
             id="liquidity_sweep_detection_enabled"
             type="checkbox"
             checked={!!config.liquidity_sweep_detection_enabled}
             onChange={(e) =>
-              handleChange("liquidity_sweep_detection_enabled", e.target.checked)
+              handleChange(
+                "liquidity_sweep_detection_enabled",
+                e.target.checked,
+              )
             }
           />
           <span>Enable Liquidity Sweep Detection</span>
         </label>
         {config.liquidity_sweep_detection_enabled && (
-          <div className="tw-grid-fit-190" style={{ marginTop: 8 }}>
+          <div className="tw-grid-fit-190 ui-mt-sm">
             <div className="form-group">
-              <label htmlFor="sweep_min_aggression_z">Min Aggression Z ({"<="})</label>
+              <label htmlFor="sweep_min_aggression_z">
+                Min Aggression Z ({"<="})
+              </label>
               <input
                 id="sweep_min_aggression_z"
                 type="number"
@@ -60,19 +66,26 @@ export function OrderFlowSettings({
               />
             </div>
             <div className="form-group">
-              <label htmlFor="sweep_min_book_pressure_z">Min Book Pressure Z ({">="})</label>
+              <label htmlFor="sweep_min_book_pressure_z">
+                Min Book Pressure Z ({">="})
+              </label>
               <input
                 id="sweep_min_book_pressure_z"
                 type="number"
                 step="0.1"
                 value={config.sweep_min_book_pressure_z ?? ""}
                 onChange={(e) =>
-                  handleChange("sweep_min_book_pressure_z", Number(e.target.value))
+                  handleChange(
+                    "sweep_min_book_pressure_z",
+                    Number(e.target.value),
+                  )
                 }
               />
             </div>
             <div className="form-group">
-              <label htmlFor="sweep_max_price_change_pct">Max |5m Trend Slope| (%)</label>
+              <label htmlFor="sweep_max_price_change_pct">
+                Max |5m Trend Slope| (%)
+              </label>
               <input
                 id="sweep_max_price_change_pct"
                 type="number"
@@ -88,7 +101,9 @@ export function OrderFlowSettings({
               />
             </div>
             <div className="form-group">
-              <label htmlFor="sweep_atr_buffer_multiplier">Sweep ATR Buffer Multiplier</label>
+              <label htmlFor="sweep_atr_buffer_multiplier">
+                Sweep ATR Buffer Multiplier
+              </label>
               <input
                 id="sweep_atr_buffer_multiplier"
                 type="number"
@@ -118,7 +133,8 @@ export function OrderFlowSettings({
         />
       ) : (
         <div className="preset-copy">
-          Exit/risk moduly a ich detaily sa nastavujú v `Global Modules` a cez unified profile.
+          Exit/risk moduly a ich detaily sa nastavujú v `Global Modules` a cez
+          unified profile.
         </div>
       )}
 
@@ -126,7 +142,8 @@ export function OrderFlowSettings({
         <div className="tw-panel">
           <div className="tw-panel-title">L2 Confirmation Gate</div>
           <div className="tw-panel-hint">
-            Applies an order-flow quality check before entry. Keep filters light to avoid overfitting.
+            Applies an order-flow quality check before entry. Keep filters light
+            to avoid overfitting.
           </div>
           <div className="form-group">
             <label className="field-row" htmlFor="l2_confirm_enabled">
@@ -135,7 +152,9 @@ export function OrderFlowSettings({
                 id="l2_confirm_enabled"
                 type="checkbox"
                 checked={config.l2_confirm_enabled || false}
-                onChange={(e) => handleChange("l2_confirm_enabled", e.target.checked)}
+                onChange={(e) =>
+                  handleChange("l2_confirm_enabled", e.target.checked)
+                }
               />
             </label>
           </div>
@@ -162,9 +181,7 @@ export function OrderFlowSettings({
                         )
                       }
                     />
-                    <div className="tw-inline-note">
-                      {field.hint}
-                    </div>
+                    <div className="tw-inline-note">{field.hint}</div>
                   </div>
                 );
               })}
@@ -177,7 +194,8 @@ export function OrderFlowSettings({
         <div className="tw-panel">
           <div className="tw-panel-title">TCBBO Options Flow Gate</div>
           <div className="tw-panel-hint">
-            Uses OPRA TCBBO options-flow features for confirmation/regime override and diagnostics.
+            Uses OPRA TCBBO options-flow features for confirmation/regime
+            override and diagnostics.
           </div>
           <div className="form-group">
             <label className="field-row" htmlFor="tcbbo_gate_enabled">
@@ -186,7 +204,9 @@ export function OrderFlowSettings({
                 id="tcbbo_gate_enabled"
                 type="checkbox"
                 checked={config.tcbbo_gate_enabled !== false}
-                onChange={(e) => handleChange("tcbbo_gate_enabled", e.target.checked)}
+                onChange={(e) =>
+                  handleChange("tcbbo_gate_enabled", e.target.checked)
+                }
               />
             </label>
           </div>

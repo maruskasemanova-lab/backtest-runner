@@ -190,6 +190,7 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
         "tenants": {},
         "users": {},
         "run_summaries": {},
+        "run_config_snapshots": {},
     }
 
     def _fake_request(
@@ -252,6 +253,42 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
                 ]
                 return _StubResponse(200, rows)
 
+        if path.endswith("/run_config_snapshots"):
+            if method == "POST":
+                rows = []
+                for row in json or []:
+                    snapshot_id = str(row.get("snapshot_id") or "").strip()
+                    state["run_config_snapshots"][snapshot_id] = dict(row or {})
+                    rows.append(
+                        {
+                            "snapshot_id": snapshot_id,
+                            "run_key": row.get("run_key"),
+                            "updated_at": row.get("updated_at"),
+                        }
+                    )
+                return _StubResponse(201, rows)
+            if method == "GET":
+                user_id = _eq(params, "user_id")
+                snapshot_id = _eq(params, "snapshot_id")
+                run_key = _eq(params, "run_key")
+                rows = []
+                for current_snapshot_id, row in state["run_config_snapshots"].items():
+                    if user_id and str((row or {}).get("user_id") or "") != user_id:
+                        continue
+                    if snapshot_id and current_snapshot_id != snapshot_id:
+                        continue
+                    if run_key and str((row or {}).get("run_key") or "") != run_key:
+                        continue
+                    rows.append(
+                        {
+                            "snapshot_id": current_snapshot_id,
+                            "run_key": row.get("run_key"),
+                            "snapshot": row.get("snapshot") if isinstance(row, dict) else {},
+                            "updated_at": row.get("updated_at"),
+                        }
+                    )
+                return _StubResponse(200, rows)
+
         raise AssertionError(
             f"Unexpected request: {method} {url} params={params} json={json}"
         )
@@ -283,6 +320,24 @@ def test_supabase_run_reports_store_upsert_and_list(monkeypatch):
     assert single is not None
     assert single["run_key"] == "run-1:MU:2026-02-03"
     assert single["summary"]["run_id"] == "run-1"
+
+    snapshot_v1 = store.upsert_run_config_snapshot(
+        run_key="run-1:MU:2026-02-03",
+        snapshot={"schema_version": 1, "config_fingerprint": "cfg_exec123"},
+    )
+    snapshot_v2 = store.upsert_run_config_snapshot(
+        run_key="run-1:MU:2026-02-03",
+        snapshot={"schema_version": 1, "config_fingerprint": "cfg_exec456"},
+    )
+    assert snapshot_v1["snapshot_id"] != snapshot_v2["snapshot_id"]
+
+    latest_snapshot = store.get_run_config_snapshot(run_key="run-1:MU:2026-02-03")
+    assert latest_snapshot is not None
+    assert latest_snapshot["payload"]["config_fingerprint"] == "cfg_exec456"
+
+    first_snapshot = store.get_run_config_snapshot(snapshot_id=snapshot_v1["snapshot_id"])
+    assert first_snapshot is not None
+    assert first_snapshot["payload"]["config_fingerprint"] == "cfg_exec123"
 
     created_user = state["users"]["runner-user"]
     assert created_user["tenant_id"]
@@ -569,6 +624,24 @@ def test_sqlite_run_reports_store_upsert_and_list(tmp_path):
     assert single is not None
     assert single["run_key"] == "run-2:MU:2026-02-12"
     assert single["summary"]["session_summary"]["total_trades"] == 4
+
+    snapshot_v1 = store.upsert_run_config_snapshot(
+        run_key="run-2:MU:2026-02-12",
+        snapshot={"schema_version": 1, "config_fingerprint": "cfg_exec123"},
+    )
+    snapshot_v2 = store.upsert_run_config_snapshot(
+        run_key="run-2:MU:2026-02-12",
+        snapshot={"schema_version": 1, "config_fingerprint": "cfg_exec456"},
+    )
+    assert snapshot_v1["snapshot_id"] != snapshot_v2["snapshot_id"]
+
+    latest_snapshot = store.get_run_config_snapshot(run_key="run-2:MU:2026-02-12")
+    assert latest_snapshot is not None
+    assert latest_snapshot["payload"]["config_fingerprint"] == "cfg_exec456"
+
+    first_snapshot = store.get_run_config_snapshot(snapshot_id=snapshot_v1["snapshot_id"])
+    assert first_snapshot is not None
+    assert first_snapshot["payload"]["config_fingerprint"] == "cfg_exec123"
 
 
 def test_sqlite_config_snapshots_and_aos_history_store(tmp_path):

@@ -185,8 +185,10 @@ class SessionRunner:
         self._data_selection_warnings: List[str] = []
         # Optional run-level metadata injected by start_run service for reports.
         self._report_metadata: Dict[str, Any] = {}
+        self._control_plane_snapshot: Dict[str, Any] = {}
         self._aos_applied: Dict[str, Any] = {}
         self._execution_config: Dict[str, Any] = {}
+        self._resolved_config_snapshot: Dict[str, Any] = {}
         self._run_request_config: Dict[str, Any] = {}
         self._l2_applied: Dict[str, Any] = {}
         self._strategy_state_reset: Optional[bool] = None
@@ -1282,7 +1284,8 @@ class SessionRunner:
 
     def _resolve_strategy_session_config_snapshot(self) -> Dict[str, Any]:
         return self._strategy_recovery_helper.resolve_config_snapshot(
-            getattr(self, "_restart_session_config", {})
+            getattr(self, "_restart_session_config", {}),
+            resolved_config_snapshot=getattr(self, "_resolved_config_snapshot", {}),
         )
 
     async def _recover_strategy_session(self, *, reason: str, detail: str = "") -> bool:
@@ -2360,6 +2363,7 @@ class SessionRunner:
     def get_summary(self) -> Dict[str, Any]:
         """Get session summary."""
         summary = self._build_session_summary()
+        control_plane_snapshot = getattr(self, "_control_plane_snapshot", {})
         return build_summary_payload(
             run_id=self.config.run_id,
             ticker=self.config.ticker,
@@ -2374,6 +2378,11 @@ class SessionRunner:
                 if isinstance(self._report_metadata, dict) and self._report_metadata
                 else {}
             ),
+            control_plane_snapshot=(
+                dict(control_plane_snapshot)
+                if isinstance(control_plane_snapshot, dict) and control_plane_snapshot
+                else {}
+            ),
             aos_applied=(
                 dict(self._aos_applied)
                 if isinstance(self._aos_applied, dict) and self._aos_applied
@@ -2382,6 +2391,12 @@ class SessionRunner:
             execution_config=(
                 dict(self._execution_config)
                 if isinstance(self._execution_config, dict) and self._execution_config
+                else {}
+            ),
+            session_config_snapshot=(
+                dict(self._restart_session_config)
+                if isinstance(getattr(self, "_restart_session_config", None), dict)
+                and getattr(self, "_restart_session_config")
                 else {}
             ),
             run_request_config=(

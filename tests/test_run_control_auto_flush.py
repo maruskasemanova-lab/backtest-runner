@@ -43,6 +43,11 @@ class _DummyRunner:
             "run_id": self.config.run_id,
             "ticker": self.config.ticker,
             "phase": self.phase,
+            "resolved_config_snapshot": {
+                "schema_version": 1,
+                "run_key": f"{self.config.run_id}:{self.config.ticker}:{self.config.date}",
+                "config_fingerprint": "cfg_exec123",
+            },
         }
 
 
@@ -68,9 +73,21 @@ class _DummyRegistry:
 class _CaptureRunReportsStore:
     def __init__(self):
         self.calls = []
+        self.snapshot_calls = []
 
     def upsert_run_summary(self, *, run_key: str, summary):
         self.calls.append({"run_key": run_key, "summary": summary})
+
+    def upsert_run_config_snapshot(self, *, run_key: str, snapshot):
+        snapshot_id = "rcs_test123"
+        self.snapshot_calls.append(
+            {"run_key": run_key, "snapshot": snapshot, "snapshot_id": snapshot_id}
+        )
+        return {
+            "snapshot_id": snapshot_id,
+            "run_key": run_key,
+            "payload": snapshot,
+        }
 
 
 class _RawJsonRequest:
@@ -131,7 +148,10 @@ def test_play_run_auto_flushes_successful_completed_run(monkeypatch):
     assert runner.closed is True
     assert clear_calls == [("http://localhost:8001", "run-1", "MU")]
     assert run_reports_store.calls
+    assert run_reports_store.snapshot_calls
     assert run_reports_store.calls[0]["run_key"] == run_key
+    assert run_reports_store.calls[0]["summary"]["resolved_config_snapshot_id"] == "rcs_test123"
+    assert "resolved_config_snapshot" not in run_reports_store.calls[0]["summary"]
 
 
 def test_play_run_keeps_incomplete_run_in_memory(monkeypatch):
@@ -218,3 +238,4 @@ def test_play_run_keeps_completed_run_when_requested(monkeypatch):
     assert runner.closed is False
     assert clear_calls == []
     assert run_reports_store.calls
+    assert run_reports_store.snapshot_calls

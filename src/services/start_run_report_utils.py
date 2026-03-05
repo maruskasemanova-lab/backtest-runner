@@ -182,9 +182,24 @@ def build_report_metadata(
         aos_applied=aos_applied,
         execution_config=execution_config,
     )
+    execution_payload = execution_config if isinstance(execution_config, dict) else {}
+    control_plane_snapshot = (
+        execution_payload.get("control_plane_snapshot", {})
+        if isinstance(execution_payload.get("control_plane_snapshot"), dict)
+        else {}
+    )
     return {
         "run_key": str(run_key),
         "run_date_label": str(run_date_label),
+        "config_fingerprint": first_profile_ref_token(
+            execution_payload.get("config_fingerprint"),
+            control_plane_snapshot.get("config_fingerprint"),
+            control_plane_snapshot.get("execution_config_fingerprint"),
+        ),
+        "aos_applied_fingerprint": first_profile_ref_token(
+            execution_payload.get("aos_applied_fingerprint"),
+            control_plane_snapshot.get("aos_applied_fingerprint"),
+        ),
         "unified_profile_id": profile_meta.get("unified_profile_id"),
         "unified_profile_name": profile_meta.get("unified_profile_name"),
         "adaptive_profile_id": profile_meta.get("adaptive_profile_id"),

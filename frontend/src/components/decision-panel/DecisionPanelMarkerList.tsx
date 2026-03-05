@@ -22,7 +22,9 @@ type Props = {
   selectedMarker: DecisionPanelMarkerLike | null;
   isDetailFullscreen: boolean;
   setIsDetailFullscreen: (value: boolean) => void;
-  onSelectMarker: (marker: DecisionPanelMarkerLike & { __selectionSource?: string }) => void;
+  onSelectMarker: (
+    marker: DecisionPanelMarkerLike & { __selectionSource?: string },
+  ) => void;
   t: (text: string) => string;
   renderTitle: (marker: DecisionPanelMarkerLike) => string;
 };
@@ -44,7 +46,10 @@ export default function DecisionPanelMarkerList({
   renderTitle,
 }: Props) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const reversedMarkers = useMemo(() => [...visibleMarkers].reverse(), [visibleMarkers]);
+  const reversedMarkers = useMemo(
+    () => [...visibleMarkers].reverse(),
+    [visibleMarkers],
+  );
   const rowVirtualizer = useVirtualizer({
     count: reversedMarkers.length,
     getScrollElement: () => scrollContainerRef.current,
@@ -53,7 +58,10 @@ export default function DecisionPanelMarkerList({
   });
 
   const selectedIndex = useMemo(
-    () => reversedMarkers.findIndex((marker) => isSameMarker(selectedMarker, marker)),
+    () =>
+      reversedMarkers.findIndex((marker) =>
+        isSameMarker(selectedMarker, marker),
+      ),
     [reversedMarkers, selectedMarker],
   );
 
@@ -95,10 +103,9 @@ export default function DecisionPanelMarkerList({
 
         {visibleMarkers.length > 0 && (
           <div
+            className="decision-virtual-list"
             style={{
               height: `${rowVirtualizer.getTotalSize()}px`,
-              position: "relative",
-              width: "100%",
             }}
           >
             {virtualItems.map((virtualRow) => {
@@ -110,36 +117,44 @@ export default function DecisionPanelMarkerList({
               const selected = isSameMarker(selectedMarker, marker);
               const markerDetails = marker?.details || {};
               const markerMetadata = markerDetails?.metadata || {};
-              const markerIntradayLevels = extractIntradayLevels(marker, markerDetails, markerMetadata);
+              const markerIntradayLevels = extractIntradayLevels(
+                marker,
+                markerDetails,
+                markerMetadata,
+              );
               const markerIntradayEvent =
-                markerIntradayLevels?.latestEvent && typeof markerIntradayLevels.latestEvent === "object"
+                markerIntradayLevels?.latestEvent &&
+                typeof markerIntradayLevels.latestEvent === "object"
                   ? (markerIntradayLevels.latestEvent as DecisionPanelIntradayLevelsLatestEventLike)
                   : null;
-              const markerIntradayEventType = String(markerIntradayEvent?.event_type || "").toLowerCase();
-              const markerIntradayEventDirection = String(markerIntradayEvent?.direction || "").toLowerCase();
+              const markerIntradayEventType = String(
+                markerIntradayEvent?.event_type || "",
+              ).toLowerCase();
+              const markerIntradayEventDirection = String(
+                markerIntradayEvent?.direction || "",
+              ).toLowerCase();
               const markerIntradayEventLabel = markerIntradayEvent
                 ? `Levels ${markerIntradayEventType || "event"}${markerIntradayEventDirection ? ` ${markerIntradayEventDirection}` : ""}${
-                    markerIntradayEvent.price != null ? ` @ ${Number(markerIntradayEvent.price).toFixed(2)}` : ""
+                    markerIntradayEvent.price != null
+                      ? ` @ ${Number(markerIntradayEvent.price).toFixed(2)}`
+                      : ""
                   }`
                 : "";
-              const markerIntradayEventColor =
+              const markerIntradayEventClassName =
                 markerIntradayEventType === "break"
-                  ? "var(--accent-green)"
+                  ? "decision-marker-event is-break"
                   : markerIntradayEventType === "bounce"
-                    ? "var(--text-secondary)"
-                    : "var(--text-muted)";
+                    ? "decision-marker-event is-bounce"
+                    : "decision-marker-event is-neutral";
 
               return (
                 <div
                   key={markerKey}
                   ref={rowVirtualizer.measureElement}
                   data-index={virtualRow.index}
+                  className="decision-virtual-row"
                   style={{
-                    left: 0,
-                    position: "absolute",
-                    top: 0,
                     transform: `translateY(${virtualRow.start}px)`,
-                    width: "100%",
                   }}
                 >
                   <div
@@ -156,33 +171,21 @@ export default function DecisionPanelMarkerList({
                       <span className="decision-title">
                         {getMarkerIcon(marker)} {renderTitle(marker)}
                       </span>
-                      <span className="decision-time">{formatTime(marker.timestamp)}</span>
+                      <span className="decision-time">
+                        {formatTime(marker.timestamp)}
+                      </span>
                     </div>
                     <div className="decision-description">
                       {exitMetrics
                         ? `${t("Reason")}: ${marker.details?.exit_reason || "n/a"}`
                         : marker.description || t("No description")}
                       {exitMetrics && (
-                        <div
-                          style={{
-                            marginTop: 4,
-                            color: "var(--text-muted)",
-                            fontSize: "0.78rem",
-                            fontWeight: 600,
-                          }}
-                        >
+                        <div className="decision-marker-meta">
                           {exitMetrics}
                         </div>
                       )}
                       {markerIntradayEvent && (
-                        <div
-                          style={{
-                            marginTop: 4,
-                            color: markerIntradayEventColor,
-                            fontSize: "0.75rem",
-                            fontWeight: 600,
-                          }}
-                        >
+                        <div className={markerIntradayEventClassName}>
                           {markerIntradayEventLabel}
                         </div>
                       )}

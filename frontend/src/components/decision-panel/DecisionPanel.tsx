@@ -20,19 +20,27 @@ import useDecisionPanelTooltips from "./useDecisionPanelTooltips";
 import useDecisionPanelViewModel from "./useDecisionPanelViewModel";
 
 function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
-  const [detailTab, setDetailTab] = useState('details');
-  const [listTab, setListTab] = useState('decisions');
+  const [detailTab, setDetailTab] = useState("details");
+  const [listTab, setListTab] = useState("decisions");
   const [isDetailFullscreen, setIsDetailFullscreen] = useState(false);
   const [uiLanguage, setUiLanguage] = useState(resolveDecisionLanguage);
   const panelRootRef = useRef(null);
   const fallbackDocument = typeof document !== "undefined" ? document : null;
-  const portalDocument = panelRootRef.current?.ownerDocument || fallbackDocument;
-  const portalWindow = portalDocument?.defaultView || (typeof window !== "undefined" ? window : null);
-  const portalBody = portalDocument?.body || (typeof document !== "undefined" ? document.body : null);
+  const portalDocument =
+    panelRootRef.current?.ownerDocument || fallbackDocument;
+  const portalWindow =
+    portalDocument?.defaultView ||
+    (typeof window !== "undefined" ? window : null);
+  const portalBody =
+    portalDocument?.body ||
+    (typeof document !== "undefined" ? document.body : null);
 
   useEffect(() => {
     if (!portalWindow?.localStorage) return;
-    portalWindow.localStorage.setItem(DECISION_PANEL_LANGUAGE_STORAGE_KEY, uiLanguage);
+    portalWindow.localStorage.setItem(
+      DECISION_PANEL_LANGUAGE_STORAGE_KEY,
+      uiLanguage,
+    );
   }, [portalWindow, uiLanguage]);
 
   useEffect(() => {
@@ -40,7 +48,7 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
       setIsDetailFullscreen(false);
       return;
     }
-    setDetailTab('details');
+    setDetailTab("details");
     if (selectedMarker?.__selectionSource === "decision_panel") {
       setIsDetailFullscreen(true);
     } else if (selectedMarker?.__selectionSource === "chart") {
@@ -57,35 +65,40 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
     if (!isDetailFullscreen) return undefined;
     if (!portalDocument || !portalWindow) return undefined;
     const previousOverflow = portalDocument.body.style.overflow;
-    portalDocument.body.style.overflow = 'hidden';
+    portalDocument.body.style.overflow = "hidden";
     const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setIsDetailFullscreen(false);
       }
     };
-    portalWindow.addEventListener('keydown', handleKeyDown);
+    portalWindow.addEventListener("keydown", handleKeyDown);
     return () => {
-      portalWindow.removeEventListener('keydown', handleKeyDown);
+      portalWindow.removeEventListener("keydown", handleKeyDown);
       portalDocument.body.style.overflow = previousOverflow;
     };
   }, [isDetailFullscreen, portalDocument, portalWindow]);
 
   useEffect(() => {
     if (!selectedMarker) return;
-    setListTab(isDecisionMarker(selectedMarker) ? 'decisions' : 'events');
-  }, [selectedMarker?.id, selectedMarker?.timestamp, selectedMarker?.time, selectedMarker?.marker_type]);
+    setListTab(isDecisionMarker(selectedMarker) ? "decisions" : "events");
+  }, [
+    selectedMarker?.id,
+    selectedMarker?.timestamp,
+    selectedMarker?.time,
+    selectedMarker?.marker_type,
+  ]);
 
   const decisionMarkers = useMemo(
     () => (markers || []).filter(isDecisionMarker),
-    [markers]
+    [markers],
   );
   const eventMarkers = useMemo(
     () => (markers || []).filter((marker) => !isDecisionMarker(marker)),
-    [markers]
+    [markers],
   );
   const visibleMarkers = useMemo(
-    () => (listTab === 'decisions' ? decisionMarkers : eventMarkers),
-    [decisionMarkers, eventMarkers, listTab]
+    () => (listTab === "decisions" ? decisionMarkers : eventMarkers),
+    [decisionMarkers, eventMarkers, listTab],
   );
 
   const hasAnyMarkers = Array.isArray(markers) && markers.length > 0;
@@ -120,42 +133,47 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
   });
 
   const renderTitle = (marker) => {
-    const markerPnlUsd = marker?.details?.pnl_usd ?? marker?.details?.pnl_dollars;
+    const markerPnlUsd =
+      marker?.details?.pnl_usd ?? marker?.details?.pnl_dollars;
     const markerPnlPct = resolvePnlPct(marker?.details, markerPnlUsd);
-    if (marker.marker_type === 'take_profit_hit' && markerPnlPct !== null && markerPnlPct <= 0) {
+    if (
+      marker.marker_type === "take_profit_hit" &&
+      markerPnlPct !== null &&
+      markerPnlPct <= 0
+    ) {
       return `${marker.title || t("Take Profit")} (${t("net loss")})`;
     }
     return marker.title || marker.marker_type || t("Decision");
   };
 
-  const {
-    activeHelpTooltip,
-    setActiveHelpTooltip,
-    renderDetailLabel,
-  } = useDecisionPanelTooltips({
-    portalWindow,
-    runtimeTooltipByLabel,
-    resolveTooltipBaseLabel,
-    formatTooltipRuntimeValue,
-    tooltipLocaleText,
-    baseTooltipFor,
-    t,
-    selectedMarker,
-    detailTab,
-    uiLanguage,
-    isDetailFullscreen,
-  });
-  
+  const { activeHelpTooltip, setActiveHelpTooltip, renderDetailLabel } =
+    useDecisionPanelTooltips({
+      portalWindow,
+      runtimeTooltipByLabel,
+      resolveTooltipBaseLabel,
+      formatTooltipRuntimeValue,
+      tooltipLocaleText,
+      baseTooltipFor,
+      t,
+      selectedMarker,
+      detailTab,
+      uiLanguage,
+      isDetailFullscreen,
+    });
+
   // Helper to render sections
   const renderSectionHeader = (title) => (
-    <div className="detail-item" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-sm)', marginTop: 'var(--spacing-xs)', marginBottom: 'var(--spacing-xs)' }}>
-      {renderDetailLabel(title, title, { fontWeight: 600, color: 'var(--text-primary)' })}
+    <div className="detail-item decision-detail-section">
+      {renderDetailLabel(title, {
+        tooltipLabel: title,
+        className: "decision-section-label",
+      })}
     </div>
   );
 
   const renderDecisionDetail = (fullscreen = false) => (
     <div
-      className={`decision-detail ${fullscreen ? 'fullscreen' : ''}`}
+      className={`decision-detail ${fullscreen ? "fullscreen" : ""}`}
       onClick={(event) => {
         if (fullscreen) {
           event.stopPropagation();
@@ -214,7 +232,7 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
       ref={(node) => {
         panelRootRef.current = node;
       }}
-      style={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}
+      className="ui-flex-col-fill"
     >
       {hasAnyMarkers ? (
         <>
@@ -232,7 +250,9 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
             renderTitle={renderTitle}
           />
 
-          {activeHelpTooltip && !activeHelpTooltip.pinned && portalBody &&
+          {activeHelpTooltip &&
+            !activeHelpTooltip.pinned &&
+            portalBody &&
             createPortal(
               <div
                 className={`decision-help-tooltip ${activeHelpTooltip.placeAbove ? "above" : ""}`}
@@ -248,12 +268,13 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
               </div>,
               portalBody,
             )}
-          
+
           {/* Detail Panel */}
           {selectedMarker && (
             <>
               {!isDetailFullscreen && renderDecisionDetail(false)}
-              {isDetailFullscreen && portalBody &&
+              {isDetailFullscreen &&
+                portalBody &&
                 createPortal(
                   <>
                     <div
@@ -272,7 +293,9 @@ function DecisionPanel({ markers, selectedMarker, onSelectMarker }) {
           <div className="empty-state">
             <div className="icon">📭</div>
             <p>
-              {t("No decisions yet. Start the backtest to see trading decisions appear here.")}
+              {t(
+                "No decisions yet. Start the backtest to see trading decisions appear here.",
+              )}
             </p>
           </div>
         </div>

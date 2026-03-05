@@ -14,24 +14,73 @@ type RiskManagementPanelProps = {
 
 const clampMinZero = (value: number) => Math.max(0, value);
 const clampUnitRange = (value: number) => Math.max(0, Math.min(1, value));
-const clampPartialFraction = (value: number) => Math.max(0.05, Math.min(0.95, value));
+const clampPartialFraction = (value: number) =>
+  Math.max(0.05, Math.min(0.95, value));
 const clampPartialTarget = (value: number) => Math.max(0.25, value);
 const clampLevelTests = (value: number) => Math.max(0, Math.trunc(value));
 const clampMaxAnchorSearch = (value: number) => Math.max(0.1, value);
 
 const EXECUTION_SIZING_FIELDS = [
-  { field: "risk_per_trade_pct", label: "Risk Per Trade (%)", min: "0.1", max: "10", step: "0.1" },
-  { field: "max_position_notional_pct", label: "Max Position Notional (%)", min: "1", max: "100", step: "1" },
-  { field: "max_fill_participation_rate", label: "Max Fill Participation (0-1)", min: "0.01", max: "1", step: "0.01" },
-  { field: "min_fill_ratio", label: "Min Fill Ratio (0-1)", min: "0.01", max: "1", step: "0.01" },
+  {
+    field: "risk_per_trade_pct",
+    label: "Risk Per Trade (%)",
+    min: "0.1",
+    max: "10",
+    step: "0.1",
+  },
+  {
+    field: "max_position_notional_pct",
+    label: "Max Position Notional (%)",
+    min: "1",
+    max: "100",
+    step: "1",
+  },
+  {
+    field: "max_fill_participation_rate",
+    label: "Max Fill Participation (0-1)",
+    min: "0.01",
+    max: "1",
+    step: "0.01",
+  },
+  {
+    field: "min_fill_ratio",
+    label: "Min Fill Ratio (0-1)",
+    min: "0.01",
+    max: "1",
+    step: "0.01",
+  },
   { field: "time_exit_bars", label: "Time Exit (bars)", min: "1", step: "1" },
 ] as const;
 
 const CONTEXT_RISK_FIELDS = [
-  { field: "context_risk_sl_buffer_pct", label: "SL Buffer (%)", min: "0", step: "0.01", normalize: clampMinZero },
-  { field: "context_risk_min_sl_pct", label: "Min SL Floor (%)", min: "0", step: "0.01", normalize: clampMinZero },
-  { field: "context_risk_min_room_pct", label: "Min Room (%)", min: "0", step: "0.01", normalize: clampMinZero },
-  { field: "context_risk_min_effective_rr", label: "Min Effective RR", min: "0", step: "0.1", normalize: clampMinZero },
+  {
+    field: "context_risk_sl_buffer_pct",
+    label: "SL Buffer (%)",
+    min: "0",
+    step: "0.01",
+    normalize: clampMinZero,
+  },
+  {
+    field: "context_risk_min_sl_pct",
+    label: "Min SL Floor (%)",
+    min: "0",
+    step: "0.01",
+    normalize: clampMinZero,
+  },
+  {
+    field: "context_risk_min_room_pct",
+    label: "Min Room (%)",
+    min: "0",
+    step: "0.01",
+    normalize: clampMinZero,
+  },
+  {
+    field: "context_risk_min_effective_rr",
+    label: "Min Effective RR",
+    min: "0",
+    step: "0.1",
+    normalize: clampMinZero,
+  },
   {
     field: "context_risk_trailing_tighten_zone",
     label: "Trailing Tighten Zone (0-1)",
@@ -65,12 +114,48 @@ const CONTEXT_RISK_FIELDS = [
 ] as const;
 
 const STOP_LOSS_FIELDS = [
-  { field: "trailing_stop_pct", label: "Global Trailing Stop (%)", min: "0", max: "5", step: "0.01" },
-  { field: "global_exit_rr_ratio", label: "Global Exit RR Ratio", min: "0", max: "10", step: "0.05" },
-  { field: "global_risk_atr_stop_multiplier", label: "Global Risk ATR Stop Multiplier", min: "0", max: "10", step: "0.05" },
-  { field: "global_risk_volume_stop_pct", label: "Global Risk Volume Stop (%)", min: "0", max: "10", step: "0.05" },
-  { field: "global_risk_min_stop_loss_pct", label: "Global Risk Min Stop-Loss (%)", min: "0", max: "5", step: "0.01" },
-  { field: "trailing_activation_pct", label: "Trailing Activation (% MFE)", min: "0", max: "5", step: "0.01" },
+  {
+    field: "trailing_stop_pct",
+    label: "Global Trailing Stop (%)",
+    min: "0",
+    max: "5",
+    step: "0.01",
+  },
+  {
+    field: "global_exit_rr_ratio",
+    label: "Global Exit RR Ratio",
+    min: "0",
+    max: "10",
+    step: "0.05",
+  },
+  {
+    field: "global_risk_atr_stop_multiplier",
+    label: "Global Risk ATR Stop Multiplier",
+    min: "0",
+    max: "10",
+    step: "0.05",
+  },
+  {
+    field: "global_risk_volume_stop_pct",
+    label: "Global Risk Volume Stop (%)",
+    min: "0",
+    max: "10",
+    step: "0.05",
+  },
+  {
+    field: "global_risk_min_stop_loss_pct",
+    label: "Global Risk Min Stop-Loss (%)",
+    min: "0",
+    max: "5",
+    step: "0.01",
+  },
+  {
+    field: "trailing_activation_pct",
+    label: "Trailing Activation (% MFE)",
+    min: "0",
+    max: "5",
+    step: "0.01",
+  },
 ] as const;
 
 const BREAK_EVEN_FIELDS = [
@@ -98,8 +183,19 @@ const BREAK_EVEN_FIELDS = [
     step: "0.1",
     normalize: clampMinZero,
   },
-  { field: "break_even_buffer_pct", label: "Break-even Buffer (%)", min: "0", max: "2", step: "0.01" },
-  { field: "break_even_min_hold_bars", label: "Break-even Min Hold (bars)", min: "1", step: "1" },
+  {
+    field: "break_even_buffer_pct",
+    label: "Break-even Buffer (%)",
+    min: "0",
+    max: "2",
+    step: "0.01",
+  },
+  {
+    field: "break_even_min_hold_bars",
+    label: "Break-even Min Hold (bars)",
+    min: "1",
+    step: "1",
+  },
 ] as const;
 
 const PARTIAL_TAKE_PROFIT_FIELDS = [
@@ -131,8 +227,19 @@ const PARTIAL_TAKE_PROFIT_FIELDS = [
 ] as const;
 
 const ADVERSE_FLOW_FIELDS = [
-  { field: "adverse_flow_threshold", label: "Adverse Flow Threshold", min: "0.02", max: "1", step: "0.01" },
-  { field: "adverse_flow_min_hold_bars", label: "Adverse Flow Min Hold (bars)", min: "1", step: "1" },
+  {
+    field: "adverse_flow_threshold",
+    label: "Adverse Flow Threshold",
+    min: "0.02",
+    max: "1",
+    step: "0.01",
+  },
+  {
+    field: "adverse_flow_min_hold_bars",
+    label: "Adverse Flow Min Hold (bars)",
+    min: "1",
+    step: "1",
+  },
 ] as const;
 
 export function ExecutionSizingPanel({
@@ -173,7 +280,7 @@ export function ContextAwareRiskPanel({
       />
 
       {config.context_aware_risk_enabled ? (
-        <div className="tw-grid-fit-190" style={{ paddingTop: 4 }}>
+        <div className="tw-grid-fit-190 ui-pt-xs">
           {CONTEXT_RISK_FIELDS.map((field) => (
             <RiskManagementNumberField
               key={field.field}

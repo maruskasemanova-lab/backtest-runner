@@ -273,6 +273,156 @@ def test_get_saved_run_history_includes_run_request_config_snapshot(
     }
 
 
+def test_get_saved_run_history_prefers_resolved_config_snapshot(monkeypatch, tmp_path):
+    _write_session_summary(
+        tmp_path,
+        "20260301_100000_MU_resolved-config",
+        {
+            "run_id": "resolved-config",
+            "ticker": "MU",
+            "date": "2026-02-11",
+            "session_summary": {
+                "total_trades": 1,
+                "trades": [
+                    {
+                        "trade_id": 41,
+                        "strategy": "AdaptiveCore",
+                        "side": "long",
+                        "entry_time": "2026-02-11T14:30:00+00:00",
+                        "exit_time": "2026-02-11T14:36:00+00:00",
+                        "pnl_pct": 0.3,
+                        "pnl_dollars": 3.0,
+                        "bars_held": 7,
+                    }
+                ],
+            },
+            "markers": [],
+            "resolved_config_snapshot": {
+                "schema_version": 1,
+                "run_id": "resolved-config",
+                "ticker": "MU",
+                "date_label": "2026-02-11",
+                "run_key": "resolved-config:MU:2026-02-11",
+                "config_fingerprint": "cfg_exec123",
+                "control_plane_snapshot": {
+                    "config_fingerprint": "cfg_exec123",
+                    "aos_applied_fingerprint": "cfg_aos456",
+                },
+                "report_metadata": {
+                    "adaptive_profile_id": "adaptive-alpha",
+                    "adaptive_profile_name": "Adaptive Alpha",
+                    "config_fingerprint": "cfg_exec123",
+                },
+                "execution_config": {
+                    "config_fingerprint": "cfg_exec123",
+                    "trade_eval_mode": "intrabar_5s",
+                },
+                "run_request_config": {
+                    "trade_eval_mode": "intrabar_5s",
+                    "l2_confirm_enabled": True,
+                },
+                "aos_applied": {
+                    "adaptive_profile": {
+                        "active_profile_id": "adaptive-alpha",
+                        "profile_name": "Adaptive Alpha",
+                    }
+                },
+            },
+        },
+    )
+
+    client = _build_client(monkeypatch, tmp_path)
+    response = client.get("/api/reports/history/MU")
+    assert response.status_code == 200
+    payload = response.json()
+
+    day_row = payload["day_results"][0]
+    run_row = day_row["runs"][0]
+    assert day_row["run_request_config"]["trade_eval_mode"] == "intrabar_5s"
+    assert run_row["execution_config"]["trade_eval_mode"] == "intrabar_5s"
+    assert run_row["control_plane_snapshot"]["config_fingerprint"] == "cfg_exec123"
+    assert day_row["resolved_config_snapshot"]["config_fingerprint"] == "cfg_exec123"
+    assert day_row["adaptive_profile_id"] == "adaptive-alpha"
+    assert day_row["config_fingerprints"] == ["cfg_exec123"]
+
+
+def test_get_saved_run_history_hydrates_externalized_resolved_config_snapshot(
+    monkeypatch, tmp_path
+):
+    run_key = "resolved-store:MU:2026-02-11"
+
+    class _SnapshotStore:
+        def list_run_summaries(self, *, limit=300):
+            _ = limit
+            return [
+                {
+                    "run_key": run_key,
+                    "updated_at": "2026-03-01T10:00:00Z",
+                    "summary": {
+                        "run_id": "resolved-store",
+                        "ticker": "MU",
+                        "date": "2026-02-11",
+                        "session_summary": {
+                            "total_trades": 1,
+                            "trades": [
+                                {
+                                    "trade_id": 51,
+                                    "strategy": "AdaptiveCore",
+                                    "side": "long",
+                                    "entry_time": "2026-02-11T14:30:00+00:00",
+                                    "exit_time": "2026-02-11T14:36:00+00:00",
+                                    "pnl_pct": 0.25,
+                                    "pnl_dollars": 2.5,
+                                    "bars_held": 6,
+                                }
+                            ],
+                        },
+                        "markers": [],
+                        "resolved_config_snapshot_id": "rcs_test123",
+                    },
+                }
+            ]
+
+        def get_run_config_snapshot(self, *, snapshot_id=None, run_key=None):
+            assert snapshot_id == "rcs_test123"
+            assert run_key == "resolved-store:MU:2026-02-11"
+            return {
+                "snapshot_id": "rcs_test123",
+                "run_key": run_key,
+                "payload": {
+                    "schema_version": 1,
+                    "run_key": run_key,
+                    "config_fingerprint": "cfg_exec123",
+                    "report_metadata": {
+                        "adaptive_profile_id": "adaptive-store",
+                    },
+                    "execution_config": {
+                        "trade_eval_mode": "intrabar_5s",
+                        "config_fingerprint": "cfg_exec123",
+                    },
+                    "run_request_config": {
+                        "trade_eval_mode": "intrabar_5s",
+                    },
+                },
+            }
+
+    client = _build_client(
+        monkeypatch,
+        tmp_path,
+        state_setup=lambda app: setattr(app.state, "run_reports_store", _SnapshotStore()),
+    )
+    response = client.get("/api/reports/history/MU")
+    assert response.status_code == 200
+    payload = response.json()
+
+    day_row = payload["day_results"][0]
+    run_row = day_row["runs"][0]
+    assert run_row["resolved_config_snapshot_id"] == "rcs_test123"
+    assert run_row["resolved_config_snapshot"]["config_fingerprint"] == "cfg_exec123"
+    assert run_row["execution_config"]["trade_eval_mode"] == "intrabar_5s"
+    assert day_row["adaptive_profile_id"] == "adaptive-store"
+
+
 def test_get_saved_run_history_filters_by_profile_exact_only(monkeypatch, tmp_path):
     _write_session_summary(
         tmp_path,
@@ -968,6 +1118,66 @@ def test_get_run_playback_snapshot_from_store(monkeypatch, tmp_path):
     assert len(payload["markers"]) == 1
     assert payload["summary"]["playback_snapshot"]["encoding"] == "gzip+base64"
     assert "payload_b64" not in payload["summary"]["playback_snapshot"]
+
+
+def test_get_run_playback_snapshot_hydrates_externalized_config_snapshot(
+    monkeypatch, tmp_path
+):
+    run_key = "snapshot-store:MU:2026-02-13"
+    bars = [
+        {"timestamp": "2026-02-13T14:30:00+00:00", "close": 100.5},
+        {"timestamp": "2026-02-13T14:31:00+00:00", "close": 101.0},
+    ]
+    markers = []
+
+    class _SnapshotStore:
+        def get_run_summary(self, *, run_key):
+            assert run_key == "snapshot-store:MU:2026-02-13"
+            return {
+                "run_key": run_key,
+                "updated_at": "2026-03-01T10:00:00Z",
+                "summary": {
+                    "run_id": "snapshot-store",
+                    "ticker": "MU",
+                    "date": "2026-02-13",
+                    "phase": "COMPLETED",
+                    "processed_bars": 2,
+                    "total_bars": 2,
+                    "session_summary": {"total_trades": 1, "trades": []},
+                    "markers": markers,
+                    "resolved_config_snapshot_id": "rcs_test123",
+                    "playback_snapshot": _build_playback_snapshot_payload(
+                        run_key=run_key,
+                        bars=bars,
+                        markers=markers,
+                    ),
+                },
+            }
+
+        def get_run_config_snapshot(self, *, snapshot_id=None, run_key=None):
+            assert snapshot_id == "rcs_test123"
+            assert run_key == "snapshot-store:MU:2026-02-13"
+            return {
+                "snapshot_id": "rcs_test123",
+                "run_key": run_key,
+                "payload": {
+                    "schema_version": 1,
+                    "run_key": run_key,
+                    "config_fingerprint": "cfg_exec123",
+                },
+            }
+
+    client = _build_client(
+        monkeypatch,
+        tmp_path,
+        state_setup=lambda app: setattr(app.state, "run_reports_store", _SnapshotStore()),
+    )
+    response = client.get(f"/api/reports/run-snapshot?run_key={run_key}")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["summary"]["resolved_config_snapshot_id"] == "rcs_test123"
+    assert payload["summary"]["resolved_config_snapshot"]["config_fingerprint"] == "cfg_exec123"
 
 
 def test_get_run_playback_snapshot_without_payload_returns_404(monkeypatch, tmp_path):

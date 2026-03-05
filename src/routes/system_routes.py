@@ -10,6 +10,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from src.routes.context import ApiServices, get_api_services
 from src.runtime_mode import is_serverless_environment, stateful_run_api_supported
+from src.services.run_config_snapshot_service import (
+    attach_resolved_config_snapshot_to_summary,
+)
 
 router = APIRouter()
 _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -180,21 +183,42 @@ def _first_profile_token(*values: Any) -> Optional[str]:
     return None
 
 
+def _resolved_config_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = payload.get("resolved_config_snapshot", {})
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
+def _resolve_config_payload_dict(payload: Dict[str, Any], *, key: str) -> Dict[str, Any]:
+    direct = payload.get(key, {})
+    snapshot = _resolved_config_snapshot(payload)
+    nested = snapshot.get(key, {})
+    nested_payload = nested if isinstance(nested, dict) else {}
+    if isinstance(direct, dict):
+        if nested_payload:
+            return {**nested_payload, **direct}
+        return direct
+    return nested_payload
+
+
 def _extract_profile_metadata(payload: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    snapshot = _resolved_config_snapshot(payload)
     report_meta = (
         payload.get("report_metadata", {})
         if isinstance(payload.get("report_metadata"), dict)
         else {}
     )
-    aos_applied = (
-        payload.get("aos_applied", {})
-        if isinstance(payload.get("aos_applied"), dict)
+    snapshot_report_meta = (
+        snapshot.get("report_metadata", {})
+        if isinstance(snapshot.get("report_metadata"), dict)
         else {}
     )
-    execution_config = (
-        payload.get("execution_config", {})
-        if isinstance(payload.get("execution_config"), dict)
-        else {}
+    if snapshot_report_meta:
+        report_meta = {**snapshot_report_meta, **report_meta}
+    aos_applied = _resolve_config_payload_dict(payload, key="aos_applied")
+    execution_config = _resolve_config_payload_dict(payload, key="execution_config")
+    control_plane_snapshot = _resolve_config_payload_dict(
+        payload,
+        key="control_plane_snapshot",
     )
     if not aos_applied and isinstance(report_meta.get("aos_applied"), dict):
         aos_applied = report_meta.get("aos_applied", {})
@@ -256,7 +280,11 @@ def _extract_profile_metadata(payload: Dict[str, Any]) -> Dict[str, Optional[str
         unified_meta.get("profile_name"),
     )
     config_fingerprint = _first_profile_token(
+        report_meta.get("config_fingerprint"),
+        payload.get("config_fingerprint"),
         execution_config.get("config_fingerprint"),
+        control_plane_snapshot.get("config_fingerprint"),
+        control_plane_snapshot.get("execution_config_fingerprint"),
     )
     return {
         "unified_profile_id": unified_profile_id,
@@ -584,6 +612,39 @@ def _decode_playback_snapshot(summary_payload: Dict[str, Any]) -> Optional[Dict[
     return payload if isinstance(payload, dict) else None
 
 
+def _hydrate_summary_with_persisted_config_snapshot(
+    *,
+    summary_payload: Dict[str, Any],
+    run_key: str,
+    report_store: Any,
+) -> Dict[str, Any]:
+    payload = dict(summary_payload) if isinstance(summary_payload, dict) else {}
+    embedded_snapshot = (
+        payload.get("resolved_config_snapshot", {})
+        if isinstance(payload.get("resolved_config_snapshot"), dict)
+        else {}
+    )
+    if embedded_snapshot:
+        return payload
+    get_snapshot = getattr(report_store, "get_run_config_snapshot", None)
+    if not callable(get_snapshot):
+        return payload
+    snapshot_id = str(payload.get("resolved_config_snapshot_id") or "").strip() or None
+    try:
+        row = get_snapshot(snapshot_id=snapshot_id, run_key=run_key)
+    except Exception:
+        return payload
+    if not isinstance(row, dict):
+        return payload
+    snapshot_payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    resolved_snapshot_id = str(row.get("snapshot_id") or snapshot_id or "").strip()
+    return attach_resolved_config_snapshot_to_summary(
+        payload,
+        snapshot_id=resolved_snapshot_id,
+        snapshot_payload=snapshot_payload,
+    )
+
+
 def _extract_entry_reason(marker: Dict[str, Any]) -> Optional[str]:
     details = (
         marker.get("details", {}) if isinstance(marker.get("details"), dict) else {}
@@ -735,16 +796,8 @@ def _build_history_day_rows(
         if isinstance(session_summary.get("trades"), list)
         else []
     )
-    execution_config = (
-        payload.get("execution_config", {})
-        if isinstance(payload.get("execution_config"), dict)
-        else {}
-    )
-    run_request_config = (
-        payload.get("run_request_config", {})
-        if isinstance(payload.get("run_request_config"), dict)
-        else {}
-    )
+    execution_config = _resolve_config_payload_dict(payload, key="execution_config")
+    run_request_config = _resolve_config_payload_dict(payload, key="run_request_config")
     if not run_request_config:
         report_metadata = (
             payload.get("report_metadata", {})
@@ -756,10 +809,14 @@ def _build_history_day_rows(
             if isinstance(report_metadata.get("run_request_config"), dict)
             else {}
         )
-    aos_applied = (
-        payload.get("aos_applied", {})
-        if isinstance(payload.get("aos_applied"), dict)
-        else {}
+    aos_applied = _resolve_config_payload_dict(payload, key="aos_applied")
+    control_plane_snapshot = _resolve_config_payload_dict(
+        payload,
+        key="control_plane_snapshot",
+    )
+    resolved_config_snapshot = _resolved_config_snapshot(payload)
+    resolved_config_snapshot_id = (
+        str(payload.get("resolved_config_snapshot_id") or "").strip() or None
     )
     profile_meta = _extract_profile_metadata(payload)
     entry_reasons = _build_entry_reason_map(markers)
@@ -884,6 +941,9 @@ def _build_history_day_rows(
                 "execution_config": execution_config,
                 "run_request_config": run_request_config,
                 "aos_applied": aos_applied,
+                "control_plane_snapshot": control_plane_snapshot,
+                "resolved_config_snapshot": resolved_config_snapshot,
+                "resolved_config_snapshot_id": resolved_config_snapshot_id,
                 "unified_profile_id": profile_meta.get("unified_profile_id"),
                 "unified_profile_name": profile_meta.get("unified_profile_name"),
                 "adaptive_profile_id": profile_meta.get("adaptive_profile_id"),
@@ -1032,6 +1092,17 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
                     if isinstance(row.get("aos_applied"), dict)
                     else {}
                 ),
+                "control_plane_snapshot": (
+                    row.get("control_plane_snapshot")
+                    if isinstance(row.get("control_plane_snapshot"), dict)
+                    else {}
+                ),
+                "resolved_config_snapshot": (
+                    row.get("resolved_config_snapshot")
+                    if isinstance(row.get("resolved_config_snapshot"), dict)
+                    else {}
+                ),
+                "resolved_config_snapshot_id": row.get("resolved_config_snapshot_id"),
                 "execution_config": (
                     row.get("execution_config")
                     if isinstance(row.get("execution_config"), dict)
@@ -1120,6 +1191,14 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
         }
         if len(runs) == 1:
             row["aos_applied"] = runs[0].get("aos_applied", {})
+            row["control_plane_snapshot"] = runs[0].get("control_plane_snapshot", {})
+            row["resolved_config_snapshot"] = runs[0].get(
+                "resolved_config_snapshot",
+                {},
+            )
+            row["resolved_config_snapshot_id"] = runs[0].get(
+                "resolved_config_snapshot_id"
+            )
             row["execution_config"] = runs[0].get("execution_config", {})
             row["run_request_config"] = runs[0].get("run_request_config", {})
             row["run_total_trades"] = _safe_optional_int(
@@ -1141,6 +1220,9 @@ def _aggregate_history_day_rows(day_rows: List[Dict[str, Any]]) -> List[Dict[str
             row["run_total_bars"] = _safe_optional_int(runs[0].get("run_total_bars"))
         else:
             row["aos_applied"] = {}
+            row["control_plane_snapshot"] = {}
+            row["resolved_config_snapshot"] = {}
+            row["resolved_config_snapshot_id"] = None
             row["execution_config"] = {}
             row["run_request_config"] = {}
             row["run_total_trades"] = None
@@ -1681,6 +1763,11 @@ async def get_saved_run_history(
             if not isinstance(payload, dict):
                 skipped_invalid += 1
                 continue
+            payload = _hydrate_summary_with_persisted_config_snapshot(
+                summary_payload=payload,
+                run_key=str(row.get("run_key") or ""),
+                report_store=external_store,
+            )
             report_saved_at = _normalize_iso_timestamp(row.get("updated_at"))
             report_dir_name = _external_report_dir_name(
                 run_key=str(row.get("run_key") or ""),
@@ -1858,6 +1945,11 @@ async def get_run_playback_snapshot(
         if isinstance(summary_row.get("summary"), dict)
         else {}
     )
+    summary_payload = _hydrate_summary_with_persisted_config_snapshot(
+        summary_payload=summary_payload,
+        run_key=safe_run_key,
+        report_store=report_store,
+    )
     decoded_snapshot = _decode_playback_snapshot(summary_payload)
     bars_payload = (
         decoded_snapshot.get("bars", [])
@@ -1896,10 +1988,9 @@ async def get_run_playback_snapshot(
         (float(processed_bars) / float(total_bars)) * 100.0 if total_bars > 0 else 0.0
     )
 
-    request_config = (
-        summary_payload.get("run_request_config", {})
-        if isinstance(summary_payload.get("run_request_config"), dict)
-        else {}
+    request_config = _resolve_config_payload_dict(
+        summary_payload,
+        key="run_request_config",
     )
     date_from = _normalize_iso_date(request_config.get("date_from"))
     date_to = _normalize_iso_date(request_config.get("date_to"))

@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
-import json
 import os
-import threading
 from dataclasses import dataclass
 from datetime import date, datetime
 from time import perf_counter
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 
 from fastapi import HTTPException
 
@@ -52,7 +49,12 @@ from src.services.start_run_report_utils import (
 from src.services.start_run_time_filter_utils import (
     canonical_trading_hours as _canonical_trading_hours,
 )
-from src.services.start_run_local_aos_service import resolve_local_aos_applied
+from src.services.start_run_prewarm_utils import (
+    PrewarmInflightRegistry,
+    PrewarmRequestState,
+    raise_for_guard_reason as prewarm_raise_for_guard_reason,
+    resolve_prewarm_request_state as prewarm_resolve_request_state,
+)
 from src.services.start_run_bootstrap_phase_service import (
     BootstrapPhaseDeps,
     BootstrapPhaseInputs,
@@ -68,6 +70,7 @@ from src.services.start_run_session_phase_service import (
     SessionPhaseInputs,
     run_start_session_phase,
 )
+from src.services.run_config_snapshot_service import build_resolved_config_snapshot
 from src.services.start_run_runner_setup_service import (
     RunnerSetupDeps,
     RunnerSetupInputs,
@@ -137,8 +140,7 @@ PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS = _parse_non_negative_int_env(
     "BACKTEST_PROGRESSIVE_LOAD_COMPARABLE_CHUNK_DAYS",
     1,
 )
-_PREWARM_INFLIGHT: Dict[str, concurrent.futures.Future] = {}
-_PREWARM_INFLIGHT_LOCK = threading.Lock()
+_PREWARM_INFLIGHT_REGISTRY = PrewarmInflightRegistry()
 
 
 def _strategy_reset_success(value: Any) -> bool:
@@ -185,37 +187,6 @@ def _to_json_compatible(value: Any) -> Any:
     return str(value)
 
 
-def _acquire_prewarm_inflight(key: str) -> tuple[concurrent.futures.Future, bool]:
-    with _PREWARM_INFLIGHT_LOCK:
-        existing = _PREWARM_INFLIGHT.get(key)
-        if isinstance(existing, concurrent.futures.Future):
-            if existing.done():
-                _PREWARM_INFLIGHT.pop(key, None)
-            else:
-                return existing, False
-        future: concurrent.futures.Future = concurrent.futures.Future()
-        _PREWARM_INFLIGHT[key] = future
-        return future, True
-
-
-def _release_prewarm_inflight(key: str, future: concurrent.futures.Future) -> None:
-    with _PREWARM_INFLIGHT_LOCK:
-        current = _PREWARM_INFLIGHT.get(key)
-        if current is future:
-            _PREWARM_INFLIGHT.pop(key, None)
-
-
-def _is_prewarm_inflight(key: str) -> bool:
-    with _PREWARM_INFLIGHT_LOCK:
-        current = _PREWARM_INFLIGHT.get(key)
-        if not isinstance(current, concurrent.futures.Future):
-            return False
-        if current.done():
-            _PREWARM_INFLIGHT.pop(key, None)
-            return False
-        return True
-
-
 @dataclass
 class StartRunDeps:
     active_runners: Dict[str, Any]
@@ -242,6 +213,7 @@ class StartRunDeps:
     attach_l2_features: Callable[..., Any]
     load_aos_config: Callable[..., Dict[str, Any]]
     get_ticker_positioning_config: Callable[[str], Dict[str, Any]]
+    positioning_config_keys: Iterable[str]
     configure_session: Callable[..., Awaitable[Any]]
     broadcast: Callable[[Dict[str, Any]], Awaitable[None]]
     run_config_cls: Any
@@ -346,87 +318,25 @@ def _build_run_request_config_snapshot(request: StartRunRequest) -> Dict[str, An
     return report_build_run_request_config_snapshot(request)
 
 
-def _build_prewarm_cache_key(
+def _resolve_prewarm_request_state(
     *,
     request: PrewarmRunRequest,
-    prewarm_scope: str,
-    ticker: str,
-    range_start: str,
-    range_end: str,
-    requested_l2_only: bool,
-    requested_l2_confirm: bool,
-    aos_applied: Dict[str, Any],
-) -> str:
-    key_payload = {
-        "ticker": ticker,
-        "prewarm_scope": str(prewarm_scope or "range").strip().lower(),
-        "range_start": str(range_start),
-        "range_end": str(range_end),
-        "data_file": str(request.data_file or ""),
-        "allow_mock_data": bool(request.allow_mock_data),
-        "comparable_mode": bool(request.comparable_mode),
-        "requested_l2_only": bool(requested_l2_only),
-        "requested_l2_confirm": bool(requested_l2_confirm),
-        "include_extended_hours": (
-            None
-            if getattr(request, "include_extended_hours", None) is None
-            else bool(request.include_extended_hours)
-        ),
-        "time_filter_enabled": bool(aos_applied.get("time_filter_enabled", False)),
-        "trading_hours": _canonical_trading_hours(aos_applied.get("trading_hours")),
-        "aos_config_path": str(getattr(request, "aos_config_path", "") or ""),
-    }
-    return json.dumps(key_payload, sort_keys=True, separators=(",", ":"))
-
-
-def _resolve_prewarm_scope_range(
-    *,
-    request: PrewarmRunRequest,
-    ticker: str,
-    databento_svc: Any,
-    get_discovery: Callable[[], Any],
-) -> tuple[str, str, str]:
-    requested_scope = (
-        str(getattr(request, "prewarm_scope", "range") or "range").strip().lower()
+    deps: StartRunDeps,
+) -> PrewarmRequestState:
+    ticker = str(request.ticker or "").strip().upper()
+    if not ticker:
+        raise HTTPException(400, "Ticker is required")
+    return prewarm_resolve_request_state(
+        request=request,
+        ticker=ticker,
+        databento_svc=deps.databento_svc,
+        get_discovery=deps.get_discovery,
+        load_aos_config=deps.load_aos_config,
+        get_ticker_positioning_config=deps.get_ticker_positioning_config,
+        positioning_config_keys=getattr(deps, "positioning_config_keys", ()) or (),
+        resolve_request_range=_resolve_request_range,
+        build_l2_guard_reason=_prewarm_l2_guard_reason,
     )
-    prewarm_scope = (
-        requested_scope if requested_scope in {"range", "ticker"} else "range"
-    )
-    if prewarm_scope == "range":
-        range_start, range_end = _resolve_request_range(request)
-        return prewarm_scope, range_start, range_end
-
-    # Ticker-level prewarm resolves to full locally available OHLCV coverage.
-    try:
-        databento_svc.scan_existing_files()
-    except Exception:
-        pass
-
-    try:
-        summary = databento_svc.get_available_data_summary(refresh=True)
-    except Exception:
-        summary = {}
-    date_ranges = summary.get("date_ranges", {}) if isinstance(summary, dict) else {}
-    ticker_range = date_ranges.get(ticker, {}) if isinstance(date_ranges, dict) else {}
-    range_start = str(ticker_range.get("start") or "").strip()
-    range_end = str(ticker_range.get("end") or "").strip()
-
-    if not range_start or not range_end:
-        try:
-            discovery = get_discovery()
-            fallback = discovery.get_date_range(ticker)
-        except Exception:
-            fallback = {}
-        if isinstance(fallback, dict):
-            range_start = str(fallback.get("start") or range_start).strip()
-            range_end = str(fallback.get("end") or range_end).strip()
-
-    if not range_start or not range_end:
-        raise HTTPException(
-            404,
-            f"No available OHLCV coverage found for ticker {ticker} for ticker-level prewarm.",
-        )
-    return prewarm_scope, range_start, range_end
 
 
 def _inclusive_day_span(start_iso: str, end_iso: str) -> int:
@@ -837,6 +747,7 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
             request=request,
             execution_cfg=bootstrap.execution_cfg,
             aos_applied=bootstrap.aos_applied,
+            control_plane_snapshot=bootstrap.control_plane_snapshot,
             momentum_diversification_source=bootstrap.momentum_diversification_source,
             effective_momentum_diversification=bootstrap.effective_momentum_diversification,
             effective_intrabar_execution_recalc_1s=session_phase.effective_intrabar_execution_recalc_1s,
@@ -872,6 +783,11 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         dict(bootstrap.aos_applied) if isinstance(bootstrap.aos_applied, dict) else {}
     )
     runner._execution_config = dict(execution_config_payload)
+    runner._control_plane_snapshot = (
+        dict(bootstrap.control_plane_snapshot)
+        if isinstance(bootstrap.control_plane_snapshot, dict)
+        else {}
+    )
     runner._l2_applied = dict(l2_applied_payload)
     runner._strategy_state_reset = _strategy_reset_success(bootstrap.orchestrator_reset)
     runner._strategy_state_reset_detail = _strategy_reset_detail(
@@ -896,6 +812,19 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         execution_config=runner._execution_config,
     )
     runner._run_request_config = _build_run_request_config_snapshot(request)
+    runner._resolved_config_snapshot = build_resolved_config_snapshot(
+        run_id=request.run_id,
+        ticker=identity.ticker,
+        date_label=identity.run_date_label,
+        report_metadata=runner._report_metadata,
+        control_plane_snapshot=runner._control_plane_snapshot,
+        aos_applied=runner._aos_applied,
+        execution_config=runner._execution_config,
+        run_request_config=runner._run_request_config,
+        l2_applied=runner._l2_applied,
+        session_config_snapshot=session_phase.session_config_snapshot,
+        to_json_safe=_to_json_compatible,
+    )
 
     deps.logger.info(f"Started run {identity.run_key} with {len(bars)} bars")
 
@@ -931,6 +860,7 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
         "strategy_overrides_applied": bootstrap.strategy_overrides_applied,
         "data_files": list(load_phase.data_files),
         "aos_applied": bootstrap.aos_applied,
+        "control_plane_snapshot": bootstrap.control_plane_snapshot,
         "l2_applied": l2_applied_payload,
         "execution_config": execution_config_payload,
         "start_timing": start_timing,
@@ -944,90 +874,34 @@ async def prewarm_run_data(
     request: PrewarmRunRequest, deps: StartRunDeps
 ) -> Dict[str, Any]:
     logger = deps.logger
-    ticker = str(request.ticker or "").strip().upper()
-    if not ticker:
-        raise HTTPException(400, "Ticker is required")
+    state = _resolve_prewarm_request_state(request=request, deps=deps)
+    prewarm_raise_for_guard_reason(state=state, logger=logger)
 
-    prewarm_scope, range_start, range_end = _resolve_prewarm_scope_range(
-        request=request,
-        ticker=ticker,
-        databento_svc=deps.databento_svc,
-        get_discovery=deps.get_discovery,
-    )
-    is_multi_day_request = bool(
-        range_start != range_end or bool(request.date_from and request.date_to)
-    )
-
-    aos_applied = resolve_local_aos_applied(
-        ticker=ticker,
-        load_aos_config=deps.load_aos_config,
-        get_ticker_positioning_config=deps.get_ticker_positioning_config,
-        aos_config_path=getattr(request, "aos_config_path", None),
-    )
-
-    aos_l2_cfg = (
-        aos_applied.get("l2", {}) if isinstance(aos_applied.get("l2"), dict) else {}
-    )
-    requested_l2_only_raw = bool(
-        request.l2_only or bool(aos_l2_cfg.get("l2_only", False))
-    )
-    requested_l2_confirm_raw = bool(
-        request.l2_confirm_enabled or bool(aos_l2_cfg.get("confirm_enabled", False))
-    )
-    requested_l2_only = requested_l2_only_raw
-    requested_l2_confirm = requested_l2_confirm_raw
-    l2_guard_reason = _prewarm_l2_guard_reason(
-        prewarm_scope=prewarm_scope,
-        requested_l2_only=requested_l2_only,
-        requested_l2_confirm=requested_l2_confirm,
-        range_start=range_start,
-        range_end=range_end,
-    )
-    if l2_guard_reason:
-        logger.warning(
-            "%s ticker=%s range=%s..%s",
-            l2_guard_reason,
-            ticker,
-            range_start,
-            range_end,
-        )
-        raise HTTPException(400, l2_guard_reason)
-
-    prewarm_cache_key = _build_prewarm_cache_key(
-        request=request,
-        prewarm_scope=prewarm_scope,
-        ticker=ticker,
-        range_start=range_start,
-        range_end=range_end,
-        requested_l2_only=requested_l2_only,
-        requested_l2_confirm=requested_l2_confirm,
-        aos_applied=aos_applied,
-    )
-    cached_result = get_prewarm_result(prewarm_cache_key)
+    cached_result = get_prewarm_result(state.prewarm_cache_key)
     if isinstance(cached_result, dict):
         logger.info(
             "Using prewarm result cache for %s %s..%s",
-            ticker,
-            range_start,
-            range_end,
+            state.ticker,
+            state.range_start,
+            state.range_end,
         )
         cached_payload = dict(cached_result)
         cached_payload["cache_hit"] = True
-        cached_payload["cache_key"] = prewarm_cache_key
+        cached_payload["cache_key"] = state.prewarm_cache_key
         cached_payload["cache_stats"] = get_start_run_data_cache_stats()
         return cached_payload
-    shared_future, is_owner = _acquire_prewarm_inflight(prewarm_cache_key)
+    shared_future, is_owner = _PREWARM_INFLIGHT_REGISTRY.acquire(state.prewarm_cache_key)
     if not is_owner:
         logger.info(
             "Joining in-flight prewarm for %s %s..%s",
-            ticker,
-            range_start,
-            range_end,
+            state.ticker,
+            state.range_start,
+            state.range_end,
         )
         joined_result = await asyncio.wrap_future(shared_future)
         joined_payload = dict(joined_result)
         joined_payload["cache_hit"] = True
-        joined_payload["cache_key"] = prewarm_cache_key
+        joined_payload["cache_key"] = state.prewarm_cache_key
         joined_payload["cache_stats"] = get_start_run_data_cache_stats()
         joined_payload["joined_inflight"] = True
         return joined_payload
@@ -1035,27 +909,28 @@ async def prewarm_run_data(
     try:
         bars, data_files = load_run_bars(
             request=request,
-            ticker=ticker,
-            range_start=range_start,
-            range_end=range_end,
+            ticker=state.ticker,
+            range_start=state.range_start,
+            range_end=state.range_end,
             data_loader=deps.data_loader,
             databento_svc=deps.databento_svc,
             get_discovery=deps.get_discovery,
-            aos_applied=aos_applied,
+            aos_applied=state.aos_applied,
             logger=logger,
         )
 
         bars, l2_stats, l2_sessionized_by_market_day = enrich_bars_with_l2(
             bars=bars,
-            ticker=ticker,
-            range_start=range_start,
-            range_end=range_end,
-            requested_l2_only=requested_l2_only,
-            requested_l2_confirm=requested_l2_confirm,
+            ticker=state.ticker,
+            range_start=state.range_start,
+            range_end=state.range_end,
+            requested_l2_only=state.requested_l2_only,
+            requested_l2_confirm=state.requested_l2_confirm,
             comparable_mode=bool(request.comparable_mode),
-            is_multi_day_request=is_multi_day_request,
+            is_multi_day_request=state.is_multi_day_request,
             aos_l2_config_applied=bool(
-                isinstance(aos_applied.get("l2"), dict) and aos_applied.get("l2")
+                isinstance(state.aos_applied.get("l2"), dict)
+                and state.aos_applied.get("l2")
             ),
             to_utc_datetime=deps.to_utc_datetime,
             build_l2_feature_map=deps.build_l2_feature_map,
@@ -1065,9 +940,9 @@ async def prewarm_run_data(
         )
 
         ref_bars_map = load_reference_bars_map(
-            ticker=ticker,
-            range_start=range_start,
-            range_end=range_end,
+            ticker=state.ticker,
+            range_start=state.range_start,
+            range_end=state.range_end,
             data_loader=deps.data_loader,
             databento_svc=deps.databento_svc,
             get_discovery=deps.get_discovery,
@@ -1076,25 +951,27 @@ async def prewarm_run_data(
 
         result = {
             "success": True,
-            "ticker": ticker,
-            "prewarm_scope": prewarm_scope,
-            "range_start": range_start,
-            "range_end": range_end,
+            "ticker": state.ticker,
+            "prewarm_scope": state.prewarm_scope,
+            "range_start": state.range_start,
+            "range_end": state.range_end,
             "bars": len(bars),
             "data_files_count": len(data_files),
             "reference_bars": len(ref_bars_map),
-            "l2_requested": bool(requested_l2_only_raw or requested_l2_confirm_raw),
-            "use_l2": bool(requested_l2_only or requested_l2_confirm),
-            "l2_only": requested_l2_only,
-            "l2_confirm_enabled": requested_l2_confirm,
-            "l2_guard_reason": l2_guard_reason,
+            "l2_requested": bool(
+                state.requested_l2_only_raw or state.requested_l2_confirm_raw
+            ),
+            "use_l2": bool(state.requested_l2_only or state.requested_l2_confirm),
+            "l2_only": state.requested_l2_only,
+            "l2_confirm_enabled": state.requested_l2_confirm,
+            "l2_guard_reason": state.l2_guard_reason,
             "l2_sessionized_by_market_day": l2_sessionized_by_market_day,
             "l2": l2_stats,
             "cache_hit": False,
-            "cache_key": prewarm_cache_key,
+            "cache_key": state.prewarm_cache_key,
             "cache_stats": get_start_run_data_cache_stats(),
         }
-        set_prewarm_result(prewarm_cache_key, result)
+        set_prewarm_result(state.prewarm_cache_key, result)
         if not shared_future.done():
             shared_future.set_result(dict(result))
         return result
@@ -1103,85 +980,34 @@ async def prewarm_run_data(
             shared_future.set_exception(exc)
         raise
     finally:
-        _release_prewarm_inflight(prewarm_cache_key, shared_future)
+        _PREWARM_INFLIGHT_REGISTRY.release(state.prewarm_cache_key, shared_future)
 
 
 async def get_prewarm_status(
     request: PrewarmRunRequest, deps: StartRunDeps
 ) -> Dict[str, Any]:
     """Check whether a prewarm request key is already ready/in-flight without loading data."""
-    logger = deps.logger
-    ticker = str(request.ticker or "").strip().upper()
-    if not ticker:
-        raise HTTPException(400, "Ticker is required")
-
-    prewarm_scope, range_start, range_end = _resolve_prewarm_scope_range(
-        request=request,
-        ticker=ticker,
-        databento_svc=deps.databento_svc,
-        get_discovery=deps.get_discovery,
-    )
-    aos_applied = resolve_local_aos_applied(
-        ticker=ticker,
-        load_aos_config=deps.load_aos_config,
-        get_ticker_positioning_config=deps.get_ticker_positioning_config,
-        aos_config_path=getattr(request, "aos_config_path", None),
-    )
-    aos_l2_cfg = (
-        aos_applied.get("l2", {}) if isinstance(aos_applied.get("l2"), dict) else {}
-    )
-    requested_l2_only_raw = bool(
-        request.l2_only or bool(aos_l2_cfg.get("l2_only", False))
-    )
-    requested_l2_confirm_raw = bool(
-        request.l2_confirm_enabled or bool(aos_l2_cfg.get("confirm_enabled", False))
-    )
-    requested_l2_only = requested_l2_only_raw
-    requested_l2_confirm = requested_l2_confirm_raw
-    l2_guard_reason = _prewarm_l2_guard_reason(
-        prewarm_scope=prewarm_scope,
-        requested_l2_only=requested_l2_only,
-        requested_l2_confirm=requested_l2_confirm,
-        range_start=range_start,
-        range_end=range_end,
-    )
-    if l2_guard_reason:
-        logger.warning(
-            "%s ticker=%s range=%s..%s",
-            l2_guard_reason,
-            ticker,
-            range_start,
-            range_end,
-        )
-        raise HTTPException(400, l2_guard_reason)
-
-    prewarm_cache_key = _build_prewarm_cache_key(
-        request=request,
-        prewarm_scope=prewarm_scope,
-        ticker=ticker,
-        range_start=range_start,
-        range_end=range_end,
-        requested_l2_only=requested_l2_only,
-        requested_l2_confirm=requested_l2_confirm,
-        aos_applied=aos_applied,
-    )
-    cached_result = get_prewarm_result(prewarm_cache_key)
-    in_progress = _is_prewarm_inflight(prewarm_cache_key)
+    state = _resolve_prewarm_request_state(request=request, deps=deps)
+    prewarm_raise_for_guard_reason(state=state, logger=deps.logger)
+    cached_result = get_prewarm_result(state.prewarm_cache_key)
+    in_progress = _PREWARM_INFLIGHT_REGISTRY.is_inflight(state.prewarm_cache_key)
 
     response = {
         "success": True,
         "ready": bool(isinstance(cached_result, dict)),
         "in_progress": bool(in_progress),
-        "cache_key": prewarm_cache_key,
-        "ticker": ticker,
-        "prewarm_scope": prewarm_scope,
-        "range_start": range_start,
-        "range_end": range_end,
-        "l2_requested": bool(requested_l2_only_raw or requested_l2_confirm_raw),
-        "use_l2": bool(requested_l2_only or requested_l2_confirm),
-        "l2_only": requested_l2_only,
-        "l2_confirm_enabled": requested_l2_confirm,
-        "l2_guard_reason": l2_guard_reason,
+        "cache_key": state.prewarm_cache_key,
+        "ticker": state.ticker,
+        "prewarm_scope": state.prewarm_scope,
+        "range_start": state.range_start,
+        "range_end": state.range_end,
+        "l2_requested": bool(
+            state.requested_l2_only_raw or state.requested_l2_confirm_raw
+        ),
+        "use_l2": bool(state.requested_l2_only or state.requested_l2_confirm),
+        "l2_only": state.requested_l2_only,
+        "l2_confirm_enabled": state.requested_l2_confirm,
+        "l2_guard_reason": state.l2_guard_reason,
         "cache_stats": get_start_run_data_cache_stats(),
     }
     if isinstance(cached_result, dict):

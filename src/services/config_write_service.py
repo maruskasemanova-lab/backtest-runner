@@ -4,6 +4,12 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException
+from src.services.config_domain import (
+    load_mutable_ticker_config_state,
+    remove_ticker_positioning_config,
+    save_ticker_aos_config,
+    save_ticker_positioning_config,
+)
 from src.security.network_policy import (
     StrategyApiPolicyError,
     enforce_strategy_url_allowlist_only,
@@ -270,21 +276,13 @@ async def capture_unified_profile(
     if not strategy_params:
         raise HTTPException(400, "No strategy parameters available to capture.")
 
-    config = deps.load_aos_config()
-    positioning_config = deps.load_positioning_config()
-    if "tickers" not in config or not isinstance(config.get("tickers"), dict):
-        config["tickers"] = {}
-    ticker_cfg = config["tickers"].get(ticker, {})
-    if not isinstance(ticker_cfg, dict):
-        ticker_cfg = {}
-
-    positioning_tickers = positioning_config.get("tickers")
-    if not isinstance(positioning_tickers, dict):
-        positioning_tickers = {}
-        positioning_config["tickers"] = positioning_tickers
-    positioning_ticker_cfg = positioning_tickers.get(ticker, {})
-    if not isinstance(positioning_ticker_cfg, dict):
-        positioning_ticker_cfg = {}
+    state = load_mutable_ticker_config_state(
+        ticker=ticker,
+        load_aos_config=deps.load_aos_config,
+        load_positioning_config=deps.load_positioning_config,
+    )
+    ticker_cfg = state.ticker_config
+    positioning_ticker_cfg = state.positioning_ticker_config
 
     profiles, active_profile_id = _load_unified_profile_state(
         ticker=ticker,
@@ -341,8 +339,7 @@ async def capture_unified_profile(
     elif _clear_local_unified_profile_state(ticker_cfg):
         config_changed = True
     if config_changed:
-        config["tickers"][ticker] = ticker_cfg
-        if not deps.save_aos_config(config):
+        if not save_ticker_aos_config(state=state, save_aos_config=deps.save_aos_config):
             raise HTTPException(500, "Failed to save unified profile")
 
     return {
@@ -361,13 +358,12 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
     if not profile_id:
         raise HTTPException(400, "profile_id is required")
 
-    config = deps.load_aos_config()
-    positioning_config = deps.load_positioning_config()
-    if "tickers" not in config or not isinstance(config.get("tickers"), dict):
-        config["tickers"] = {}
-    ticker_cfg = config["tickers"].get(ticker, {})
-    if not isinstance(ticker_cfg, dict):
-        ticker_cfg = {}
+    state = load_mutable_ticker_config_state(
+        ticker=ticker,
+        load_aos_config=deps.load_aos_config,
+        load_positioning_config=deps.load_positioning_config,
+    )
+    ticker_cfg = state.ticker_config
 
     profiles, _active_profile_id = _load_unified_profile_state(
         ticker=ticker,
@@ -470,22 +466,16 @@ async def apply_unified_profile(request: Any, deps: ConfigWriteDeps) -> Dict[str
                 positioning_payload[key] = execution_profile.get(key)
 
         if positioning_payload:
-            pos_tickers = positioning_config.get("tickers")
-            if not isinstance(pos_tickers, dict):
-                pos_tickers = {}
-                positioning_config["tickers"] = pos_tickers
-            existing_pos = pos_tickers.get(ticker, {})
-            if not isinstance(existing_pos, dict):
-                existing_pos = {}
-            existing_pos.update(positioning_payload)
-            pos_tickers[ticker] = existing_pos
+            state.positioning_ticker_config.update(positioning_payload)
             applied_execution = True
 
     if config_changed:
-        config["tickers"][ticker] = ticker_cfg
-        if not deps.save_aos_config(config):
+        if not save_ticker_aos_config(state=state, save_aos_config=deps.save_aos_config):
             raise HTTPException(500, "Failed to save active unified profile")
-    if applied_execution and not deps.save_positioning_config(positioning_config):
+    if applied_execution and not save_ticker_positioning_config(
+        state=state,
+        save_positioning_config=deps.save_positioning_config,
+    ):
         raise HTTPException(
             500, "Failed to save positioning config for unified profile"
         )
@@ -541,12 +531,12 @@ async def capture_strategy_combo(request: Any, deps: ConfigWriteDeps) -> Dict[st
     if not strategy_params:
         raise HTTPException(400, "No strategy parameters available to capture.")
 
-    config = deps.load_aos_config()
-    if "tickers" not in config or not isinstance(config.get("tickers"), dict):
-        config["tickers"] = {}
-    ticker_cfg = config["tickers"].get(ticker, {})
-    if not isinstance(ticker_cfg, dict):
-        ticker_cfg = {}
+    state = load_mutable_ticker_config_state(
+        ticker=ticker,
+        load_aos_config=deps.load_aos_config,
+        load_positioning_config=deps.load_positioning_config,
+    )
+    ticker_cfg = state.ticker_config
 
     profiles = deps.normalize_strategy_combo_profiles(
         ticker_cfg.get("strategy_combo_profiles", [])
@@ -560,8 +550,7 @@ async def capture_strategy_combo(request: Any, deps: ConfigWriteDeps) -> Dict[st
     ticker_cfg["strategy_combo_profiles"] = profiles[:30]
     if request.set_active:
         ticker_cfg["active_strategy_combo_profile_id"] = entry["profile_id"]
-    config["tickers"][ticker] = ticker_cfg
-    if not deps.save_aos_config(config):
+    if not save_ticker_aos_config(state=state, save_aos_config=deps.save_aos_config):
         raise HTTPException(500, "Failed to save strategy combo profile")
 
     return {
@@ -583,12 +572,12 @@ async def apply_strategy_combo(request: Any, deps: ConfigWriteDeps) -> Dict[str,
     if not profile_id:
         raise HTTPException(400, "profile_id is required")
 
-    config = deps.load_aos_config()
-    if "tickers" not in config or not isinstance(config.get("tickers"), dict):
-        config["tickers"] = {}
-    ticker_cfg = config["tickers"].get(ticker, {})
-    if not isinstance(ticker_cfg, dict):
-        ticker_cfg = {}
+    state = load_mutable_ticker_config_state(
+        ticker=ticker,
+        load_aos_config=deps.load_aos_config,
+        load_positioning_config=deps.load_positioning_config,
+    )
+    ticker_cfg = state.ticker_config
 
     profiles = deps.normalize_strategy_combo_profiles(
         ticker_cfg.get("strategy_combo_profiles", [])
@@ -606,8 +595,7 @@ async def apply_strategy_combo(request: Any, deps: ConfigWriteDeps) -> Dict[str,
 
     ticker_cfg["strategy_combo_profiles"] = profiles
     ticker_cfg["active_strategy_combo_profile_id"] = profile_id
-    config["tickers"][ticker] = ticker_cfg
-    if not deps.save_aos_config(config):
+    if not save_ticker_aos_config(state=state, save_aos_config=deps.save_aos_config):
         raise HTTPException(500, "Failed to save active strategy combo profile")
 
     try:
@@ -635,15 +623,12 @@ async def apply_strategy_combo(request: Any, deps: ConfigWriteDeps) -> Dict[str,
 
 
 def update_aos_config(request: Any, deps: ConfigWriteDeps) -> Dict[str, Any]:
-    config = deps.load_aos_config()
-    positioning_config = deps.load_positioning_config()
-
-    if "tickers" not in config:
-        config["tickers"] = {}
-    if "tickers" not in positioning_config:
-        positioning_config["tickers"] = {}
-
     ticker_upper = request.ticker.upper()
+    state = load_mutable_ticker_config_state(
+        ticker=ticker_upper,
+        load_aos_config=deps.load_aos_config,
+        load_positioning_config=deps.load_positioning_config,
+    )
     incoming_config = dict(request.config or {})
     positioning_marker = object()
     incoming_positioning = incoming_config.pop("positioning", positioning_marker)
@@ -665,34 +650,33 @@ def update_aos_config(request: Any, deps: ConfigWriteDeps) -> Dict[str, Any]:
         else:
             raise HTTPException(400, "positioning must be an object or null")
 
-    existing = config["tickers"].get(ticker_upper, {})
-    if not isinstance(existing, dict):
-        existing = {}
+    existing = state.ticker_config
     existing.pop("positioning", None)
     for key in deps.positioning_config_keys:
         existing.pop(key, None)
     existing.update(incoming_config)
-    config["tickers"][ticker_upper] = existing
+    positioning_changed = False
+    allow_empty_positioning = False
 
     if incoming_positioning is not positioning_marker:
+        positioning_changed = True
         if incoming_positioning is None:
-            if isinstance(positioning_config.get("tickers"), dict):
-                positioning_config["tickers"].pop(ticker_upper, None)
+            remove_ticker_positioning_config(state)
         elif isinstance(incoming_positioning, dict):
-            pos_tickers = positioning_config.get("tickers")
-            if not isinstance(pos_tickers, dict):
-                pos_tickers = {}
-                positioning_config["tickers"] = pos_tickers
-            pos_existing = pos_tickers.get(ticker_upper, {})
-            if not isinstance(pos_existing, dict):
-                pos_existing = {}
-            pos_existing.update(incoming_positioning)
-            pos_tickers[ticker_upper] = pos_existing
+            state.positioning_ticker_config.update(incoming_positioning)
+            allow_empty_positioning = True
         else:
             raise HTTPException(400, "positioning must be an object or null")
 
-    saved_aos = deps.save_aos_config(config)
-    saved_positioning = deps.save_positioning_config(positioning_config)
+    saved_aos = save_ticker_aos_config(state=state, save_aos_config=deps.save_aos_config)
+    if positioning_changed:
+        saved_positioning = save_ticker_positioning_config(
+            state=state,
+            save_positioning_config=deps.save_positioning_config,
+            allow_empty=allow_empty_positioning,
+        )
+    else:
+        saved_positioning = bool(deps.save_positioning_config(state.positioning_config))
     if not (saved_aos and saved_positioning):
         raise HTTPException(500, "Failed to save AOS config")
 
@@ -703,7 +687,7 @@ def update_aos_config(request: Any, deps: ConfigWriteDeps) -> Dict[str, Any]:
         )
     payload = dict(existing)
     merged_positioning = deps.get_ticker_positioning_config(
-        ticker_upper, positioning_config
+        ticker_upper, state.positioning_config
     )
     if merged_positioning:
         payload["positioning"] = merged_positioning
@@ -715,17 +699,18 @@ def update_positioning_config(request: Any, deps: ConfigWriteDeps) -> Dict[str, 
     if not ticker_upper:
         raise HTTPException(400, "ticker is required")
     incoming = dict(request.config or {})
-    cfg = deps.load_positioning_config()
-    tickers = cfg.get("tickers")
-    if not isinstance(tickers, dict):
-        tickers = {}
-        cfg["tickers"] = tickers
-    existing = tickers.get(ticker_upper, {})
-    if not isinstance(existing, dict):
-        existing = {}
+    state = load_mutable_ticker_config_state(
+        ticker=ticker_upper,
+        load_aos_config=deps.load_aos_config,
+        load_positioning_config=deps.load_positioning_config,
+    )
+    existing = state.positioning_ticker_config
     existing.update(incoming)
-    tickers[ticker_upper] = existing
-    if not deps.save_positioning_config(cfg):
+    if not save_ticker_positioning_config(
+        state=state,
+        save_positioning_config=deps.save_positioning_config,
+        allow_empty=True,
+    ):
         raise HTTPException(500, "Failed to save positioning config")
     deps.logger.info("Updated positioning config for %s: %s", ticker_upper, incoming)
     return {"success": True, "config": existing}
@@ -739,12 +724,12 @@ def apply_adaptive_tuner_profile(request: Any, deps: ConfigWriteDeps) -> Dict[st
     if not profile_id:
         raise HTTPException(400, "profile_id is required")
 
-    config = deps.load_aos_config()
-    if "tickers" not in config or not isinstance(config.get("tickers"), dict):
-        config["tickers"] = {}
-    ticker_cfg = config["tickers"].get(ticker, {})
-    if not isinstance(ticker_cfg, dict):
-        ticker_cfg = {}
+    state = load_mutable_ticker_config_state(
+        ticker=ticker,
+        load_aos_config=deps.load_aos_config,
+        load_positioning_config=deps.load_positioning_config,
+    )
+    ticker_cfg = state.ticker_config
 
     profiles = deps.normalize_tuner_profiles(
         ticker_cfg.get("adaptive_tuner_profiles", [])
@@ -788,9 +773,9 @@ def apply_adaptive_tuner_profile(request: Any, deps: ConfigWriteDeps) -> Dict[st
     # adaptive profile, clear any stale explicit unified active profile so callers
     # fall back to the current combo+adaptive derived active view.
     updated_cfg["active_unified_profile_id"] = ""
-    config["tickers"][ticker] = updated_cfg
+    state.ticker_config = updated_cfg
 
-    if not deps.save_aos_config(config):
+    if not save_ticker_aos_config(state=state, save_aos_config=deps.save_aos_config):
         raise HTTPException(500, "Failed to apply adaptive tuner profile")
 
     return {

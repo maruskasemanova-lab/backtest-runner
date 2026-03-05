@@ -13,6 +13,10 @@ from typing import Any, Awaitable, Dict, Optional, Union
 import aiohttp
 from fastapi import HTTPException, Request
 
+from src.services.run_config_snapshot_service import (
+    attach_resolved_config_snapshot_to_summary,
+    resolve_session_config_snapshot,
+)
 from src.services.session_runner_strategy_client import StrategyApiClient
 from src.services.strategy_api_auth_headers import build_strategy_api_headers
 from src.services.trade_eval_mode_service import (
@@ -359,12 +363,150 @@ async def _persist_runner_summary_to_store(runner: Any, deps: RunControlDeps) ->
     )
     if isinstance(playback_snapshot, dict):
         payload["playback_snapshot"] = playback_snapshot
+    upsert_snapshot = getattr(report_store, "upsert_run_config_snapshot", None)
+    resolved_config_snapshot = (
+        payload.get("resolved_config_snapshot", {})
+        if isinstance(payload.get("resolved_config_snapshot"), dict)
+        else {}
+    )
+    if callable(upsert_snapshot) and resolved_config_snapshot:
+        try:
+            snapshot_row = await asyncio.to_thread(
+                upsert_snapshot,
+                run_key=run_key,
+                snapshot=resolved_config_snapshot,
+            )
+        except Exception as exc:
+            deps.logger.error(
+                "Failed to persist run config snapshot for %s: %s",
+                run_key,
+                exc,
+            )
+        else:
+            snapshot_id = (
+                snapshot_row.get("snapshot_id")
+                if isinstance(snapshot_row, dict)
+                else None
+            )
+            payload = attach_resolved_config_snapshot_to_summary(
+                payload,
+                snapshot_id=snapshot_id,
+            )
+            payload.pop("resolved_config_snapshot", None)
     await asyncio.to_thread(
         upsert,
         run_key=run_key,
         summary=payload,
     )
     return True
+
+
+def _hydrate_persisted_run_summary(
+    *,
+    summary: Dict[str, Any],
+    run_key: str,
+    report_store: Any,
+    logger: Any,
+) -> Dict[str, Any]:
+    payload = dict(summary) if isinstance(summary, dict) else {}
+    embedded_snapshot = (
+        payload.get("resolved_config_snapshot", {})
+        if isinstance(payload.get("resolved_config_snapshot"), dict)
+        else {}
+    )
+    if embedded_snapshot:
+        return payload
+    get_snapshot = getattr(report_store, "get_run_config_snapshot", None)
+    if not callable(get_snapshot):
+        return payload
+    snapshot_id = str(payload.get("resolved_config_snapshot_id") or "").strip() or None
+    try:
+        snapshot_row = get_snapshot(snapshot_id=snapshot_id, run_key=run_key)
+    except Exception as exc:
+        logger.error(
+            "Failed to read run config snapshot from DB for %s: %s",
+            run_key,
+            exc,
+        )
+        return payload
+    if not isinstance(snapshot_row, dict):
+        return payload
+    snapshot_payload = (
+        snapshot_row.get("payload")
+        if isinstance(snapshot_row.get("payload"), dict)
+        else {}
+    )
+    resolved_snapshot_id = str(
+        snapshot_row.get("snapshot_id") or snapshot_id or ""
+    ).strip()
+    return attach_resolved_config_snapshot_to_summary(
+        payload,
+        snapshot_id=resolved_snapshot_id,
+        snapshot_payload=snapshot_payload,
+    )
+
+
+def _load_runner_persisted_summary(
+    *,
+    runner: Any,
+    deps: RunControlDeps,
+) -> Dict[str, Any]:
+    report_store = getattr(deps, "run_reports_store", None)
+    get_summary = getattr(report_store, "get_run_summary", None)
+    if not callable(get_summary):
+        return {}
+
+    run_key = _runner_run_key(runner)
+    if not run_key:
+        return {}
+
+    try:
+        row = get_summary(run_key=run_key)
+    except Exception as exc:
+        deps.logger.error(
+            "Failed to read persisted run summary for %s: %s",
+            run_key,
+            exc,
+        )
+        return {}
+
+    if not isinstance(row, dict):
+        return {}
+
+    summary = row.get("summary", {})
+    if not isinstance(summary, dict):
+        return {}
+
+    return _hydrate_persisted_run_summary(
+        summary=summary,
+        run_key=run_key,
+        report_store=report_store,
+        logger=deps.logger,
+    )
+
+
+def _resolve_restart_session_config(
+    *,
+    runner: Any,
+    deps: RunControlDeps,
+) -> Dict[str, Any]:
+    direct_snapshot = resolve_session_config_snapshot(
+        getattr(runner, "_restart_session_config", None)
+    )
+    if direct_snapshot:
+        return direct_snapshot
+
+    resolved_snapshot = resolve_session_config_snapshot(
+        resolved_config_snapshot=getattr(runner, "_resolved_config_snapshot", None)
+    )
+    if resolved_snapshot:
+        return resolved_snapshot
+
+    persisted_summary = _load_runner_persisted_summary(runner=runner, deps=deps)
+    if persisted_summary:
+        return resolve_session_config_snapshot(summary_payload=persisted_summary)
+
+    return {}
 
 
 def get_run_state(run_id: str, ticker: str, date: str, deps: RunControlDeps):
@@ -609,8 +751,8 @@ async def restart_run(run_id: str, ticker: str, date: str, deps: RunControlDeps)
             409, "Cannot restart while run is active. Pause/stop first."
         )
 
-    restart_config = getattr(runner, "_restart_session_config", None)
-    if not isinstance(restart_config, dict):
+    restart_config = _resolve_restart_session_config(runner=runner, deps=deps)
+    if not restart_config:
         raise HTTPException(
             409, "Run cannot be restarted (missing session config snapshot)."
         )
@@ -867,7 +1009,7 @@ def get_run_summary(run_id: str, ticker: str, date: str, deps: RunControlDeps):
 
 def get_run_summary_db(run_id: str, ticker: str, date: str, deps: RunControlDeps):
     run_key = deps.run_registry.build_key(run_id, ticker, date)
-    
+
     # Check RAM first
     runner = deps.active_runners.get(run_key)
     if runner is not None:
@@ -879,7 +1021,17 @@ def get_run_summary_db(run_id: str, ticker: str, date: str, deps: RunControlDeps
         try:
             db_result = store.get_run_summary(run_key=run_key)
             if db_result and "summary" in db_result:
-                return db_result["summary"]
+                summary = (
+                    db_result["summary"]
+                    if isinstance(db_result.get("summary"), dict)
+                    else {}
+                )
+                return _hydrate_persisted_run_summary(
+                    summary=summary,
+                    run_key=run_key,
+                    report_store=store,
+                    logger=deps.logger,
+                )
         except Exception as exc:
             deps.logger.error("Failed to read run summary from DB for %s: %s", run_key, exc)
 

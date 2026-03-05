@@ -11,6 +11,7 @@ class ExecutionPayloadInputs:
     request: Any
     execution_cfg: Dict[str, Any]
     aos_applied: Dict[str, Any]
+    control_plane_snapshot: Dict[str, Any]
     momentum_diversification_source: str
     effective_momentum_diversification: Optional[Dict[str, Any]]
     effective_intrabar_execution_recalc_1s: bool
@@ -36,6 +37,29 @@ class ExecutionPayloadInputs:
 class ExecutionPayloadResult:
     execution_config_payload: Dict[str, Any]
     l2_applied_payload: Dict[str, Any]
+
+
+def _apply_control_plane_snapshot(
+    *,
+    execution_config_payload: Dict[str, Any],
+    execution_cfg: Dict[str, Any],
+    control_plane_snapshot: Dict[str, Any],
+) -> None:
+    config_fingerprint = str(execution_cfg.get("config_fingerprint") or "").strip()
+    if config_fingerprint:
+        execution_config_payload["config_fingerprint"] = config_fingerprint
+
+    snapshot = (
+        dict(control_plane_snapshot)
+        if isinstance(control_plane_snapshot, dict)
+        else {}
+    )
+    if not snapshot:
+        return
+    execution_config_payload["control_plane_snapshot"] = snapshot
+    aos_applied_fingerprint = str(snapshot.get("aos_applied_fingerprint") or "").strip()
+    if aos_applied_fingerprint:
+        execution_config_payload["aos_applied_fingerprint"] = aos_applied_fingerprint
 
 
 def _build_l2_thresholds(execution_cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -942,6 +966,11 @@ def build_execution_payload(
     _apply_optional_execution_limits(
         execution_config_payload=execution_config_payload,
         execution_cfg=execution_cfg,
+    )
+    _apply_control_plane_snapshot(
+        execution_config_payload=execution_config_payload,
+        execution_cfg=execution_cfg,
+        control_plane_snapshot=inputs.control_plane_snapshot,
     )
     _apply_effective_profile_metadata(
         execution_config_payload=execution_config_payload,

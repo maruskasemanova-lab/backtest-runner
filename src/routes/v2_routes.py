@@ -3,18 +3,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import io
 import json
 import logging
 import os
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Dict, Optional, Tuple
-from urllib.parse import urlparse
 from uuid import uuid4
 
-import pandas as pd
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -39,6 +36,21 @@ from src.security.network_policy import (
 from src.services.saas_service import V2Services, resolve_plan_limits
 from src.services.adaptive_tuner_orchestration_service import (
     run_adaptive_tuner as service_run_adaptive_tuner,
+)
+from src.services.user_dataset_utils import (
+    DatasetInputError as _DatasetInputError,
+    default_user_dataset_s3_path as _default_user_dataset_s3_path,
+    format_user_dataset as _format_user_dataset,
+    is_http_remote_locator as _is_http_remote_locator,
+    normalize_dataset_format as _normalize_dataset_format_impl,
+    normalize_dataset_identifier as _normalize_dataset_identifier_impl,
+    normalize_dataset_status as _normalize_dataset_status_impl,
+    parse_s3_locator as _parse_s3_locator,
+    read_csv_upload_frame as _read_csv_upload_frame,
+    request_prefers_local_user_datasets as _request_prefers_local_user_datasets,
+    user_dataset_local_cache_path as _user_dataset_local_cache_path,
+    user_dataset_storage_mode as _user_dataset_storage_mode,
+    user_dataset_upload_max_bytes as _user_dataset_upload_max_bytes,
 )
 
 router = APIRouter(prefix="/api/v2")
@@ -106,6 +118,16 @@ class V2AdaptiveStrategyProfileRequest(BaseModel):
 def _request_id(request: Request) -> str:
     candidate = str(request.headers.get("x-request-id") or "").strip()
     return candidate if candidate else uuid4().hex
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace(
+        "+00:00", "Z"
+    )
 
 
 def _detail(
@@ -596,7 +618,7 @@ def _to_utc_iso_from_unix(value: Any) -> Optional[str]:
         return token or None
     if parsed <= 0:
         return None
-    return datetime.utcfromtimestamp(parsed).replace(microsecond=0).isoformat() + "Z"
+    return _utc_iso(datetime.fromtimestamp(parsed, timezone.utc))
 
 
 def _to_bool(value: Any) -> bool:
@@ -609,12 +631,7 @@ def _to_bool(value: Any) -> bool:
 def _grace_until_iso(*, now_ts: float, days: int) -> Optional[str]:
     if days <= 0:
         return None
-    return (
-        datetime.utcfromtimestamp(now_ts + (days * 86400))
-        .replace(microsecond=0)
-        .isoformat()
-        + "Z"
-    )
+    return _utc_iso(datetime.fromtimestamp(now_ts + (days * 86400), timezone.utc))
 
 
 def _as_object(value: Any) -> Dict[str, Any]:
@@ -805,7 +822,7 @@ def get_v2_services(request: Request) -> V2Services:
 
 def _maybe_apply_retention_cleanup(*, auth: AuthContext, services: V2Services) -> None:
     limits = resolve_plan_limits(auth.plan_tier)
-    day_key = datetime.utcnow().date().isoformat()
+    day_key = _utc_now().date().isoformat()
     marker_key = f"{auth.user_id}:{limits.retention_days}"
     if services.retention_cleanup_markers.get(marker_key) == day_key:
         return
@@ -905,7 +922,7 @@ def _quota_snapshot(*, auth: AuthContext, services: V2Services) -> Dict[str, Any
         job_types=HEAVY_JOB_TYPES,
     )
     return {
-        "day_key": datetime.utcnow().date().isoformat(),
+        "day_key": _utc_now().date().isoformat(),
         "limits": {
             "concurrent_runs": limits.concurrent_runs,
             "max_range_days": limits.max_range_days,
@@ -943,47 +960,17 @@ def _normalize_dataset_identifier(
     *,
     request_id: str,
 ) -> Optional[str]:
-    token = str(value or "").strip()
-    if not token:
-        return None
-    if len(token) > 128:
-        _raise(
-            400,
-            code="invalid_dataset_id",
-            message="dataset_id must be <= 128 characters",
-            request_id=request_id,
-        )
-    for ch in token:
-        if ch.isalnum() or ch in {"-", "_", "."}:
-            continue
-        _raise(
-            400,
-            code="invalid_dataset_id",
-            message="dataset_id contains invalid characters",
-            request_id=request_id,
-        )
-    return token
+    try:
+        return _normalize_dataset_identifier_impl(value)
+    except _DatasetInputError as exc:
+        _raise(400, code=exc.code, message=exc.message, request_id=request_id)
 
 
 def _normalize_dataset_status(value: Any, *, request_id: str) -> str:
-    token = str(value or "").strip().lower() or "ready"
-    if len(token) > 32:
-        _raise(
-            400,
-            code="invalid_dataset_status",
-            message="status must be <= 32 characters",
-            request_id=request_id,
-        )
-    for ch in token:
-        if ch.isalnum() or ch in {"-", "_"}:
-            continue
-        _raise(
-            400,
-            code="invalid_dataset_status",
-            message="status contains invalid characters",
-            request_id=request_id,
-        )
-    return token
+    try:
+        return _normalize_dataset_status_impl(value)
+    except _DatasetInputError as exc:
+        _raise(400, code=exc.code, message=exc.message, request_id=request_id)
 
 
 def _normalize_dataset_format(
@@ -992,159 +979,10 @@ def _normalize_dataset_format(
     request_id: str,
     default: Optional[str] = "parquet",
 ) -> Optional[str]:
-    token = str(value or "").strip().lower()
-    if not token:
-        token = str(default or "").strip().lower()
-    if not token:
-        return None
-    if len(token) > 32:
-        _raise(
-            400,
-            code="invalid_dataset_format",
-            message="file format must be <= 32 characters",
-            request_id=request_id,
-        )
-    for ch in token:
-        if ch.isalnum() or ch in {"-", "_"}:
-            continue
-        _raise(
-            400,
-            code="invalid_dataset_format",
-            message="file format contains invalid characters",
-            request_id=request_id,
-        )
-    return token
-
-
-def _storage_path_segment(value: Any, *, default: str) -> str:
-    token = str(value or "").strip()
-    if not token:
-        return default
-    cleaned = "".join(
-        ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in token
-    ).strip("._")
-    return cleaned or default
-
-
-def _default_user_dataset_s3_path(
-    *,
-    user_id: str,
-    dataset_id: str,
-    file_format: str,
-    prefer_remote: bool = True,
-) -> str:
-    ext = _storage_path_segment(file_format, default="parquet").lower()
-    safe_user_id = _storage_path_segment(user_id, default="user")
-    safe_dataset_id = _storage_path_segment(dataset_id, default="dataset")
-    object_key = f"users/{safe_user_id}/datasets/{safe_dataset_id}.{ext}"
-    if not prefer_remote:
-        return object_key
-    bucket = str(os.getenv("BACKTEST_USER_DATASETS_BUCKET") or "").strip().rstrip("/")
-    if not bucket:
-        return object_key
-    if "://" in bucket:
-        return f"{bucket}/{object_key}"
-    return f"s3://{bucket}/{object_key}"
-
-
-def _format_user_dataset(dataset: Dict[str, Any]) -> Dict[str, Any]:
-    payload = dataset if isinstance(dataset, dict) else {}
-    return {
-        "dataset_id": str(payload.get("dataset_id") or ""),
-        "user_id": str(payload.get("user_id") or ""),
-        "tenant_id": str(payload.get("tenant_id") or ""),
-        "dataset_name": str(payload.get("dataset_name") or ""),
-        "source_filename": str(payload.get("source_filename") or "") or None,
-        "s3_path": str(payload.get("s3_path") or ""),
-        "status": str(payload.get("status") or ""),
-        "file_format": str(payload.get("file_format") or ""),
-        "source_format": str(payload.get("source_format") or "") or None,
-        "row_count": (
-            None
-            if payload.get("row_count") is None
-            else int(payload.get("row_count") or 0)
-        ),
-        "size_bytes": (
-            None
-            if payload.get("size_bytes") is None
-            else int(payload.get("size_bytes") or 0)
-        ),
-        "schema_name": str(payload.get("schema_name") or "") or None,
-        "metadata": (
-            payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-        ),
-        "created_at": payload.get("created_at"),
-        "updated_at": payload.get("updated_at"),
-    }
-
-
-def _user_datasets_local_cache_dir() -> Path:
-    configured = str(
-        os.getenv("BACKTEST_USER_DATASETS_LOCAL_CACHE_DIR") or "data/user_datasets"
-    ).strip()
-    base = Path(configured) if configured else Path("data/user_datasets")
-    if not base.is_absolute():
-        base = (Path.cwd() / base).resolve()
-    base.mkdir(parents=True, exist_ok=True)
-    return base
-
-
-def _user_dataset_local_cache_path(*, user_id: str, dataset_id: str) -> Path:
-    safe_user_id = _storage_path_segment(user_id, default="user")
-    safe_dataset_id = _storage_path_segment(dataset_id, default="dataset")
-    target = _user_datasets_local_cache_dir() / safe_user_id / f"{safe_dataset_id}.parquet"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    return target
-
-
-def _user_dataset_upload_max_bytes() -> int:
-    raw = os.getenv("BACKTEST_USER_DATASET_UPLOAD_MAX_BYTES")
     try:
-        parsed = int(str(raw).strip()) if raw is not None else 25 * 1024 * 1024
-    except Exception:
-        parsed = 25 * 1024 * 1024
-    return max(1, parsed)
-
-
-def _is_http_remote_locator(locator: str) -> bool:
-    scheme = str(urlparse(str(locator or "").strip()).scheme or "").strip().lower()
-    return scheme in {"http", "https"}
-
-
-def _user_dataset_storage_mode() -> str:
-    mode = str(os.getenv("BACKTEST_USER_DATASETS_STORAGE_MODE") or "auto").strip().lower()
-    if mode in {"local", "remote"}:
-        return mode
-    return "auto"
-
-
-def _request_prefers_local_user_datasets(request: Optional[Request]) -> bool:
-    mode = _user_dataset_storage_mode()
-    if mode == "local":
-        return True
-    if mode == "remote":
-        return False
-    host = ""
-    if request is not None:
-        try:
-            host = str(request.url.hostname or "").strip().lower()
-        except Exception:
-            host = ""
-    if host in {"", "localhost", "127.0.0.1", "::1", "0.0.0.0", "testserver"}:
-        return True
-    bucket = str(os.getenv("BACKTEST_USER_DATASETS_BUCKET") or "").strip()
-    return not bool(bucket)
-
-
-def _parse_s3_locator(locator: str) -> Optional[Tuple[str, str]]:
-    parsed = urlparse(str(locator or "").strip())
-    if parsed.scheme.lower() != "s3":
-        return None
-    bucket = str(parsed.netloc or "").strip()
-    key = str(parsed.path or "").lstrip("/")
-    if not bucket or not key:
-        return None
-    return bucket, key
+        return _normalize_dataset_format_impl(value, default=default)
+    except _DatasetInputError as exc:
+        _raise(400, code=exc.code, message=exc.message, request_id=request_id)
 
 
 def _build_user_dataset_s3_client():
@@ -1295,7 +1133,7 @@ def _persist_user_dataset_local_cache_metadata(
         {
             "local_cache_path": str(local_parquet_path),
             "storage_mode": str(storage_mode or "").strip() or "local_cache",
-            "hydrated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+            "hydrated_at": _utc_iso(_utc_now()),
         }
     )
     metadata["ingest"] = ingest
@@ -1316,31 +1154,6 @@ def _persist_user_dataset_local_cache_metadata(
     )
 
 
-def _read_csv_upload_frame(
-    *,
-    body: bytes,
-    encoding: str,
-    delimiter: str,
-) -> pd.DataFrame:
-    raw_encoding = str(encoding or "").strip() or "utf-8"
-    raw_delimiter = str(delimiter or ",")
-    if len(raw_delimiter) != 1:
-        raise ValueError("delimiter must be a single character")
-    if not body:
-        raise ValueError("CSV payload is empty")
-    try:
-        text = body.decode(raw_encoding)
-    except Exception as exc:
-        raise ValueError(
-            f"Unable to decode CSV payload with encoding '{raw_encoding}'"
-        ) from exc
-    try:
-        frame = pd.read_csv(io.StringIO(text), sep=raw_delimiter)
-    except Exception as exc:
-        raise ValueError(f"Unable to parse CSV payload: {exc}") from exc
-    if frame is None:
-        raise ValueError("Unable to parse CSV payload")
-    return frame
 
 
 def _enforce_user_dataset_access(
@@ -2221,7 +2034,7 @@ async def v2_upload_user_dataset_csv(
             "delimiter": str(delimiter or ","),
             "storage_mode": storage_mode,
             "local_cache_path": str(local_parquet_path),
-            "uploaded_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+            "uploaded_at": _utc_iso(_utc_now()),
         }
     )
     existing_metadata["ingest"] = ingest_metadata
@@ -2323,7 +2136,7 @@ async def v2_ops_metrics(
         "request_id": req_id,
         "tenant_id": auth.tenant_id,
         "plan_tier": auth.plan_tier,
-        "timestamp_utc": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "timestamp_utc": _utc_iso(_utc_now()),
         "queue": {
             "queued_heavy_jobs": int(queued_heavy),
             "running_heavy_jobs": int(running_heavy),

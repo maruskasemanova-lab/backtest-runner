@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from src.services.run_config_snapshot_service import build_resolved_config_snapshot
+
 
 NormalizeSelectionWarnings = Callable[[Any], List[str]]
 MergeSelectionWarnings = Callable[..., List[str]]
@@ -173,10 +175,12 @@ def build_summary_payload(
     markers: List[Dict[str, Any]],
     session_summary: Optional[Dict[str, Any]],
     report_metadata: Dict[str, Any],
+    control_plane_snapshot: Dict[str, Any],
     aos_applied: Dict[str, Any],
     execution_config: Dict[str, Any],
     run_request_config: Dict[str, Any],
     l2_applied: Dict[str, Any],
+    session_config_snapshot: Dict[str, Any],
     checkpoint_loaded: Any,
     to_json_safe: ToJsonSafe,
     normalize_profile_token: NormalizeProfileToken,
@@ -197,6 +201,8 @@ def build_summary_payload(
         report_metadata=report_metadata,
         normalize_profile_token=normalize_profile_token,
     )
+    if control_plane_snapshot:
+        payload["control_plane_snapshot"] = to_json_safe(dict(control_plane_snapshot))
     if aos_applied:
         payload["aos_applied"] = dict(aos_applied)
     if execution_config:
@@ -205,6 +211,21 @@ def build_summary_payload(
         payload["run_request_config"] = to_json_safe(dict(run_request_config))
     if l2_applied:
         payload["l2_applied"] = dict(l2_applied)
+    resolved_config_snapshot = build_resolved_config_snapshot(
+        run_id=run_id,
+        ticker=ticker,
+        date_label=date,
+        report_metadata=report_metadata,
+        control_plane_snapshot=control_plane_snapshot,
+        aos_applied=aos_applied,
+        execution_config=execution_config,
+        run_request_config=run_request_config,
+        l2_applied=l2_applied,
+        session_config_snapshot=session_config_snapshot,
+        to_json_safe=to_json_safe,
+    )
+    if resolved_config_snapshot:
+        payload["resolved_config_snapshot"] = resolved_config_snapshot
     apply_strategy_reset_metadata(payload)
     if checkpoint_loaded is not None:
         payload["checkpoint_loaded"] = to_json_safe(checkpoint_loaded)

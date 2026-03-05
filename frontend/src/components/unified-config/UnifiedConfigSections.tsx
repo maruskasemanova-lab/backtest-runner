@@ -86,11 +86,8 @@ export function UnifiedConfigSections({
         data-section-id="risk_sizing"
       >
         <SectionHeader {...sectionMeta.risk_sizing} />
-        <fieldset
-          disabled={readOnly}
-          style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
-        >
-          <div className="flex flex-col gap-4 run-config-form">
+        <fieldset disabled={readOnly} className="ui-fieldset-reset">
+          <div className="ui-form-stack run-config-form">
             <ExecutionSizingPanel config={config} handleChange={handleChange} />
             <StopLossAndBreakEvenPanel
               config={config}
@@ -106,19 +103,13 @@ export function UnifiedConfigSections({
         data-section-id="exit_management"
       >
         <SectionHeader {...sectionMeta.exit_management} />
-        <fieldset
-          disabled={readOnly}
-          style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
-        >
-          <div className="flex flex-col gap-4 run-config-form">
+        <fieldset disabled={readOnly} className="ui-fieldset-reset">
+          <div className="ui-form-stack run-config-form">
             <PartialTakeProfitPanel
               config={config}
               handleChange={handleChange}
             />
-            <AdverseFlowExitPanel
-              config={config}
-              handleChange={handleChange}
-            />
+            <AdverseFlowExitPanel config={config} handleChange={handleChange} />
           </div>
         </fieldset>
       </div>
@@ -129,11 +120,8 @@ export function UnifiedConfigSections({
         data-section-id="order_flow"
       >
         <SectionHeader {...sectionMeta.order_flow} />
-        <fieldset
-          disabled={readOnly}
-          style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
-        >
-          <div className="flex flex-col gap-4 run-config-form">
+        <fieldset disabled={readOnly} className="ui-fieldset-reset">
+          <div className="ui-form-stack run-config-form">
             <OrderFlowSettings
               config={config}
               handleChange={handleChange}
@@ -152,18 +140,15 @@ export function UnifiedConfigSections({
         data-section-id="regime_market"
       >
         <SectionHeader {...sectionMeta.regime_market} />
-        <fieldset
-          disabled={readOnly}
-          style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
-        >
-          <div className="flex flex-col gap-4 run-config-form">
+        <fieldset disabled={readOnly} className="ui-fieldset-reset">
+          <div className="ui-form-stack run-config-form">
             <div className="tw-panel">
               <div className="tw-panel-title">Regime Detection</div>
               <div className="tw-panel-hint">
-                How frequently the market regime is re-evaluated and which regimes
-                are allowed for trading.
+                How frequently the market regime is re-evaluated and which
+                regimes are allowed for trading.
               </div>
-              <div className="tw-grid-fit-190" style={{ marginTop: 8 }}>
+              <div className="tw-grid-fit-190 ui-mt-sm">
                 <div className="form-group">
                   <label htmlFor="regime_minutes_uc">
                     Regime Detection (min)
@@ -182,18 +167,9 @@ export function UnifiedConfigSections({
                   />
                 </div>
               </div>
-              <div
-                className="form-group"
-                style={{ marginTop: 8 }}
-              >
+              <div className="form-group ui-mt-sm">
                 <label>Allowed Regimes (Override)</label>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "12px",
-                    marginTop: "4px",
-                  }}
-                >
+                <div className="unified-config-choice-row ui-mt-xs">
                   {["TRENDING", "CHOPPY", "MIXED"].map((regime) => {
                     const isChecked = (config.regime_filter || []).includes(
                       regime,
@@ -201,13 +177,7 @@ export function UnifiedConfigSections({
                     return (
                       <label
                         key={`uc-${regime}`}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          fontSize: "0.85rem",
-                          cursor: "pointer",
-                        }}
+                        className="unified-config-choice"
                       >
                         <input
                           type="checkbox"
@@ -225,13 +195,7 @@ export function UnifiedConfigSections({
                     );
                   })}
                 </div>
-                <div
-                  style={{
-                    color: "var(--text-muted)",
-                    fontSize: "0.78rem",
-                    marginTop: "4px",
-                  }}
-                >
+                <div className="ui-form-help ui-mt-xs">
                   Leave all unchecked to allow ALL regimes.
                 </div>
               </div>
@@ -250,14 +214,11 @@ export function UnifiedConfigSections({
         data-section-id="general"
       >
         <SectionHeader {...sectionMeta.general} />
-        <fieldset
-          disabled={readOnly}
-          style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
-        >
-          <div className="flex flex-col gap-4 run-config-form">
+        <fieldset disabled={readOnly} className="ui-fieldset-reset">
+          <div className="ui-form-stack run-config-form">
             <div className="tw-panel">
               <div className="tw-panel-title">Account</div>
-              <div className="tw-grid-fit-190" style={{ marginTop: 8 }}>
+              <div className="tw-grid-fit-190 ui-mt-sm">
                 <div className="form-group">
                   <label htmlFor="account_size_usd_uc">
                     Account Size (USD)
@@ -269,10 +230,7 @@ export function UnifiedConfigSections({
                     step="100"
                     value={config.account_size_usd ?? ""}
                     onChange={(e) =>
-                      handleChange(
-                        "account_size_usd",
-                        Number(e.target.value),
-                      )
+                      handleChange("account_size_usd", Number(e.target.value))
                     }
                   />
                 </div>
@@ -377,10 +335,7 @@ function ActiveProfileViewer({
   if (!hasPayload) {
     return (
       <div className="tw-panel">
-        <div
-          className="text-sm text-slate-500 italic"
-          style={{ padding: "16px" }}
-        >
+        <div className="ui-note ui-note-compact unified-config-empty">
           {summary
             ? `No unified profile payload loaded for ${summary}.`
             : "No active unified profile selected."}
@@ -390,8 +345,8 @@ function ActiveProfileViewer({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="text-xs text-slate-400">
+    <div className="ui-form-stack">
+      <div className="ui-form-help">
         {summary
           ? `Using unified profile: ${summary}`
           : "Using unified profile: unresolved"}
@@ -400,7 +355,7 @@ function ActiveProfileViewer({
       {Object.keys(currentExecutionProfile).length > 0 && (
         <div className="tw-panel">
           <div className="tw-panel-title">Execution & Positioning</div>
-          <div className="tw-grid-fit-190" style={{ marginTop: "12px" }}>
+          <div className="tw-grid-fit-190 ui-mt-md">
             {Object.entries(currentExecutionProfile).map(
               ([key, value]: any) => {
                 if (key === "positioning" && typeof value === "object")
@@ -421,10 +376,7 @@ function ActiveProfileViewer({
       {Object.keys(currentStrategyParams).length > 0 && (
         <div className="tw-panel">
           <div className="tw-panel-title">Strategy Parameters</div>
-          <div
-            className="flex flex-col gap-6"
-            style={{ marginTop: "12px" }}
-          >
+          <div className="ui-stack-lg ui-mt-md">
             {Object.entries(currentStrategyParams).map(
               ([strategyName, params]: any) => (
                 <div key={strategyName}>
@@ -473,7 +425,7 @@ function renderProfileField(
     return (
       <div className="form-group" key={key}>
         <label className="field-row" htmlFor={id}>
-          <span style={{ textTransform: "capitalize" }}>{label}</span>
+          <span className="ui-field-capitalize">{label}</span>
           <input
             id={id}
             type="checkbox"
@@ -488,7 +440,7 @@ function renderProfileField(
 
   return (
     <div className="form-group" key={key}>
-      <label htmlFor={id} style={{ textTransform: "capitalize" }}>
+      <label htmlFor={id} className="ui-field-capitalize">
         {label}
       </label>
       <input

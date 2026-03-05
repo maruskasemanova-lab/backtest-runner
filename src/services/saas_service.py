@@ -44,6 +44,7 @@ from src.services.saas_supabase_store import (
     SupabaseUserDatasetsStore,
     SupabaseUserSettingsStore,
 )
+from src.services.run_config_snapshot_service import build_resolved_config_snapshot_id
 
 
 class UserSettingsStore(Protocol):
@@ -77,6 +78,20 @@ class RunReportsStore(Protocol):
         *,
         limit: int = 300,
     ) -> list[Dict[str, Any]]: ...
+
+    def upsert_run_config_snapshot(
+        self,
+        *,
+        run_key: str,
+        snapshot: Dict[str, Any],
+    ) -> Dict[str, Any]: ...
+
+    def get_run_config_snapshot(
+        self,
+        *,
+        snapshot_id: Optional[str] = None,
+        run_key: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]: ...
 
 
 class RunStateMirror(Protocol):
@@ -234,6 +249,14 @@ class SaaSStateStore:
                 CREATE TABLE IF NOT EXISTS run_summaries (
                     run_key TEXT PRIMARY KEY,
                     summary_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS run_config_snapshots (
+                    snapshot_id TEXT PRIMARY KEY,
+                    run_key TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -397,6 +420,8 @@ class SaaSStateStore:
                     ON user_datasets(user_id, status, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_run_summaries_updated
                     ON run_summaries(updated_at);
+                CREATE INDEX IF NOT EXISTS idx_run_config_snapshots_run_key_updated
+                    ON run_config_snapshots(run_key, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_billing_audit_user_created
                     ON billing_audit_events(user_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_adaptive_profiles_scope_owner
@@ -828,6 +853,106 @@ class SaaSStateStore:
                 }
             )
         return payload_rows
+
+    def upsert_run_config_snapshot(
+        self,
+        *,
+        run_key: str,
+        snapshot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        normalized_run_key = str(run_key or "").strip()
+        if not normalized_run_key:
+            raise ValueError("run_key is required")
+        normalized_snapshot = normalize_run_summary_payload(snapshot)
+        snapshot_id = build_resolved_config_snapshot_id(
+            run_key=normalized_run_key,
+            snapshot=normalized_snapshot,
+        )
+        serialized = payload_json_dumps_compact(normalized_snapshot)
+        now = utc_now_iso()
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute(
+                "SELECT created_at FROM run_config_snapshots WHERE snapshot_id = ?",
+                (snapshot_id,),
+            ).fetchone()
+            created_at = (
+                str(row["created_at"]).strip()
+                if row is not None and row["created_at"]
+                else now
+            )
+            cur.execute(
+                """
+                INSERT INTO run_config_snapshots(
+                    snapshot_id,
+                    run_key,
+                    payload_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES(?, ?, ?, ?, ?)
+                ON CONFLICT(snapshot_id) DO UPDATE SET
+                    run_key=excluded.run_key,
+                    payload_json=excluded.payload_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    snapshot_id,
+                    normalized_run_key,
+                    serialized,
+                    created_at,
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return {
+            "snapshot_id": snapshot_id,
+            "run_key": normalized_run_key,
+            "payload": normalized_snapshot,
+            "updated_at": now,
+        }
+
+    def get_run_config_snapshot(
+        self,
+        *,
+        snapshot_id: Optional[str] = None,
+        run_key: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        normalized_snapshot_id = str(snapshot_id or "").strip()
+        normalized_run_key = str(run_key or "").strip()
+        if not normalized_snapshot_id and not normalized_run_key:
+            return None
+        with self._lock:
+            cur = self._conn.cursor()
+            if normalized_snapshot_id:
+                row = cur.execute(
+                    """
+                    SELECT snapshot_id, run_key, payload_json, updated_at
+                    FROM run_config_snapshots
+                    WHERE snapshot_id = ?
+                    LIMIT 1
+                    """,
+                    (normalized_snapshot_id,),
+                ).fetchone()
+            else:
+                row = cur.execute(
+                    """
+                    SELECT snapshot_id, run_key, payload_json, updated_at
+                    FROM run_config_snapshots
+                    WHERE run_key = ?
+                    ORDER BY updated_at DESC, snapshot_id DESC
+                    LIMIT 1
+                    """,
+                    (normalized_run_key,),
+                ).fetchone()
+        if row is None:
+            return None
+        return {
+            "snapshot_id": str(row["snapshot_id"] or normalized_snapshot_id),
+            "run_key": str(row["run_key"] or normalized_run_key),
+            "payload": self._decode_json(row["payload_json"]),
+            "updated_at": row["updated_at"],
+        }
 
     def list_daily_price_heatmap_rows(
         self,

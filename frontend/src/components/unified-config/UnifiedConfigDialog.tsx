@@ -130,15 +130,15 @@ export function UnifiedConfigDialog({
       ? onMomentumSleeveChange
       : () => {};
   const safeOnAddMomentumSleeve =
-    typeof onAddMomentumSleeve === "function"
-      ? onAddMomentumSleeve
-      : () => {};
+    typeof onAddMomentumSleeve === "function" ? onAddMomentumSleeve : () => {};
   const safeOnRemoveMomentumSleeve =
     typeof onRemoveMomentumSleeve === "function"
       ? onRemoveMomentumSleeve
       : () => {};
 
-  const ticker = String(selectedTicker || "").trim().toUpperCase();
+  const ticker = String(selectedTicker || "")
+    .trim()
+    .toUpperCase();
   const apiUrl = String(strategyApiUrl || "http://localhost:8001").replace(
     /\/+$/,
     "",
@@ -151,46 +151,38 @@ export function UnifiedConfigDialog({
     ? snapshotSections
         .filter(
           (s) =>
-            isPlainRecord(s?.config) &&
-            Object.keys(s.config || {}).length > 0,
+            isPlainRecord(s?.config) && Object.keys(s.config || {}).length > 0,
         )
         .map((s) => ({
           title: String(s?.title || "Snapshot"),
           config: s?.config || {},
-          description:
-            typeof s?.description === "string" ? s.description : "",
+          description: typeof s?.description === "string" ? s.description : "",
         }))
     : [];
-  const isSnapshotMode = Boolean(
-    readOnly && normalizedSnapshotSections.length,
-  );
+  const isSnapshotMode = Boolean(readOnly && normalizedSnapshotSections.length);
 
-  const resolvedTitle = title || (isSnapshotMode
-    ? "Run Config Snapshot"
-    : `Strategy Configuration${ticker ? ` \u2014 ${ticker}` : ""}`);
-  const resolvedSubtitle = subtitle || (isSnapshotMode
-    ? "Read-only configuration captured for this run."
-    : "All settings organized by trading impact. Most important settings are at the top.");
+  const resolvedTitle =
+    title ||
+    (isSnapshotMode
+      ? "Run Config Snapshot"
+      : `Strategy Configuration${ticker ? ` \u2014 ${ticker}` : ""}`);
+  const resolvedSubtitle =
+    subtitle ||
+    (isSnapshotMode
+      ? "Read-only configuration captured for this run."
+      : "All settings organized by trading impact. Most important settings are at the top.");
 
   return createPortal(
-    <div
-      className="unified-config-overlay"
-      onClick={onClose}
-    >
+    <div className="unified-config-overlay" onClick={onClose}>
       <div
         className="unified-config-shell card"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div
-          className="card-header flex justify-between items-center"
-          style={{ padding: "16px 24px" }}
-        >
+        <div className="card-header flex justify-between items-center unified-config-dialog-header">
           <div>
             <h2 className="card-title text-lg">{resolvedTitle}</h2>
-            <div className="text-xs text-gray-400 mt-1">
-              {resolvedSubtitle}
-            </div>
+            <div className="text-xs text-gray-400 mt-1">{resolvedSubtitle}</div>
           </div>
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             {isSnapshotMode ? "Close" : "Close / Done"}
@@ -199,10 +191,7 @@ export function UnifiedConfigDialog({
 
         {/* Body */}
         {isSnapshotMode ? (
-          <div
-            className="card-body flex-1 overflow-y-auto"
-            style={{ padding: "24px" }}
-          >
+          <div className="card-body flex-1 overflow-y-auto unified-config-snapshot-body">
             <SnapshotContent sections={normalizedSnapshotSections} />
           </div>
         ) : (
@@ -212,10 +201,7 @@ export function UnifiedConfigDialog({
               activeSectionId={nav.activeSectionId}
               onSectionClick={nav.scrollToSection}
             />
-            <div
-              ref={nav.contentRef}
-              className="unified-config-content"
-            >
+            <div ref={nav.contentRef} className="unified-config-content">
               <UnifiedConfigSections
                 config={safeConfig}
                 handleChange={safeHandleChange}
@@ -259,7 +245,7 @@ function SnapshotContent({ sections }: { sections: SnapshotSection[] }) {
               </div>
             ) : null}
             {entries.length ? (
-              <div className="tw-grid-fit-190" style={{ marginTop: "12px" }}>
+              <div className="tw-grid-fit-190 ui-mt-md">
                 {entries.map((entry) =>
                   renderSnapshotField(entry, `snapshot-${index}`),
                 )}
@@ -284,7 +270,7 @@ function renderSnapshotField(entry: SnapshotEntry, fieldPrefix: string) {
     return (
       <div className="form-group" key={`${fieldPrefix}-${entry.key}`}>
         <label className="field-row" htmlFor={fieldId}>
-          <span style={{ textTransform: "capitalize" }}>{formattedLabel}</span>
+          <span className="ui-field-capitalize">{formattedLabel}</span>
           <input
             id={fieldId}
             type="checkbox"
@@ -300,7 +286,7 @@ function renderSnapshotField(entry: SnapshotEntry, fieldPrefix: string) {
   if (entry.kind === "complex") {
     return (
       <div className="form-group" key={`${fieldPrefix}-${entry.key}`}>
-        <label htmlFor={fieldId} style={{ textTransform: "capitalize" }}>
+        <label htmlFor={fieldId} className="ui-field-capitalize">
           {formattedLabel}
         </label>
         <textarea
@@ -309,10 +295,7 @@ function renderSnapshotField(entry: SnapshotEntry, fieldPrefix: string) {
           rows={entry.rows}
           disabled
           readOnly
-          style={{
-            background: "rgba(15, 23, 42, 0.5)",
-            fontFamily: "var(--font-mono)",
-          }}
+          className="ui-code-field"
         />
       </div>
     );
@@ -320,7 +303,7 @@ function renderSnapshotField(entry: SnapshotEntry, fieldPrefix: string) {
 
   return (
     <div className="form-group" key={`${fieldPrefix}-${entry.key}`}>
-      <label htmlFor={fieldId} style={{ textTransform: "capitalize" }}>
+      <label htmlFor={fieldId} className="ui-field-capitalize">
         {formattedLabel}
       </label>
       <input
@@ -329,10 +312,7 @@ function renderSnapshotField(entry: SnapshotEntry, fieldPrefix: string) {
         value={entry.textValue}
         disabled
         readOnly
-        style={{
-          background: "rgba(15, 23, 42, 0.5)",
-          fontFamily: "var(--font-mono)",
-        }}
+        className="ui-code-field"
       />
     </div>
   );

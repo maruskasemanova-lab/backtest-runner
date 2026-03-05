@@ -11,7 +11,6 @@ import {
   MomentumEditorStatus,
   MomentumSleevesSection,
 } from "./AOSOptimizationsMomentumEditorSections";
-import { MOMENTUM_EDITOR_CONTAINER_STYLE } from "./aosOptimizationsMomentumEditorSchema";
 
 type Props = {
   momentumDraft: AOSMomentumDraft;
@@ -51,7 +50,7 @@ export default function AOSOptimizationsMomentumEditor({
   const sleeves = safeArray<AOSMomentumSleeveDraft>(momentumDraft?.sleeves);
 
   return (
-    <div style={MOMENTUM_EDITOR_CONTAINER_STYLE}>
+    <div className="aos-momentum-editor">
       <MomentumEditorHeader />
       <MomentumEditorActionBar
         momentumSaving={momentumSaving}

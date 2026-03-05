@@ -11,12 +11,15 @@ import type {
 export type DecisionPanelDetailLabelOptions = {
   tooltipLabel?: string;
   style?: CSSProperties;
+  className?: string;
   runtimeValue?: unknown;
   runtimeSource?: string;
   runtimeFlow?: string | string[] | null;
 };
 
-export type DecisionPanelDetailLabelArg = string | DecisionPanelDetailLabelOptions;
+export type DecisionPanelDetailLabelArg =
+  | string
+  | DecisionPanelDetailLabelOptions;
 
 export type DecisionPanelRenderDetailLabel = (
   label: string,
@@ -26,11 +29,17 @@ export type DecisionPanelRenderDetailLabel = (
 
 export type DecisionPanelRenderSectionHeader = (title: string) => ReactNode;
 export type DecisionPanelRenderFlag = (flag: unknown) => ReactNode;
-export type DecisionPanelRenderValue = (value: unknown, keyPrefix?: string) => ReactNode;
+export type DecisionPanelRenderValue = (
+  value: unknown,
+  keyPrefix?: string,
+) => ReactNode;
 export type DecisionPanelFormatGenericValue = (value: unknown) => ReactNode;
 export type DecisionPanelRenderReasonValue = (value: unknown) => ReactNode;
 export type DecisionPanelRenderBreakEvenValue = (value: unknown) => ReactNode;
-export type DecisionPanelFormatPctValue = (value: unknown, digits?: number) => ReactNode;
+export type DecisionPanelFormatPctValue = (
+  value: unknown,
+  digits?: number,
+) => ReactNode;
 export type DecisionPanelResolvePnlPct = (
   details: Record<string, unknown>,
   pnlDollars: unknown,
@@ -68,10 +77,12 @@ export type DecisionPanelMarkerLike = {
   id?: unknown;
   ticker?: unknown;
   run_id?: unknown;
-  details?: (Record<string, unknown> & {
-    metadata?: unknown;
-    exit_reason?: unknown;
-  }) | null;
+  details?:
+    | (Record<string, unknown> & {
+        metadata?: unknown;
+        exit_reason?: unknown;
+      })
+    | null;
   [key: string]: unknown;
 };
 
@@ -93,7 +104,9 @@ export type DecisionPanelDetailsLike = Record<string, unknown> & {
 };
 
 export type DecisionPanelDecisionLogLike = DecisionPanelDecisionLogResult;
-export type DecisionPanelDecisionLogPayloadLike = NonNullable<DecisionPanelDecisionLogLike["payload"]>;
+export type DecisionPanelDecisionLogPayloadLike = NonNullable<
+  DecisionPanelDecisionLogLike["payload"]
+>;
 export type DecisionPanelDecisionStateLike = NonNullable<
   DecisionPanelDecisionLogPayloadLike["decision_state"]
 >;
@@ -104,7 +117,9 @@ export type DecisionPanelFlowSnapshotLike = NonNullable<
   DecisionPanelDecisionLogPayloadLike["flow_snapshot"]
 >;
 
-export type DecisionPanelBreakEvenPayloadLike = NonNullable<DecisionPanelBreakEvenResolution["value"]>;
+export type DecisionPanelBreakEvenPayloadLike = NonNullable<
+  DecisionPanelBreakEvenResolution["value"]
+>;
 
 export type DecisionPanelBreakEvenComputedLike = {
   total_costs_pct?: unknown;
@@ -118,7 +133,8 @@ export type DecisionPanelBreakEvenBufferLike = {
 
 export type DecisionPanelL2DiagnosticsLike = DecisionPanelL2DiagnosticsResult;
 export type DecisionPanelIntradayLevelsLike = DecisionPanelIntradayLevelsResult;
-export type DecisionPanelIntradayLevelsStatsLike = DecisionPanelIntradayLevelsLike["stats"];
+export type DecisionPanelIntradayLevelsStatsLike =
+  DecisionPanelIntradayLevelsLike["stats"];
 export type DecisionPanelIntradayLevelsVolumeProfileLike =
   DecisionPanelIntradayLevelsLike["volumeProfile"];
 export type DecisionPanelIntradayLevelsLatestEventLike = NonNullable<
@@ -126,7 +142,8 @@ export type DecisionPanelIntradayLevelsLatestEventLike = NonNullable<
 >;
 
 export type DecisionPanelLevelContextLike = DecisionPanelLevelContextResult;
-export type DecisionPanelLevelContextPayloadLike = DecisionPanelLevelContextLike["payload"];
+export type DecisionPanelLevelContextPayloadLike =
+  DecisionPanelLevelContextLike["payload"];
 export type DecisionPanelLevelContextStatsLike = NonNullable<
   DecisionPanelLevelContextPayloadLike["stats"]
 >;
@@ -134,6 +151,7 @@ export type DecisionPanelLevelContextVolumeProfileLike = NonNullable<
   DecisionPanelLevelContextPayloadLike["volume_profile"]
 >;
 
-export type DecisionPanelEntryQualityDiagnosticsLike = DecisionPanelEntryQualityDiagnosticsResult;
+export type DecisionPanelEntryQualityDiagnosticsLike =
+  DecisionPanelEntryQualityDiagnosticsResult;
 export type DecisionPanelEntryQualityDiagnosticsPayloadLike =
   DecisionPanelEntryQualityDiagnosticsLike["payload"];

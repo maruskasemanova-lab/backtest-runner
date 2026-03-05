@@ -5,6 +5,7 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from src.services.run_config_snapshot_service import resolve_session_config_snapshot
 from src.services.session_runner_models import Err, Ok, Result
 from src.services.session_runner_payload_validator import ValidateStrategyBarPayload
 from src.services.session_runner_payload_utils import (
@@ -69,10 +70,17 @@ class StrategySessionRecoveryHelper:
         return token
 
     @staticmethod
-    def resolve_config_snapshot(restart_session_config: Any) -> Dict[str, Any]:
-        if not isinstance(restart_session_config, dict):
-            return {}
-        return dict(restart_session_config)
+    def resolve_config_snapshot(
+        restart_session_config: Any,
+        *,
+        resolved_config_snapshot: Any = None,
+        summary_payload: Any = None,
+    ) -> Dict[str, Any]:
+        return resolve_session_config_snapshot(
+            restart_session_config,
+            resolved_config_snapshot=resolved_config_snapshot,
+            summary_payload=summary_payload,
+        )
 
     @staticmethod
     def _iter_replay_bars(

@@ -64,7 +64,9 @@ export default function DecisionPanelDecisionLogContent({
         {renderDetailLabel("Selected Strategy")}
         <span className="detail-value">
           {String(
-            decisionLog.payload?.decision_state?.selected_strategy || selectedMarker?.strategy || "n/a",
+            decisionLog.payload?.decision_state?.selected_strategy ||
+              selectedMarker?.strategy ||
+              "n/a",
           )}
         </span>
       </div>
@@ -75,38 +77,51 @@ export default function DecisionPanelDecisionLogContent({
         </span>
       </div>
       {(() => {
-        const slReason = String(decisionLog.payload?.context_risk?.sl_reason || "");
+        const slReason = String(
+          decisionLog.payload?.context_risk?.sl_reason || "",
+        );
         const isStrategySL = slReason === "strategy_stop_loss";
         const isCappedFixedFloor = slReason.startsWith("capped_fixed_floor");
         const isFixedStopLossPct = slReason.startsWith("fixed_stop_loss_pct");
 
-        if (!isStrategySL && !isCappedFixedFloor && !isFixedStopLossPct) return null;
+        if (!isStrategySL && !isCappedFixedFloor && !isFixedStopLossPct)
+          return null;
 
         let mathFormula = "";
-        
+
         if (isCappedFixedFloor || isFixedStopLossPct) {
-           const riskControls = (decisionLog.payload?.risk_controls || {}) as Record<string, unknown>;
-           const minSlPct = riskControls.context_risk_min_sl_pct ?? riskControls.min_sl_pct ?? "N/A";
-           const fixedPct = riskControls.fixed_stop_loss_pct ?? "N/A";
-           
-           if (isCappedFixedFloor) {
-             const val = slReason.split(":")[1] || minSlPct;
-             mathFormula = `max(Strategy SL, Minimum Floor SL [${val}%])`;
-           } else {
-             const val = slReason.split(":")[1] || fixedPct;
-             mathFormula = `Entry ± Fixed ${val}%`;
-           }
+          const riskControls = (decisionLog.payload?.risk_controls ||
+            {}) as Record<string, unknown>;
+          const minSlPct =
+            riskControls.context_risk_min_sl_pct ??
+            riskControls.min_sl_pct ??
+            "N/A";
+          const fixedPct = riskControls.fixed_stop_loss_pct ?? "N/A";
+
+          if (isCappedFixedFloor) {
+            const val = slReason.split(":")[1] || minSlPct;
+            mathFormula = `max(Strategy SL, Minimum Floor SL [${val}%])`;
+          } else {
+            const val = slReason.split(":")[1] || fixedPct;
+            mathFormula = `Entry ± Fixed ${val}%`;
+          }
         } else if (isStrategySL) {
-          const signalMeta = (decisionLog.payload?.signal_metadata || decisionLog.payload?.metadata || {}) as Record<string, unknown>;
+          const signalMeta = (decisionLog.payload?.signal_metadata ||
+            decisionLog.payload?.metadata ||
+            {}) as Record<string, unknown>;
           if (signalMeta.stop_type === "hybrid_price_space") {
-            const sideStr = String(selectedMarker?.side || signalMeta.flow_direction || "");
-            const isLong = sideStr.toLowerCase().includes("long") || sideStr.toLowerCase().includes("support");
+            const sideStr = String(
+              selectedMarker?.side || signalMeta.flow_direction || "",
+            );
+            const isLong =
+              sideStr.toLowerCase().includes("long") ||
+              sideStr.toLowerCase().includes("support");
 
             const atrStop = signalMeta.atr_stop;
             const levelStop = signalMeta.level_stop;
-            
+
             if (atrStop != null && levelStop != null) {
-              mathFormula = isLong 
+              mathFormula = isLong
                 ? `max(ATR Stop: $${atrStop}, Level Stop: $${levelStop})`
                 : `min(ATR Stop: $${atrStop}, Level Stop: $${levelStop})`;
             }
@@ -118,7 +133,7 @@ export default function DecisionPanelDecisionLogContent({
         return (
           <div className="detail-item">
             {renderDetailLabel("SL Logic")}
-            <span className="detail-value" style={{ fontSize: "0.9em", color: "var(--text-secondary)" }}>
+            <span className="detail-value decision-detail-secondary">
               {mathFormula}
             </span>
           </div>
@@ -134,11 +149,17 @@ export default function DecisionPanelDecisionLogContent({
         const tpReason = decisionLog.payload?.context_risk?.tp_reason;
         if (tpReason !== "strategy_take_profit") return null;
 
-        const signalMeta = (decisionLog.payload?.signal_metadata || decisionLog.payload?.metadata || {}) as Record<string, unknown>;
+        const signalMeta = (decisionLog.payload?.signal_metadata ||
+          decisionLog.payload?.metadata ||
+          {}) as Record<string, unknown>;
         if (signalMeta.stop_type !== "hybrid_price_space") return null;
 
-        const sideStr = String(selectedMarker?.side || signalMeta.flow_direction || "");
-        const isLong = sideStr.toLowerCase().includes("long") || sideStr.toLowerCase().includes("support");
+        const sideStr = String(
+          selectedMarker?.side || signalMeta.flow_direction || "",
+        );
+        const isLong =
+          sideStr.toLowerCase().includes("long") ||
+          sideStr.toLowerCase().includes("support");
 
         const pocPrice = signalMeta.poc_price;
 
@@ -147,9 +168,9 @@ export default function DecisionPanelDecisionLogContent({
         if (effectiveRr == null) {
           effectiveRr = signalMeta.effective_rr;
         }
-        
+
         const rr = Number(effectiveRr || 0).toFixed(2);
-        
+
         let mathFormula = `Entry ± (Risk × ${rr} R:R)`;
         if (pocPrice != null) {
           mathFormula = isLong
@@ -160,8 +181,8 @@ export default function DecisionPanelDecisionLogContent({
         return (
           <div className="detail-item">
             {renderDetailLabel("TP Logic")}
-            <span className="detail-value" style={{ fontSize: "0.9em", color: "var(--text-secondary)" }}>
-               {mathFormula}
+            <span className="detail-value decision-detail-secondary">
+              {mathFormula}
             </span>
           </div>
         );
@@ -225,16 +246,21 @@ export default function DecisionPanelDecisionLogContent({
         <span className="detail-value">{breakEvenAntiSpikeSummary}</span>
       </div>
       <div className="detail-item">
-        {renderDetailLabel("VWAP Execution Flow", "VWAP Execution Flow (Decision Log)")}
+        {renderDetailLabel(
+          "VWAP Execution Flow",
+          "VWAP Execution Flow (Decision Log)",
+        )}
         <span className="detail-value">
           {decisionLog.payload?.flow_snapshot?.vwap_execution_flow != null
-            ? Number(decisionLog.payload.flow_snapshot.vwap_execution_flow).toFixed(3)
+            ? Number(
+                decisionLog.payload.flow_snapshot.vwap_execution_flow,
+              ).toFixed(3)
             : "n/a"}
         </span>
       </div>
-      <div className="detail-item" style={{ gridColumn: "1 / -1" }}>
+      <div className="detail-item decision-detail-span-full">
         {renderDetailLabel("Complete Decision Payload")}
-        <pre className="decision-raw-json" style={{ marginTop: 8 }}>
+        <pre className="decision-raw-json ui-mt-sm">
           {JSON.stringify(decisionLog.payload, null, 2)}
         </pre>
       </div>

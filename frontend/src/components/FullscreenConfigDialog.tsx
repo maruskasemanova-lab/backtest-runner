@@ -180,7 +180,7 @@ export function FullscreenConfigDialog({
       return (
         <div className="form-group" key={key}>
           <label className="field-row" htmlFor={id}>
-            <span style={{ textTransform: "capitalize" }}>{formattedLabel}</span>
+            <span className="ui-field-capitalize">{formattedLabel}</span>
             <input
               id={id}
               type="checkbox"
@@ -196,7 +196,7 @@ export function FullscreenConfigDialog({
     const isNum = typeof value === "number";
     return (
       <div className="form-group" key={key}>
-        <label htmlFor={id} style={{ textTransform: "capitalize" }}>{formattedLabel}</label>
+        <label htmlFor={id} className="ui-field-capitalize">{formattedLabel}</label>
         <input
           id={id}
           type={isNum ? "number" : "text"}
@@ -211,6 +211,7 @@ export function FullscreenConfigDialog({
             }
           }}
           disabled={readOnly}
+          className="config-dialog-input-dark"
         />
       </div>
     );
@@ -224,7 +225,7 @@ export function FullscreenConfigDialog({
       return (
         <div className="form-group" key={`${fieldPrefix}-${entry.key}`}>
           <label className="field-row" htmlFor={fieldId}>
-            <span style={{ textTransform: "capitalize" }}>{formattedLabel}</span>
+            <span className="ui-field-capitalize">{formattedLabel}</span>
             <input id={fieldId} type="checkbox" checked={entry.boolValue} disabled readOnly />
           </label>
         </div>
@@ -234,14 +235,14 @@ export function FullscreenConfigDialog({
     if (entry.kind === "complex") {
       return (
         <div className="form-group" key={`${fieldPrefix}-${entry.key}`}>
-          <label htmlFor={fieldId} style={{ textTransform: "capitalize" }}>{formattedLabel}</label>
+          <label htmlFor={fieldId} className="ui-field-capitalize">{formattedLabel}</label>
           <textarea
             id={fieldId}
             value={entry.textValue}
             rows={entry.rows}
             disabled
             readOnly
-            style={{ background: "rgba(15, 23, 42, 0.5)", fontFamily: "var(--font-mono)" }}
+            className="ui-code-area ui-code-surface"
           />
         </div>
       );
@@ -249,14 +250,14 @@ export function FullscreenConfigDialog({
 
     return (
       <div className="form-group" key={`${fieldPrefix}-${entry.key}`}>
-        <label htmlFor={fieldId} style={{ textTransform: "capitalize" }}>{formattedLabel}</label>
+        <label htmlFor={fieldId} className="ui-field-capitalize">{formattedLabel}</label>
         <input
           id={fieldId}
           type="text"
           value={entry.textValue}
           disabled
           readOnly
-          style={{ background: "rgba(15, 23, 42, 0.5)", fontFamily: "var(--font-mono)" }}
+          className="config-dialog-input-dark"
         />
       </div>
     );
@@ -264,23 +265,20 @@ export function FullscreenConfigDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="ui-dialog-overlay"
       style={{
-        backgroundColor: "rgba(15, 23, 42, 0.85)",
-        backdropFilter: "blur(4px)",
         zIndex,
       }}
     >
       <div
-        className="card w-[95vw] h-[95vh] flex flex-col overflow-hidden animate-fade-in"
-        style={{ background: "var(--sidebar-bg-subtle)", borderColor: "var(--sidebar-border)" }}
+        className="card ui-dialog-shell animate-fade-in"
       >
-        <div className="card-header flex justify-between items-center" style={{ padding: "16px 24px" }}>
+        <div className="card-header ui-dialog-header">
           <div>
-            <h2 className="card-title text-lg">
+            <h2 className="card-title ui-dialog-title">
               {title || (isSnapshotMode ? "Run Config Snapshot" : "Full Profile Configuration")}
             </h2>
-            <div className="text-xs text-gray-400 mt-1">
+            <div className="ui-dialog-copy">
               {subtitle || (isSnapshotMode
                 ? "Read-only configuration captured for this run."
                 : "Configure all advanced parameters for the current run session.")}
@@ -295,24 +293,24 @@ export function FullscreenConfigDialog({
           </button>
         </div>
 
-        <div className="card-body flex-1 overflow-y-auto flex flex-col lg:flex-row gap-6" style={{ padding: "24px" }}>
+        <div className="card-body ui-dialog-body">
           {isSnapshotMode ? (
-            <div className="flex-1 overflow-y-auto run-config-form">
-              <div className="flex flex-col gap-4">
+            <div className="ui-dialog-scroll run-config-form">
+              <div className="config-dialog-snapshot-stack">
                 {normalizedSnapshotSections.map((section, index) => {
                   const entries = toSnapshotEntries(section.config);
                   return (
                     <div className="tw-panel" key={`snapshot-section-${index}-${section.title}`}>
                       <div className="tw-panel-title">{section.title}</div>
                       {section.description ? (
-                        <div className="text-xs text-gray-400 mt-2">{section.description}</div>
+                        <div className="ui-form-help">{section.description}</div>
                       ) : null}
                       {entries.length ? (
-                        <div className="tw-grid-fit-190" style={{ marginTop: "12px" }}>
+                        <div className="tw-grid-fit-190 ui-mt-md">
                           {entries.map((entry) => renderSnapshotField(entry, `snapshot-${index}`))}
                         </div>
                       ) : (
-                        <div className="text-xs text-slate-500 italic mt-2">No values captured.</div>
+                        <div className="ui-form-help">No values captured.</div>
                       )}
                     </div>
                   );
@@ -324,14 +322,13 @@ export function FullscreenConfigDialog({
               {/* Editable settings */}
               <fieldset
                 disabled={readOnly}
-                style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
-                className="flex-1 overflow-y-auto pr-2"
+                className="ui-dialog-fieldset ui-dialog-scroll ui-dialog-editable"
               >
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 mb-6 gap-6 run-config-form">
+                <div className="ui-section-grid run-config-form">
 
                   {/* General Logic */}
-                  <div className="flex flex-col gap-4">
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-blue-400 border-b border-slate-700 pb-2">General Trade Parameters</h3>
+                  <div className="ui-section">
+                    <h3 className="ui-section-title ui-section-title-blue">General Trade Parameters</h3>
 
                     <div className="form-group">
                       <label htmlFor="account_size_usd_fs">Account Size (USD)</label>
@@ -342,7 +339,7 @@ export function FullscreenConfigDialog({
                         step="100"
                         value={safeConfig.account_size_usd}
                         onChange={(e) => safeHandleChange("account_size_usd", Number(e.target.value))}
-                        style={{ background: "rgba(15, 23, 42, 0.6)" }}
+                        className="config-dialog-input-dark"
                       />
                     </div>
 
@@ -354,17 +351,17 @@ export function FullscreenConfigDialog({
                         min="5"
                         value={safeConfig.regime_detection_minutes}
                         onChange={(e) => safeHandleChange("regime_detection_minutes", Number(e.target.value))}
-                        style={{ background: "rgba(15, 23, 42, 0.6)" }}
+                        className="config-dialog-input-dark"
                       />
                     </div>
 
                     <div className="form-group">
                       <label>Allowed Regimes (Override)</label>
-                      <div className="checkbox-group" style={{ display: "flex", gap: "12px", marginTop: "4px" }}>
+                      <div className="config-dialog-checkbox-group">
                         {["TRENDING", "CHOPPY", "MIXED"].map((regime) => {
                           const isChecked = (safeConfig.regime_filter || []).includes(regime);
                           return (
-                            <label key={`fs-${regime}`} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem", cursor: "pointer" }}>
+                            <label key={`fs-${regime}`} className="config-dialog-checkbox-chip">
                               <input
                                 type="checkbox"
                                 checked={isChecked}
@@ -384,27 +381,27 @@ export function FullscreenConfigDialog({
                           );
                         })}
                       </div>
-                      <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: "4px" }}>
+                      <div className="ui-form-help">
                         Select allowed regimes to override ticker defaults. Leave all unchecked to allow ALL.
                       </div>
                     </div>
                   </div>
 
                   {/* Intraday Levels */}
-                  <div className="flex flex-col gap-4">
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-700 pb-2">Levels & Zones</h3>
+                  <div className="ui-section">
+                    <h3 className="ui-section-title ui-section-title-emerald">Levels & Zones</h3>
                     <IntradayLevelsSettings config={safeConfig} handleChange={safeHandleChange} />
                   </div>
 
                   {/* Risk Management */}
-                  <div className="flex flex-col gap-4">
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-red-400 border-b border-slate-700 pb-2">Risk Management</h3>
+                  <div className="ui-section">
+                    <h3 className="ui-section-title ui-section-title-red">Risk Management</h3>
                     <RiskManagementSettings config={safeConfig} handleChange={safeHandleChange} />
                   </div>
 
                   {/* Order Flow & Momentum */}
-                  <div className="flex flex-col gap-4 md:col-span-2">
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-amber-400 border-b border-slate-700 pb-2">Order Flow & Momentum</h3>
+                  <div className="ui-section ui-section-grid-span">
+                    <h3 className="ui-section-title ui-section-title-amber">Order Flow & Momentum</h3>
                     <OrderFlowSettings
                       config={safeConfig}
                       handleChange={safeHandleChange}
@@ -420,26 +417,25 @@ export function FullscreenConfigDialog({
               {/* Raw JSON Profile viewer */}
               <fieldset
                 disabled={readOnly}
-                style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
-                className="w-full lg:w-1/3 flex flex-col gap-2 border-l border-slate-700 pl-6"
+                className="ui-dialog-fieldset ui-dialog-aside"
               >
-                <h3 className="text-sm font-bold uppercase tracking-wider text-indigo-400 border-b border-slate-700 pb-2">Active Unified Profile Settings</h3>
-                <div className="text-xs text-gray-400 mb-2">
+                <h3 className="ui-section-title ui-section-title-indigo">Active Unified Profile Settings</h3>
+                <div className="ui-dialog-copy">
                   All active strategy parameters and execution constraints loaded from this profile.
                 </div>
-                <div className="text-xs text-slate-400 mb-2">
+                <div className="ui-dialog-copy">
                   {activeProfileSummary
                     ? `Using unified profile: ${activeProfileSummary}`
                     : "Using unified profile: unresolved"}
                 </div>
                 {hasProfilePayload ? (
-                  <div className="flex-1 overflow-auto bg-slate-900/50 border border-slate-800 rounded-md p-4 flex flex-col gap-4">
+                  <div className="config-dialog-profile-shell">
 
                     {/* execution_profile metadata */}
                     {Object.keys(currentExecutionProfile).length > 0 && (
                       <div className="tw-panel">
                         <div className="tw-panel-title">Execution & Positioning</div>
-                        <div className="tw-grid-fit-190" style={{ marginTop: "12px" }}>
+                        <div className="tw-grid-fit-190 ui-mt-md">
                           {Object.entries(currentExecutionProfile).map(([key, value]: any) => {
                             if (key === "positioning" && typeof value === "object") return null;
                             return renderDynamicInput(key, value, (val) => handleExecutionParamChange(key, val), "exec");
@@ -452,10 +448,10 @@ export function FullscreenConfigDialog({
                     {Object.keys(currentStrategyParams).length > 0 && (
                       <div className="tw-panel">
                         <div className="tw-panel-title">Strategy Parameters</div>
-                        <div className="flex flex-col gap-6" style={{ marginTop: "12px" }}>
+                        <div className="config-dialog-profile-strategy ui-mt-md">
                           {Object.entries(currentStrategyParams).map(([strategyName, params]: any) => (
                             <div key={strategyName}>
-                              <div className="text-sm font-bold text-blue-400 mb-3 border-b border-slate-700/50 pb-1">{strategyName}</div>
+                              <div className="config-dialog-profile-strategy-name">{strategyName}</div>
                               <div className="tw-grid-fit-190">
                                 {Object.entries(params).map(([paramKey, paramVal]: any) =>
                                   renderDynamicInput(paramKey, paramVal, (val) => handleStrategyParamValueChange(strategyName, paramKey, val), strategyName)
@@ -469,12 +465,12 @@ export function FullscreenConfigDialog({
 
                     {/* Fallback if both empty */}
                     {(Object.keys(currentStrategyParams).length === 0 && Object.keys(currentExecutionProfile).length === 0) && (
-                      <div className="text-xs text-slate-500 italic">No detailed parameters found in profile.</div>
+                      <div className="ui-form-help">No detailed parameters found in profile.</div>
                     )}
 
                   </div>
                 ) : (
-                  <div className="flex-1 flex items-center justify-center bg-slate-900 rounded-md border border-slate-800 text-slate-500 text-sm italic">
+                  <div className="config-dialog-empty">
                     {activeProfileSummary
                       ? `No unified profile payload loaded for ${activeProfileSummary}.`
                       : "No active unified profile selected."}

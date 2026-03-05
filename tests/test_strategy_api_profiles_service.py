@@ -411,3 +411,34 @@ def test_apply_aos_optimizations_uses_unified_profile_when_active() -> None:
     assert result["trading_hours_source"] == "unified_profile"
     assert result["long_only"] is True
     assert result["positioning"]["risk_per_trade_pct"] == 0.9
+
+
+def test_apply_aos_optimizations_marks_unified_strategy_sync_skipped_when_local() -> None:
+    deps = _build_deps([])
+    deps.load_aos_config = lambda *_args, **_kwargs: {
+        "tickers": {
+            "MU": {
+                "active_unified_profile_id": "u1",
+                "unified_profiles": [
+                    {
+                        "profile_id": "u1",
+                        "strategy_profile": {
+                            "strategy_params": {"momentum": {"enabled": True}}
+                        },
+                    }
+                ],
+            }
+        }
+    }
+
+    result = asyncio.run(
+        apply_aos_optimizations(
+            strategy_api_url="http://localhost:8001",
+            ticker="MU",
+            deps=deps,
+            remote_sync=False,
+        )
+    )
+
+    assert result["remote_sync_skipped"] is True
+    assert result["unified_profile"]["strategy_sync_skipped"] is True

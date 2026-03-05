@@ -275,3 +275,56 @@ def test_unified_profile_options_include_legacy_combo_adaptive_variants(
         active_row["strategy_profile"]["active_adaptive_tuner_profile_id"] == "tuned-a"
     )
     assert active_row["execution_profile"]["positioning"]["risk_per_trade_pct"] == 0.9
+
+
+def test_unified_profile_options_merge_legacy_top_level_positioning_keys(
+    monkeypatch, tmp_path
+) -> None:
+    _seed_primary_config_snapshots(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        aos_config={
+            "version": "1.0.0",
+            "tickers": {
+                "MU": {
+                    "risk_per_trade_pct": 0.45,
+                    "trailing_stop_pct": 0.25,
+                    "active_strategy_combo_profile_id": "combo-a",
+                    "active_adaptive_tuner_profile_id": "tuned-a",
+                    "strategy_combo_profiles": [
+                        {
+                            "profile_id": "combo-a",
+                            "profile_name": "Combo A",
+                            "created_at": "2026-02-10T10:00:00Z",
+                            "updated_at": "2026-02-10T10:00:00Z",
+                            "strategy_params": {"momentum": {"enabled": True}},
+                        }
+                    ],
+                    "adaptive_tuner_profiles": [
+                        {
+                            "profile_id": "tuned-a",
+                            "profile_name": "Tuned A",
+                            "updated_at": "2026-02-10T10:00:00Z",
+                            "candidate": {
+                                "strategy_selection_mode": "adaptive_top_n",
+                                "max_active_strategies": 3,
+                            },
+                        }
+                    ],
+                }
+            },
+        },
+        positioning_config={"version": "1.0.0", "tickers": {"MU": {}}},
+    )
+
+    payload = api_server._build_unified_profile_options_payload("MU")
+    active_row = next(
+        item
+        for item in payload["profiles"]
+        if item["profile_id"] == payload["active_profile_id"]
+    )
+
+    assert active_row["execution_profile"]["positioning"] == {
+        "risk_per_trade_pct": 0.45,
+        "trailing_stop_pct": 0.25,
+    }

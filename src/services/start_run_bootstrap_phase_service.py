@@ -7,6 +7,10 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 from fastapi import HTTPException
 
+from src.services.start_run_control_plane_snapshot_service import (
+    build_control_plane_snapshot,
+)
+
 
 @dataclass(frozen=True)
 class BootstrapPhaseInputs:
@@ -43,6 +47,7 @@ class BootstrapPhaseResult:
     momentum_diversification_source: str
     momentum_diversification_json: Optional[str]
     execution_cfg: Dict[str, Any]
+    control_plane_snapshot: Dict[str, Any]
 
 
 def _positive_or_zero(value: Any) -> float:
@@ -252,6 +257,14 @@ async def run_start_bootstrap_phase(
             ),
         )
 
+    control_plane_snapshot = build_control_plane_snapshot(
+        aos_applied=aos_applied,
+        execution_config=execution_cfg,
+        apply_aos_optimizations_on_start=apply_aos_optimizations_on_start,
+        effective_reset_scope=effective_reset_scope,
+        comparable_mode=comparable_mode,
+    )
+
     phase_started = perf_counter()
     await _apply_global_trailing_from_execution_cfg(
         request=request,
@@ -272,4 +285,5 @@ async def run_start_bootstrap_phase(
         momentum_diversification_source=momentum_diversification_source,
         momentum_diversification_json=momentum_diversification_json,
         execution_cfg=dict(execution_cfg),
+        control_plane_snapshot=dict(control_plane_snapshot),
     )

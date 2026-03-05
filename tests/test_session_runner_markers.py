@@ -1328,6 +1328,13 @@ def test_summary_includes_report_context_when_provided() -> None:
         "adaptive_profile_name": "c4 adaptive",
         "strategy_combo_profile_id": "mu-combo-v1",
         "strategy_combo_profile_name": "MU Combo v1",
+        "config_fingerprint": "cfg_exec123",
+        "aos_applied_fingerprint": "cfg_aos456",
+    }
+    runner._control_plane_snapshot = {
+        "config_fingerprint": "cfg_exec123",
+        "aos_applied_fingerprint": "cfg_aos456",
+        "unified_profile_id": "mu-unified-v1",
     }
     runner._aos_applied = {
         "adaptive_profile": {
@@ -1336,6 +1343,7 @@ def test_summary_includes_report_context_when_provided() -> None:
         }
     }
     runner._execution_config = {"apply_aos_optimizations_on_start": True}
+    runner._restart_session_config = {"strategy_selection_mode": "adaptive_top_n"}
 
     summary = runner.get_summary()
     assert summary["unified_profile_id"] == "mu-unified-v1"
@@ -1350,6 +1358,41 @@ def test_summary_includes_report_context_when_provided() -> None:
         == "c4bb2197e651"
     )
     assert summary["execution_config"]["apply_aos_optimizations_on_start"] is True
+    assert summary["control_plane_snapshot"]["config_fingerprint"] == "cfg_exec123"
+    assert summary["resolved_config_snapshot"]["run_key"] == "r3b:MU:2026-02-06"
+    assert (
+        summary["resolved_config_snapshot"]["control_plane_snapshot"][
+            "aos_applied_fingerprint"
+        ]
+        == "cfg_aos456"
+    )
+    assert (
+        summary["resolved_config_snapshot"]["report_metadata"]["adaptive_profile_id"]
+        == "c4bb2197e651"
+    )
+    assert (
+        summary["resolved_config_snapshot"]["session_config_snapshot"][
+            "strategy_selection_mode"
+        ]
+        == "adaptive_top_n"
+    )
+
+
+def test_strategy_session_config_snapshot_falls_back_to_resolved_snapshot() -> None:
+    config = RunConfig(run_id="r3c", ticker="MU", date="2026-02-06")
+    runner = SessionRunner(config)
+    runner._restart_session_config = None
+    runner._resolved_config_snapshot = {
+        "session_config_snapshot": {
+            "regime_detection_minutes": 15,
+            "l2_confirm_enabled": False,
+        }
+    }
+
+    resolved = runner._resolve_strategy_session_config_snapshot()
+
+    assert resolved["regime_detection_minutes"] == 15
+    assert resolved["l2_confirm_enabled"] is False
 
 
 def test_regime_explanation_does_not_claim_high_te_when_low() -> None:

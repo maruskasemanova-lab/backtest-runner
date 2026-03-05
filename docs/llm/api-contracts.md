@@ -212,10 +212,13 @@ Important response fields:
   - includes effective `strategy_selection_mode` and `max_active_strategies`
   - includes `all_enabled_remote_sync` diagnostic payload when `strategy_selection_mode=all_enabled` (attempt/applied/strategy_count and sync status details)
   - includes `apply_aos_optimizations_on_start` (whether remote AOS sync was executed during start)
+  - includes `config_fingerprint`, `aos_applied_fingerprint`, and nested `control_plane_snapshot` when control-plane metadata is available
   - includes resolved intraday context/risk controls (spike/gap/RVOL/adaptive-window/micro-confirm/confluence-sizing and `context_risk_*` fields)
   - includes `momentum_diversification_applied`, `momentum_diversification_source` (`request|adaptive_profile|aos_config|none`), and effective `momentum_diversification`
   - active unified profile metadata is exposed via `aos_applied.unified_profile` when present
   - legacy combo/adaptive metadata remains for backward compatibility when unified profile is not active
+- `control_plane_snapshot` (immutable run-start control-plane metadata: fingerprints, effective reset scope, comparable mode, trading-hours/profile identity)
+- `resolved_config_snapshot` (persistable per-run resolved config artifact composed from report metadata, control-plane snapshot, effective AOS/execution/request/L2 payloads plus `session_config_snapshot` for restart/recovery hydration)
 - `start_timing` (start-phase timing diagnostics for FE/ops: `total_ms`, `slowest_phase`, `phases_ms`, and basic run context)
 
 ### `POST /api/run/prewarm`
@@ -488,6 +491,7 @@ Response notes:
   - `trade_details[]` including entry/exit reasons when available
   - `runs[]` summaries (run id, run key, saved-at, profile metadata, per-run day PnL/trades, plus run-level totals: `run_total_trades`, `run_total_pnl_pct`, `run_total_pnl_dollars`, `run_signals`, `run_regime_evaluations`, `run_processed_bars`, `run_total_bars`)
   - per-run request snapshot `run_request_config` (full `POST /api/run/start` payload when present in stored summary); for single-run days, `day_results[].run_request_config` mirrors that snapshot for convenience.
+  - when available, each `runs[]` item also includes `control_plane_snapshot`, `resolved_config_snapshot_id`, and hydrated `resolved_config_snapshot`; for single-run days these are mirrored to `day_results[]`.
 - includes `filter_options` payload for diagnostics dropdowns:
   - `filter_options.run_ids[]` with `run_id` and `latest_saved_at`
   - `filter_options.adaptive_profiles[]` merged from history metadata and `aos_optimization/aos_config.json`
@@ -514,12 +518,13 @@ Response notes:
 
 - checks active in-memory run first (`active_runners`) and returns live bars/markers/state when present.
 - otherwise reads persisted `run_summaries` row from configured run-report store (Supabase or SQLite).
+- when the configured run-report store supports separate run-config persistence (SQLite local store and Supabase-backed run reports), `summary.resolved_config_snapshot_id` is used to hydrate externalized `resolved_config_snapshot` payload back into the response.
 - expects compressed playback payload under `summary.playback_snapshot` (`encoding=gzip+base64`).
 - returns:
   - `run_key`
   - `state` (read-only snapshot state with `is_snapshot=true`)
   - `bars[]`, `markers[]`
-  - `summary` (same summary object but `playback_snapshot.payload_b64` removed from response)
+  - `summary` (same summary object but `playback_snapshot.payload_b64` removed from response; may include `control_plane_snapshot` and `resolved_config_snapshot`)
   - `snapshot_meta` and `report_saved_at`
 - if snapshot payload is missing (older run rows), endpoint returns `404` with guidance to rerun once with snapshot persistence enabled.
 

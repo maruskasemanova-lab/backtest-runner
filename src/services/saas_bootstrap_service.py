@@ -224,6 +224,14 @@ def build_supabase_run_reports_store(
         ).strip()
         or "backtest-runner"
     )
+    config_snapshots_table_name = (
+        str(
+            os.getenv("BACKTEST_SUPABASE_RUN_CONFIG_SNAPSHOTS_TABLE")
+            or supabase_cfg.get("config_snapshots_table_name")
+            or "run_config_snapshots",
+        ).strip()
+        or "run_config_snapshots"
+    )
     default_tenant_id = str(
         os.getenv("BACKTEST_SUPABASE_RUN_REPORTS_TENANT_ID")
         or supabase_cfg.get("tenant_id")
@@ -249,6 +257,7 @@ def build_supabase_run_reports_store(
             supabase_url=supabase_url,
             service_role_key=service_role_key,
             table_name=table_name,
+            config_snapshots_table_name=config_snapshots_table_name,
             timeout_seconds=timeout_seconds,
             default_user_id=default_user_id,
             default_tenant_id=default_tenant_id,

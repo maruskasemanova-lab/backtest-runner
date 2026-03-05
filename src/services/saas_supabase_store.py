@@ -5,6 +5,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 import requests
 
+from src.services.run_config_snapshot_service import build_resolved_config_snapshot_id
 from src.services.saas_primitives import (
     normalize_run_summary_payload,
     normalize_user_settings_payload,
@@ -620,6 +621,7 @@ class SupabaseRunReportsStore:
         supabase_url: str,
         service_role_key: str,
         table_name: str = "run_summaries",
+        config_snapshots_table_name: str = "run_config_snapshots",
         timeout_seconds: float = 8.0,
         default_user_id: str = "backtest-runner",
         default_tenant_id: str = "",
@@ -631,10 +633,16 @@ class SupabaseRunReportsStore:
         if not api_key:
             raise ValueError("service_role_key is required")
         safe_table = str(table_name or "run_summaries").strip() or "run_summaries"
+        safe_snapshots_table = (
+            str(config_snapshots_table_name or "run_config_snapshots").strip()
+            or "run_config_snapshots"
+        )
         safe_user_id = str(default_user_id or "").strip() or "backtest-runner"
         self._base_url = base_url
         self._table_name = safe_table
         self._endpoint = f"{base_url}/rest/v1/{safe_table}"
+        self._config_snapshots_table_name = safe_snapshots_table
+        self._config_snapshots_endpoint = f"{base_url}/rest/v1/{safe_snapshots_table}"
         self._users_endpoint = f"{base_url}/rest/v1/users"
         self._tenants_endpoint = f"{base_url}/rest/v1/tenants"
         self._api_key = api_key
@@ -859,6 +867,104 @@ class SupabaseRunReportsStore:
                 }
             )
         return payload_rows
+
+    def upsert_run_config_snapshot(
+        self,
+        *,
+        run_key: str,
+        snapshot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        normalized_run_key = str(run_key or "").strip()
+        if not normalized_run_key:
+            raise ValueError("run_key is required")
+        normalized_snapshot = normalize_run_summary_payload(snapshot)
+        snapshot_id = build_resolved_config_snapshot_id(
+            run_key=normalized_run_key,
+            snapshot=normalized_snapshot,
+        )
+        user_id = self._default_user_id
+        tenant_uuid = self._ensure_identity(
+            user_id=user_id, tenant_id=self._default_tenant_id
+        )
+        now = utc_now_iso()
+        self._request_json(
+            method="POST",
+            endpoint=self._config_snapshots_endpoint,
+            params={
+                "on_conflict": "snapshot_id",
+                "select": "snapshot_id,run_key,updated_at",
+            },
+            payload=[
+                {
+                    "snapshot_id": snapshot_id,
+                    "run_key": normalized_run_key,
+                    "tenant_id": tenant_uuid,
+                    "user_id": user_id,
+                    "snapshot": normalized_snapshot,
+                    "updated_at": now,
+                }
+            ],
+            prefer="resolution=merge-duplicates,return=representation",
+        )
+        return {
+            "snapshot_id": snapshot_id,
+            "run_key": normalized_run_key,
+            "payload": normalized_snapshot,
+            "updated_at": now,
+        }
+
+    def get_run_config_snapshot(
+        self,
+        *,
+        snapshot_id: Optional[str] = None,
+        run_key: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        normalized_snapshot_id = str(snapshot_id or "").strip()
+        normalized_run_key = str(run_key or "").strip()
+        if not normalized_snapshot_id and not normalized_run_key:
+            return None
+
+        params: Dict[str, str] = {
+            "select": "snapshot_id,run_key,snapshot,updated_at",
+            "limit": "1",
+        }
+        if normalized_snapshot_id:
+            params["snapshot_id"] = f"eq.{normalized_snapshot_id}"
+        else:
+            params["run_key"] = f"eq.{normalized_run_key}"
+            params["order"] = "updated_at.desc,snapshot_id.desc"
+        if self._default_user_id:
+            params["user_id"] = f"eq.{self._default_user_id}"
+
+        rows = self._request_json(
+            method="GET",
+            endpoint=self._config_snapshots_endpoint,
+            params=params,
+        )
+        if not isinstance(rows, list) or not rows:
+            return None
+        if normalized_snapshot_id:
+            row = rows[0] if isinstance(rows[0], dict) else {}
+        else:
+            candidates = [item for item in rows if isinstance(item, dict)]
+            if not candidates:
+                return None
+            row = max(
+                candidates,
+                key=lambda item: (
+                    str(item.get("updated_at") or ""),
+                    str(item.get("snapshot_id") or ""),
+                ),
+            )
+        snapshot_payload = row.get("snapshot")
+        if not isinstance(snapshot_payload, dict):
+            snapshot_payload = {}
+        return {
+            "snapshot_id": str(row.get("snapshot_id") or normalized_snapshot_id),
+            "run_key": str(row.get("run_key") or normalized_run_key),
+            "payload": snapshot_payload,
+            "updated_at": row.get("updated_at"),
+        }
 
 
 class SupabaseRunStateMirror:

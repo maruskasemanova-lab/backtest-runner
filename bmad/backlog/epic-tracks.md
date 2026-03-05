@@ -155,3 +155,7 @@ Stories:
   - Domain: `strategy-engine`
   - Key files: `../market_regime_detection/src/strategies/vwap_magnet.py`, `../market_regime_detection/src/strategies/*`
   - Acceptance: strategy signal builders share reusable helper slices; per-strategy behavior and thresholds remain identical.
+- `BR-08` AOS configuration control plane modularization.
+  - Domain: `orchestration`
+  - Key files: `src/services/config_write_service.py`, `src/services/strategy_api_profiles_service.py`, `src/services/start_run_execution_config_service.py`, `src/services/config_domain/*`
+  - Acceptance: one canonical resolver/repository defines saved, active, effective, and published config state without breaking current APIs.

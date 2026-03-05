@@ -1,24 +1,10 @@
 import type { AOSMomentumSleeveDraft } from "./aosOptimizationsMomentum";
 import {
-  MOMENTUM_ACTIONS_STYLE,
   MOMENTUM_BOOLEAN_FIELDS,
-  MOMENTUM_DIRTY_STYLE,
   MOMENTUM_DRAFT_DEFAULTS,
-  MOMENTUM_EMPTY_SLEEVES_STYLE,
-  MOMENTUM_ERROR_STYLE,
-  MOMENTUM_NOTICE_STYLE,
   MOMENTUM_NUMERIC_FIELDS,
-  MOMENTUM_NUMERIC_GRID_STYLE,
-  MOMENTUM_SECTION_HEADER_STYLE,
-  MOMENTUM_SLEEVE_CARD_STYLE,
   MOMENTUM_SLEEVE_DEFAULTS,
-  MOMENTUM_SLEEVE_META_GRID_STYLE,
-  MOMENTUM_SLEEVE_NUMERIC_GRID_STYLE,
-  MOMENTUM_SLEEVE_TOGGLE_GRID_STYLE,
-  MOMENTUM_SLEEVES_PANEL_STYLE,
   MOMENTUM_TEXT_FIELDS,
-  MOMENTUM_TEXT_GRID_STYLE,
-  MOMENTUM_TOGGLE_GRID_STYLE,
 } from "./aosOptimizationsMomentumEditorSchema";
 
 type DraftRecord = Record<string, unknown>;
@@ -67,7 +53,7 @@ function MomentumBooleanGrid({
   onFieldChange: FieldChangeHandler;
 }) {
   return (
-    <div style={MOMENTUM_TOGGLE_GRID_STYLE}>
+    <div className="tw-grid-fit-200">
       <MomentumBooleanFieldsContent draft={draft} onFieldChange={onFieldChange} />
     </div>
   );
@@ -100,10 +86,10 @@ function MomentumNumberGrid({
   draft,
   defaultDraft,
   onFieldChange,
-  gridStyle,
-}: SharedFieldsProps & { gridStyle: typeof MOMENTUM_NUMERIC_GRID_STYLE }) {
+  gridClassName,
+}: SharedFieldsProps & { gridClassName: string }) {
   return (
-    <div style={gridStyle}>
+    <div className={gridClassName}>
       <MomentumNumberFieldsContent
         draft={draft}
         defaultDraft={defaultDraft}
@@ -143,7 +129,7 @@ function MomentumTextGrid({
   onFieldChange,
 }: SharedFieldsProps) {
   return (
-    <div style={MOMENTUM_TEXT_GRID_STYLE}>
+    <div className="tw-grid-fit-220">
       <MomentumTextFieldsContent
         draft={draft}
         defaultDraft={defaultDraft}
@@ -185,7 +171,7 @@ function MomentumSleeveMetaFields({
   onSleeveFieldChange: (index: number, field: string, value: unknown) => void;
 }) {
   return (
-    <div style={MOMENTUM_SLEEVE_META_GRID_STYLE}>
+    <div className="tw-grid-fit-190">
       <div className="form-group">
         <label>Sleeve ID</label>
         <input
@@ -202,7 +188,11 @@ function MomentumSleeveMetaFields({
           min="0"
           max="1"
           step="0.05"
-          value={readFieldValue(sleeve, MOMENTUM_SLEEVE_DEFAULTS, "allocation_weight") as string | number}
+          value={readFieldValue(
+            sleeve,
+            MOMENTUM_SLEEVE_DEFAULTS,
+            "allocation_weight",
+          ) as string | number}
           onChange={(event) =>
             onSleeveFieldChange(index, "allocation_weight", Number(event.target.value))
           }
@@ -229,9 +219,9 @@ function MomentumSleeveCard({
   onSleeveFieldChange: (index: number, field: string, value: unknown) => void;
 }) {
   return (
-    <div style={MOMENTUM_SLEEVE_CARD_STYLE}>
-      <div style={MOMENTUM_SECTION_HEADER_STYLE}>
-        <div style={{ fontWeight: 700, fontSize: "0.76rem" }}>Sleeve #{index + 1}</div>
+    <div className="tw-sleeve-card">
+      <div className="tw-sleeve-header">
+        <div className="tw-sleeve-title">Sleeve #{index + 1}</div>
         <button className="btn btn-secondary" type="button" onClick={() => onRemoveSleeve(index)}>
           Remove
         </button>
@@ -243,14 +233,14 @@ function MomentumSleeveCard({
         onSleeveFieldChange={onSleeveFieldChange}
       />
 
-      <div style={MOMENTUM_SLEEVE_TOGGLE_GRID_STYLE}>
+      <div className="tw-grid-fit-190 ui-mt-md">
         <MomentumBooleanFieldsContent
           draft={sleeve}
           onFieldChange={(field, value) => onSleeveFieldChange(index, field, value)}
         />
       </div>
 
-      <div style={MOMENTUM_SLEEVE_NUMERIC_GRID_STYLE}>
+      <div className="tw-grid-fit-185">
         <MomentumNumberFieldsContent
           draft={sleeve}
           defaultDraft={MOMENTUM_SLEEVE_DEFAULTS}
@@ -263,15 +253,13 @@ function MomentumSleeveCard({
 
 export function MomentumEditorHeader() {
   return (
-    <>
-      <div style={{ fontWeight: 700, fontSize: "0.82rem" }}>
-        Visual Momentum Diversification
-      </div>
-      <div style={{ color: "var(--text-muted)", fontSize: "0.76rem" }}>
+    <div className="aos-momentum-header">
+      <div className="aos-momentum-title">Visual Momentum Diversification</div>
+      <div className="aos-momentum-copy">
         Structured editor for <code>adaptive.momentum_diversification</code> with multi-sleeve
         support.
       </div>
-    </>
+    </div>
   );
 }
 
@@ -285,7 +273,7 @@ export function MomentumEditorActionBar({
   const disableJsonActions = rawConfigSaving || momentumSaving;
 
   return (
-    <div style={MOMENTUM_ACTIONS_STYLE}>
+    <div className="aos-momentum-actions">
       <button className="btn btn-secondary" onClick={onLoadFromJson} disabled={disableJsonActions}>
         Load From JSON
       </button>
@@ -305,8 +293,8 @@ export function MomentumEditorStatus({
 }: StatusProps) {
   return (
     <>
-      {momentumNotice ? <div style={MOMENTUM_NOTICE_STYLE}>{momentumNotice}</div> : null}
-      {momentumError ? <div style={MOMENTUM_ERROR_STYLE}>{momentumError}</div> : null}
+      {momentumNotice ? <div className="ui-note ui-note-success ui-note-compact">{momentumNotice}</div> : null}
+      {momentumError ? <div className="ui-note ui-note-danger ui-note-compact">{momentumError}</div> : null}
     </>
   );
 }
@@ -325,7 +313,7 @@ export function MomentumDraftFields({
         draft={draft}
         defaultDraft={MOMENTUM_DRAFT_DEFAULTS}
         onFieldChange={onFieldChange}
-        gridStyle={MOMENTUM_NUMERIC_GRID_STYLE}
+        gridClassName="tw-grid-fit-185"
       />
       <MomentumTextGrid
         draft={draft}
@@ -343,20 +331,20 @@ export function MomentumSleevesSection({
   onSleeveFieldChange,
 }: SleevesSectionProps) {
   return (
-    <div style={MOMENTUM_SLEEVES_PANEL_STYLE}>
-      <div style={MOMENTUM_SECTION_HEADER_STYLE}>
-        <div style={{ fontWeight: 700, fontSize: "0.78rem" }}>Momentum Sleeves</div>
+    <div className="tw-panel aos-momentum-panel">
+      <div className="aos-momentum-section-head">
+        <div className="aos-momentum-section-title">Momentum Sleeves</div>
         <button className="btn btn-secondary" type="button" onClick={onAddSleeve}>
           Add Sleeve
         </button>
       </div>
 
       {sleeves.length === 0 ? (
-        <div style={MOMENTUM_EMPTY_SLEEVES_STYLE}>
+        <div className="ui-form-help">
           No sleeves defined. Add sleeve rows to enable multi-sleeve behavior.
         </div>
       ) : (
-        <div style={{ display: "grid", gap: "10px" }}>
+        <div className="aos-momentum-sleeve-list">
           {sleeves.map((sleeve, index) => (
             <MomentumSleeveCard
               key={`${sleeve?.sleeve_id || "sleeve"}-${index}`}
@@ -374,7 +362,7 @@ export function MomentumSleevesSection({
 
 export function MomentumDirtyNotice() {
   return (
-    <div style={MOMENTUM_DIRTY_STYLE}>
+    <div className="ui-note ui-note-warning ui-note-compact">
       Visual momentum editor has unsaved changes.
     </div>
   );

@@ -8,6 +8,8 @@ import sys
 
 import pytest
 
+from src.services.saas_service import SaaSStateStore
+
 
 _API_SERVER_PATH = Path(__file__).resolve().parents[1] / "api_server.py"
 _PROJECT_ROOT = str(_API_SERVER_PATH.parent)
@@ -19,6 +21,30 @@ _API_SERVER_SPEC = importlib.util.spec_from_file_location(
 assert _API_SERVER_SPEC is not None and _API_SERVER_SPEC.loader is not None
 api_server = importlib.util.module_from_spec(_API_SERVER_SPEC)
 _API_SERVER_SPEC.loader.exec_module(api_server)
+
+
+def _seed_primary_config_snapshots(
+    *,
+    monkeypatch,
+    tmp_path: Path,
+    aos_config: dict,
+    positioning_config: dict | None = None,
+) -> SaaSStateStore:
+    store = SaaSStateStore(str(tmp_path / "saas_state.db"))
+    store.upsert_config_snapshot(
+        config_key="aos_config",
+        payload=aos_config,
+        source="test_seed",
+    )
+    store.upsert_config_snapshot(
+        config_key="positioning_config",
+        payload=positioning_config or {"version": "1.0.0", "tickers": {}},
+        source="test_seed",
+    )
+    monkeypatch.setattr(api_server.v2_services, "store", store)
+    monkeypatch.setattr(api_server.api_services, "state_store", store)
+    monkeypatch.setattr(api_server.app.state, "saas_state_store", store, raising=False)
+    return store
 
 
 def _base_request(**overrides):
@@ -231,45 +257,43 @@ def test_run_adaptive_tuner_quick_mode_samples_dates_and_sets_metadata(
 
 
 def test_apply_adaptive_tuner_profile_updates_aos_config(monkeypatch, tmp_path) -> None:
-    temp_aos = tmp_path / "aos_config.json"
-    temp_aos.write_text(
-        json.dumps(
-            {
-                "version": "1.0.0",
-                "tickers": {
-                    "MU": {
-                        "strategy_selection_mode": "adaptive_top_n",
-                        "max_active_strategies": 2,
-                        "active_strategy_combo_profile_id": "combo123",
-                        "active_unified_profile_id": "mu-unified-stale",
-                        "adaptive": {"version": 1, "flow_bias_enabled": True},
-                        "strategy_combo_profiles": [
-                            {
-                                "profile_id": "combo123",
-                                "profile_name": "Combo 123",
-                                "strategy_params": {"momentum": {"enabled": True}},
-                            }
-                        ],
-                        "adaptive_tuner_profiles": [
-                            {
-                                "profile_id": "p123",
-                                "adaptive_version": 1,
-                                "candidate": {
-                                    "strategy_selection_mode": "all_enabled",
-                                    "max_active_strategies": 5,
-                                    "min_active_bars_before_switch": 3,
-                                    "switch_cooldown_bars": 2,
-                                    "flow_bias_enabled": False,
-                                    "use_ohlcv_fallbacks": True,
-                                },
-                            }
-                        ],
-                    }
-                },
-            }
-        )
+    _seed_primary_config_snapshots(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        aos_config={
+            "version": "1.0.0",
+            "tickers": {
+                "MU": {
+                    "strategy_selection_mode": "adaptive_top_n",
+                    "max_active_strategies": 2,
+                    "active_strategy_combo_profile_id": "combo123",
+                    "active_unified_profile_id": "mu-unified-stale",
+                    "adaptive": {"version": 1, "flow_bias_enabled": True},
+                    "strategy_combo_profiles": [
+                        {
+                            "profile_id": "combo123",
+                            "profile_name": "Combo 123",
+                            "strategy_params": {"momentum": {"enabled": True}},
+                        }
+                    ],
+                    "adaptive_tuner_profiles": [
+                        {
+                            "profile_id": "p123",
+                            "adaptive_version": 1,
+                            "candidate": {
+                                "strategy_selection_mode": "all_enabled",
+                                "max_active_strategies": 5,
+                                "min_active_bars_before_switch": 3,
+                                "switch_cooldown_bars": 2,
+                                "flow_bias_enabled": False,
+                                "use_ohlcv_fallbacks": True,
+                            },
+                        }
+                    ],
+                }
+            },
+        },
     )
-    monkeypatch.setattr(api_server, "AOS_CONFIG_PATH", temp_aos)
 
     request = api_server.AdaptiveTunerProfileApplyRequest(
         ticker="MU", profile_id="p123"
@@ -278,7 +302,7 @@ def test_apply_adaptive_tuner_profile_updates_aos_config(monkeypatch, tmp_path) 
     assert result["success"] is True
     assert result["profile_id"] == "p123"
 
-    saved = api_server._load_aos_config(temp_aos)
+    saved = api_server._load_aos_config()
     mu_cfg = saved["tickers"]["MU"]
     assert mu_cfg["strategy_selection_mode"] == "all_enabled"
     assert mu_cfg["max_active_strategies"] == 5
@@ -299,6 +323,12 @@ def test_create_isolated_tuner_aos_config_snapshot(monkeypatch, tmp_path) -> Non
         "tickers": {"MU": {"strategy": "momentum_flow"}},
     }
     base_aos.write_text(json.dumps(base_payload))
+
+    _seed_primary_config_snapshots(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        aos_config=base_payload,
+    )
 
     isolated_dir = tmp_path / "isolated"
     monkeypatch.setattr(api_server, "AOS_CONFIG_PATH", base_aos)

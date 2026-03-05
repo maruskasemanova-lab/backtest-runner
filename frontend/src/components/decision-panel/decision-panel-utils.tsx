@@ -10,7 +10,8 @@ const DECISION_MARKER_TYPES = new Set([
 
 const DEFAULT_ACCOUNT_SIZE = 10_000;
 
-export const DECISION_PANEL_LANGUAGE_STORAGE_KEY = "backtest_runner.decision_panel_language";
+export const DECISION_PANEL_LANGUAGE_STORAGE_KEY =
+  "backtest_runner.decision_panel_language";
 
 const SUPPORTED_DECISION_LANGUAGES = new Set(["sk", "en"]);
 
@@ -37,8 +38,11 @@ export const formatTooltipRuntimeValue = (value) => {
   if (value === null || value === undefined) return "n/a";
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return "n/a";
-    if (Math.abs(value) >= 1000) return value.toLocaleString("en-US", { maximumFractionDigits: 6 });
-    return Number.isInteger(value) ? String(value) : value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+    if (Math.abs(value) >= 1000)
+      return value.toLocaleString("en-US", { maximumFractionDigits: 6 });
+    return Number.isInteger(value)
+      ? String(value)
+      : value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
   }
   if (typeof value === "boolean") return value ? "true" : "false";
   if (Array.isArray(value)) {
@@ -58,14 +62,17 @@ export const formatTooltipRuntimeValue = (value) => {
 
 export const resolveDecisionLanguage = () => {
   if (typeof window === "undefined") return "sk";
-  const stored = String(window.localStorage.getItem(DECISION_PANEL_LANGUAGE_STORAGE_KEY) || "")
+  const stored = String(
+    window.localStorage.getItem(DECISION_PANEL_LANGUAGE_STORAGE_KEY) || "",
+  )
     .trim()
     .toLowerCase();
   if (SUPPORTED_DECISION_LANGUAGES.has(stored)) return stored;
   return "sk";
 };
 
-export const isDecisionMarker = (marker) => DECISION_MARKER_TYPES.has(marker?.marker_type);
+export const isDecisionMarker = (marker) =>
+  DECISION_MARKER_TYPES.has(marker?.marker_type);
 
 export const formatGenericValue = (value) => {
   if (value === null || value === undefined) return "n/a";
@@ -78,7 +85,8 @@ export const formatGenericValue = (value) => {
     if (!value.length) return "[]";
     return value
       .map((item) => {
-        if (typeof item === "object" && item !== null) return JSON.stringify(item);
+        if (typeof item === "object" && item !== null)
+          return JSON.stringify(item);
         return String(item);
       })
       .join(", ");
@@ -101,16 +109,16 @@ export const renderValue = (val, keyPrefix = "") => {
     if (Object.keys(val).length === 0) return "{}";
 
     return (
-      <div
-        className="object-container"
-        style={{ marginLeft: "10px", borderLeft: "2px solid rgba(15, 23, 42, 0.1)", paddingLeft: "8px" }}
-      >
+      <div className="object-container decision-tree">
         {Object.entries(val).map(([k, v]) => (
-          <div key={`${keyPrefix}-${k}`} className="object-row" style={{ marginTop: "4px" }}>
-            <span className="object-key" style={{ fontWeight: 500, color: "var(--text-secondary)", fontSize: "0.85em" }}>
-              {k}:
-            </span>
-            <div className="nested-object">{renderValue(v, `${keyPrefix}-${k}`)}</div>
+          <div
+            key={`${keyPrefix}-${k}`}
+            className="object-row decision-tree-row"
+          >
+            <span className="object-key decision-tree-key">{k}:</span>
+            <div className="nested-object">
+              {renderValue(v, `${keyPrefix}-${k}`)}
+            </div>
           </div>
         ))}
       </div>
@@ -120,16 +128,16 @@ export const renderValue = (val, keyPrefix = "") => {
   if (Array.isArray(val)) {
     if (val.length === 0) return "[]";
     return (
-      <div
-        className="object-container"
-        style={{ marginLeft: "10px", borderLeft: "2px solid rgba(15, 23, 42, 0.1)", paddingLeft: "8px" }}
-      >
+      <div className="object-container decision-tree">
         {val.map((v, i) => (
-          <div key={`${keyPrefix}-${i}`} className="object-row" style={{ marginTop: "4px" }}>
-            <span className="object-key" style={{ fontWeight: 500, color: "var(--text-secondary)", fontSize: "0.85em" }}>
-              [{i}]:
-            </span>
-            <div className="nested-object">{renderValue(v, `${keyPrefix}-${i}`)}</div>
+          <div
+            key={`${keyPrefix}-${i}`}
+            className="object-row decision-tree-row"
+          >
+            <span className="object-key decision-tree-key">[{i}]:</span>
+            <div className="nested-object">
+              {renderValue(v, `${keyPrefix}-${i}`)}
+            </div>
           </div>
         ))}
       </div>
@@ -138,13 +146,13 @@ export const renderValue = (val, keyPrefix = "") => {
 
   if (typeof val === "number") {
     return (
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.9em" }}>
+      <span className="decision-mono">
         {Math.abs(val) < 0.01 ? val.toFixed(6) : val.toFixed(4)}
       </span>
     );
   }
 
-  return <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.9em" }}>{String(val)}</span>;
+  return <span className="decision-mono">{String(val)}</span>;
 };
 
 export const toFiniteNumber = (value) => {
@@ -196,7 +204,10 @@ export const getMarkerIdentity = (marker) => {
 };
 
 export const getMarkerKey = (marker, idx = 0) => {
-  return marker.id || `${marker.marker_type || "marker"}-${marker.timestamp || marker.time || "na"}-${idx}`;
+  return (
+    marker.id ||
+    `${marker.marker_type || "marker"}-${marker.timestamp || marker.time || "na"}-${idx}`
+  );
 };
 
 export const isSameMarker = (a, b) => {
@@ -214,7 +225,11 @@ export const getMarkerIcon = (marker) => {
   const markerType = marker?.marker_type;
   const markerPnlUsd = marker?.details?.pnl_usd ?? marker?.details?.pnl_dollars;
   const markerPnlPct = resolvePnlPct(marker?.details, markerPnlUsd);
-  if (markerType === "take_profit_hit" && markerPnlPct !== null && markerPnlPct <= 0) {
+  if (
+    markerType === "take_profit_hit" &&
+    markerPnlPct !== null &&
+    markerPnlPct <= 0
+  ) {
     return "🔴";
   }
   const icons = {
@@ -235,7 +250,11 @@ export const getMarkerIcon = (marker) => {
 };
 
 export const formatExitMetrics = (marker) => {
-  if (!["exit_executed", "stop_loss_hit", "take_profit_hit"].includes(marker?.marker_type)) {
+  if (
+    !["exit_executed", "stop_loss_hit", "take_profit_hit"].includes(
+      marker?.marker_type,
+    )
+  ) {
     return null;
   }
   const details = marker?.details || {};
@@ -247,13 +266,20 @@ export const formatExitMetrics = (marker) => {
 
   const parts = [];
   if (pnlPct != null || pnlUsd != null) {
-    const pctText = pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${Number(pnlPct).toFixed(2)}%` : "n/a";
-    const usdText = pnlUsd != null ? `${Number(pnlUsd) >= 0 ? "+" : ""}$${Number(pnlUsd).toFixed(2)}` : "n/a";
+    const pctText =
+      pnlPct != null
+        ? `${pnlPct >= 0 ? "+" : ""}${Number(pnlPct).toFixed(2)}%`
+        : "n/a";
+    const usdText =
+      pnlUsd != null
+        ? `${Number(pnlUsd) >= 0 ? "+" : ""}$${Number(pnlUsd).toFixed(2)}`
+        : "n/a";
     parts.push(`PnL: ${pctText} (${usdText})`);
   }
   if (costUsd != null) {
     const costUsdText = `$${Number(costUsd).toFixed(2)}`;
-    const costPctText = costPct != null ? ` (${Number(costPct).toFixed(2)}%)` : "";
+    const costPctText =
+      costPct != null ? ` (${Number(costPct).toFixed(2)}%)` : "";
     parts.push(`Costs: ${costUsdText}${costPctText}`);
   }
   if (barsHeld != null) {

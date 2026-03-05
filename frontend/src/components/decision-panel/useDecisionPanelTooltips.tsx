@@ -34,10 +34,16 @@ type Params = {
   isDetailFullscreen: boolean;
 };
 
-type TooltipAnchorEvent = ReactMouseEvent<HTMLElement> | ReactFocusEvent<HTMLElement>;
-type TooltipToggleEvent = ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>;
+type TooltipAnchorEvent =
+  | ReactMouseEvent<HTMLElement>
+  | ReactFocusEvent<HTMLElement>;
+type TooltipToggleEvent =
+  | ReactMouseEvent<HTMLElement>
+  | ReactKeyboardEvent<HTMLElement>;
 
-function isDetailLabelOptions(value: unknown): value is DecisionPanelDetailLabelOptions {
+function isDetailLabelOptions(
+  value: unknown,
+): value is DecisionPanelDetailLabelOptions {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -54,7 +60,8 @@ export default function useDecisionPanelTooltips({
   uiLanguage,
   isDetailFullscreen,
 }: Params) {
-  const [activeHelpTooltip, setActiveHelpTooltip] = useState<ActiveHelpTooltip>(null);
+  const [activeHelpTooltip, setActiveHelpTooltip] =
+    useState<ActiveHelpTooltip>(null);
 
   useEffect(() => {
     setActiveHelpTooltip(null);
@@ -97,29 +104,41 @@ export default function useDecisionPanelTooltips({
       setActiveHelpTooltip(null);
     };
     portalWindow.addEventListener("pointerdown", handlePointerDown, true);
-    return () => portalWindow.removeEventListener("pointerdown", handlePointerDown, true);
+    return () =>
+      portalWindow.removeEventListener("pointerdown", handlePointerDown, true);
   }, [activeHelpTooltip?.pinned, portalWindow]);
 
   const runtimeTooltipFor = (label: string) => {
     const runtime =
-      runtimeTooltipByLabel[label] ?? runtimeTooltipByLabel[resolveTooltipBaseLabel(label)] ?? null;
+      runtimeTooltipByLabel[label] ??
+      runtimeTooltipByLabel[resolveTooltipBaseLabel(label)] ??
+      null;
     if (!runtime) return "";
     const lines = [];
-    lines.push(`${tooltipLocaleText.value}: ${formatTooltipRuntimeValue(runtime.value)}`);
+    lines.push(
+      `${tooltipLocaleText.value}: ${formatTooltipRuntimeValue(runtime.value)}`,
+    );
     if (runtime.source) {
       lines.push(`${tooltipLocaleText.source}: ${runtime.source}`);
     }
-    (Array.isArray(runtime.flow) ? runtime.flow : []).forEach((line) => lines.push(line));
+    (Array.isArray(runtime.flow) ? runtime.flow : []).forEach((line) =>
+      lines.push(line),
+    );
     return lines.join("\n");
   };
 
   const tooltipFor = (label: string) => {
     const base = baseTooltipFor(label);
     const runtime = runtimeTooltipFor(label);
-    return [base, runtime].filter((part) => String(part || "").trim()).join("\n\n");
+    return [base, runtime]
+      .filter((part) => String(part || "").trim())
+      .join("\n\n");
   };
 
-  const resolveHelpTooltipPosition = (anchorRect: DOMRect, viewportWindow = portalWindow) => {
+  const resolveHelpTooltipPosition = (
+    anchorRect: DOMRect,
+    viewportWindow = portalWindow,
+  ) => {
     if (!viewportWindow) {
       return {
         top: anchorRect.bottom + 10,
@@ -138,15 +157,22 @@ export default function useDecisionPanelTooltips({
       Math.max(horizontalPadding, viewportWidth - maxWidth - horizontalPadding),
     );
     const placeAbove = anchorRect.bottom > viewportHeight * 0.72;
-    const top = placeAbove ? Math.max(10, anchorRect.top - 10) : anchorRect.bottom + 10;
+    const top = placeAbove
+      ? Math.max(10, anchorRect.top - 10)
+      : anchorRect.bottom + 10;
     return { top, left, maxWidth, placeAbove };
   };
 
-  const showHelpTooltip = (event: TooltipAnchorEvent, tooltipText: string, pinned = false) => {
+  const showHelpTooltip = (
+    event: TooltipAnchorEvent,
+    tooltipText: string,
+    pinned = false,
+  ) => {
     const text = String(tooltipText || "").trim();
     if (!text) return;
     const anchorRect = event.currentTarget.getBoundingClientRect();
-    const anchorWindow = event.currentTarget?.ownerDocument?.defaultView || portalWindow;
+    const anchorWindow =
+      event.currentTarget?.ownerDocument?.defaultView || portalWindow;
     setActiveHelpTooltip({
       ...resolveHelpTooltipPosition(anchorRect, anchorWindow),
       text,
@@ -158,17 +184,28 @@ export default function useDecisionPanelTooltips({
     setActiveHelpTooltip((previous) => (previous?.pinned ? previous : null));
   };
 
-  const togglePinnedHelpTooltip = (event: TooltipToggleEvent, tooltipText: string) => {
+  const togglePinnedHelpTooltip = (
+    event: TooltipToggleEvent,
+    tooltipText: string,
+  ) => {
     event.preventDefault();
     event.stopPropagation();
     const text = String(tooltipText || "").trim();
     if (!text) return;
-    const ElementCtor = portalWindow?.Element || (typeof Element !== "undefined" ? Element : null);
+    const ElementCtor =
+      portalWindow?.Element ||
+      (typeof Element !== "undefined" ? Element : null);
     const anchorElement =
-      ElementCtor && event.currentTarget instanceof ElementCtor ? event.currentTarget : null;
-    const anchorWindow = anchorElement?.ownerDocument?.defaultView || portalWindow;
+      ElementCtor && event.currentTarget instanceof ElementCtor
+        ? event.currentTarget
+        : null;
+    const anchorWindow =
+      anchorElement?.ownerDocument?.defaultView || portalWindow;
     const nextPosition = anchorElement
-      ? resolveHelpTooltipPosition(anchorElement.getBoundingClientRect(), anchorWindow)
+      ? resolveHelpTooltipPosition(
+          anchorElement.getBoundingClientRect(),
+          anchorWindow,
+        )
       : { top: 12, left: 12, maxWidth: 420, placeAbove: false };
     setActiveHelpTooltip((previous) => {
       if (previous?.pinned && previous?.text === text) {
@@ -187,11 +224,14 @@ export default function useDecisionPanelTooltips({
     tooltipLabelOrOptions = label,
     style,
   ) => {
-    const optionsObject = isDetailLabelOptions(tooltipLabelOrOptions) ? tooltipLabelOrOptions : null;
+    const optionsObject = isDetailLabelOptions(tooltipLabelOrOptions)
+      ? tooltipLabelOrOptions
+      : null;
     const tooltipLabel = optionsObject
       ? optionsObject.tooltipLabel || label
       : tooltipLabelOrOptions || label;
     const effectiveStyle = optionsObject ? optionsObject.style : style;
+    const effectiveClassName = optionsObject?.className || "";
     const runtimeOverride = optionsObject
       ? {
           value: optionsObject.runtimeValue,
@@ -205,7 +245,9 @@ export default function useDecisionPanelTooltips({
       ? [
           baseTooltipFor(tooltipLabel),
           `${tooltipLocaleText.value}: ${formatTooltipRuntimeValue(runtimeOverride.value)}`,
-          runtimeOverride.source ? `${tooltipLocaleText.source}: ${runtimeOverride.source}` : "",
+          runtimeOverride.source
+            ? `${tooltipLocaleText.source}: ${runtimeOverride.source}`
+            : "",
           ...(runtimeOverride.flow || []),
         ]
           .filter((part) => String(part || "").trim())
@@ -215,7 +257,7 @@ export default function useDecisionPanelTooltips({
       <span className="detail-label-with-tooltip">
         <button
           type="button"
-          className="detail-label-trigger"
+          className={`detail-label-trigger${effectiveClassName ? ` ${effectiveClassName}` : ""}`}
           aria-label={tooltipText}
           style={effectiveStyle}
           onMouseEnter={(event) => showHelpTooltip(event, tooltipText, false)}
@@ -238,7 +280,9 @@ export default function useDecisionPanelTooltips({
           type="button"
           className="detail-label-help"
           aria-label={tooltipText}
-          aria-expanded={Boolean(activeHelpTooltip && activeHelpTooltip.text === tooltipText)}
+          aria-expanded={Boolean(
+            activeHelpTooltip && activeHelpTooltip.text === tooltipText,
+          )}
           onMouseEnter={(event) => showHelpTooltip(event, tooltipText, false)}
           onMouseLeave={hideHelpTooltip}
           onFocus={(event) => showHelpTooltip(event, tooltipText, false)}

@@ -634,6 +634,7 @@ def _build_start_run_deps() -> StartRunDeps:
         attach_l2_features=_attach_l2_features,
         load_aos_config=_load_aos_config,
         get_ticker_positioning_config=_get_ticker_positioning_config,
+        positioning_config_keys=POSITIONING_CONFIG_KEYS,
         configure_session=_configure_session,
         broadcast=broadcast,
         run_config_cls=RunConfig,
@@ -1073,6 +1074,7 @@ def _build_unified_profile_options_payload(ticker: str) -> Dict[str, Any]:
         normalize_strategy_selection_mode=_normalize_strategy_selection_mode,
         normalize_clamped_int=_normalize_clamped_int,
         get_ticker_positioning_config=_get_ticker_positioning_config,
+        positioning_config_keys=POSITIONING_CONFIG_KEYS,
         parse_utc_iso=_parse_utc_iso,
     )
 

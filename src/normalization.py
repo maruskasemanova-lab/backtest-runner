@@ -237,11 +237,77 @@ def normalize_tuner_profiles(raw: Any) -> List[Dict[str, Any]]:
         if isinstance(item.get("search_space"), dict):
             profile["search_space"] = item["search_space"]
 
+        candidate = item.get("candidate")
+        if isinstance(candidate, dict):
+            profile["candidate"] = candidate
+
+        best_trial = item.get("best_trial")
+        if isinstance(best_trial, dict):
+            profile["best_trial"] = best_trial
+
         if isinstance(item.get("best_candidate"), dict):
             profile["best_candidate"] = item["best_candidate"]
+            if "candidate" not in profile:
+                profile["candidate"] = item["best_candidate"]
 
         if isinstance(item.get("metrics"), dict):
             profile["metrics"] = item["metrics"]
+
+        if isinstance(item.get("metadata"), dict):
+            profile["metadata"] = item["metadata"]
+
+        if isinstance(item.get("vector_analysis"), dict):
+            profile["vector_analysis"] = item["vector_analysis"]
+
+        if isinstance(item.get("ticker"), str):
+            profile["ticker"] = str(item.get("ticker") or "").strip().upper()
+
+        if isinstance(item.get("method"), str):
+            profile["method"] = str(item.get("method") or "").strip()
+
+        if isinstance(item.get("score_metric"), str):
+            profile["score_metric"] = str(item.get("score_metric") or "").strip()
+
+        if isinstance(item.get("date_from"), str):
+            profile["date_from"] = str(item.get("date_from") or "").strip()
+
+        if isinstance(item.get("date_to"), str):
+            profile["date_to"] = str(item.get("date_to") or "").strip()
+
+        if isinstance(item.get("scope"), str):
+            profile["scope"] = str(item.get("scope") or "").strip().lower()
+
+        if isinstance(item.get("owner_user_id"), str):
+            profile["owner_user_id"] = str(item.get("owner_user_id") or "").strip()
+
+        if isinstance(item.get("owner_tenant_id"), str):
+            profile["owner_tenant_id"] = str(item.get("owner_tenant_id") or "").strip()
+
+        try:
+            adaptive_version = int(item.get("adaptive_version", 1))
+        except (TypeError, ValueError):
+            adaptive_version = 1
+        profile["adaptive_version"] = max(1, adaptive_version)
+
+        for key in ("evaluated_days", "quick_max_days", "quick_trial_boost"):
+            if key not in item:
+                continue
+            try:
+                profile[key] = int(item.get(key))
+            except (TypeError, ValueError):
+                continue
+
+        for key in ("score",):
+            if key not in item:
+                continue
+            try:
+                profile[key] = float(item.get(key))
+            except (TypeError, ValueError):
+                continue
+
+        for key in ("l2_required", "l2_only", "quick_mode"):
+            if key in item:
+                profile[key] = bool(item.get(key))
 
         if isinstance(item.get("notes"), str):
             profile["notes"] = item["notes"].strip()

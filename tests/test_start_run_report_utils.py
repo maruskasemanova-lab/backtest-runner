@@ -84,6 +84,21 @@ def test_build_report_metadata_uses_profile_metadata() -> None:
     assert metadata["unified_profile_id"] == "u-active"
 
 
+def test_build_report_metadata_includes_control_plane_fingerprints() -> None:
+    metadata = build_report_metadata(
+        run_key="run-1:MU:2026-02-01",
+        run_date_label="2026-02-01",
+        aos_applied={},
+        execution_config={
+            "config_fingerprint": "cfg_exec123",
+            "control_plane_snapshot": {"aos_applied_fingerprint": "cfg_aos456"},
+        },
+    )
+
+    assert metadata["config_fingerprint"] == "cfg_exec123"
+    assert metadata["aos_applied_fingerprint"] == "cfg_aos456"
+
+
 def test_build_run_request_config_snapshot_json_normalizes_values() -> None:
     class _DummyRequest:
         def dict(self) -> dict:

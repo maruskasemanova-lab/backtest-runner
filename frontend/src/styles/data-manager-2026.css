@@ -585,6 +585,14 @@
 }
 
 @media (max-width: 1320px) {
+  .dm-main-row {
+    flex-direction: column;
+  }
+
+  .dm-left-panel {
+    width: 100%;
+  }
+
   .dm-filter-bar {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

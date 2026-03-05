@@ -21,5 +21,4 @@ This folder contains a ready-to-upload analysis pack for cloud review.
 5. `claude_prompt.md`
 
 ## Optional
-A compressed archive is available at:
-- `analysis/claude_handoff_2026-02-06.tar.gz`
+If you need a compressed handoff pack, create it from this folder on demand.

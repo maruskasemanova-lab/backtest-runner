@@ -28,17 +28,17 @@ Own regime detection, signal generation, position management, learning component
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 41 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/trading_orchestrator.py` | yes | 473 | `562a066 2026-02-25` |
 | `../market_regime_detection/src/feature_store.py` | yes | 691 | `562a066 2026-02-25` |
-| `../market_regime_detection/src/ensemble_combiner.py` | yes | 469 | `a0fc856 2026-02-23` |
+| `../market_regime_detection/src/ensemble_combiner.py` | yes | 469 | `c149629 2026-03-05` |
 | `../market_regime_detection/src/edge_monitor.py` | yes | 364 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/checkpoint.py` | yes | 284 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/adaptive_regime.py` | yes | 27 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/position_sizing.py` | yes | 145 | `d33cc78 2026-02-07` |
-| `../market_regime_detection/src/evidence_decision.py` | yes | 538 | `018eb2b 2026-02-24` |
+| `../market_regime_detection/src/evidence_decision.py` | yes | 538 | `c149629 2026-03-05` |
 | `../market_regime_detection/src/strategy_factory.py` | yes | 44 | `6267f1a 2026-03-04` |
-| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 709 | `56c4990 2026-03-05` |
+| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 709 | `c149629 2026-03-05` |
 | `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 185 | `56c4990 2026-03-05` |
 | `../market_regime_detection/src/strategies/absorption_reversal.py` | yes | 186 | `56c4990 2026-03-05` |
-| `../market_regime_detection/src/strategies/exhaustion_fade.py` | yes | 207 | `a0fc856 2026-02-23` |
+| `../market_regime_detection/src/strategies/exhaustion_fade.py` | yes | 207 | `c149629 2026-03-05` |
 | `../market_regime_detection/src/strategies/trailing_stop.py` | yes | 301 | `94c21fc 2026-02-01` |
 
 ## Change Checks

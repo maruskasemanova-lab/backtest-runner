@@ -67,6 +67,7 @@ class _DummyRunner:
             "max_active_strategies": 3,
             "momentum_diversification_json": None,
         }
+        self._resolved_config_snapshot = {}
         self.reset_calls = 0
 
     def reset_for_replay(self):
@@ -93,7 +94,31 @@ class _DummyRegistry:
         return f"{run_id}:{ticker}:{date}", self.runner
 
 
-def _build_deps(runner: _DummyRunner, calls: dict) -> RunControlDeps:
+class _RunReportsStoreStub:
+    def __init__(self, *, summary=None, snapshot_row=None):
+        self.summary = summary
+        self.snapshot_row = snapshot_row
+
+    def get_run_summary(self, *, run_key: str):
+        if not isinstance(self.summary, dict):
+            return None
+        return {
+            "run_key": run_key,
+            "summary": dict(self.summary),
+            "updated_at": "2026-02-10T12:00:00Z",
+        }
+
+    def get_run_config_snapshot(self, *, snapshot_id=None, run_key=None):
+        _ = snapshot_id, run_key
+        return self.snapshot_row
+
+
+def _build_deps(
+    runner: _DummyRunner,
+    calls: dict,
+    *,
+    run_reports_store=None,
+) -> RunControlDeps:
     async def _clear_remote(strategy_api_url: str, run_id: str, ticker: str):
         calls["clear"] = (strategy_api_url, run_id, ticker)
 
@@ -110,6 +135,7 @@ def _build_deps(runner: _DummyRunner, calls: dict) -> RunControlDeps:
         save_remote_checkpoint=None,
         clear_remote_strategy_sessions=_clear_remote,
         configure_session=_configure_session,
+        run_reports_store=run_reports_store,
     )
 
 
@@ -143,3 +169,34 @@ def test_restart_run_rejects_active_run():
         asyncio.run(restart_run("r1", "NVDA", "2026-02-01_to_2026-02-10", deps))
 
     assert exc.value.status_code == 409
+
+
+def test_restart_run_uses_persisted_resolved_snapshot_when_ram_snapshot_missing():
+    runner = _DummyRunner()
+    runner._restart_session_config = None
+    calls = {}
+    deps = _build_deps(
+        runner,
+        calls,
+        run_reports_store=_RunReportsStoreStub(
+            summary={"resolved_config_snapshot_id": "rcs_test123"},
+            snapshot_row={
+                "snapshot_id": "rcs_test123",
+                "run_key": "r1:NVDA:2026-02-01_to_2026-02-10",
+                "payload": {
+                    "session_config_snapshot": {
+                        "strategy_selection_mode": "all_enabled",
+                        "l2_confirm_enabled": False,
+                    }
+                },
+            },
+        ),
+    )
+
+    result = asyncio.run(restart_run("r1", "NVDA", "2026-02-01_to_2026-02-10", deps))
+
+    assert result["success"] is True
+    cfg_call = calls["configure"]
+    assert cfg_call[3] == "2026-02-01"
+    assert cfg_call[4]["strategy_selection_mode"] == "all_enabled"
+    assert cfg_call[4]["l2_confirm_enabled"] is False

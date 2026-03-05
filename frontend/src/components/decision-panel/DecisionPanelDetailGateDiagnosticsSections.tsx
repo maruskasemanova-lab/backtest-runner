@@ -30,7 +30,9 @@ export default function DecisionPanelDetailGateDiagnosticsSections({
           {renderSectionHeader("Level Context Gate")}
           <div className="detail-item">
             {renderDetailLabel("Status")}
-            <span className="detail-value">{renderGateStatus(levelContext.payload.passed)}</span>
+            <span className="detail-value">
+              {renderGateStatus(levelContext.payload.passed)}
+            </span>
           </div>
           <div className="detail-item">
             {renderDetailLabel("Strategy", "Strategy (Gate)")}
@@ -40,24 +42,36 @@ export default function DecisionPanelDetailGateDiagnosticsSections({
           </div>
           <div className="detail-item">
             {renderDetailLabel("Gate Reason")}
-            <span className="detail-value">{String(levelContext.payload.reason || "n/a")}</span>
+            <span className="detail-value">
+              {String(levelContext.payload.reason || "n/a")}
+            </span>
           </div>
           <div className="detail-item">
-            {renderDetailLabel("Near Tested Levels", "Near Tested Levels (Gate)")}
+            {renderDetailLabel(
+              "Near Tested Levels",
+              "Near Tested Levels (Gate)",
+            )}
             <span className="detail-value">
-              {Number(levelContext.payload?.stats?.near_tested_levels_count || 0)}
+              {Number(
+                levelContext.payload?.stats?.near_tested_levels_count || 0,
+              )}
             </span>
           </div>
           <div className="detail-item">
             {renderDetailLabel("Value Area Position")}
             <span className="detail-value">
-              {String(levelContext.payload?.volume_profile?.value_area_position || "n/a")}
+              {String(
+                levelContext.payload?.volume_profile?.value_area_position ||
+                  "n/a",
+              )}
             </span>
           </div>
           <div className="detail-item">
             {renderDetailLabel("POC On Trade Side", "POC On Trade Side (Gate)")}
             <span className="detail-value">
-              {renderYesNo(levelContext.payload?.volume_profile?.poc_on_trade_side)}
+              {renderYesNo(
+                levelContext.payload?.volume_profile?.poc_on_trade_side,
+              )}
             </span>
           </div>
           <div className="detail-item">
@@ -69,9 +83,11 @@ export default function DecisionPanelDetailGateDiagnosticsSections({
             </span>
           </div>
           {levelContext.reasons.length > 0 && (
-            <div className="detail-item" style={{ gridColumn: "1 / -1" }}>
+            <div className="detail-item decision-detail-span-full">
               {renderDetailLabel("Fail Reasons")}
-              <span className="detail-value">{levelContext.reasons.join(", ")}</span>
+              <span className="detail-value">
+                {levelContext.reasons.join(", ")}
+              </span>
             </div>
           )}
         </>
@@ -83,7 +99,9 @@ export default function DecisionPanelDetailGateDiagnosticsSections({
           <div className="detail-item">
             {renderDetailLabel("First-Bar Stop Loss")}
             <span className="detail-value">
-              {renderYesNo(entryQualityDiagnostics.payload?.is_first_bar_stop_loss)}
+              {renderYesNo(
+                entryQualityDiagnostics.payload?.is_first_bar_stop_loss,
+              )}
             </span>
           </div>
           <div className="detail-item">
@@ -111,23 +129,33 @@ export default function DecisionPanelDetailGateDiagnosticsSections({
             </span>
           </div>
           <div className="detail-item">
-            {renderDetailLabel("Near Tested Levels", "Near Tested Levels (Entry Timing)")}
+            {renderDetailLabel(
+              "Near Tested Levels",
+              "Near Tested Levels (Entry Timing)",
+            )}
             <span className="detail-value">
               {entryQualityDiagnostics.payload?.near_tested_levels_count != null
-                ? Number(entryQualityDiagnostics.payload.near_tested_levels_count)
+                ? Number(
+                    entryQualityDiagnostics.payload.near_tested_levels_count,
+                  )
                 : "n/a"}
             </span>
           </div>
           <div className="detail-item">
-            {renderDetailLabel("POC On Trade Side", "POC On Trade Side (Entry Timing)")}
+            {renderDetailLabel(
+              "POC On Trade Side",
+              "POC On Trade Side (Entry Timing)",
+            )}
             <span className="detail-value">
               {renderYesNo(entryQualityDiagnostics.payload?.poc_on_trade_side)}
             </span>
           </div>
           {entryQualityDiagnostics.tags.length > 0 && (
-            <div className="detail-item" style={{ gridColumn: "1 / -1" }}>
+            <div className="detail-item decision-detail-span-full">
               {renderDetailLabel("Diagnosis Tags")}
-              <span className="detail-value">{entryQualityDiagnostics.tags.join(", ")}</span>
+              <span className="detail-value">
+                {entryQualityDiagnostics.tags.join(", ")}
+              </span>
             </div>
           )}
         </>

@@ -306,7 +306,7 @@ function AOSOptimizations({
         <div className="card-header">
           <span className="card-title">AOS Config</span>
         </div>
-        <div className="card-body" style={{ color: "var(--text-muted)" }}>
+        <div className="card-body ui-muted">
           Select a ticker to edit AOS configuration from file.
         </div>
       </div>
@@ -314,7 +314,7 @@ function AOSOptimizations({
   }
 
   return (
-    <div className="card">
+    <div className="card aos-config-card">
       <div className="card-header">
         <span className="card-title">AOS Config - {selectedTickerKey}</span>
         <button className="btn btn-secondary" onClick={fetchAOSConfig} disabled={loading || rawConfigSaving || momentumSaving}>
@@ -322,26 +322,18 @@ function AOSOptimizations({
         </button>
       </div>
 
-      <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        {loading && <div style={{ color: "var(--text-muted)" }}>Loading config...</div>}
-        {error && <div style={{ color: "var(--accent-red)" }}>{error}</div>}
+      <div className="card-body aos-config-body">
+        {loading && <div className="ui-note ui-note-compact">Loading config...</div>}
+        {error && <div className="ui-note ui-note-danger ui-note-compact">{error}</div>}
 
-        <div
-          style={{
-            border: "1px solid var(--border-color)",
-            borderRadius: "6px",
-            padding: "12px",
-            fontSize: "0.8rem",
-            color: "var(--text-muted)",
-          }}
-        >
-          Source of truth: <code>aos_optimization/aos_config.json</code> (adaptive/strategy)
-          plus <code>aos_optimization/positioning_config.json</code> (execution/positioning) via{" "}
-          <code>/api/aos-config</code>. Saved changes are applied on the next <code>/api/run/start</code>.
+        <div className="ui-note ui-note-compact">
+          Source of truth: DB-backed config snapshots exposed via <code>/api/aos-config</code>.
+          Local files under <code>aos_optimization/</code> are bootstrap and compatibility inputs, not the primary runtime store.
+          Saved changes are applied on the next <code>/api/run/start</code>.
         </div>
 
         {!hasTickerConfig && (
-          <div style={{ color: "var(--accent-yellow)", fontSize: "0.8rem" }}>
+          <div className="ui-note ui-note-warning ui-note-compact">
             No existing config for {selectedTickerKey} in file. Editing starts from an empty object.
           </div>
         )}
@@ -369,26 +361,16 @@ function AOSOptimizations({
             setRawConfigDirty(true);
             setRawConfigError(null);
           }}
-          style={{
-            width: "100%",
-            minHeight: "260px",
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-            fontSize: "0.75rem",
-            padding: "8px",
-            borderRadius: "4px",
-            border: "1px solid var(--border-color)",
-            backgroundColor: "var(--bg-primary)",
-            color: "var(--text-primary)",
-          }}
+          className="ui-code-area aos-config-editor"
         />
 
         {rawConfigError && (
-          <div style={{ color: "var(--accent-red)", fontSize: "0.8rem" }}>
+          <div className="ui-note ui-note-danger ui-note-compact">
             {rawConfigError}
           </div>
         )}
 
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div className="ui-actions">
           <button className="btn btn-primary" onClick={applyRawConfig} disabled={rawConfigSaving || !rawConfigDirty}>
             {rawConfigSaving ? "Saving..." : "Apply JSON"}
           </button>
