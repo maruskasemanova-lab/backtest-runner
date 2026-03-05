@@ -4,6 +4,9 @@ import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from src.services.run_control_service import RunControlDeps, delete_run, get_run_summary_db
 
 
@@ -144,6 +147,10 @@ def test_get_run_summary_db_hydrates_externalized_config_snapshot():
             "schema_version": 1,
             "run_key": run_key,
             "config_fingerprint": "cfg_exec123",
+            "session_config_snapshot": {
+                "regime_detection_minutes": 15,
+                "strategy_selection_mode": "adaptive_top_n",
+            },
         },
     }
 
@@ -162,3 +169,36 @@ def test_get_run_summary_db_hydrates_externalized_config_snapshot():
 
     assert summary["resolved_config_snapshot_id"] == "rcs_test123"
     assert summary["resolved_config_snapshot"]["config_fingerprint"] == "cfg_exec123"
+
+
+def test_get_run_summary_db_rejects_legacy_summary_without_modern_snapshots():
+    run_key = "run-1:MU:2026-02-11_to_2026-02-12"
+    store = _CaptureRunReportsStore()
+    store.upsert_run_summary(
+        run_key=run_key,
+        summary={
+            "run_id": "run-1",
+            "ticker": "MU",
+            "playback_snapshot": {
+                "encoding": "gzip+base64",
+                "payload_b64": "abc",
+            },
+        },
+    )
+
+    deps = RunControlDeps(
+        run_registry=SimpleNamespace(build_key=lambda run_id, ticker, date: run_key),
+        active_runners={},
+        marker_type_enum=None,
+        logger=SimpleNamespace(error=lambda *args, **kwargs: None),
+        save_remote_checkpoint=lambda *args, **kwargs: None,
+        clear_remote_strategy_sessions=lambda *args, **kwargs: None,
+        configure_session=lambda *args, **kwargs: None,
+        run_reports_store=store,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        get_run_summary_db("run-1", "MU", "2026-02-11", deps)
+
+    assert exc.value.status_code == 404
+    assert "Legacy run summary" in str(exc.value.detail)

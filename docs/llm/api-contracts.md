@@ -220,6 +220,7 @@ Important response fields:
 - `control_plane_snapshot` (immutable run-start control-plane metadata: fingerprints, effective reset scope, comparable mode, trading-hours/profile identity)
 - `resolved_config_snapshot` (persistable per-run resolved config artifact composed from report metadata, control-plane snapshot, effective AOS/execution/request/L2 payloads plus `session_config_snapshot` for restart/recovery hydration)
 - `start_timing` (start-phase timing diagnostics for FE/ops: `total_ms`, `slowest_phase`, `phases_ms`, and basic run context)
+- startup no longer migrates legacy JSON report files from `reports/` into the run-report store; only newly persisted snapshot-backed runs are supported.
 
 ### `POST /api/run/prewarm`
 
@@ -262,6 +263,7 @@ Purpose: expose available ticker/date coverage for run setup and tuner UX.
 Request contract:
 
 - optional query `refresh` (`true|false`, default `false`) to force catalog rescan before summarizing.
+- optional query `include_run_report_ranges` (`true|false`, default `true`) to merge persisted run-report date hints into catalog coverage; set `false` to return file-catalog coverage only.
 
 Response contract:
 
@@ -338,8 +340,22 @@ Compatibility notes:
 - when `play` reaches a successful terminal state (all bars processed, no run error), runner is auto-flushed from `active_runners` after summary persistence to prevent unbounded in-memory run accumulation.
 - `step` accepts optional body `trade_eval_mode` (`standard|intrabar_1s|intrabar_5s`) so single-step evaluation can switch checkpoint granularity without restarting run.
 - `restart` rewinds the existing in-memory run to bar zero (no re-load of source bars), clears remote strategy session state for that run+ticker, and reapplies stored session config before replay.
+- snapshot-backed restored runs are read-only; `step|play|resume|restart|intrabar_eval` return `409` instead of pretending they are live re-executable sessions.
 - marker/event ordering must remain stable for frontend playback.
 - `POST /api/run/cache/flush?include_disk=true|false` clears run-start caches (bars/reference/L2 enrichment); use when reclaiming memory or forcing re-read from source files.
+
+### `POST /api/run/{run_id}/{ticker}/{date}/restore-snapshot`
+
+Purpose: rehydrate a completed persisted run into RAM as a read-only snapshot-backed runner so legacy stateful `GET /api/run/*` consumers can reattach after the original runner was flushed from memory.
+
+Compatibility notes:
+
+- loads persisted summary from the configured run-report store and hydrates externalized `resolved_config_snapshot` when available.
+- requires persisted `playback_snapshot` (`encoding=gzip+base64`); if missing, returns `404`.
+- rebuilds an in-memory runner with restored bars, markers, summary metadata, `resolved_config_snapshot`, and `session_config_snapshot`.
+- returned `state` includes `is_snapshot=true`, `snapshot_backed=true`, `snapshot_restored=true`, and `report_saved_at` when available.
+- restore is idempotent for an already active matching run key: response returns `already_active=true` instead of creating a duplicate runner.
+- restored snapshot runners are for diagnostics/read-side reuse, not for continuing execution.
 
 ### `POST /api/run/{run_id}/{ticker}/{date}/intrabar_eval`
 
@@ -478,6 +494,7 @@ Query contract:
 - `run_id_contains` optional substring filter for historical run IDs.
 - `adaptive_profile_id` optional adaptive profile filter. Exact metadata match is preferred; legacy report IDs with matching short token (e.g. `c4`) may be surfaced as hint matches.
   - additional legacy heuristic: when profile-id metadata is missing in report artifacts, endpoint may classify matches as `strategy_hint` by comparing report strategy names with strategy set saved in `aos_config` profile candidate.
+- persisted rows without modern snapshot artifacts (`playback_snapshot` plus hydrated `resolved_config_snapshot` / `resolved_config_snapshot_id`) are ignored as unsupported legacy runs.
 - `include_multi_day` (default `true`) expands `YYYY-MM-DD_to_YYYY-MM-DD` labels into day-level calendar rows even when a day has zero closed trades.
 - `include_zero_trade_runs` (default `false`) includes runs with no closed trades in history payload; day rows then carry zero trade/PnL values.
 
@@ -520,6 +537,7 @@ Response notes:
 - otherwise reads persisted `run_summaries` row from configured run-report store (Supabase or SQLite).
 - when the configured run-report store supports separate run-config persistence (SQLite local store and Supabase-backed run reports), `summary.resolved_config_snapshot_id` is used to hydrate externalized `resolved_config_snapshot` payload back into the response.
 - expects compressed playback payload under `summary.playback_snapshot` (`encoding=gzip+base64`).
+- legacy persisted runs without modern playback + resolved-config snapshots return `404`; rerun them under the current contract if they are still needed.
 - returns:
   - `run_key`
   - `state` (read-only snapshot state with `is_snapshot=true`)

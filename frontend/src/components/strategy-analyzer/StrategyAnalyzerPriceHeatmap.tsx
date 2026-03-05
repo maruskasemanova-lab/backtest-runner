@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { orderIsoDateRange } from "./utils";
-import type { StrategyAnalyzerPreviewBar } from "./types";
 
 type Props = {
-  bars: StrategyAnalyzerPreviewBar[];
   ticker: string;
   dateFrom: string;
   dateTo: string;
@@ -73,7 +71,7 @@ const heatAlpha = (value: number, max: number): number => {
 };
 
 type HeatmapTableProps = {
-  title: string;
+  title?: string;
   days: string[];
   rows: Row[];
 };
@@ -91,7 +89,7 @@ function HeatmapTable({ title, days, rows }: HeatmapTableProps) {
 
   return (
     <section className="sa-heatmap-panel">
-      <h4 className="sa-heatmap-title">{title}</h4>
+      {title ? <h4 className="sa-heatmap-title">{title}</h4> : null}
       <div className="sa-heatmap-scroll">
         <table className="sa-heatmap-table">
           <thead>
@@ -127,7 +125,7 @@ function HeatmapTable({ title, days, rows }: HeatmapTableProps) {
   );
 }
 
-export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, dateTo }: Props) {
+export default function StrategyAnalyzerPriceHeatmap({ ticker, dateFrom, dateTo }: Props) {
   const [binSize, setBinSize] = useState(0.5);
   const [payload, setPayload] = useState<DbHeatmapPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -208,39 +206,9 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
     [payload],
   );
 
-  const summary = payload?.latest_summary || null;
-  const rangeText =
-    summary?.min_price_bin != null && summary?.max_price_bin != null
-      ? `${formatPrice(summary.min_price_bin)} - ${formatPrice(summary.max_price_bin)}`
-      : "n/a";
-  const latestAsOfDate = payload?.latest_as_of_date || "n/a";
-  const heatmapInfoTooltip = [
-    `${ticker} | ${dateFrom || "n/a"} -> ${dateTo || "n/a"} | Preview bars ${bars.length.toLocaleString()} | Range ${rangeText}`,
-    "Source: daily_price_heatmap_levels (daily cumulative values).",
-    "Bars = count of 1m candles (time = bars in minutes).",
-    `Top tables are based on the latest day in range (${latestAsOfDate}).`,
-    `Heatmap tables below are scrollable across full price range and ${days.length} day(s).`,
-  ].join("\n");
-
   return (
     <div className="card sa-heatmap-card">
       <div className="sa-heatmap-head">
-        <div>
-          <div className="sa-heatmap-heading-row">
-            <div>
-              <div className="sa-section-kicker">Price Clustering</div>
-              <h3 className="sa-section-title">Heatmap exekucii podla ceny (DB cumulative)</h3>
-            </div>
-            <button
-              type="button"
-              className="sa-heatmap-info-btn"
-              title={heatmapInfoTooltip}
-              aria-label="Heatmap info"
-            >
-              i
-            </button>
-          </div>
-        </div>
         <label className="sa-control-field sa-control-field-small" htmlFor="sa_heatmap_bin_size">
           <span className="sa-control-label">BIN SIZE</span>
           <select
@@ -258,11 +226,11 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
         </label>
       </div>
 
-      {loading ? <div className="sa-heatmap-note">Načítavam DB heatmapu...</div> : null}
-      {!loading && loadError ? <div className="sa-heatmap-note">Chyba DB heatmapy: {loadError}</div> : null}
+      {loading ? <div className="sa-heatmap-note">Loading cumulative heatmap...</div> : null}
+      {!loading && loadError ? <div className="sa-heatmap-note">Heatmap error: {loadError}</div> : null}
       {!loading && !loadError && payload && payload.rows.length === 0 ? (
         <div className="sa-heatmap-note">
-          Pre tento ticker/range v DB nie sú prepočítané heatmap dáta. Spusť `python3 scripts/recompute_daily_price_heatmaps.py`.
+          No precomputed cumulative heatmap data exists for this ticker/range. Run `python3 scripts/recompute_daily_price_heatmaps.py`.
         </div>
       ) : null}
 
@@ -270,7 +238,7 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
         <>
           <div className="sa-heatmap-summary-grid">
             <section className="sa-heatmap-panel">
-              <h4 className="sa-heatmap-title">Top levels by cumulative time</h4>
+              <h4 className="sa-heatmap-title">Top levels by time spent</h4>
               <table className="sa-heatmap-summary-table">
                 <thead>
                   <tr>
@@ -294,7 +262,7 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
             </section>
 
             <section className="sa-heatmap-panel">
-              <h4 className="sa-heatmap-title">Top levels by cumulative volume</h4>
+              <h4 className="sa-heatmap-title">Top levels by volume traded</h4>
               <table className="sa-heatmap-summary-table">
                 <thead>
                   <tr>
@@ -316,8 +284,8 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
             </section>
           </div>
 
-          <HeatmapTable title="Kumulatívny čas pri cene (bars)" days={days} rows={timeRows} />
-          <HeatmapTable title="Kumulatívny volume pri cene" days={days} rows={volumeRows} />
+          <HeatmapTable days={days} rows={timeRows} />
+          <HeatmapTable title="Volume traded at price" days={days} rows={volumeRows} />
         </>
       ) : null}
     </div>

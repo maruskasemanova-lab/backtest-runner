@@ -520,11 +520,6 @@ export default function StrategyAnalyzer({
             rangeScrubMeta={rangeScrubMeta}
             focusSelectedRangeOffset={focusSelectedRangeOffset}
             moveSelectedRangeByStep={moveSelectedRangeByStep}
-            isPlayingRun={isPlayingRun}
-            runLoading={runLoading}
-            onPlayRun={() => void handlePlayWithOverrides?.({ trade_eval_mode: analyzerTradeEvalMode, speed_ms: "max" })}
-            onPauseRun={() => void onPauseRun?.()}
-            onStepRun={() => void handleStepWithOverrides?.({ trade_eval_mode: analyzerTradeEvalMode })}
           />
         </div>
 
@@ -562,10 +557,6 @@ export default function StrategyAnalyzer({
             onClearAnalyzerRun={handleClearAnalyzerRun}
             analyzerPlaybackProgress={analyzerPlaybackProgress}
             attachedRunState={attachedRunState}
-            rankedWfoResults={rankedWfoResults}
-            selectedWfoVariantId={selectedWfoVariantId}
-            bestWfoVariantId={bestWfoVariantId}
-            onSelectWfoVariant={handleSelectWfoVariant}
             layout="rail"
           />
 
@@ -592,10 +583,6 @@ export default function StrategyAnalyzer({
             onSelectWfoVariant={handleSelectWfoVariant}
           />
 
-          {bars.length > 0 ? (
-            <StrategyAnalyzerPriceHeatmap bars={bars} ticker={ticker} dateFrom={dateFrom} dateTo={dateTo} />
-          ) : null}
-
           {isAnalyzerAttachedRun ? (
             <StrategyAnalyzerAttachedPanels
               ticker={ticker}
@@ -609,6 +596,10 @@ export default function StrategyAnalyzer({
               entryConditionsContent={entryConditionsContent}
               decisionsContent={decisionsContent}
             />
+          ) : null}
+
+          {bars.length > 0 ? (
+            <StrategyAnalyzerPriceHeatmap ticker={ticker} dateFrom={dateFrom} dateTo={dateTo} />
           ) : null}
         </aside>
       </div>

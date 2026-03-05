@@ -3,8 +3,8 @@ import CandlestickChart from "../CandlestickChart";
 import ChartRangeSelector from "./ChartRangeSelector";
 import StrategyAnalyzerScrubSlider from "./StrategyAnalyzerScrubSlider";
 import type {
-  StrategyAnalyzerChartHandle,
   StrategyAnalyzerChartBarLike,
+  StrategyAnalyzerChartHandle,
   StrategyAnalyzerChartMarkerClickTarget,
   StrategyAnalyzerChartWindow,
   StrategyAnalyzerDecisionMarker,
@@ -38,13 +38,12 @@ type Props = {
   rangeScrubMeta: StrategyAnalyzerRangeScrubMeta;
   focusSelectedRangeOffset: (nextOffset: number) => void;
   moveSelectedRangeByStep: (direction: -1 | 1) => void;
-  // Playback controls
-  isPlayingRun: boolean;
-  runLoading: boolean;
-  onPlayRun?: () => void;
-  onPauseRun?: () => void;
-  onStepRun?: () => void;
 };
+
+function formatRangeLabel(from: string | null, to: string | null): string {
+  if (!from || !to) return "Replay window not locked";
+  return `${from.replace("T", " ")} -> ${to.replace("T", " ")}`;
+}
 
 export default function StrategyAnalyzerChartPanel({
   bars,
@@ -72,43 +71,45 @@ export default function StrategyAnalyzerChartPanel({
   rangeScrubMeta,
   focusSelectedRangeOffset,
   moveSelectedRangeByStep,
-  isPlayingRun,
-  runLoading,
-  onPlayRun,
-  onPauseRun,
-  onStepRun,
 }: Props) {
   const fallbackBars = (Array.isArray(chartBars) ? chartBars : []).filter(
-    (bar) => Number.isFinite(Number(bar?.time))
+    (bar) => Number.isFinite(Number(bar?.time)),
   ) as StrategyAnalyzerPreviewBar[];
   const selectionBars = bars.length > 0 ? bars : fallbackBars;
   const hasRenderableBars = selectionBars.length > 0;
   const renderBars = chartBars.length > 0 ? chartBars : selectionBars;
+  const selectedRangeReady = Boolean(selectedRangeFrom && selectedRangeTo);
 
   return (
     <div className="card chart-container sa-chart-panel">
       <div className="card-header sa-chart-header">
-        <span className="card-title">
-          {hasRenderableBars ? `${ticker} - ${dateFrom} \u2192 ${dateTo}` : "Strategy Analyzer"}
-        </span>
+        <div className="sa-chart-heading">
+          <div className="sa-section-kicker">Replay Canvas</div>
+          <span className="card-title">
+            {hasRenderableBars ? `${ticker} | ${dateFrom} -> ${dateTo}` : "Strategy Analyzer"}
+          </span>
+          <div className="sa-chart-meta">
+            <span className="sa-meta-pill">{hasRenderableBars ? `${selectionBars.length.toLocaleString()} preview bars` : "Load market tape"}</span>
+            <span className={`sa-state-pill ${selectedRangeReady ? "is-ready" : "is-idle"}`}>
+              {selectedRangeReady ? "Window selected" : "Window pending"}
+            </span>
+            {isAnalyzerAttachedRun && analyzerDisplayPhase ? (
+              <span className={`phase-badge ${String(analyzerDisplayPhase || "").toLowerCase()}`}>
+                {analyzerDisplayPhase}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
         <div className="chart-toolbar sa-chart-toolbar">
-          {isAnalyzerAttachedRun && analyzerDisplayPhase ? (
-            <span className={`phase-badge ${String(analyzerDisplayPhase || "").toLowerCase()}`}>
-              {analyzerDisplayPhase}
-            </span>
-          ) : null}
-          {selectedRangeFrom && selectedRangeTo && (
-            <span className="sa-range-pill">
-              {selectedRangeFrom.replace("T", " ")} &rarr; {selectedRangeTo.replace("T", " ")}
-            </span>
-          )}
+          <span className="sa-range-pill">{formatRangeLabel(selectedRangeFrom, selectedRangeTo)}</span>
           <button
             className={rangeSelectMode ? "btn btn-primary" : "btn btn-secondary"}
             onClick={onToggleRangeSelectMode}
             title={rangeSelectMode ? "Cancel range selection" : "Select range on chart"}
             type="button"
           >
-            {rangeSelectMode ? "Cancel Selection" : "Select Range"}
+            {rangeSelectMode ? "Cancel range pick" : "Pick range on chart"}
           </button>
         </div>
       </div>
@@ -141,60 +142,51 @@ export default function StrategyAnalyzerChartPanel({
           </div>
         ) : (
           <div className="sa-chart-empty">
-            {loading ? "Loading bars..." : "Select a ticker and date range, then click Load Chart"}
+            <div className="sa-chart-empty__panel">
+              <div className="sa-section-kicker">Trader Workflow</div>
+              <h3 className="sa-chart-empty__title">Load a market tape first</h3>
+              <p className="sa-chart-empty__copy">
+                Pick the symbol and day span from the right rail, then draw a precise replay window on the chart before you start tweaking entries.
+              </p>
+              <div className="sa-empty-step-grid">
+                <div className="sa-empty-step">
+                  <span className="sa-empty-step__index">01</span>
+                  <span className="sa-empty-step__copy">Load the exact session you want to inspect.</span>
+                </div>
+                <div className="sa-empty-step">
+                  <span className="sa-empty-step__index">02</span>
+                  <span className="sa-empty-step__copy">Mark the regime leg or failed sequence you want to replay.</span>
+                </div>
+                <div className="sa-empty-step">
+                  <span className="sa-empty-step__index">03</span>
+                  <span className="sa-empty-step__copy">Run replay, pause, tweak gates and inspect each decision path.</span>
+                </div>
+              </div>
+            </div>
+            <div className="sa-chart-empty__status">
+              {loading ? "Loading bars..." : "Select a ticker and date range, then click Load market tape."}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Scrubber + playback controls sit outside chart stage to avoid gesture conflicts */}
-      {hasRenderableBars && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 8px 6px" }}>
-          {isAnalyzerAttachedRun && (
-            <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-              {isPlayingRun ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={onPauseRun}
-                  disabled={runLoading}
-                  title="Pause"
-                  style={{ padding: "2px 8px", fontSize: "0.72rem", lineHeight: 1.3 }}
-                >
-                  ⏸
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={onPlayRun}
-                  disabled={runLoading}
-                  title="Play"
-                  style={{ padding: "2px 8px", fontSize: "0.72rem", lineHeight: 1.3 }}
-                >
-                  ▶
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={onStepRun}
-                disabled={runLoading || isPlayingRun}
-                title="Step one bar"
-                style={{ padding: "2px 8px", fontSize: "0.72rem", lineHeight: 1.3 }}
-              >
-                ⏭
-              </button>
-            </div>
-          )}
-          <div style={{ flex: 1, minWidth: 0 }}>
+      {hasRenderableBars ? (
+        <div className="sa-chart-footer">
+          {isAnalyzerAttachedRun ? (
             <StrategyAnalyzerScrubSlider
               rangeScrubMeta={rangeScrubMeta}
               focusSelectedRangeOffset={focusSelectedRangeOffset}
               moveSelectedRangeByStep={moveSelectedRangeByStep}
             />
-          </div>
+          ) : (
+            <div className="sa-chart-footer-note">
+              {selectedRangeReady
+                ? "Replay window locked. Start the replay from the action rail to activate scrub + live decision diagnostics."
+                : "Use the chart picker or manual timestamps to lock a replay window before you start."}
+            </div>
+          )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

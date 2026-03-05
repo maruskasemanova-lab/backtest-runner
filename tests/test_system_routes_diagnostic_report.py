@@ -64,6 +64,146 @@ class _FixtureRunReportsStore:
         return rows
 
 
+def _derive_run_key_from_payload(payload: dict) -> str:
+    run_id = str(payload.get("run_id") or "").strip()
+    ticker = str(payload.get("ticker") or "").strip().upper()
+    date_label = str(payload.get("date") or "").strip()
+    if run_id and ticker and date_label:
+        return f"{run_id}:{ticker}:{date_label}"
+    return ""
+
+
+def _fixture_playback_snapshot_payload(
+    *,
+    run_key: str,
+    bars: list[dict],
+    markers: list[dict],
+) -> dict:
+    raw_payload = {
+        "schema_version": 1,
+        "run_key": run_key,
+        "created_at": "2026-02-26T00:00:00Z",
+        "bars": bars,
+        "markers": markers,
+    }
+    encoded = json.dumps(raw_payload, separators=(",", ":")).encode("utf-8")
+    compressed = gzip.compress(encoded, compresslevel=6)
+    return {
+        "schema_version": 1,
+        "encoding": "gzip+base64",
+        "bars_count": len(bars),
+        "markers_count": len(markers),
+        "payload_b64": base64.b64encode(compressed).decode("ascii"),
+        "uncompressed_bytes": len(encoded),
+        "compressed_bytes": len(compressed),
+        "skip_reason": None,
+    }
+
+
+def _modernize_summary_payload(payload: dict) -> dict:
+    normalized = dict(payload)
+    if normalized.pop("__legacy_persisted_artifact__", False):
+        return normalized
+
+    run_key = _derive_run_key_from_payload(normalized)
+    if not run_key:
+        return normalized
+
+    date_label = str(normalized.get("date") or "").strip()
+    ticker = str(normalized.get("ticker") or "").strip().upper()
+    run_id = str(normalized.get("run_id") or "").strip()
+
+    resolved_snapshot = (
+        dict(normalized.get("resolved_config_snapshot"))
+        if isinstance(normalized.get("resolved_config_snapshot"), dict)
+        else {}
+    )
+    if not resolved_snapshot:
+        resolved_snapshot = {
+            "schema_version": 1,
+            "run_id": run_id,
+            "ticker": ticker,
+            "date_label": date_label,
+            "run_key": run_key,
+        }
+    if "run_key" not in resolved_snapshot:
+        resolved_snapshot["run_key"] = run_key
+    if "run_id" not in resolved_snapshot:
+        resolved_snapshot["run_id"] = run_id
+    if "ticker" not in resolved_snapshot:
+        resolved_snapshot["ticker"] = ticker
+    if "date_label" not in resolved_snapshot:
+        resolved_snapshot["date_label"] = date_label
+    for field in (
+        "report_metadata",
+        "control_plane_snapshot",
+        "aos_applied",
+        "execution_config",
+        "run_request_config",
+        "l2_applied",
+    ):
+        if field not in resolved_snapshot and isinstance(normalized.get(field), dict):
+            resolved_snapshot[field] = dict(normalized.get(field))
+    if not isinstance(resolved_snapshot.get("session_config_snapshot"), dict):
+        resolved_snapshot["session_config_snapshot"] = {
+            "regime_detection_minutes": 15,
+            "strategy_selection_mode": "adaptive_top_n",
+            "max_active_strategies": 3,
+        }
+    normalized["resolved_config_snapshot"] = resolved_snapshot
+
+    if not isinstance(normalized.get("playback_snapshot"), dict):
+        markers = (
+            list(normalized.get("markers"))
+            if isinstance(normalized.get("markers"), list)
+            else []
+        )
+        session_summary = (
+            normalized.get("session_summary", {})
+            if isinstance(normalized.get("session_summary"), dict)
+            else {}
+        )
+        trades = (
+            session_summary.get("trades", [])
+            if isinstance(session_summary.get("trades"), list)
+            else []
+        )
+        timestamp = ""
+        for marker in markers:
+            if isinstance(marker, dict):
+                timestamp = str(marker.get("timestamp") or "").strip()
+                if timestamp:
+                    break
+        if not timestamp:
+            for trade in trades:
+                if not isinstance(trade, dict):
+                    continue
+                timestamp = str(
+                    trade.get("entry_time") or trade.get("exit_time") or ""
+                ).strip()
+                if timestamp:
+                    break
+        if not timestamp:
+            anchor = date_label.split("_to_", 1)[0] if "_to_" in date_label else date_label
+            timestamp = f"{anchor}T14:30:00+00:00" if anchor else "2026-02-01T14:30:00+00:00"
+        normalized["playback_snapshot"] = _fixture_playback_snapshot_payload(
+            run_key=run_key,
+            bars=[
+                {
+                    "timestamp": timestamp,
+                    "open": 100.0,
+                    "high": 100.0,
+                    "low": 100.0,
+                    "close": 100.0,
+                    "volume": 1.0,
+                }
+            ],
+            markers=markers,
+        )
+
+    return normalized
+
+
 def _build_client(monkeypatch, tmp_path, *, state_setup=None):
     app = FastAPI()
     app.include_router(system_routes.router)
@@ -82,7 +222,7 @@ def _write_session_summary(tmp_path, folder_name: str, payload: dict) -> None:
     report_dir = tmp_path / "reports" / folder_name
     report_dir.mkdir(parents=True, exist_ok=True)
     (report_dir / "session_summary.json").write_text(
-        json.dumps(payload), encoding="utf-8"
+        json.dumps(_modernize_summary_payload(payload)), encoding="utf-8"
     )
 
 
@@ -834,27 +974,29 @@ def test_get_saved_run_history_reads_external_report_store(monkeypatch, tmp_path
                 {
                     "run_key": "supabase-run:MU:2026-02-11",
                     "updated_at": "2026-02-14T10:00:00Z",
-                    "summary": {
-                        "run_id": "supabase-run",
-                        "ticker": "MU",
-                        "date": "2026-02-11",
-                        "session_summary": {
-                            "total_trades": 1,
-                            "trades": [
-                                {
-                                    "trade_id": 1,
-                                    "strategy": "AdaptiveCore",
-                                    "side": "long",
-                                    "entry_time": "2026-02-11T14:30:00+00:00",
-                                    "exit_time": "2026-02-11T14:35:00+00:00",
-                                    "pnl_pct": 0.2,
-                                    "pnl_dollars": 2.0,
-                                    "bars_held": 5,
-                                }
-                            ],
-                        },
-                        "markers": [],
-                    },
+                    "summary": _modernize_summary_payload(
+                        {
+                            "run_id": "supabase-run",
+                            "ticker": "MU",
+                            "date": "2026-02-11",
+                            "session_summary": {
+                                "total_trades": 1,
+                                "trades": [
+                                    {
+                                        "trade_id": 1,
+                                        "strategy": "AdaptiveCore",
+                                        "side": "long",
+                                        "entry_time": "2026-02-11T14:30:00+00:00",
+                                        "exit_time": "2026-02-11T14:35:00+00:00",
+                                        "pnl_pct": 0.2,
+                                        "pnl_dollars": 2.0,
+                                        "bars_held": 5,
+                                    }
+                                ],
+                            },
+                            "markers": [],
+                        }
+                    ),
                 }
             ]
 
@@ -1186,6 +1328,7 @@ def test_get_run_playback_snapshot_without_payload_returns_404(monkeypatch, tmp_
         tmp_path,
         "20260214_100000_MU_no-snapshot",
         {
+            "__legacy_persisted_artifact__": True,
             "run_id": "no-snapshot",
             "ticker": "MU",
             "date": "2026-02-13",
@@ -1197,4 +1340,60 @@ def test_get_run_playback_snapshot_without_payload_returns_404(monkeypatch, tmp_
     client = _build_client(monkeypatch, tmp_path)
     response = client.get(f"/api/reports/run-snapshot?run_key={run_key}")
     assert response.status_code == 404
-    assert "Playback snapshot is not available" in response.json()["detail"]
+    assert "Legacy run artifacts are no longer supported" in response.json()["detail"]
+
+
+def test_get_run_playback_snapshot_rejects_legacy_summary_without_resolved_snapshot(
+    monkeypatch, tmp_path
+):
+    run_key = "legacy-no-config:MU:2026-02-13"
+    _write_session_summary(
+        tmp_path,
+        "20260214_100000_MU_legacy-no-config",
+        {
+            "__legacy_persisted_artifact__": True,
+            "run_id": "legacy-no-config",
+            "ticker": "MU",
+            "date": "2026-02-13",
+            "phase": "COMPLETED",
+            "processed_bars": 1,
+            "total_bars": 1,
+            "playback_snapshot": _build_playback_snapshot_payload(
+                run_key=run_key,
+                bars=[{"timestamp": "2026-02-13T14:30:00+00:00", "close": 100.0}],
+                markers=[],
+            ),
+        },
+    )
+
+    client = _build_client(monkeypatch, tmp_path)
+    response = client.get(f"/api/reports/run-snapshot?run_key={run_key}")
+    assert response.status_code == 404
+    assert "Legacy run artifacts are no longer supported" in response.json()["detail"]
+
+
+def test_get_saved_run_history_skips_legacy_persisted_rows_without_modern_artifacts(
+    monkeypatch, tmp_path
+):
+    _write_session_summary(
+        tmp_path,
+        "20260214_100000_MU_legacy-history",
+        {
+            "__legacy_persisted_artifact__": True,
+            "run_id": "legacy-history",
+            "ticker": "MU",
+            "date": "2026-02-13",
+            "processed_bars": 1,
+            "total_bars": 1,
+            "session_summary": {"total_trades": 1, "trades": []},
+        },
+    )
+
+    client = _build_client(monkeypatch, tmp_path)
+    response = client.get("/api/reports/history/MU")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["matched_reports"] == 0
+    assert payload["skipped_invalid_reports"] >= 1
+    assert payload["day_results"] == []

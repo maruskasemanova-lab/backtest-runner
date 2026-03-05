@@ -185,7 +185,6 @@ from src.services.local_config_service import LocalConfigService
 from src.services.file_store_migration_service import (
     ensure_primary_config_snapshots,
     migrate_aos_history_jsonl_to_store,
-    migrate_reports_to_run_reports_store,
     sync_live_trader_artifacts_to_store,
 )
 from src.security.network_policy import (
@@ -434,12 +433,15 @@ def _run_file_storage_migrations() -> None:
         store=state_store,
         logger=logger,
     )
-    report_stats = migrate_reports_to_run_reports_store(
-        reports_dir=REPORTS_DIR,
-        run_reports_store=_run_reports_store,
-        logger=logger,
-        overwrite_existing=False,
-    )
+    report_stats = {
+        "scanned_files": 0,
+        "processed_reports": 0,
+        "inserted": 0,
+        "updated": 0,
+        "skipped": 0,
+        "errors": 0,
+        "migration_disabled": 1,
+    }
     live_stats = sync_live_trader_artifacts_to_store(
         artifacts_dir=LIVE_TRADER_ARTIFACTS_DIR,
         store=state_store,
@@ -504,6 +506,8 @@ def _build_run_control_deps() -> RunControlDeps:
         clear_remote_strategy_sessions=_clear_remote_strategy_sessions,
         configure_session=_configure_session,
         l2_manager=getattr(api_services, "l2_manager", None),
+        run_config_cls=RunConfig,
+        session_runner_cls=SessionRunner,
     )
 
 

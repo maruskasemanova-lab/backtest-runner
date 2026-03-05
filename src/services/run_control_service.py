@@ -13,10 +13,12 @@ from typing import Any, Awaitable, Dict, Optional, Union
 import aiohttp
 from fastapi import HTTPException, Request
 
+from decision_tracker import DecisionMarker
 from src.services.run_config_snapshot_service import (
     attach_resolved_config_snapshot_to_summary,
     resolve_session_config_snapshot,
 )
+from src.services.session_runner_models import ExecutionLifecycle
 from src.services.session_runner_strategy_client import StrategyApiClient
 from src.services.strategy_api_auth_headers import build_strategy_api_headers
 from src.services.trade_eval_mode_service import (
@@ -37,6 +39,8 @@ class RunControlDeps:
     configure_session: Any
     run_reports_store: Optional[Any] = None
     l2_manager: Optional[Any] = None
+    run_config_cls: Optional[Any] = None
+    session_runner_cls: Optional[Any] = None
 
 
 def _runner_date_label(runner: Any) -> str:
@@ -92,6 +96,40 @@ def _runner_completed_successfully(runner: Any) -> bool:
         return False
 
     return True
+
+
+def _snapshot_backed_runner(runner: Any) -> bool:
+    return bool(getattr(runner, "_snapshot_restored", False))
+
+
+def _guard_snapshot_runner_mutation(runner: Any, *, action: str) -> None:
+    if not _snapshot_backed_runner(runner):
+        return
+    raise HTTPException(
+        409,
+        (
+            f"Snapshot-backed run is read-only and cannot {action}. "
+            "Restore or start a live run to execute bars again."
+        ),
+    )
+
+
+def _runner_state_payload(runner: Any) -> Dict[str, Any]:
+    getter = getattr(runner, "get_state", None)
+    state = getter() if callable(getter) else {}
+    payload = dict(state) if isinstance(state, dict) else {}
+    if not _snapshot_backed_runner(runner):
+        return payload
+    payload["is_snapshot"] = True
+    payload["snapshot_backed"] = True
+    payload["snapshot_restored"] = True
+    payload["snapshot_source_mode"] = str(
+        getattr(runner, "_snapshot_source_mode", "") or "persisted_playback"
+    )
+    report_saved_at = str(getattr(runner, "_snapshot_report_saved_at", "") or "").strip()
+    if report_saved_at:
+        payload["report_saved_at"] = report_saved_at
+    return payload
 
 
 async def _flush_runner_from_memory(
@@ -446,19 +484,15 @@ def _hydrate_persisted_run_summary(
     )
 
 
-def _load_runner_persisted_summary(
+def _load_persisted_run_summary_by_run_key(
     *,
-    runner: Any,
+    run_key: str,
     deps: RunControlDeps,
-) -> Dict[str, Any]:
+) -> tuple[Dict[str, Any], Optional[str]]:
     report_store = getattr(deps, "run_reports_store", None)
     get_summary = getattr(report_store, "get_run_summary", None)
     if not callable(get_summary):
-        return {}
-
-    run_key = _runner_run_key(runner)
-    if not run_key:
-        return {}
+        return {}, None
 
     try:
         row = get_summary(run_key=run_key)
@@ -468,21 +502,38 @@ def _load_runner_persisted_summary(
             run_key,
             exc,
         )
-        return {}
+        return {}, None
 
     if not isinstance(row, dict):
-        return {}
+        return {}, None
 
     summary = row.get("summary", {})
     if not isinstance(summary, dict):
-        return {}
+        return {}, row.get("updated_at")
 
-    return _hydrate_persisted_run_summary(
+    hydrated = _hydrate_persisted_run_summary(
         summary=summary,
         run_key=run_key,
         report_store=report_store,
         logger=deps.logger,
     )
+    updated_at = str(row.get("updated_at") or "").strip() or None
+    return hydrated, updated_at
+
+
+def _load_runner_persisted_summary(
+    *,
+    runner: Any,
+    deps: RunControlDeps,
+) -> Dict[str, Any]:
+    run_key = _runner_run_key(runner)
+    if not run_key:
+        return {}
+    summary, _updated_at = _load_persisted_run_summary_by_run_key(
+        run_key=run_key,
+        deps=deps,
+    )
+    return summary
 
 
 def _resolve_restart_session_config(
@@ -509,9 +560,396 @@ def _resolve_restart_session_config(
     return {}
 
 
+def _resolved_config_snapshot_payload(summary_payload: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = summary_payload.get("resolved_config_snapshot", {})
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
+def _has_modern_persisted_summary(
+    summary_payload: Dict[str, Any],
+    *,
+    require_playback: bool = False,
+) -> bool:
+    resolved_snapshot = _resolved_config_snapshot_payload(summary_payload)
+    if not resolved_snapshot and not str(
+        summary_payload.get("resolved_config_snapshot_id") or ""
+    ).strip():
+        return False
+    if not resolve_session_config_snapshot(summary_payload=summary_payload):
+        return False
+    if require_playback:
+        playback_snapshot = (
+            summary_payload.get("playback_snapshot", {})
+            if isinstance(summary_payload.get("playback_snapshot"), dict)
+            else {}
+        )
+        if str(playback_snapshot.get("encoding") or "").strip().lower() != "gzip+base64":
+            return False
+        if not str(playback_snapshot.get("payload_b64") or "").strip():
+            return False
+    return True
+
+
+def _resolve_summary_config_payload(
+    summary_payload: Dict[str, Any],
+    *,
+    key: str,
+) -> Dict[str, Any]:
+    direct = summary_payload.get(key, {})
+    direct_payload = direct if isinstance(direct, dict) else {}
+    snapshot = _resolved_config_snapshot_payload(summary_payload)
+    nested = snapshot.get(key, {})
+    nested_payload = nested if isinstance(nested, dict) else {}
+    if direct_payload and nested_payload:
+        return {**nested_payload, **direct_payload}
+    return direct_payload or nested_payload
+
+
+def _parse_snapshot_datetime(value: Any) -> Optional[datetime]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _decode_playback_snapshot(summary_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    snapshot_meta = (
+        summary_payload.get("playback_snapshot", {})
+        if isinstance(summary_payload.get("playback_snapshot"), dict)
+        else {}
+    )
+    if not snapshot_meta:
+        return None
+    if str(snapshot_meta.get("encoding") or "").strip().lower() != "gzip+base64":
+        return None
+    encoded = str(snapshot_meta.get("payload_b64") or "").strip()
+    if not encoded:
+        return None
+    try:
+        compressed = base64.b64decode(encoded)
+        decompressed = gzip.decompress(compressed)
+        payload = json.loads(decompressed.decode("utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _restore_decision_markers(
+    *,
+    marker_rows: Any,
+    run_id: str,
+    ticker: str,
+    date_label: str,
+    marker_type_enum: Any,
+) -> list[DecisionMarker]:
+    if not isinstance(marker_rows, list):
+        return []
+    restored: list[DecisionMarker] = []
+    for index, row in enumerate(marker_rows, start=1):
+        if not isinstance(row, dict):
+            continue
+        marker_type_token = str(row.get("marker_type") or "").strip()
+        if not marker_type_token:
+            continue
+        try:
+            marker_type = marker_type_enum(marker_type_token)
+        except Exception:
+            continue
+        timestamp = _parse_snapshot_datetime(row.get("timestamp")) or datetime.now(
+            timezone.utc
+        )
+        try:
+            bar_index = int(row.get("bar_index", index - 1) or 0)
+        except Exception:
+            bar_index = index - 1
+        try:
+            price = float(row.get("price") or 0.0)
+        except Exception:
+            price = 0.0
+        confidence = row.get("confidence")
+        if confidence is not None:
+            try:
+                confidence = float(confidence)
+            except Exception:
+                confidence = None
+        restored.append(
+            DecisionMarker(
+                id=str(row.get("id") or f"{run_id}:{ticker}:{date_label}:{index}"),
+                timestamp=timestamp,
+                bar_index=max(0, bar_index),
+                marker_type=marker_type,
+                title=str(row.get("title") or marker_type_token),
+                description=str(row.get("description") or ""),
+                price=price,
+                side=(
+                    str(row.get("side")).strip()
+                    if row.get("side") is not None
+                    else None
+                ),
+                strategy=(
+                    str(row.get("strategy")).strip()
+                    if row.get("strategy") is not None
+                    else None
+                ),
+                regime=(
+                    str(row.get("regime")).strip()
+                    if row.get("regime") is not None
+                    else None
+                ),
+                confidence=confidence,
+                details=(
+                    dict(row.get("details"))
+                    if isinstance(row.get("details"), dict)
+                    else {}
+                ),
+            )
+        )
+    return restored
+
+
+def restore_run_snapshot(
+    run_id: str,
+    ticker: str,
+    date: str,
+    deps: RunControlDeps,
+):
+    run_key = deps.run_registry.build_key(run_id, ticker, date)
+    existing_runner = deps.active_runners.get(run_key)
+    if existing_runner is not None:
+        return {
+            "success": True,
+            "restored": False,
+            "already_active": True,
+            "run_key": run_key,
+            "state": _runner_state_payload(existing_runner),
+        }
+
+    run_config_cls = getattr(deps, "run_config_cls", None)
+    session_runner_cls = getattr(deps, "session_runner_cls", None)
+    if run_config_cls is None or session_runner_cls is None:
+        raise HTTPException(
+            503,
+            "Snapshot restore is unavailable in this runtime (runner classes missing).",
+        )
+
+    summary_payload, report_saved_at = _load_persisted_run_summary_by_run_key(
+        run_key=run_key,
+        deps=deps,
+    )
+    if not summary_payload:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "RUN_NOT_FOUND",
+                "message": f"Run snapshot not found for {run_key}",
+                "hint": "Ensure the run completed and flushed to the run-report store.",
+            },
+        )
+
+    decoded_snapshot = _decode_playback_snapshot(summary_payload)
+    if not _has_modern_persisted_summary(summary_payload, require_playback=True):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Legacy run artifacts are no longer supported. "
+                "Start a new run to persist modern playback and config snapshots."
+            ),
+        )
+    bars_payload = (
+        decoded_snapshot.get("bars", [])
+        if isinstance(decoded_snapshot, dict)
+        and isinstance(decoded_snapshot.get("bars"), list)
+        else []
+    )
+    marker_rows = (
+        decoded_snapshot.get("markers", [])
+        if isinstance(decoded_snapshot, dict)
+        and isinstance(decoded_snapshot.get("markers"), list)
+        else (
+            summary_payload.get("markers", [])
+            if isinstance(summary_payload.get("markers"), list)
+            else []
+        )
+    )
+    if not bars_payload:
+        raise HTTPException(
+            404,
+            (
+                "Playback snapshot is not available for this run. "
+                "Run it again once with snapshot persistence enabled."
+            ),
+        )
+
+    request_config = _resolve_summary_config_payload(
+        summary_payload,
+        key="run_request_config",
+    )
+    execution_config = _resolve_summary_config_payload(
+        summary_payload,
+        key="execution_config",
+    )
+    report_metadata = _resolve_summary_config_payload(
+        summary_payload,
+        key="report_metadata",
+    )
+    control_plane_snapshot = _resolve_summary_config_payload(
+        summary_payload,
+        key="control_plane_snapshot",
+    )
+    aos_applied = _resolve_summary_config_payload(summary_payload, key="aos_applied")
+    l2_applied = _resolve_summary_config_payload(summary_payload, key="l2_applied")
+    resolved_config_snapshot = _resolved_config_snapshot_payload(summary_payload)
+    session_config_snapshot = resolve_session_config_snapshot(summary_payload=summary_payload)
+
+    run_date_label = str(summary_payload.get("date") or date or "").strip() or date
+    date_from = str(request_config.get("date_from") or "").strip()
+    date_to = str(request_config.get("date_to") or "").strip()
+    if not date_from:
+        if "_to_" in run_date_label:
+            date_from = run_date_label.split("_to_", 1)[0]
+        else:
+            date_from = run_date_label
+    if not date_to:
+        if "_to_" in run_date_label:
+            date_to = run_date_label.split("_to_", 1)[1]
+        else:
+            date_to = run_date_label
+
+    trade_eval_mode = str(
+        execution_config.get("trade_eval_mode")
+        or request_config.get("trade_eval_mode")
+        or ""
+    ).strip()
+    intrabar_enabled = bool(
+        request_config.get("intrabar_execution_recalc_1s")
+        or trade_eval_mode.startswith("intrabar")
+    )
+    try:
+        intrabar_step_seconds = int(
+            execution_config.get("intrabar_eval_step_seconds")
+            or request_config.get("intrabar_eval_step_seconds")
+            or 1
+        )
+    except Exception:
+        intrabar_step_seconds = 1
+
+    try:
+        account_size_usd = float(
+            request_config.get("account_size_usd")
+            or execution_config.get("account_size_usd")
+            or 10_000.0
+        )
+    except Exception:
+        account_size_usd = 10_000.0
+    try:
+        regime_detection_minutes = int(
+            session_config_snapshot.get("regime_detection_minutes")
+            or request_config.get("regime_detection_minutes")
+            or 15
+        )
+    except Exception:
+        regime_detection_minutes = 15
+
+    config = run_config_cls(
+        run_id=str(summary_payload.get("run_id") or run_id),
+        ticker=str(summary_payload.get("ticker") or ticker).strip().upper(),
+        date=run_date_label,
+        date_from=date_from,
+        date_to=date_to,
+        strategy_api_url=str(
+            request_config.get("strategy_api_url") or "http://localhost:8001"
+        ),
+        account_size_usd=account_size_usd,
+        regime_detection_minutes=regime_detection_minutes,
+        intrabar_execution_recalc_1s=intrabar_enabled,
+        intrabar_eval_step_seconds=max(1, intrabar_step_seconds),
+    )
+    runner = session_runner_cls(config)
+    normalized_bars = [dict(item) for item in bars_payload if isinstance(item, dict)]
+    runner.load_bars(normalized_bars)
+    if intrabar_enabled and getattr(deps, "l2_manager", None) is not None:
+        runner.l2_manager = deps.l2_manager
+
+    total_bars = len(normalized_bars)
+    try:
+        processed_bars = int(summary_payload.get("processed_bars") or total_bars)
+    except Exception:
+        processed_bars = total_bars
+    runner.current_bar_index = max(0, min(processed_bars, total_bars))
+    runner.phase = str(summary_payload.get("phase") or "COMPLETED")
+    runner.is_running = False
+    runner.is_paused = False
+    runner.last_response = None
+    runner.session_summary = (
+        dict(summary_payload.get("session_summary"))
+        if isinstance(summary_payload.get("session_summary"), dict)
+        else None
+    )
+    selection_warnings = (
+        [str(item).strip() for item in summary_payload.get("selection_warnings", [])]
+        if isinstance(summary_payload.get("selection_warnings"), list)
+        else []
+    )
+    runner.selection_warnings = [item for item in selection_warnings if item]
+    runner._data_selection_warnings = list(runner.selection_warnings)
+    runner._report_metadata = dict(report_metadata)
+    runner._control_plane_snapshot = dict(control_plane_snapshot)
+    runner._aos_applied = dict(aos_applied)
+    runner._execution_config = dict(execution_config)
+    runner._run_request_config = dict(request_config)
+    runner._l2_applied = dict(l2_applied)
+    runner._resolved_config_snapshot = dict(resolved_config_snapshot)
+    runner._restart_session_config = dict(session_config_snapshot)
+    runner._restart_session_date = date_from
+    runner._checkpoint_loaded = summary_payload.get("checkpoint_loaded")
+    runner._keep_in_memory_after_completion = True
+    runner._progressive_loading_enabled = False
+    runner._progressive_loading_complete = True
+    runner._progressive_loading_loaded_until = date_to
+    runner._progressive_loading_target_end = date_to
+    runner._progressive_loading_pending_chunks = 0
+    runner._progressive_loading_last_error = None
+    runner._snapshot_restored = True
+    runner._snapshot_source_mode = "persisted_playback"
+    runner._snapshot_report_saved_at = report_saved_at
+    runner._execution_state_manager.lifecycle = ExecutionLifecycle.END_OF_DAY
+    runner._execution_state_manager.position_active = False
+    runner._execution_state_manager.pending_entry = False
+
+    restored_markers = _restore_decision_markers(
+        marker_rows=marker_rows,
+        run_id=config.run_id,
+        ticker=config.ticker,
+        date_label=config.date,
+        marker_type_enum=deps.marker_type_enum,
+    )
+    if restored_markers:
+        runner.decision_tracker.markers = restored_markers
+        runner.decision_tracker._marker_counter = len(restored_markers)
+
+    deps.active_runners[run_key] = runner
+    return {
+        "success": True,
+        "restored": True,
+        "already_active": False,
+        "run_key": run_key,
+        "bars_count": total_bars,
+        "markers_count": len(restored_markers),
+        "state": _runner_state_payload(runner),
+    }
+
+
 def get_run_state(run_id: str, ticker: str, date: str, deps: RunControlDeps):
     _, runner = deps.run_registry.require(run_id, ticker, date)
-    return runner.get_state()
+    return _runner_state_payload(runner)
 
 
 async def step_run(
@@ -524,6 +962,7 @@ async def step_run(
     raw_request: Optional[Request] = None,
 ):
     _, runner = deps.run_registry.require(run_id, ticker, date)
+    _guard_snapshot_runner_mutation(runner, action="step")
 
     payload = await _read_raw_request_payload(raw_request)
     normalized_trade_mode = _resolve_requested_trade_eval_mode(
@@ -586,6 +1025,7 @@ async def play_run(
     raw_request: Optional[Request] = None,
 ):
     run_key, runner = deps.run_registry.require(run_id, ticker, date)
+    _guard_snapshot_runner_mutation(runner, action="play")
     payload = await _read_raw_request_payload(raw_request)
     requested_keep_in_memory = _coerce_optional_bool(
         (payload or {}).get("keep_in_memory_after_completion")
@@ -733,6 +1173,7 @@ def pause_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
 
 def resume_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
     _, runner = deps.run_registry.require(run_id, ticker, date)
+    _guard_snapshot_runner_mutation(runner, action="resume")
     runner.resume()
     return {"success": True, "is_paused": False}
 
@@ -745,6 +1186,7 @@ def stop_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
 
 async def restart_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
     _, runner = deps.run_registry.require(run_id, ticker, date)
+    _guard_snapshot_runner_mutation(runner, action="restart")
 
     if getattr(runner, "is_running", False):
         raise HTTPException(
@@ -790,7 +1232,7 @@ async def restart_run(run_id: str, ticker: str, date: str, deps: RunControlDeps)
         runner.last_response = None
         runner.session_summary = None
 
-    return {"success": True, "restarted": True, "state": runner.get_state()}
+    return {"success": True, "restarted": True, "state": _runner_state_payload(runner)}
 
 
 def get_processed_bars(
@@ -801,6 +1243,7 @@ def get_processed_bars(
     since_index: Optional[int] = None,
 ):
     _, runner = deps.run_registry.require(run_id, ticker, date)
+    _guard_snapshot_runner_mutation(runner, action="evaluate intrabar slices")
     bars = _safe_runner_processed_bars(runner)
     total_bars = len(getattr(runner, "bars", []) or [])
     current_index = int(getattr(runner, "current_bar_index", 0) or 0)
@@ -1026,12 +1469,27 @@ def get_run_summary_db(run_id: str, ticker: str, date: str, deps: RunControlDeps
                     if isinstance(db_result.get("summary"), dict)
                     else {}
                 )
-                return _hydrate_persisted_run_summary(
+                hydrated = _hydrate_persisted_run_summary(
                     summary=summary,
                     run_key=run_key,
                     report_store=store,
                     logger=deps.logger,
                 )
+                if not _has_modern_persisted_summary(hydrated):
+                    raise HTTPException(
+                        status_code=404,
+                        detail={
+                            "error_code": "RUN_NOT_FOUND",
+                            "message": (
+                                "Legacy run summary is no longer supported. "
+                                f"Start a new run for {run_key}."
+                            ),
+                            "hint": "Only modern snapshot-backed persisted runs are readable.",
+                        },
+                    )
+                return hydrated
+        except HTTPException:
+            raise
         except Exception as exc:
             deps.logger.error("Failed to read run summary from DB for %s: %s", run_key, exc)
 
@@ -1054,9 +1512,14 @@ def get_run_status(run_id: str, ticker: str, date: str, deps: RunControlDeps):
         state = runner.get_state()
         return {
             "run_key": run_key,
-            "state": "running" if state.get("is_running") else "active_in_ram",
+            "state": (
+                "snapshot_restored_in_ram"
+                if _snapshot_backed_runner(runner)
+                else ("running" if state.get("is_running") else "active_in_ram")
+            ),
             "phase": state.get("phase"),
-            "persisted": False
+            "persisted": bool(_snapshot_backed_runner(runner)),
+            "snapshot_backed": bool(_snapshot_backed_runner(runner)),
         }
 
     # Check DB

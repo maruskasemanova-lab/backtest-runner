@@ -19,6 +19,7 @@ from src.services.run_control_service import (
     pause_run,
     play_run,
     restart_run,
+    restore_run_snapshot,
     resume_run,
     step_run,
     stop_run,
@@ -123,6 +124,22 @@ async def restart_run_endpoint(
 ):
     """Restart an existing run from bar zero using already loaded bars."""
     return await restart_run(run_id, ticker, date, services.build_run_control_deps())
+
+
+@router.post("/api/run/{run_id}/{ticker}/{date}/restore-snapshot")
+async def restore_run_snapshot_endpoint(
+    run_id: str,
+    ticker: str,
+    date: str,
+    services: ApiServices = Depends(get_api_services),
+):
+    """Restore a read-only snapshot-backed run from persisted playback artifacts."""
+    return restore_run_snapshot(
+        run_id,
+        ticker,
+        date,
+        services.build_run_control_deps(),
+    )
 
 
 @router.get("/api/run/{run_id}/{ticker}/{date}/bars")
