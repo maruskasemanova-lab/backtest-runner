@@ -38,6 +38,12 @@ type Props = {
   rangeScrubMeta: StrategyAnalyzerRangeScrubMeta;
   focusSelectedRangeOffset: (nextOffset: number) => void;
   moveSelectedRangeByStep: (direction: -1 | 1) => void;
+  // Playback controls
+  isPlayingRun: boolean;
+  runLoading: boolean;
+  onPlayRun?: () => void;
+  onPauseRun?: () => void;
+  onStepRun?: () => void;
 };
 
 export default function StrategyAnalyzerChartPanel({
@@ -66,6 +72,11 @@ export default function StrategyAnalyzerChartPanel({
   rangeScrubMeta,
   focusSelectedRangeOffset,
   moveSelectedRangeByStep,
+  isPlayingRun,
+  runLoading,
+  onPlayRun,
+  onPauseRun,
+  onStepRun,
 }: Props) {
   const fallbackBars = (Array.isArray(chartBars) ? chartBars : []).filter(
     (bar) => Number.isFinite(Number(bar?.time))
@@ -104,43 +115,86 @@ export default function StrategyAnalyzerChartPanel({
 
       <div className="sa-chart-stage">
         {hasRenderableBars ? (
-          <>
-            <div className="sa-chart-viewport">
-              <div className="sa-chart-canvas">
-                <CandlestickChart
-                  ref={chartRef}
-                  bars={renderBars}
-                  markers={analyzerChartMarkers}
-                  icebergs={[]}
-                  onMarkerClick={onChartMarkerClick}
-                  onBarClick={onBarClick}
-                  selectedMarker={selectedMarker}
-                  chartState={analyzerChartState || selectedRangeWindow || null}
-                  onChartStateChange={onChartStateChange}
-                />
-              </div>
-              <ChartRangeSelector
-                enabled={rangeSelectMode}
-                chartRef={chartRef}
-                bars={selectionBars}
-                onRangeSelected={onRangeSelected}
-                onSelectionClear={onSelectionClear}
-                selectedFrom={selectedRangeFrom}
-                selectedTo={selectedRangeTo}
+          <div className="sa-chart-viewport">
+            <div className="sa-chart-canvas">
+              <CandlestickChart
+                ref={chartRef}
+                bars={renderBars}
+                markers={analyzerChartMarkers}
+                icebergs={[]}
+                onMarkerClick={onChartMarkerClick}
+                onBarClick={onBarClick}
+                selectedMarker={selectedMarker}
+                chartState={analyzerChartState || selectedRangeWindow || null}
+                onChartStateChange={onChartStateChange}
               />
             </div>
-            <StrategyAnalyzerScrubSlider
-              rangeScrubMeta={rangeScrubMeta}
-              focusSelectedRangeOffset={focusSelectedRangeOffset}
-              moveSelectedRangeByStep={moveSelectedRangeByStep}
+            <ChartRangeSelector
+              enabled={rangeSelectMode}
+              chartRef={chartRef}
+              bars={selectionBars}
+              onRangeSelected={onRangeSelected}
+              onSelectionClear={onSelectionClear}
+              selectedFrom={selectedRangeFrom}
+              selectedTo={selectedRangeTo}
             />
-          </>
+          </div>
         ) : (
           <div className="sa-chart-empty">
             {loading ? "Loading bars..." : "Select a ticker and date range, then click Load Chart"}
           </div>
         )}
       </div>
+
+      {/* Scrubber + playback controls sit outside chart stage to avoid gesture conflicts */}
+      {hasRenderableBars && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 8px 6px" }}>
+          {isAnalyzerAttachedRun && (
+            <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+              {isPlayingRun ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={onPauseRun}
+                  disabled={runLoading}
+                  title="Pause"
+                  style={{ padding: "2px 8px", fontSize: "0.72rem", lineHeight: 1.3 }}
+                >
+                  ⏸
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={onPlayRun}
+                  disabled={runLoading}
+                  title="Play"
+                  style={{ padding: "2px 8px", fontSize: "0.72rem", lineHeight: 1.3 }}
+                >
+                  ▶
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={onStepRun}
+                disabled={runLoading || isPlayingRun}
+                title="Step one bar"
+                style={{ padding: "2px 8px", fontSize: "0.72rem", lineHeight: 1.3 }}
+              >
+                ⏭
+              </button>
+            </div>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <StrategyAnalyzerScrubSlider
+              rangeScrubMeta={rangeScrubMeta}
+              focusSelectedRangeOffset={focusSelectedRangeOffset}
+              moveSelectedRangeByStep={moveSelectedRangeByStep}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

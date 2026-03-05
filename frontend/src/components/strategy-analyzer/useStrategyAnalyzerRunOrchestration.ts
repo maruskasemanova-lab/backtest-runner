@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { defaultStrategyApiUrl } from "../../utils";
-import { dateTimeLocalToUtcIso } from "./utils";
+import { dateTimeLocalToUtcIso, orderIsoDateRange } from "./utils";
 import type {
   StrategyAnalyzerContextRiskPresetKey,
   StrategyAnalyzerOnClearRun,
@@ -105,8 +105,13 @@ export function useStrategyAnalyzerRunOrchestration({
 
     const effectiveStartLocal = rangePlaybackMeta.warmupStartLocal || selectedRangeFrom;
     const effectiveEndLocal = rangePlaybackMeta.tradeEndLocal || selectedRangeTo;
-    const dateFrom = effectiveStartLocal.slice(0, 10);
-    const dateTo = effectiveEndLocal.slice(0, 10);
+    const orderedRange = orderIsoDateRange(
+      String(effectiveStartLocal || "").slice(0, 10),
+      String(effectiveEndLocal || "").slice(0, 10),
+    );
+    const dateFrom = orderedRange.dateFrom;
+    const dateTo = orderedRange.dateTo;
+    if (!dateFrom || !dateTo) return;
 
     const prewarmKey = `${ticker}:${dateFrom}:${dateTo}:${includeExtendedHours ? "ext" : "rth"}`;
     if (prewarmKey === lastPrewarmKeyRef.current) return;
@@ -137,8 +142,15 @@ export function useStrategyAnalyzerRunOrchestration({
       const effectiveEndLocal = rangePlaybackMeta?.tradeEndLocal || selectedRangeTo;
       const effectiveTradeStartLocal = rangePlaybackMeta?.tradeStartLocal || selectedRangeFrom;
       const effectiveTradeEndLocal = rangePlaybackMeta?.tradeEndLocal || selectedRangeTo;
-      const dateFrom = effectiveStartLocal.slice(0, 10);
-      const dateTo = effectiveEndLocal.slice(0, 10);
+      const orderedRange = orderIsoDateRange(
+        String(effectiveStartLocal || "").slice(0, 10),
+        String(effectiveEndLocal || "").slice(0, 10),
+      );
+      const dateFrom = orderedRange.dateFrom;
+      const dateTo = orderedRange.dateTo;
+      if (!dateFrom || !dateTo) {
+        throw new Error("Invalid date range for Strategy Analyzer run.");
+      }
       const contextRiskOverrides = resolveStrategyAnalyzerContextRiskOverrides(contextRiskPresetKey);
 
       // Ensure bars are cached before /api/run/start.

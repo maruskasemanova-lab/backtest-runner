@@ -67,6 +67,8 @@ export const useRunControlActions = ({
       }
 
       try {
+        const rawStepOptions =
+          stepOptions && typeof stepOptions === 'object' ? stepOptions : {};
         const overrideTradeEvalMode = String(stepOptions?.trade_eval_mode || '')
           .trim()
           .toLowerCase();
@@ -81,6 +83,7 @@ export const useRunControlActions = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            ...rawStepOptions,
             trade_eval_mode: requestedTradeEvalMode,
           }),
         });
@@ -146,6 +149,8 @@ export const useRunControlActions = ({
       }
 
       try {
+        const rawPlayOptions =
+          playOptions && typeof playOptions === 'object' ? playOptions : {};
         const overrideSpeedRaw = playOptions?.speed_ms;
         const hasSpeedOverride =
           overrideSpeedRaw !== undefined &&
@@ -180,6 +185,7 @@ export const useRunControlActions = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            ...rawPlayOptions,
             speed_ms: speedParam,
             trade_eval_mode: requestedTradeEvalMode,
           }),
@@ -194,9 +200,11 @@ export const useRunControlActions = ({
             // Ignore detail parse issues and keep HTTP fallback.
           }
           if (response.status === 404) {
-            clearActiveRunState(
-              'Active run no longer exists on backend (likely after restart/reload). Start backtest again.',
+            refreshActiveRuns();
+            setRuntimeNotice(
+              'Active run is no longer in backend memory. Replay controls are disabled for this snapshot; start/reload run to continue interactively.',
             );
+            setIsPlaying(false);
             return;
           }
           setRuntimeNotice(`Play failed: ${detailMessage}`);

@@ -7,6 +7,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Awaitable, Dict, Optional, Union
 
 import aiohttp
@@ -194,6 +195,24 @@ def _env_int(name: str, default: int, *, minimum: int) -> int:
     return max(minimum, parsed)
 
 
+def _coerce_optional_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    token = str(value).strip().lower()
+    if token in {"1", "true", "yes", "on"}:
+        return True
+    if token in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _strategy_api_session_deps(logger: Any) -> Any:
+    """Session-service helpers currently only require a logger dependency."""
+    return SimpleNamespace(logger=logger)
+
+
 def _to_json_compatible(value: Any) -> Any:
     """Recursively normalize payload values for FastAPI JSON encoding."""
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -372,6 +391,31 @@ async def step_run(
     if normalized_trade_mode is not None:
         _set_runner_trade_eval_mode(runner, deps, normalized_trade_mode)
 
+    # Apply threshold overrides atomically before stepping
+    threshold_overrides = (payload or {}).get("threshold_overrides")
+    if isinstance(threshold_overrides, dict) and threshold_overrides:
+        strategy_api_url = str(
+            getattr(getattr(runner, "config", None), "strategy_api_url", "") or ""
+        ).strip()
+        if strategy_api_url:
+            from src.services.strategy_api_session_service import apply_orchestrator_config
+            integration_deps = _strategy_api_session_deps(deps.logger)
+            await apply_orchestrator_config(strategy_api_url, threshold_overrides, integration_deps)
+
+    # Seek to scrubbed position if requested
+    seek_to = (payload or {}).get("seek_to_bar_index")
+    if seek_to is not None:
+        try:
+            seek_idx = int(seek_to)
+            total = len(getattr(runner, "bars", []) or [])
+            if 0 <= seek_idx < total:
+                runner.current_bar_index = seek_idx
+                runner.is_running = False
+                runner.is_paused = False
+                runner.phase = "PAUSED"
+        except (TypeError, ValueError):
+            pass
+
     result = await runner.step()
     if isinstance(result, dict):
         out = dict(result)
@@ -401,6 +445,11 @@ async def play_run(
 ):
     run_key, runner = deps.run_registry.require(run_id, ticker, date)
     payload = await _read_raw_request_payload(raw_request)
+    requested_keep_in_memory = _coerce_optional_bool(
+        (payload or {}).get("keep_in_memory_after_completion")
+    )
+    if requested_keep_in_memory is not None:
+        setattr(runner, "_keep_in_memory_after_completion", requested_keep_in_memory)
 
     raw_speed = None
     request_speed = getattr(request, "speed_ms", None) if request is not None else None
@@ -420,6 +469,31 @@ async def play_run(
 
     if normalized_trade_mode is not None:
         _set_runner_trade_eval_mode(runner, deps, normalized_trade_mode)
+
+    # Apply threshold overrides atomically before playing
+    threshold_overrides = (payload or {}).get("threshold_overrides")
+    if isinstance(threshold_overrides, dict) and threshold_overrides:
+        strategy_api_url = str(
+            getattr(getattr(runner, "config", None), "strategy_api_url", "") or ""
+        ).strip()
+        if strategy_api_url:
+            from src.services.strategy_api_session_service import apply_orchestrator_config
+            integration_deps = _strategy_api_session_deps(deps.logger)
+            await apply_orchestrator_config(strategy_api_url, threshold_overrides, integration_deps)
+
+    # Seek to scrubbed position if requested
+    seek_to = (payload or {}).get("seek_to_bar_index")
+    if seek_to is not None:
+        try:
+            seek_idx = int(seek_to)
+            total = len(getattr(runner, "bars", []) or [])
+            if 0 <= seek_idx < total:
+                runner.current_bar_index = seek_idx
+                runner.is_running = False
+                runner.is_paused = False
+                runner.phase = "PAUSED"
+        except (TypeError, ValueError):
+            pass
 
     effective_trade_mode = _effective_runner_trade_eval_mode(runner)
 
@@ -484,11 +558,19 @@ async def play_run(
                     )
 
         if _runner_completed_successfully(runner):
-            await _flush_runner_from_memory(
-                run_key=run_key,
-                runner=runner,
-                deps=deps,
+            should_flush_completed_runs = _env_flag(
+                "BACKTEST_AUTO_FLUSH_COMPLETED_RUNS",
+                True,
             )
+            keep_in_memory = bool(
+                getattr(runner, "_keep_in_memory_after_completion", False)
+            )
+            if should_flush_completed_runs and not keep_in_memory:
+                await _flush_runner_from_memory(
+                    run_key=run_key,
+                    runner=runner,
+                    deps=deps,
+                )
 
     asyncio.create_task(_run_and_maybe_save())
     return {
@@ -869,3 +951,24 @@ async def delete_run(run_id: str, ticker: str, date: str, deps: RunControlDeps):
 
 def list_runs(deps: RunControlDeps):
     return [runner.get_state() for runner in deps.active_runners.values()]
+
+
+async def update_orchestrator_config(
+    run_id: str,
+    ticker: str,
+    date: str,
+    config: Dict[str, Any],
+    deps: RunControlDeps,
+) -> Dict[str, Any]:
+    """Proxy orchestrator config update to the strategy API for an active run."""
+    _, runner = deps.run_registry.require(run_id, ticker, date)
+    strategy_api_url = str(
+        getattr(getattr(runner, "config", None), "strategy_api_url", "") or ""
+    ).strip()
+    if not strategy_api_url:
+        raise HTTPException(500, "Run has no strategy_api_url configured.")
+
+    from src.services.strategy_api_session_service import apply_orchestrator_config
+    integration_deps = _strategy_api_session_deps(deps.logger)
+    result = await apply_orchestrator_config(strategy_api_url, config, integration_deps)
+    return result if isinstance(result, dict) else {}

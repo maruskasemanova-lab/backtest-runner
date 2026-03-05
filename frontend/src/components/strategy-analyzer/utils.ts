@@ -38,6 +38,26 @@ export const dateTimeLocalToUtcIso = (value: string | null | undefined): string 
   return new Date(ms).toISOString();
 };
 
+export const orderIsoDateRange = (
+  dateFrom: string | null | undefined,
+  dateTo: string | null | undefined,
+): { dateFrom: string; dateTo: string } => {
+  const from = String(dateFrom || "").trim();
+  const to = String(dateTo || "").trim();
+
+  if (!from && !to) return { dateFrom: "", dateTo: "" };
+  if (!from) return { dateFrom: to, dateTo: to };
+  if (!to) return { dateFrom: from, dateTo: from };
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return from <= to
+      ? { dateFrom: from, dateTo: to }
+      : { dateFrom: to, dateTo: from };
+  }
+
+  return { dateFrom: from, dateTo: to };
+};
+
 export const unixSecondsToDateTimeLocal = (ts: number): string => {
   const d = new Date(ts * 1000);
   const yyyy = d.getFullYear();

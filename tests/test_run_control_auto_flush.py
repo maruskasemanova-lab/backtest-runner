@@ -73,6 +73,14 @@ class _CaptureRunReportsStore:
         self.calls.append({"run_key": run_key, "summary": summary})
 
 
+class _RawJsonRequest:
+    def __init__(self, payload):
+        self._payload = payload
+
+    async def json(self):
+        return self._payload
+
+
 def _capture_tasks(monkeypatch):
     scheduled = []
 
@@ -161,3 +169,52 @@ def test_play_run_keeps_incomplete_run_in_memory(monkeypatch):
     assert run_key in active_runners
     assert runner.closed is False
     assert clear_calls == []
+
+
+def test_play_run_keeps_completed_run_when_requested(monkeypatch):
+    runner = _DummyRunner()
+    run_key = "run-1:MU:2026-02-11"
+    active_runners = {run_key: runner}
+    run_reports_store = _CaptureRunReportsStore()
+    scheduled = _capture_tasks(monkeypatch)
+    clear_calls = []
+
+    async def _clear_remote(strategy_api_url: str, run_id: str, ticker: str):
+        clear_calls.append((strategy_api_url, run_id, ticker))
+        return None
+
+    async def _noop(*args, **kwargs):
+        _ = args, kwargs
+        return None
+
+    deps = RunControlDeps(
+        run_registry=_DummyRegistry(run_key, runner),
+        active_runners=active_runners,
+        marker_type_enum=None,
+        logger=SimpleNamespace(error=lambda *args, **kwargs: None),
+        save_remote_checkpoint=_noop,
+        clear_remote_strategy_sessions=_clear_remote,
+        configure_session=_noop,
+        run_reports_store=run_reports_store,
+    )
+
+    result = asyncio.run(
+        play_run(
+            "run-1",
+            "MU",
+            "2026-02-11",
+            deps,
+            raw_request=_RawJsonRequest({"keep_in_memory_after_completion": True}),
+        )
+    )
+
+    assert result["success"] is True
+    assert run_key in active_runners
+    assert len(scheduled) == 1
+
+    asyncio.run(scheduled.pop())
+
+    assert run_key in active_runners
+    assert runner.closed is False
+    assert clear_calls == []
+    assert run_reports_store.calls

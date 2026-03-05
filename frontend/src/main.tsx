@@ -27,10 +27,19 @@ if (
   typeof window.fetch === "function" &&
   hasConfiguredApiRequestRewrite
 ) {
+  const _isLocalDevProxyHost = (() => {
+    const host = String(window.location.hostname || "").trim().toLowerCase();
+    const port = String(window.location.port || "").trim();
+    const isLocalHost = host === "localhost" || host === "127.0.0.1";
+    return isLocalHost && port === "5173";
+  })();
+
   const nativeFetch = window.fetch.bind(window);
   window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
     if (typeof input === "string" && input.startsWith("/api")) {
-      return nativeFetch(resolveApiRequestUrl(input), init);
+      // In local Vite dev we prefer same-origin /api so proxy/CORS stays deterministic.
+      const requestUrl = _isLocalDevProxyHost ? input : resolveApiRequestUrl(input);
+      return nativeFetch(requestUrl, init);
     }
     return nativeFetch(input, init);
   };

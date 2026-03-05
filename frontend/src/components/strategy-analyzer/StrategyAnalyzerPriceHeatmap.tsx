@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { orderIsoDateRange } from "./utils";
 import type { StrategyAnalyzerPreviewBar } from "./types";
 
 type Props = {
@@ -138,14 +139,22 @@ export default function StrategyAnalyzerPriceHeatmap({ bars, ticker, dateFrom, d
       setLoadError(null);
       return;
     }
+    const orderedRange = orderIsoDateRange(dateFrom, dateTo);
+    const effectiveDateFrom = orderedRange.dateFrom;
+    const effectiveDateTo = orderedRange.dateTo;
+    if (!effectiveDateFrom || !effectiveDateTo) {
+      setPayload(null);
+      setLoadError("Missing valid date range.");
+      return;
+    }
     const abortController = new AbortController();
     let isActive = true;
     setLoading(true);
     setLoadError(null);
 
     const endpoint = `/api/chart-preview/heatmap-daily-cumulative?ticker=${encodeURIComponent(ticker)}&date_from=${encodeURIComponent(
-      dateFrom,
-    )}&date_to=${encodeURIComponent(dateTo)}&bin_size=${encodeURIComponent(String(binSize))}`;
+      effectiveDateFrom,
+    )}&date_to=${encodeURIComponent(effectiveDateTo)}&bin_size=${encodeURIComponent(String(binSize))}`;
 
     void fetch(endpoint, { signal: abortController.signal, cache: "no-store" })
       .then(async (response) => {

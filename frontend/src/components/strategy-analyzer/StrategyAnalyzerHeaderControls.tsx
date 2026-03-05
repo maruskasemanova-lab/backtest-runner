@@ -251,7 +251,7 @@ export default function StrategyAnalyzerHeaderControls({
                   speed_ms: "max",
                 })
               }
-              disabled={runLoading || isPlayingRun || analyzerRunTerminal}
+              disabled={runLoading || isPlayingRun}
               title="Play analyzer run"
             >
               ▶ Play
@@ -271,7 +271,7 @@ export default function StrategyAnalyzerHeaderControls({
               type="button"
               className="btn btn-secondary"
               onClick={() => void onStepRun?.({ trade_eval_mode: analyzerTradeEvalMode })}
-              disabled={runLoading || isPlayingRun || analyzerRunTerminal}
+              disabled={runLoading || isPlayingRun}
               title="Step one bar"
             >
               Step

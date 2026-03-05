@@ -1,7 +1,6 @@
 .chart-container {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .chart-toolbar {
@@ -705,6 +704,7 @@
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .sa-chart-canvas {
@@ -726,7 +726,7 @@
 /* ── Scrub slider bar (sits below chart viewport) ────────── */
 .sa-scrub-overlay {
   position: relative;
-  z-index: 1;
+  z-index: 20;
   flex: 0 0 auto;
   width: 100%;
   pointer-events: auto;
@@ -1235,4 +1235,12 @@
   .sa-toolbar-divider {
     display: none;
   }
+}
+
+/* ── Interactive threshold slider handles ───────────────────────── */
+.sa-threshold-handle:hover {
+  filter: brightness(1.3);
+}
+.sa-threshold-handle:active {
+  filter: brightness(1.4);
 }

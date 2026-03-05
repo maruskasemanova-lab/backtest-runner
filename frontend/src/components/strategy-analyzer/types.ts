@@ -152,6 +152,8 @@ export type StrategyAnalyzerRunBarAnalysisSnapshot = {
   intrabar_only_checkpoint?: boolean;
   checkpoint_offset_sec?: number | null;
   provisional?: boolean | null;
+  bar_action?: string | null;
+  bar_reason?: string | null;
 };
 
 export type StrategyAnalyzerConditionsLiveAnalysis =

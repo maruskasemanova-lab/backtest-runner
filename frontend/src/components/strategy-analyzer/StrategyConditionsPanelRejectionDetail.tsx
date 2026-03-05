@@ -1,4 +1,4 @@
-import { BarChart2, Layers } from "lucide-react";
+import { Layers } from "lucide-react";
 
 import { StrategyConditionsPanelFormattedReasoning as FormattedReasoning } from "./StrategyConditionsPanelFormattedReasoning";
 import { MiniBar, SectionLabel, safeNum } from "./StrategyConditionsPanelShared";
@@ -274,8 +274,6 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
   if (gate === "threshold" || gate === "cross_asset_headwind") {
     const score = safeNum(d.combined_score) ?? safeNum(d.combined_norm_0_100);
     const thr = safeNum(d.threshold_used) ?? safeNum(d.trade_gate_threshold);
-    const stratScore = safeNum(d.strategy_score);
-    const flowScore = safeNum(d.flow_score);
     const reasoning = typeof d.reasoning === "string" ? d.reasoning : null;
     const todBoost = safeNum(d.tod_threshold_boost);
     const hwBoost = safeNum(d.headwind_threshold_boost);
@@ -284,101 +282,60 @@ export function StrategyConditionsPanelRejectionDetail({ d }: { d: any }) {
     const direction = resolveDirectionFromRejection(d);
     const isLong = direction === "bullish";
     const scoreGap = score != null && thr != null ? score - thr : null;
-    const gapAbs = scoreGap != null ? Math.abs(scoreGap) : null;
-    const progressPct = score != null && thr != null && thr > 0 ? Math.max(0, Math.min(120, (score / thr) * 100)) : null;
-
     const scorePassed = score != null && thr != null && score >= thr;
-    const scoreColor = scorePassed ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)";
 
     return (
       <div style={{ marginTop: 4 }}>
-        <SectionLabel icon={<BarChart2 size={10} />}>Bodové Hodnotenie (Score)</SectionLabel>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, marginBottom: 6 }}>
-          <div style={{ background: "rgba(148, 163, 184, 0.08)", border: "1px solid rgba(148, 163, 184, 0.2)", borderRadius: 4, padding: "4px 6px" }}>
-            <div style={{ fontSize: "0.5rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Potrebné</div>
-            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>
-              {thr != null ? thr.toFixed(1) : "—"}
-            </div>
-          </div>
-          <div style={{ background: "rgba(148, 163, 184, 0.08)", border: "1px solid rgba(148, 163, 184, 0.2)", borderRadius: 4, padding: "4px 6px" }}>
-            <div style={{ fontSize: "0.5rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Mal som</div>
-            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: scoreColor, fontVariantNumeric: "tabular-nums" }}>
-              {score != null ? score.toFixed(1) : "—"}
-            </div>
-          </div>
-          <div style={{ background: "rgba(148, 163, 184, 0.08)", border: "1px solid rgba(148, 163, 184, 0.2)", borderRadius: 4, padding: "4px 6px" }}>
-            <div style={{ fontSize: "0.5rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{scoreGap != null && scoreGap >= 0 ? "Nad prahom" : "Chýba"}</div>
-            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: scoreGap != null && scoreGap >= 0 ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)", fontVariantNumeric: "tabular-nums" }}>
-              {gapAbs != null ? `${scoreGap != null && scoreGap >= 0 ? "+" : "-"}${gapAbs.toFixed(1)}` : "—"}
-            </div>
-          </div>
-        </div>
-        {(progressPct != null || direction != null) && (
-          <div style={{ marginBottom: 6 }}>
-            {progressPct != null && (
-              <div style={{ position: "relative", height: 6, borderRadius: 4, background: "var(--bg-tertiary, rgba(255,255,255,0.06))", overflow: "hidden", marginBottom: 4 }}>
-                <div
-                  style={{
-                    height: "100%",
-                    width: `${Math.min(100, progressPct)}%`,
-                    background: scorePassed ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)",
-                    opacity: 0.85,
-                  }}
-                />
-              </div>
-            )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: "0.52rem", color: "var(--text-muted)" }}>
-                Plnenie vstupného prahu: {progressPct != null ? `${progressPct.toFixed(0)}%` : "—"}
-              </span>
-              {direction && (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "1px 6px",
-                    borderRadius: 3,
-                    fontSize: "0.55rem",
-                    fontWeight: 700,
-                    background: isLong ? "rgba(34, 197, 94, 0.12)" : "rgba(239, 68, 68, 0.12)",
-                    color: isLong ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)",
-                    border: `1px solid ${isLong ? "rgba(34, 197, 94, 0.25)" : "rgba(239, 68, 68, 0.25)"}`,
-                  }}
-                >
-                  {isLong ? "▲ LONG" : "▼ SHORT"}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "2px 0", marginBottom: 6 }}>
-          {score != null && thr != null && (
-            <MiniBar
-              label={isHeadwind ? "Skóre po korekcii" : "Celkové skóre (Combined)"}
-              value={score}
-              max={Math.max(score, thr, 100)}
-              threshold={thr}
-              suffix=""
-              showThresholdLine
-            />
+        {/* Compact score vs threshold summary (not duplicating the full bars) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+          {direction && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+                padding: "1px 5px",
+                borderRadius: 3,
+                fontSize: "0.55rem",
+                fontWeight: 700,
+                background: isLong ? "rgba(34, 197, 94, 0.12)" : "rgba(239, 68, 68, 0.12)",
+                color: isLong ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)",
+                border: `1px solid ${isLong ? "rgba(34, 197, 94, 0.25)" : "rgba(239, 68, 68, 0.25)"}`,
+              }}
+            >
+              {isLong ? "▲ LONG" : "▼ SHORT"}
+            </span>
           )}
-          {stratScore != null && <MiniBar label="Stratégia (Strategy Score)" value={stratScore} max={100} suffix="" />}
-          {flowScore != null && <MiniBar label="Order Flow Score" value={flowScore} max={100} suffix="" />}
+          {score != null && thr != null && (
+            <span style={{
+              fontSize: "0.56rem",
+              fontWeight: 600,
+              fontVariantNumeric: "tabular-nums",
+              color: scorePassed ? "var(--accent-green, #22c55e)" : "var(--accent-red, #ef4444)",
+            }}>
+              {score.toFixed(1)} / {thr.toFixed(0)} thr
+              {scoreGap != null && ` (${scoreGap >= 0 ? "+" : ""}${scoreGap.toFixed(1)})`}
+            </span>
+          )}
+          {isHeadwind && (
+            <span style={{ fontSize: "0.52rem", color: "var(--text-muted)", fontStyle: "italic" }}>
+              headwind adjusted
+            </span>
+          )}
         </div>
 
+        {/* Threshold adjustments */}
         {(todBoost != null || hwBoost != null || thrReason) && (
-          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", fontSize: "0.52rem", color: "var(--text-muted)", marginBottom: 4, background: "rgba(0,0,0,0.1)", padding: "4px 6px", borderRadius: 4 }}>
-            <span style={{ fontWeight: 600 }}>Úpravy Tresholdov:</span>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", fontSize: "0.52rem", color: "var(--text-muted)", marginBottom: 4, background: "rgba(0,0,0,0.1)", padding: "3px 6px", borderRadius: 3 }}>
+            <span style={{ fontWeight: 600 }}>Thr adjustments:</span>
             {todBoost != null && todBoost !== 0 && (
-              <span title="Úprava kvôli času obchodovania (Time of Day)" style={{ color: todBoost > 0 ? "var(--accent-red, #ef4444)" : "var(--accent-green, #22c55e)", cursor: "help" }}>
-                ToD {todBoost > 0 ? "+" : ""}
-                {todBoost.toFixed(0)}
+              <span title="Time of Day adjustment" style={{ color: todBoost > 0 ? "var(--accent-red, #ef4444)" : "var(--accent-green, #22c55e)", cursor: "help" }}>
+                ToD {todBoost > 0 ? "+" : ""}{todBoost.toFixed(0)}
               </span>
             )}
             {hwBoost != null && hwBoost !== 0 && (
-              <span title="Korekcia kvôli protivetru (Headwind)" style={{ color: "var(--accent-red, #ef4444)", cursor: "help" }}>
-                Headwind +{hwBoost.toFixed(1)}
+              <span title="Headwind correction" style={{ color: "var(--accent-red, #ef4444)", cursor: "help" }}>
+                HW +{hwBoost.toFixed(1)}
               </span>
             )}
             {thrReason && <span style={{ fontStyle: "italic" }}>({thrReason})</span>}

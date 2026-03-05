@@ -21,7 +21,7 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 1107 | `6267f1a 2026-03-04` |
+| `../market_regime_detection/api_server.py` | yes | 1135 | `6267f1a 2026-03-04` |
 | `../market_regime_detection/src/api_models.py` | yes | 278 | `89d7179 2026-02-28` |
 | `../market_regime_detection/src/day_trading_manager.py` | yes | 1110 | `6748856 2026-03-02` |
 | `../market_regime_detection/src/intraday_levels.py` | yes | 814 | `a0fc856 2026-02-23` |
@@ -35,7 +35,7 @@ Own regime detection, signal generation, position management, learning component
 | `../market_regime_detection/src/position_sizing.py` | yes | 145 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/evidence_decision.py` | yes | 530 | `018eb2b 2026-02-24` |
 | `../market_regime_detection/src/strategy_factory.py` | yes | 44 | `6267f1a 2026-03-04` |
-| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 675 | `89d7179 2026-02-28` |
+| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 699 | `89d7179 2026-02-28` |
 | `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 185 | `97fd90d 2026-02-25` |
 | `../market_regime_detection/src/strategies/absorption_reversal.py` | yes | 186 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/strategies/exhaustion_fade.py` | yes | 178 | `a0fc856 2026-02-23` |
@@ -77,13 +77,13 @@ Own regime detection, signal generation, position management, learning component
 - `function` `_field_value` (line 204)
 - `function` `_apply_reference_bar_update` (line 210)
 - `function` `_process_session_bar_payload` (line 236)
-- `async_function` `root` (line 279)
-- `async_function` `get_state` (line 284)
-- `async_function` `get_regime` (line 290)
-- `async_function` `get_strategies` (line 310)
-- `async_function` `toggle_strategy` (line 326)
-- `async_function` `update_strategy` (line 346)
-- ... 32 more symbols
+- `function` `_strategy_to_payload` (line 276)
+- `async_function` `root` (line 307)
+- `async_function` `get_state` (line 312)
+- `async_function` `get_regime` (line 318)
+- `async_function` `get_strategies` (line 335)
+- `async_function` `toggle_strategy` (line 354)
+- ... 33 more symbols
 
 ### `../market_regime_detection/src/api_models.py`
 - `class` `StrategyToggle` (line 11)

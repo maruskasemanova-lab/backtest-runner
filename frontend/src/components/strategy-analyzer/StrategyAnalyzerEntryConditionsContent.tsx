@@ -3,23 +3,36 @@ import type {
   StrategyAnalyzerConditionsLiveAnalysis,
   StrategyAnalyzerDecisionMarker,
 } from "./types";
+import type { ThresholdOverrides, ThresholdOverrideKey } from "./useStrategyAnalyzerThresholdOverrides";
 
 type Props = {
   effectiveConditionsMarker: StrategyAnalyzerDecisionMarker | null;
   stableConditionsLiveAnalysis: StrategyAnalyzerConditionsLiveAnalysis;
   isScrubbingLiveEval: boolean;
+  isThresholdInteractive?: boolean;
+  thresholdOverrides?: ThresholdOverrides;
+  onThresholdOverrideChange?: (key: ThresholdOverrideKey, value: number | boolean) => void;
+  hasPendingOverrides?: boolean;
 };
 
 export default function StrategyAnalyzerEntryConditionsContent({
   effectiveConditionsMarker,
   stableConditionsLiveAnalysis,
   isScrubbingLiveEval,
+  isThresholdInteractive,
+  thresholdOverrides,
+  onThresholdOverrideChange,
+  hasPendingOverrides,
 }: Props) {
   return (
     <div className="sa-entry-conditions-surface">
       <StrategyConditionsPanel
         marker={effectiveConditionsMarker}
         liveAnalysis={stableConditionsLiveAnalysis}
+        isThresholdInteractive={isThresholdInteractive}
+        thresholdOverrides={thresholdOverrides}
+        onThresholdOverrideChange={onThresholdOverrideChange}
+        hasPendingOverrides={hasPendingOverrides}
       />
       {isScrubbingLiveEval ? (
         <div

@@ -44,6 +44,9 @@ export default function ChartRangeSelector({
   const startXRef = useRef(0);
   const [dragRect, setDragRect] = useState<{ left: number; width: number } | null>(null);
   const [highlight, setHighlight] = useState<{ left: number; width: number } | null>(null);
+  const dragAnimationFrameRef = useRef<number | null>(null);
+  const pendingDragRectRef = useRef<{ left: number; width: number } | null>(null);
+  const highlightAnimationFrameRef = useRef<number | null>(null);
 
   /* ── core helper: get pixel-X for a bar time ───────────────────── */
   const timeToX = useCallback(
@@ -127,19 +130,47 @@ export default function ChartRangeSelector({
       if (x1 != null && x2 != null) {
         const left = Math.min(x1, x2);
         const width = Math.max(Math.abs(x2 - x1), 4);
-        setHighlight({ left, width });
+        setHighlight((prev) => {
+          if (
+            prev &&
+            Math.abs(prev.left - left) < 0.75 &&
+            Math.abs(prev.width - width) < 0.75
+          ) {
+            return prev;
+          }
+          return { left, width };
+        });
       } else {
         setHighlight(null);
       }
     };
 
-    const timer = setTimeout(recalc, 50);
-    const unsub = chart.timeScale().subscribeVisibleTimeRangeChange(recalc);
+    const scheduleRecalc = () => {
+      if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+        recalc();
+        return;
+      }
+      if (highlightAnimationFrameRef.current != null) return;
+      highlightAnimationFrameRef.current = window.requestAnimationFrame(() => {
+        highlightAnimationFrameRef.current = null;
+        recalc();
+      });
+    };
+
+    scheduleRecalc();
+    const unsub = chart.timeScale().subscribeVisibleTimeRangeChange(scheduleRecalc);
     return () => {
-      clearTimeout(timer);
+      if (
+        highlightAnimationFrameRef.current != null &&
+        typeof window !== "undefined" &&
+        typeof window.cancelAnimationFrame === "function"
+      ) {
+        window.cancelAnimationFrame(highlightAnimationFrameRef.current);
+      }
+      highlightAnimationFrameRef.current = null;
       if (typeof unsub === "function") unsub();
       else {
-        try { chart.timeScale().unsubscribeVisibleTimeRangeChange(recalc); } catch {}
+        try { chart.timeScale().unsubscribeVisibleTimeRangeChange(scheduleRecalc); } catch {}
       }
     };
   }, [selectedFrom, selectedTo, chartRef, findBarTimesForDateRange, timeToX]);
@@ -172,7 +203,31 @@ export default function ChartRangeSelector({
       const x = getLocalX(e);
       const left = Math.min(startXRef.current, x);
       const width = Math.abs(x - startXRef.current);
-      setDragRect({ left, width });
+      const nextRect = { left, width };
+
+      if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+        setDragRect(nextRect);
+        return;
+      }
+
+      pendingDragRectRef.current = nextRect;
+      if (dragAnimationFrameRef.current != null) return;
+      dragAnimationFrameRef.current = window.requestAnimationFrame(() => {
+        dragAnimationFrameRef.current = null;
+        const pendingRect = pendingDragRectRef.current;
+        pendingDragRectRef.current = null;
+        if (!pendingRect) return;
+        setDragRect((prev) => {
+          if (
+            prev &&
+            Math.abs(prev.left - pendingRect.left) < 0.75 &&
+            Math.abs(prev.width - pendingRect.width) < 0.75
+          ) {
+            return prev;
+          }
+          return pendingRect;
+        });
+      });
     },
     [getLocalX]
   );
@@ -185,6 +240,15 @@ export default function ChartRangeSelector({
       const x = getLocalX(e);
       const x1 = Math.min(startXRef.current, x);
       const x2 = Math.max(startXRef.current, x);
+      if (
+        dragAnimationFrameRef.current != null &&
+        typeof window !== "undefined" &&
+        typeof window.cancelAnimationFrame === "function"
+      ) {
+        window.cancelAnimationFrame(dragAnimationFrameRef.current);
+      }
+      dragAnimationFrameRef.current = null;
+      pendingDragRectRef.current = null;
       setDragRect(null);
 
       if (x2 - x1 < 10) return;
@@ -207,8 +271,39 @@ export default function ChartRangeSelector({
   const handleMouseLeave = useCallback(() => {
     if (isDraggingRef.current) {
       isDraggingRef.current = false;
+      if (
+        dragAnimationFrameRef.current != null &&
+        typeof window !== "undefined" &&
+        typeof window.cancelAnimationFrame === "function"
+      ) {
+        window.cancelAnimationFrame(dragAnimationFrameRef.current);
+      }
+      dragAnimationFrameRef.current = null;
+      pendingDragRectRef.current = null;
       setDragRect(null);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (
+        dragAnimationFrameRef.current != null &&
+        typeof window !== "undefined" &&
+        typeof window.cancelAnimationFrame === "function"
+      ) {
+        window.cancelAnimationFrame(dragAnimationFrameRef.current);
+      }
+      dragAnimationFrameRef.current = null;
+      pendingDragRectRef.current = null;
+      if (
+        highlightAnimationFrameRef.current != null &&
+        typeof window !== "undefined" &&
+        typeof window.cancelAnimationFrame === "function"
+      ) {
+        window.cancelAnimationFrame(highlightAnimationFrameRef.current);
+      }
+      highlightAnimationFrameRef.current = null;
+    };
   }, []);
 
   /* ── render ────────────────────────────────────────────────────── */

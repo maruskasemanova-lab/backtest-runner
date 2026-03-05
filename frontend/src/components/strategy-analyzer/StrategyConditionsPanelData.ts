@@ -45,6 +45,8 @@ export interface StrategyConditionsPanelDataValue {
   calibratedProbability: number | null;
   intrabarOnlyCheckpoint: boolean;
   liveAnalysisSource: any | null;
+  barAction: string | null;
+  barReason: string | null;
 }
 
 function normalizeSignalDirection(raw: unknown): "bullish" | "bearish" | null {
@@ -169,6 +171,8 @@ export function extractStrategyConditionsPanelData(
       calibratedProbability: safeNum(ls.calibrated_probability),
       intrabarOnlyCheckpoint: false,
       liveAnalysisSource: null,
+      barAction: details?.action || null,
+      barReason: details?.reason || null,
     };
   }
 
@@ -241,6 +245,8 @@ export function extractStrategyConditionsPanelData(
         ls.source_contributions && typeof ls.source_contributions === "object" ? ls.source_contributions : null,
       sourceWeights: ls.source_weights && typeof ls.source_weights === "object" ? ls.source_weights : null,
       calibratedProbability: safeNum(ls.calibrated_probability),
+      barAction: liveAnalysis?.bar_action || sr?.action || liveAnalysis?.action || null,
+      barReason: liveAnalysis?.bar_reason || sr?.reason_text || liveAnalysis?.reason || null,
     };
   }
 

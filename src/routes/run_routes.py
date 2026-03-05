@@ -22,6 +22,7 @@ from src.services.run_control_service import (
     resume_run,
     step_run,
     stop_run,
+    update_orchestrator_config,
 )
 
 router = APIRouter()
@@ -239,6 +240,20 @@ async def delete_run_endpoint(
 ):
     """Delete a run from memory."""
     return await delete_run(run_id, ticker, date, services.build_run_control_deps())
+
+
+@router.post("/api/run/{run_id}/{ticker}/{date}/orchestrator-config")
+async def update_orchestrator_config_endpoint(
+    run_id: str,
+    ticker: str,
+    date: str,
+    payload: dict = Body(default_factory=dict),
+    services: ApiServices = Depends(get_api_services),
+):
+    """Update orchestrator runtime config for an active run."""
+    return await update_orchestrator_config(
+        run_id, ticker, date, payload, services.build_run_control_deps()
+    )
 
 
 @router.get("/api/runs")

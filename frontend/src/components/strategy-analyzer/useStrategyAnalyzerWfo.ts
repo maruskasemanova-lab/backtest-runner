@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { buildRunApiBase, parseRunKey, readErrorDetail } from "../../app/appShared";
 import { defaultStrategyApiUrl } from "../../utils";
-import { dateTimeLocalToUtcIso } from "./utils";
+import { dateTimeLocalToUtcIso, orderIsoDateRange } from "./utils";
 import type {
   StrategyAnalyzerContextRiskPresetKey,
   StrategyAnalyzerRangePlaybackMeta,
@@ -272,12 +272,16 @@ export function useStrategyAnalyzerWfo({
       const effectiveTradeStartLocal = rangePlaybackMeta?.tradeStartLocal || selectedRangeFrom;
       const effectiveTradeEndLocal = rangePlaybackMeta?.tradeEndLocal || selectedRangeTo;
       const contextRiskOverrides = resolveStrategyAnalyzerContextRiskOverrides(contextRiskPresetKey);
+      const orderedRange = orderIsoDateRange(
+        String(effectiveStartLocal || "").slice(0, 10),
+        String(effectiveEndLocal || "").slice(0, 10),
+      );
 
       const payload: StrategyAnalyzerStartRunPayload & Record<string, any> = {
         run_id: runId,
         ticker,
-        date_from: String(effectiveStartLocal || "").slice(0, 10),
-        date_to: String(effectiveEndLocal || "").slice(0, 10),
+        date_from: orderedRange.dateFrom,
+        date_to: orderedRange.dateTo,
         start_time: dateTimeLocalToUtcIso(effectiveStartLocal),
         end_time: dateTimeLocalToUtcIso(effectiveEndLocal),
         trade_start_time: dateTimeLocalToUtcIso(effectiveTradeStartLocal),

@@ -48,6 +48,8 @@ export function extractRunBarAnalysis(bar: any): StrategyAnalyzerRunBarAnalysisS
       checkpoint_offset_sec: Number.isFinite(Number(bar?.offset_sec)) ? Number(bar.offset_sec) : null,
       provisional: typeof bar?.provisional === "boolean" ? Boolean(bar.provisional) : null,
       timestamp: typeof bar?.timestamp === "string" ? bar.timestamp : null,
+      bar_action: typeof bar?.action === "string" ? bar.action : null,
+      bar_reason: typeof bar?.reason === "string" ? bar.reason : null,
     };
   }
 
@@ -138,5 +140,9 @@ export function extractRunBarAnalysis(bar: any): StrategyAnalyzerRunBarAnalysisS
     bar_index: Number.isFinite(Number(barIndexCandidate)) ? Number(barIndexCandidate) : null,
     warmup_only: warmupOnly,
     timestamp: bar.timestamp || bar.analysis?.timestamp || bar.strategy_analysis?.timestamp || null,
+    bar_action:
+      bar.action ?? bar.analysis?.action ?? bar.strategy_analysis?.action ?? null,
+    bar_reason:
+      bar.reason ?? bar.analysis?.reason ?? bar.strategy_analysis?.reason ?? null,
   };
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { parseRunKey, buildRunApiBase } from "../../app/appRunStateStateHelpers";
 import IntradayLevelsDialog from "../IntradayLevelsDialog";
 import StrategyAnalyzerAttachedPanels from "./StrategyAnalyzerAttachedPanels";
 import StrategyAnalyzerChartPanel from "./StrategyAnalyzerChartPanel";
@@ -9,6 +10,7 @@ import StrategyAnalyzerUnifiedConfigWrapper from "./StrategyAnalyzerUnifiedConfi
 import StrategyAnalyzerHeaderControls from "./StrategyAnalyzerHeaderControls";
 import StrategyAnalyzerRangeActions from "./StrategyAnalyzerRangeActions";
 import { filterMarkersByChartWindow } from "./filterMarkersByChartWindow";
+import { useStrategyAnalyzerThresholdOverrides } from "./useStrategyAnalyzerThresholdOverrides";
 import type {
   StrategyAnalyzerChartHandle,
   StrategyAnalyzerAttachedRunState,
@@ -205,6 +207,25 @@ export default function StrategyAnalyzer({
     isAnalyzerAttachedRun &&
     !attachedRunState?.is_running &&
     (TERMINAL_RUN_PHASES.has(analyzerRunPhase) || analyzerProgressLooksComplete);
+
+  // ── threshold overrides (interactive sliders when paused) ─────
+  const activeRunApiBase = useMemo(
+    () => buildRunApiBase(parseRunKey(attachedRunKey)),
+    [attachedRunKey],
+  );
+  const {
+    thresholdOverrides,
+    isThresholdInteractive,
+    hasPendingOverrides,
+    updateThresholdOverride,
+    buildThresholdPayload,
+  } = useStrategyAnalyzerThresholdOverrides({
+    isAnalyzerAttachedRun,
+    isPlayingRun,
+    analyzerRunTerminal,
+    activeRunApiBase,
+  });
+
   const { timelineCacheVersion } = useStrategyAnalyzerTimelineCache({
     isAnalyzerAttachedRun,
     rangePlaybackMeta,
@@ -396,11 +417,52 @@ export default function StrategyAnalyzer({
     void handleStartTest();
   }, [wfoEnabled, handleRunWfo, handleStartTest]);
 
+  // ── play/step wrapped with threshold overrides + scrub seek ───
+  const handlePlayWithOverrides: typeof onPlayRun = useCallback(
+    async (options?: any) => {
+      // Embed transformed overrides in request body for atomicity
+      const merged: any = hasPendingOverrides
+        ? { ...options, threshold_overrides: buildThresholdPayload(thresholdOverrides) }
+        : { ...options };
+      merged.keep_in_memory_after_completion = true;
+      // If user scrubbed back from end, include seek position
+      if (
+        rangeScrubMeta &&
+        rangeScrubMeta.clampedOffset < rangeScrubMeta.progressedMaxOffset &&
+        rangeScrubMeta.targetBar?.bar_index != null
+      ) {
+        merged.seek_to_bar_index = rangeScrubMeta.targetBar.bar_index;
+      }
+      return onPlayRun?.(merged);
+    },
+    [hasPendingOverrides, onPlayRun, thresholdOverrides, rangeScrubMeta, buildThresholdPayload],
+  );
+  const handleStepWithOverrides: typeof onStepRun = useCallback(
+    async (options?: any) => {
+      const merged: any = hasPendingOverrides
+        ? { ...options, threshold_overrides: buildThresholdPayload(thresholdOverrides) }
+        : { ...options };
+      if (
+        rangeScrubMeta &&
+        rangeScrubMeta.clampedOffset < rangeScrubMeta.progressedMaxOffset &&
+        rangeScrubMeta.targetBar?.bar_index != null
+      ) {
+        merged.seek_to_bar_index = rangeScrubMeta.targetBar.bar_index;
+      }
+      return onStepRun?.(merged);
+    },
+    [hasPendingOverrides, onStepRun, thresholdOverrides, rangeScrubMeta, buildThresholdPayload],
+  );
+
   const entryConditionsContent = (
     <StrategyAnalyzerEntryConditionsContent
       effectiveConditionsMarker={effectiveConditionsMarker}
       stableConditionsLiveAnalysis={stableConditionsLiveAnalysis}
       isScrubbingLiveEval={isScrubbingLiveEval}
+      isThresholdInteractive={isThresholdInteractive}
+      thresholdOverrides={thresholdOverrides}
+      onThresholdOverrideChange={updateThresholdOverride}
+      hasPendingOverrides={hasPendingOverrides}
     />
   );
 
@@ -457,6 +519,11 @@ export default function StrategyAnalyzer({
             rangeScrubMeta={rangeScrubMeta}
             focusSelectedRangeOffset={focusSelectedRangeOffset}
             moveSelectedRangeByStep={moveSelectedRangeByStep}
+            isPlayingRun={isPlayingRun}
+            runLoading={runLoading}
+            onPlayRun={() => void handlePlayWithOverrides?.({ trade_eval_mode: analyzerTradeEvalMode, speed_ms: "max" })}
+            onPauseRun={() => void onPauseRun?.()}
+            onStepRun={() => void handleStepWithOverrides?.({ trade_eval_mode: analyzerTradeEvalMode })}
           />
         </div>
 
@@ -488,9 +555,9 @@ export default function StrategyAnalyzer({
             runLoading={runLoading || wfoIsRunning}
             isPlayingRun={isPlayingRun}
             analyzerRunTerminal={analyzerRunTerminal}
-            onPlayRun={onPlayRun}
+            onPlayRun={handlePlayWithOverrides}
             onPauseRun={onPauseRun}
-            onStepRun={onStepRun}
+            onStepRun={handleStepWithOverrides}
             onClearAnalyzerRun={handleClearAnalyzerRun}
             analyzerPlaybackProgress={analyzerPlaybackProgress}
             attachedRunState={attachedRunState}

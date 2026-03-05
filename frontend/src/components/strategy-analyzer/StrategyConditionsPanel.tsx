@@ -1,8 +1,9 @@
 import { useMemo } from "react";
-import { Activity, BarChart2, Target, Layers, Crosshair, Zap, AlertTriangle } from "lucide-react";
+import { Activity, BarChart2, Target, Crosshair, Zap, AlertTriangle } from "lucide-react";
 import { extractStrategyConditionsPanelData } from "./StrategyConditionsPanelData";
 import { StrategyConditionsPanelRejectionDetail as RejectionDetail } from "./StrategyConditionsPanelRejectionDetail";
-import { MiniBar, SectionLabel, safeNum } from "./StrategyConditionsPanelShared";
+import { InteractiveMiniBar, MiniBar, SectionLabel, safeNum } from "./StrategyConditionsPanelShared";
+import type { ThresholdOverrides, ThresholdOverrideKey } from "./useStrategyAnalyzerThresholdOverrides";
 
 /* ── gate badge (compact) ────────────────────────────────────────── */
 
@@ -37,10 +38,188 @@ function GateBadge({ label, passed }: { label: string; passed: boolean | null })
 interface StrategyConditionsPanelProps {
   marker: any;
   liveAnalysis?: any;
+  isThresholdInteractive?: boolean;
+  thresholdOverrides?: ThresholdOverrides;
+  onThresholdOverrideChange?: (key: ThresholdOverrideKey, value: number | boolean) => void;
+  hasPendingOverrides?: boolean;
 }
 
-export default function StrategyConditionsPanel({ marker, liveAnalysis }: StrategyConditionsPanelProps) {
-  const data = useMemo(() => extractStrategyConditionsPanelData(marker, liveAnalysis), [marker, liveAnalysis]);
+export default function StrategyConditionsPanel({
+  marker,
+  liveAnalysis,
+  isThresholdInteractive,
+  thresholdOverrides,
+  onThresholdOverrideChange,
+  hasPendingOverrides,
+}: StrategyConditionsPanelProps) {
+  const rawData = useMemo(() => extractStrategyConditionsPanelData(marker, liveAnalysis), [marker, liveAnalysis]);
+
+  // Local re-evaluation: override gate results based on current threshold overrides
+  // so the UI updates instantly when user adjusts sliders (without waiting for Play/Step)
+  const data = useMemo(() => {
+    if (!rawData) return null;
+    if (!thresholdOverrides || !isThresholdInteractive) return rawData;
+
+    const patched = { ...rawData };
+
+    // ── Master bypass: clear ALL rejections when bypass_all_entry_gates is on ──
+    if (thresholdOverrides.bypass_all_entry_gates === true) {
+      if (patched.rejectionGate && patched.rejectionGate !== "threshold") {
+        // Clear non-threshold rejections — scoring threshold is handled below
+        patched.passed = true;
+        patched.rejectionGate = null;
+        patched.rejectionReason = null;
+        patched.rejectionDetails = null;
+      }
+    }
+
+    // ── Locally recalculate combined score when strategy_weight changes ──
+    if (thresholdOverrides.strategy_weight != null && patched.sourceContributions && patched.sourceWeights) {
+      const contributions = patched.sourceContributions as Record<string, number>;
+      const origWeights = patched.sourceWeights as Record<string, number>;
+      // strategy_weight override is stored as 0-100 in the UI, converted to 0-1 for the payload
+      const newStrategyWeight = thresholdOverrides.strategy_weight / 100;
+
+      // Recompute weighted sum with the new strategy weight
+      let totalWeightedScore = 0;
+      let totalWeight = 0;
+      for (const [key, contribution] of Object.entries(contributions)) {
+        if (contribution == null || contribution <= 0) continue;
+        const origWeight = origWeights[key] ?? 0;
+        if (origWeight <= 0) continue;
+        // The raw score for this source = contribution / origWeight
+        const rawScore = contribution / origWeight;
+        // Apply new weight for strategy sources, keep original for others
+        const isStrategy = key.startsWith("strategy:");
+        const effectiveWeight = isStrategy ? newStrategyWeight : origWeight;
+        totalWeightedScore += rawScore * effectiveWeight;
+        totalWeight += effectiveWeight;
+      }
+      if (totalWeight > 0) {
+        patched.combinedScore = Math.round((totalWeightedScore / totalWeight) * 100) / 100;
+      }
+    }
+
+    // ── Re-evaluate threshold gate ──
+    // When bypass_all_entry_gates is on, force-pass the threshold gate too
+    if (thresholdOverrides.bypass_all_entry_gates === true && patched.rejectionGate === "threshold") {
+      patched.passed = true;
+      patched.rejectionGate = null;
+      patched.rejectionReason = null;
+      patched.rejectionDetails = null;
+    }
+    // Use overridden base_threshold if set, otherwise fall back to backend's own threshold
+    const effectiveThreshold = thresholdOverrides.base_threshold ?? patched.threshold;
+    if (effectiveThreshold != null && patched.combinedScore != null) {
+      const scorePasses = patched.combinedScore >= effectiveThreshold;
+
+      if (scorePasses && patched.rejectionGate === "threshold") {
+        patched.passed = true;
+        patched.rejectionGate = null;
+        patched.rejectionReason = null;
+        patched.rejectionDetails = null;
+      } else if (!scorePasses && patched.passed !== false) {
+        patched.passed = false;
+        if (!patched.rejectionGate) {
+          patched.rejectionGate = "threshold";
+        }
+      }
+    }
+
+    // Re-evaluate: confirming_sources vs. overridden min_confirming_sources
+    if (thresholdOverrides.min_confirming_sources != null && patched.confirmingSources != null) {
+      const required = thresholdOverrides.min_confirming_sources;
+      patched.requiredConfirmingSources = required;
+      const sourcesPasses = patched.confirmingSources >= required;
+
+      if (sourcesPasses && patched.rejectionGate === "confirming_sources") {
+        // Was rejected for confirming_sources but now passes with lowered threshold
+        patched.passed = true;
+        patched.rejectionGate = null;
+        patched.rejectionReason = null;
+        patched.rejectionDetails = null;
+      } else if (!sourcesPasses && patched.rejectionGate !== "confirming_sources") {
+        // Doesn't pass with new higher requirement
+        patched.passed = false;
+        patched.rejectionGate = "confirming_sources";
+      }
+    }
+
+    // Re-evaluate context risk: room_pct and effective_rr vs overridden minimums
+    if (patched.contextRisk && typeof patched.contextRisk === "object") {
+      const cr = { ...patched.contextRisk };
+      const overriddenMinRoom = thresholdOverrides.context_risk_min_room_pct;
+      const overriddenMinRr = thresholdOverrides.context_risk_min_effective_rr;
+      const roomPct = safeNum(cr.room_pct);
+      const effectiveRr = safeNum(cr.effective_rr);
+
+      let roomOk = true;
+      let rrOk = true;
+
+      if (overriddenMinRoom != null && roomPct != null) {
+        roomOk = roomPct >= overriddenMinRoom;
+        cr.configured_min_room_pct = overriddenMinRoom;
+      }
+      if (overriddenMinRr != null && effectiveRr != null) {
+        rrOk = effectiveRr >= overriddenMinRr;
+        cr.configured_min_effective_rr = overriddenMinRr;
+      }
+
+      // If both pass now with overrides, clear context_risk skip
+      if (roomOk && rrOk && cr.skip === true) {
+        cr.skip = false;
+      }
+      // If one fails and it wasn't skipping before, set skip
+      if ((!roomOk || !rrOk) && cr.skip !== true) {
+        cr.skip = true;
+        cr.skip_reason = !roomOk ? "min_room_pct" : "min_effective_rr";
+      }
+
+      patched.contextRisk = cr;
+    }
+
+    // Re-evaluate pullback_quality gate
+    if (patched.rejectionGate === "pullback_quality" && patched.rejectionDetails) {
+      const details = patched.rejectionDetails.details || {};
+      const reason = patched.rejectionDetails.reason || patched.rejectionReason || "";
+
+      let cleared = false;
+      // Morning window disabled → clear morning window rejection
+      if (thresholdOverrides.pullback_morning_window_enabled === false
+          && reason.includes("morning_window")) {
+        cleared = true;
+      }
+      // Choppy macro disabled → clear choppy rejection
+      if (thresholdOverrides.pullback_block_choppy_macro === false
+          && reason.includes("choppy_macro")) {
+        cleared = true;
+      }
+      // POC requirement disabled → clear POC rejection
+      if (thresholdOverrides.pullback_require_poc_on_trade_side === false
+          && reason.includes("poc_on_trade_side")) {
+        cleared = true;
+      }
+      // Trend efficiency lowered → clear trend efficiency rejection
+      if (thresholdOverrides.pullback_min_price_trend_efficiency != null
+          && reason.includes("trend_efficiency")) {
+        const actual = safeNum(details.trend_efficiency);
+        if (actual != null && actual >= thresholdOverrides.pullback_min_price_trend_efficiency) {
+          cleared = true;
+        }
+      }
+      // Micro regime — check blocked_micro rejection
+      // (not directly overridable but clears if regime changes)
+
+      if (cleared) {
+        patched.passed = true;
+        patched.rejectionGate = null;
+        patched.rejectionReason = null;
+        patched.rejectionDetails = null;
+      }
+    }
+
+    return patched;
+  }, [rawData, thresholdOverrides, isThresholdInteractive]);
 
   if (!data) {
     return (
@@ -123,25 +302,101 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
         })()}
       </div>
 
-      {/* ── Scores: 2-column grid ── */}
+      {/* ── Scores: single-column when interactive, 2-col otherwise ── */}
       {hasLayerScores && (
         <>
-          <SectionLabel icon={<BarChart2 size={10} />}>Entry Scores</SectionLabel>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 8px" }}>
-            <MiniBar label="Combined" value={data.combinedScore} threshold={data.threshold} showThresholdLine />
-            <MiniBar label="Strategy" value={data.strategyScore} />
+          <SectionLabel icon={<BarChart2 size={10} />}>
+            Entry Scores
+            {data.confirmingSources != null && (
+              <span style={{
+                marginLeft: "auto",
+                fontSize: "0.56rem",
+                fontWeight: 600,
+                color: data.confirmingSources >= (data.requiredConfirmingSources ?? 0)
+                  ? "var(--accent-green, #22c55e)"
+                  : "var(--accent-red, #ef4444)",
+                fontVariantNumeric: "tabular-nums",
+              }}>
+                {data.confirmingSources}/{data.requiredConfirmingSources ?? "?"} sources
+              </span>
+            )}
+          </SectionLabel>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: isThresholdInteractive ? "1fr" : "1fr 1fr",
+            gap: isThresholdInteractive ? "2px 0" : "0 8px",
+          }}>
+            <InteractiveMiniBar
+              label="Combined"
+              value={data.combinedScore}
+              threshold={data.threshold}
+              showThresholdLine
+              interactive={isThresholdInteractive}
+              thresholdOverride={thresholdOverrides?.base_threshold}
+              onThresholdChange={(v) => onThresholdOverrideChange?.("base_threshold", v)}
+              thresholdMin={30}
+              thresholdMax={90}
+            />
+            <InteractiveMiniBar
+              label="Str-Only Thr"
+              value={data.strategyScore}
+              threshold={thresholdOverrides?.strategy_only_threshold ?? null}
+              showThresholdLine={isThresholdInteractive || thresholdOverrides?.strategy_only_threshold != null}
+              interactive={isThresholdInteractive}
+              thresholdOverride={thresholdOverrides?.strategy_only_threshold}
+              onThresholdChange={(v) => onThresholdOverrideChange?.("strategy_only_threshold", v)}
+              thresholdMin={40}
+              thresholdMax={95}
+            />
             {data.flowScore != null ? (
-              <MiniBar label="Flow" value={data.flowScore} />
+              <InteractiveMiniBar
+                label="Flow"
+                value={data.flowScore}
+                threshold={thresholdOverrides?.strategy_weight ?? null}
+                showThresholdLine={isThresholdInteractive || thresholdOverrides?.strategy_weight != null}
+                interactive={isThresholdInteractive}
+                thresholdOverride={thresholdOverrides?.strategy_weight}
+                onThresholdChange={(v) => onThresholdOverrideChange?.("strategy_weight", v)}
+                thresholdMin={10}
+                thresholdMax={90}
+              />
             ) : (
-              <div />
+              !isThresholdInteractive ? <div /> : null
             )}
             {data.levelQuality != null && (
-              <MiniBar label="Level Qlty" value={data.levelQuality} />
+              <InteractiveMiniBar
+                label="Level Qlty"
+                value={data.levelQuality}
+                threshold={thresholdOverrides?.min_confirming_sources != null
+                  ? (thresholdOverrides.min_confirming_sources / 5) * 100
+                  : null}
+                showThresholdLine={isThresholdInteractive || thresholdOverrides?.min_confirming_sources != null}
+                interactive={isThresholdInteractive}
+                thresholdOverride={thresholdOverrides?.min_confirming_sources != null
+                  ? (thresholdOverrides.min_confirming_sources / 5) * 100
+                  : null}
+                onThresholdChange={(v) => onThresholdOverrideChange?.("min_confirming_sources", Math.round(v / 100 * 5))}
+                thresholdMin={20}
+                thresholdMax={100}
+              />
             )}
           </div>
 
-          {/* Threshold info - cleaned up */}
-          {data.threshold != null && (
+          {/* Pending overrides indicator */}
+          {isThresholdInteractive && hasPendingOverrides && (
+            <div style={{
+              fontSize: "0.55rem",
+              color: "var(--accent-blue, #3b82f6)",
+              marginTop: 2,
+              marginBottom: 2,
+              fontStyle: "italic",
+            }}>
+              Threshold changes apply on next Play/Step
+            </div>
+          )}
+
+          {/* Threshold info - cleaned up (hidden when interactive to avoid clutter) */}
+          {!isThresholdInteractive && data.threshold != null && (
             <div style={{ fontSize: "0.58rem", color: "var(--text-muted)", marginTop: 1, marginBottom: 2, lineHeight: 1.3 }}>
               Thr: {data.threshold.toFixed(0)}
               {data.todBoost != null && data.todBoost !== 0 && (
@@ -164,6 +419,287 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
                 ) : null;
               })()}
             </div>
+          )}
+
+          {/* ── Extra Tuning controls (interactive mode only) ── */}
+          {isThresholdInteractive && (
+            <>
+              <SectionLabel icon={<Crosshair size={10} />}>Tuning</SectionLabel>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "2px 0" }}>
+                <InteractiveMiniBar
+                  label="Min Margin Over Thr"
+                  value={thresholdOverrides?.min_margin_over_threshold ?? 3}
+                  threshold={null}
+                  showThresholdLine={false}
+                  interactive
+                  thresholdOverride={thresholdOverrides?.min_margin_over_threshold ?? null}
+                  onThresholdChange={(v) => onThresholdOverrideChange?.("min_margin_over_threshold", v)}
+                  thresholdMin={0}
+                  thresholdMax={20}
+                  max={20}
+                />
+                <InteractiveMiniBar
+                  label="Single Source Min Margin"
+                  value={thresholdOverrides?.single_source_min_margin ?? 8}
+                  threshold={null}
+                  showThresholdLine={false}
+                  interactive
+                  thresholdOverride={thresholdOverrides?.single_source_min_margin ?? null}
+                  onThresholdChange={(v) => onThresholdOverrideChange?.("single_source_min_margin", v)}
+                  thresholdMin={0}
+                  thresholdMax={25}
+                  max={25}
+                />
+                <InteractiveMiniBar
+                  label="Ctx Risk Min Room %"
+                  value={thresholdOverrides?.context_risk_min_room_pct ?? 0.15}
+                  threshold={null}
+                  showThresholdLine={false}
+                  interactive
+                  thresholdOverride={thresholdOverrides?.context_risk_min_room_pct ?? null}
+                  onThresholdChange={(v) => onThresholdOverrideChange?.("context_risk_min_room_pct", v)}
+                  thresholdMin={0}
+                  thresholdMax={1}
+                  max={1}
+                  suffix="%"
+                />
+                <InteractiveMiniBar
+                  label="Ctx Risk Min RR"
+                  value={thresholdOverrides?.context_risk_min_effective_rr ?? 0.8}
+                  threshold={null}
+                  showThresholdLine={false}
+                  interactive
+                  thresholdOverride={thresholdOverrides?.context_risk_min_effective_rr ?? null}
+                  onThresholdChange={(v) => onThresholdOverrideChange?.("context_risk_min_effective_rr", v)}
+                  thresholdMin={0}
+                  thresholdMax={3}
+                  max={3}
+                />
+                <InteractiveMiniBar
+                  label="Min Confirming Sources"
+                  value={thresholdOverrides?.min_confirming_sources ?? (data.requiredConfirmingSources ?? 1)}
+                  threshold={null}
+                  showThresholdLine={false}
+                  interactive
+                  thresholdOverride={thresholdOverrides?.min_confirming_sources ?? null}
+                  onThresholdChange={(v) => onThresholdOverrideChange?.("min_confirming_sources", Math.round(v))}
+                  thresholdMin={0}
+                  thresholdMax={5}
+                  max={5}
+                />
+                <InteractiveMiniBar
+                  label="Min Confluence Score"
+                  value={thresholdOverrides?.intraday_levels_min_confluence_score ?? 2}
+                  threshold={null}
+                  showThresholdLine={false}
+                  interactive
+                  thresholdOverride={thresholdOverrides?.intraday_levels_min_confluence_score ?? null}
+                  onThresholdChange={(v) => onThresholdOverrideChange?.("intraday_levels_min_confluence_score", Math.round(v))}
+                  thresholdMin={0}
+                  thresholdMax={10}
+                  max={10}
+                />
+                <InteractiveMiniBar
+                  label="RVOL Min Thr"
+                  value={thresholdOverrides?.intraday_levels_rvol_min_threshold ?? 0.8}
+                  threshold={null}
+                  showThresholdLine={false}
+                  interactive
+                  thresholdOverride={thresholdOverrides?.intraday_levels_rvol_min_threshold ?? null}
+                  onThresholdChange={(v) => onThresholdOverrideChange?.("intraday_levels_rvol_min_threshold", v)}
+                  thresholdMin={0}
+                  thresholdMax={3}
+                  max={3}
+                />
+                <InteractiveMiniBar
+                  label="Pullback RVOL Min"
+                  value={thresholdOverrides?.intraday_levels_pullback_rvol_min_threshold ?? 0.3}
+                  threshold={null}
+                  showThresholdLine={false}
+                  interactive
+                  thresholdOverride={thresholdOverrides?.intraday_levels_pullback_rvol_min_threshold ?? null}
+                  onThresholdChange={(v) => onThresholdOverrideChange?.("intraday_levels_pullback_rvol_min_threshold", v)}
+                  thresholdMin={0}
+                  thresholdMax={2}
+                  max={2}
+                />
+                <InteractiveMiniBar
+                  label="Cost Aware Min Risk %"
+                  value={thresholdOverrides?.cost_aware_sweep_min_risk_pct ?? 0.1}
+                  threshold={null}
+                  showThresholdLine={false}
+                  interactive
+                  thresholdOverride={thresholdOverrides?.cost_aware_sweep_min_risk_pct ?? null}
+                  onThresholdChange={(v) => onThresholdOverrideChange?.("cost_aware_sweep_min_risk_pct", v)}
+                  thresholdMin={0}
+                  thresholdMax={1}
+                  max={1}
+                  suffix="%"
+                />
+              </div>
+
+              {/* Master bypass toggle */}
+              {(() => {
+                const bypassOn = thresholdOverrides?.bypass_all_entry_gates === true;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onThresholdOverrideChange?.("bypass_all_entry_gates", !bypassOn)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 5,
+                      width: "100%",
+                      padding: "4px 8px",
+                      marginTop: 6,
+                      marginBottom: 2,
+                      border: `1px solid ${bypassOn ? "var(--accent-red, #ef4444)" : "var(--border-primary, rgba(255,255,255,0.08))"}`,
+                      borderRadius: 4,
+                      background: bypassOn ? "rgba(239, 68, 68, 0.12)" : "transparent",
+                      color: bypassOn ? "var(--accent-red, #ef4444)" : "var(--text-secondary)",
+                      cursor: "pointer",
+                      fontSize: "0.6rem",
+                      fontWeight: 700,
+                      letterSpacing: "0.03em",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.65rem" }}>{bypassOn ? "⚡" : "🔒"}</span>
+                    {bypassOn ? "BYPASS ALL GATES — ON" : "Bypass All Gates"}
+                  </button>
+                );
+              })()}
+
+              {/* Feature flag toggles */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "3px 8px",
+                marginTop: 4,
+              }}>
+                {([
+                  ["use_evidence_engine", "Evidence Engine"],
+                  ["use_adaptive_regime", "Adaptive Regime"],
+                  ["use_calibration", "Calibration"],
+                  ["use_quality_sizing", "Quality Sizing"],
+                  ["use_cross_asset", "Cross-Asset"],
+                  ["use_edge_monitor", "Edge Monitor"],
+                  ["context_aware_risk_enabled", "Context Risk"],
+                  ["intraday_levels_entry_quality_enabled", "Entry Quality"],
+                  ["pullback_quality_gate_enabled", "Pullback Quality"],
+                  ["momentum_diversification_gate_enabled", "Momentum Div"],
+                ] as const).map(([key, label]) => {
+                  const override = thresholdOverrides?.[key];
+                  const isOn = override != null ? Boolean(override) : true; // default on
+                  const isOverridden = override != null;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => onThresholdOverrideChange?.(key, !isOn)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        padding: "2px 5px",
+                        borderRadius: 3,
+                        fontSize: "0.55rem",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        border: `1px solid ${isOn
+                          ? "rgba(34, 197, 94, 0.25)"
+                          : "rgba(239, 68, 68, 0.25)"}`,
+                        background: isOn
+                          ? "rgba(34, 197, 94, 0.08)"
+                          : "rgba(239, 68, 68, 0.08)",
+                        color: isOn
+                          ? "var(--accent-green, #22c55e)"
+                          : "var(--accent-red, #ef4444)",
+                        transition: "all 120ms ease",
+                        textAlign: "left",
+                      }}
+                    >
+                      <span style={{ fontSize: "0.52rem" }}>{isOn ? "✓" : "✗"}</span>
+                      {label}
+                      {isOverridden && (
+                        <span style={{ fontSize: "0.45rem", opacity: 0.6, marginLeft: "auto" }}>mod</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* ── Pullback quality gate controls ── */}
+              {(data.selectedStrategy?.toLowerCase().includes("pullback") || data.rejectionGate === "pullback_quality" || rawData?.rejectionGate === "pullback_quality") && (
+                <>
+                  <SectionLabel icon={<Target size={10} />}>Pullback Gate</SectionLabel>
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "3px 8px",
+                    marginBottom: 4,
+                  }}>
+                    {([
+                      ["pullback_morning_window_enabled", "Morning Window"],
+                      ["pullback_block_choppy_macro", "Block Choppy"],
+                      ["pullback_require_poc_on_trade_side", "Require POC Side"],
+                    ] as const).map(([key, label]) => {
+                      const override = thresholdOverrides?.[key];
+                      const isOn = override != null ? Boolean(override) : true;
+                      const isOverridden = override != null;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => onThresholdOverrideChange?.(key, !isOn)}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                            padding: "2px 5px",
+                            borderRadius: 3,
+                            fontSize: "0.55rem",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            border: `1px solid ${isOn
+                              ? "rgba(34, 197, 94, 0.25)"
+                              : "rgba(239, 68, 68, 0.25)"}`,
+                            background: isOn
+                              ? "rgba(34, 197, 94, 0.08)"
+                              : "rgba(239, 68, 68, 0.08)",
+                            color: isOn
+                              ? "var(--accent-green, #22c55e)"
+                              : "var(--accent-red, #ef4444)",
+                            transition: "all 120ms ease",
+                            textAlign: "left",
+                          }}
+                        >
+                          <span style={{ fontSize: "0.52rem" }}>{isOn ? "✓" : "✗"}</span>
+                          {label}
+                          {isOverridden && (
+                            <span style={{ fontSize: "0.45rem", opacity: 0.6, marginLeft: "auto" }}>mod</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "2px 0" }}>
+                    <InteractiveMiniBar
+                      label="Min Trend Efficiency"
+                      value={thresholdOverrides?.pullback_min_price_trend_efficiency ?? 0.15}
+                      threshold={null}
+                      showThresholdLine={false}
+                      interactive
+                      thresholdOverride={thresholdOverrides?.pullback_min_price_trend_efficiency ?? null}
+                      onThresholdChange={(v) => onThresholdOverrideChange?.("pullback_min_price_trend_efficiency", v)}
+                      thresholdMin={0}
+                      thresholdMax={1}
+                      max={1}
+                    />
+                  </div>
+                </>
+              )}
+            </>
           )}
 
           {/* ── Evidence Source Breakdown ── */}
@@ -217,6 +753,28 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
                     );
                   })}
                 </div>
+
+                {/* Aligned source tags — shown inline with evidence */}
+                {data.alignedSourceKeys.length > 0 && (
+                  <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 3 }}>
+                    {data.alignedSourceKeys.map((key: string) => (
+                      <span
+                        key={key}
+                        style={{
+                          padding: "0px 4px",
+                          borderRadius: 2,
+                          fontSize: "0.55rem",
+                          lineHeight: 1.5,
+                          background: "rgba(59, 130, 246, 0.08)",
+                          color: "var(--accent-blue, #3b82f6)",
+                          border: "1px solid rgba(59, 130, 246, 0.15)",
+                        }}
+                      >
+                        {key.replace(/_/g, " ")}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </>
             );
           })()}
@@ -245,6 +803,7 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
               intraday_levels_entry_quality: "Kvalita vstupu pri úrovniach nízka",
               level_quality: "Kvalita okolitých úrovní nízka",
               cross_asset_headwind: "Protivietor z indexu",
+              pullback_quality: "Pullback kvalita nedostatočná",
             };
             const readableGate = gateLabels[data.rejectionGate] || data.rejectionGate.replace(/_/g, " ");
             return (
@@ -267,6 +826,60 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
         </>
       )}
 
+      {/* ── Bar Outcome (why entry did/didn't happen) ── */}
+      {data.barAction && (() => {
+        const action = data.barAction;
+        const reason = data.barReason || "";
+        // Skip displaying for 'no_signal' or empty actions
+        if (action === "no_signal" || action === "warmup") return null;
+        const isPositive = action === "position_opened";
+        const isSkip = action.includes("skip") || action.includes("cooldown") || action.includes("failed") || action.includes("dropped") || action.includes("insufficient");
+        const isPending = action.includes("pending");
+        const actionLabels: Record<string, string> = {
+          position_opened: "✓ Pozícia otvorená",
+          context_risk_skip: "✗ Context Risk SKIP",
+          consecutive_loss_cooldown: "✗ Cooldown po stratách",
+          micro_confirmation_failed: "✗ Micro potvrdenie zlyhalo",
+          intrabar_confirmation_failed: "✗ Intrabar potvrdenie zlyhalo",
+          pending_micro_confirmation: "⏳ Čaká na micro potvrdenie",
+          pending_intrabar_confirmation: "⏳ Čaká na intrabar potvrdenie",
+          insufficient_fill: "✗ Nedostatočný fill",
+        };
+        const label = actionLabels[action] || action.replace(/_/g, " ");
+        const bgColor = isPositive
+          ? "rgba(34, 197, 94, 0.08)"
+          : isSkip
+            ? "rgba(239, 68, 68, 0.06)"
+            : isPending
+              ? "rgba(234, 179, 8, 0.06)"
+              : "rgba(150, 150, 150, 0.06)";
+        const textColor = isPositive
+          ? "var(--accent-green, #22c55e)"
+          : isSkip
+            ? "var(--accent-red, #ef4444)"
+            : isPending
+              ? "var(--accent-yellow, #eab308)"
+              : "var(--text-secondary)";
+        return (
+          <div style={{
+            fontSize: "0.58rem",
+            background: bgColor,
+            padding: "4px 6px",
+            borderRadius: 3,
+            marginBottom: 3,
+            lineHeight: 1.4,
+          }}>
+            <div style={{ fontWeight: 600, fontSize: "0.6rem", color: textColor }}>
+              {label}
+            </div>
+            {reason && (
+              <div style={{ color: "var(--text-secondary)", fontSize: "0.55rem", marginTop: 1 }}>
+                {reason}
+              </div>
+            )}
+          </div>
+        );
+      })()}
       {/* ── Context Risk (post-signal execution gate) ── */}
       {data.contextRisk && data.contextRisk.skip === true && (() => {
         const cr = data.contextRisk;
@@ -339,66 +952,25 @@ export default function StrategyConditionsPanel({ marker, liveAnalysis }: Strate
         );
       })()}
 
-      {/* ── Evidence + L2: side by side in 2 cols ── */}
-      {(data.confirmingSources != null || hasL2) && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 8px", marginTop: 2 }}>
-          {/* Left: Evidence */}
-          <div>
-            {data.confirmingSources != null && (
-              <>
-                <SectionLabel icon={<Layers size={10} />}>Evidence</SectionLabel>
-                <MiniBar
-                  label="Sources"
-                  value={data.confirmingSources}
-                  max={Math.max(data.requiredConfirmingSources ?? 5, data.confirmingSources, 5)}
-                  threshold={data.requiredConfirmingSources}
-                  suffix=""
-                  showThresholdLine
-                />
-              </>
-            )}
-          </div>
-          {/* Right: L2 */}
-          <div>
+      {/* ── L2 Flow ── */}
       {hasL2 && (
         <>
-                <SectionLabel icon={<Zap size={10} />}>L2 Flow</SectionLabel>
-                {data.signedAggression != null && (
-                  <MiniBar label="Aggr" value={data.signedAggression} max={1} suffix="" />
-                )}
-                {data.l2AggressionZ != null && (
-                  <MiniBar label="Aggr Z" value={data.l2AggressionZ} max={4} suffix="" />
-                )}
-                {data.l2BookPressureZ != null && (
-                  <MiniBar label="Book Z" value={data.l2BookPressureZ} max={4} suffix="" />
-                )}
-              </>
+          <SectionLabel icon={<Zap size={10} />}>L2 Flow</SectionLabel>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 8px" }}>
+            {data.signedAggression != null && (
+              <MiniBar label="Aggr" value={data.signedAggression} max={1} suffix="" />
+            )}
+            {data.l2AggressionZ != null && (
+              <MiniBar label="Aggr Z" value={data.l2AggressionZ} max={4} suffix="" />
+            )}
+            {data.l2BookPressureZ != null && (
+              <MiniBar label="Book Z" value={data.l2BookPressureZ} max={4} suffix="" />
             )}
           </div>
-        </div>
+        </>
       )}
 
-      {/* Aligned source tags */}
-      {data.alignedSourceKeys.length > 0 && (
-        <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 2, marginBottom: 2 }}>
-          {data.alignedSourceKeys.map((key: string) => (
-            <span
-              key={key}
-              style={{
-                padding: "0px 4px",
-                borderRadius: 2,
-                fontSize: "0.55rem",
-                lineHeight: 1.5,
-                background: "rgba(59, 130, 246, 0.08)",
-                color: "var(--accent-blue, #3b82f6)",
-                border: "1px solid rgba(59, 130, 246, 0.15)",
-              }}
-            >
-              {key.replace(/_/g, " ")}
-            </span>
-          ))}
-        </div>
-      )}
+
 
       {/* ── Candidates: compact list ── */}
       {data.top3.length > 0 && (

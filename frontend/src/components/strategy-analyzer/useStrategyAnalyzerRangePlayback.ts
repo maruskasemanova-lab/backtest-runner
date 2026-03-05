@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   StrategyAnalyzerChartWindow,
   StrategyAnalyzerPreviewBar,
@@ -13,6 +13,8 @@ type Params = {
   warmupBars: number;
 };
 
+const CHART_STATE_UPDATE_THROTTLE_MS = 120;
+
 export function useStrategyAnalyzerRangePlayback({
   bars,
   selectedRangeFrom,
@@ -20,6 +22,40 @@ export function useStrategyAnalyzerRangePlayback({
   warmupBars,
 }: Params) {
   const [analyzerChartState, setAnalyzerChartState] = useState<StrategyAnalyzerChartWindow | null>(null);
+  const pendingChartStateRef = useRef<StrategyAnalyzerChartWindow | null>(null);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyChartState = useCallback((nextState: StrategyAnalyzerChartWindow | null) => {
+    if (!nextState) return;
+    const from = Number(nextState.from);
+    const to = Number(nextState.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return;
+    setAnalyzerChartState((prev) => {
+      const prevFrom = Number(prev?.from);
+      const prevTo = Number(prev?.to);
+      if (
+        Number.isFinite(prevFrom) &&
+        Number.isFinite(prevTo) &&
+        Math.abs(prevFrom - from) < 0.001 &&
+        Math.abs(prevTo - to) < 0.001
+      ) {
+        return prev;
+      }
+      return { from, to };
+    });
+  }, []);
+
+  const scheduleChartStateApply = useCallback((nextState: StrategyAnalyzerChartWindow | null) => {
+    if (!nextState) return;
+    pendingChartStateRef.current = nextState;
+    if (flushTimerRef.current) return;
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      const pending = pendingChartStateRef.current;
+      pendingChartStateRef.current = null;
+      applyChartState(pending);
+    }, CHART_STATE_UPDATE_THROTTLE_MS);
+  }, [applyChartState]);
 
   const rangePlaybackMeta = useMemo<StrategyAnalyzerRangePlaybackMeta>(() => {
     const rawFromSec = Date.parse(String(selectedRangeFrom || "")) / 1000;
@@ -104,45 +140,35 @@ export function useStrategyAnalyzerRangePlayback({
     : null;
 
   useEffect(() => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    pendingChartStateRef.current = null;
+
     if (!selectedRangeWindow) {
       setAnalyzerChartState(null);
       return;
     }
-    setAnalyzerChartState((prev) => {
-      const prevFrom = Number(prev?.from);
-      const prevTo = Number(prev?.to);
-      const nextFrom = Number(selectedRangeWindow.from);
-      const nextTo = Number(selectedRangeWindow.to);
-      if (
-        Number.isFinite(prevFrom) &&
-        Number.isFinite(prevTo) &&
-        Math.abs(prevFrom - nextFrom) < 0.001 &&
-        Math.abs(prevTo - nextTo) < 0.001
-      ) {
-        return prev;
-      }
-      return { from: nextFrom, to: nextTo };
-    });
-  }, [selectedRangeWindow?.from, selectedRangeWindow?.to]);
+    applyChartState(selectedRangeWindow);
+  }, [selectedRangeWindow?.from, selectedRangeWindow?.to, applyChartState]);
 
   const handleAnalyzerChartStateChange = useCallback((nextRange: StrategyAnalyzerChartWindow | null) => {
     if (!nextRange) return;
     const from = Number(nextRange.from);
     const to = Number(nextRange.to);
     if (!Number.isFinite(from) || !Number.isFinite(to)) return;
-    setAnalyzerChartState((prev) => {
-      const prevFrom = Number(prev?.from);
-      const prevTo = Number(prev?.to);
-      if (
-        Number.isFinite(prevFrom) &&
-        Number.isFinite(prevTo) &&
-        Math.abs(prevFrom - from) < 0.001 &&
-        Math.abs(prevTo - to) < 0.001
-      ) {
-        return prev;
+    scheduleChartStateApply({ from, to });
+  }, [scheduleChartStateApply]);
+
+  useEffect(() => {
+    return () => {
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
       }
-      return { from, to };
-    });
+      pendingChartStateRef.current = null;
+    };
   }, []);
 
   return {

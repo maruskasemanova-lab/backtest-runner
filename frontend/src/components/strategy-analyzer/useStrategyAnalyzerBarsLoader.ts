@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toChartBar } from "./utils";
+import { orderIsoDateRange, toChartBar } from "./utils";
 import type { StrategyAnalyzerPreviewBar } from "./types";
 
 type Params = {
@@ -37,6 +37,11 @@ export function useStrategyAnalyzerBarsLoader({
 
   const loadBars = useCallback(async () => {
     if (!ticker || !dateFrom || !dateTo) return;
+    const orderedRange = orderIsoDateRange(dateFrom, dateTo);
+    const effectiveDateFrom = orderedRange.dateFrom;
+    const effectiveDateTo = orderedRange.dateTo;
+    if (!effectiveDateFrom || !effectiveDateTo) return;
+
     const requestId = latestLoadRequestIdRef.current + 1;
     latestLoadRequestIdRef.current = requestId;
     activeAbortControllerRef.current?.abort();
@@ -48,7 +53,7 @@ export function useStrategyAnalyzerBarsLoader({
     resetBarsState();
     resetSelectionForNewData();
     try {
-      const url = `/api/chart-preview/bars?ticker=${encodeURIComponent(ticker)}&date_from=${dateFrom}&date_to=${dateTo}`;
+      const url = `/api/chart-preview/bars?ticker=${encodeURIComponent(ticker)}&date_from=${effectiveDateFrom}&date_to=${effectiveDateTo}`;
       const resp = await fetch(url, { signal: abortController.signal });
       if (!resp.ok) {
         const detail = await resp.json().catch(() => ({}));
