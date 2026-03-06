@@ -61,6 +61,28 @@ const getBarAnalysisArtifacts = (
     analysisPayload?.entry_quality_diagnostics,
     strategyAnalysisPayload?.entry_quality_diagnostics,
   );
+  const tcbboConfirmationSnapshot = pickFirstObjectRecord(
+    row.tcbbo_confirmation,
+    analysisPayload?.tcbbo_confirmation,
+    analysisPayload?.signal_metadata?.tcbbo_confirmation,
+    strategyAnalysisPayload?.tcbbo_confirmation,
+    strategyAnalysisPayload?.signal_metadata?.tcbbo_confirmation,
+  );
+  const intrabarConfirmationSnapshot = pickFirstObjectRecord(
+    row.intrabar_confirmation,
+    analysisPayload?.intrabar_confirmation,
+    strategyAnalysisPayload?.intrabar_confirmation,
+  );
+  const microConfirmationSnapshot = pickFirstObjectRecord(
+    row.micro_confirmation,
+    analysisPayload?.micro_confirmation,
+    strategyAnalysisPayload?.micro_confirmation,
+  );
+  const contextRiskSnapshot = pickFirstObjectRecord(
+    row.context_risk,
+    analysisPayload?.context_risk,
+    strategyAnalysisPayload?.context_risk,
+  );
   const nestedWarmupOnly =
     typeof nestedAnalysis?.warmup_only === 'boolean' ? nestedAnalysis.warmup_only : undefined;
   const nestedBarIndex = nestedAnalysis?.bar_index;
@@ -83,6 +105,10 @@ const getBarAnalysisArtifacts = (
         intradayLevelsSnapshot ||
         levelContextSnapshot ||
         entryQualityDiagnosticsSnapshot ||
+        tcbboConfirmationSnapshot ||
+        intrabarConfirmationSnapshot ||
+        microConfirmationSnapshot ||
+        contextRiskSnapshot ||
         nestedAnalysis?.intrabar_1s),
   );
 
@@ -95,6 +121,10 @@ const getBarAnalysisArtifacts = (
     intradayLevelsSnapshot,
     levelContextSnapshot,
     entryQualityDiagnosticsSnapshot,
+    tcbboConfirmationSnapshot,
+    intrabarConfirmationSnapshot,
+    microConfirmationSnapshot,
+    contextRiskSnapshot,
     latestCheckpoint,
     resolvedWarmupOnly,
     resolvedBarIndex,
@@ -129,6 +159,10 @@ export const toChartBar = (
     intradayLevelsSnapshot,
     levelContextSnapshot,
     entryQualityDiagnosticsSnapshot,
+    tcbboConfirmationSnapshot,
+    intrabarConfirmationSnapshot,
+    microConfirmationSnapshot,
+    contextRiskSnapshot,
     resolvedWarmupOnly,
     resolvedBarIndex,
     shouldAttachAnalysisPayload,
@@ -148,13 +182,25 @@ export const toChartBar = (
     ...(entryQualityDiagnosticsSnapshot
       ? { entry_quality_diagnostics: entryQualityDiagnosticsSnapshot }
       : {}),
+    ...(tcbboConfirmationSnapshot
+      ? { tcbbo_confirmation: tcbboConfirmationSnapshot }
+      : {}),
+    ...(intrabarConfirmationSnapshot
+      ? { intrabar_confirmation: intrabarConfirmationSnapshot }
+      : {}),
+    ...(microConfirmationSnapshot ? { micro_confirmation: microConfirmationSnapshot } : {}),
+    ...(contextRiskSnapshot ? { context_risk: contextRiskSnapshot } : {}),
     ...(layerScores ||
     signalRejected ||
     candidateDiagnostics ||
     intrabarEvalTrace ||
     intradayLevelsSnapshot ||
     levelContextSnapshot ||
-    entryQualityDiagnosticsSnapshot
+    entryQualityDiagnosticsSnapshot ||
+    tcbboConfirmationSnapshot ||
+    intrabarConfirmationSnapshot ||
+    microConfirmationSnapshot ||
+    contextRiskSnapshot
       ? {
           layer_scores: layerScores || undefined,
           signal_rejected: signalRejected || undefined,
@@ -182,6 +228,10 @@ export const extractLiveBarAnalysis = (
     intradayLevelsSnapshot,
     levelContextSnapshot,
     entryQualityDiagnosticsSnapshot,
+    tcbboConfirmationSnapshot,
+    intrabarConfirmationSnapshot,
+    microConfirmationSnapshot,
+    contextRiskSnapshot,
     latestCheckpoint,
     resolvedWarmupOnly,
     resolvedBarIndex,
@@ -192,14 +242,14 @@ export const extractLiveBarAnalysis = (
     !intrabarEvalTrace &&
     !intradayLevelsSnapshot &&
     !levelContextSnapshot &&
-    !entryQualityDiagnosticsSnapshot
+    !entryQualityDiagnosticsSnapshot &&
+    !tcbboConfirmationSnapshot &&
+    !intrabarConfirmationSnapshot &&
+    !microConfirmationSnapshot &&
+    !contextRiskSnapshot
   ) {
     return null;
   }
-
-  const intrabarConfirmation = asObjectRecord(nestedAnalysis?.intrabar_confirmation);
-  const microConfirmation = asObjectRecord(nestedAnalysis?.micro_confirmation);
-  const contextRisk = asObjectRecord(nestedAnalysis?.context_risk);
 
   return {
     layer_scores: layerScores || null,
@@ -210,11 +260,14 @@ export const extractLiveBarAnalysis = (
     intraday_levels: intradayLevelsSnapshot || null,
     level_context: levelContextSnapshot || null,
     entry_quality_diagnostics: entryQualityDiagnosticsSnapshot || null,
+    tcbbo_confirmation: tcbboConfirmationSnapshot || null,
     bar_index: resolvedBarIndex ?? null,
     warmup_only: Boolean(resolvedWarmupOnly),
     timestamp: typeof row.timestamp === 'string' ? row.timestamp : null,
-    ...(intrabarConfirmation ? { intrabar_confirmation: intrabarConfirmation } : {}),
-    ...(microConfirmation ? { micro_confirmation: microConfirmation } : {}),
-    ...(contextRisk ? { context_risk: contextRisk } : {}),
+    ...(intrabarConfirmationSnapshot
+      ? { intrabar_confirmation: intrabarConfirmationSnapshot }
+      : {}),
+    ...(microConfirmationSnapshot ? { micro_confirmation: microConfirmationSnapshot } : {}),
+    ...(contextRiskSnapshot ? { context_risk: contextRiskSnapshot } : {}),
   };
 };

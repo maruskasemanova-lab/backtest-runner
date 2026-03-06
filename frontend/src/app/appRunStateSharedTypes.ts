@@ -22,6 +22,10 @@ export type BarAnalysisArtifacts = {
   intradayLevelsSnapshot: AnyRecord | null;
   levelContextSnapshot: AnyRecord | null;
   entryQualityDiagnosticsSnapshot: AnyRecord | null;
+  tcbboConfirmationSnapshot: AnyRecord | null;
+  intrabarConfirmationSnapshot: AnyRecord | null;
+  microConfirmationSnapshot: AnyRecord | null;
+  contextRiskSnapshot: AnyRecord | null;
   latestCheckpoint: AnyRecord | null;
   resolvedWarmupOnly: boolean | undefined;
   resolvedBarIndex: number | undefined;

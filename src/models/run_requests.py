@@ -205,6 +205,8 @@ class StartRunRequest(BaseModel):
     context_risk_min_level_tests_for_sl: int = 1
     strategy_selection_mode: Optional[str] = None
     max_active_strategies: Optional[int] = None
+    trade_audit_level: str = "full"
+    trade_audit_fields: Optional[List[str]] = None
     momentum_diversification_override: Optional[Dict[str, Any]] = None
     # Optional start-time playback evaluation path:
     # - "standard" => minute bars only

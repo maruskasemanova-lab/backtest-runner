@@ -1924,6 +1924,112 @@ def test_closed_trade_cost_falls_back_to_costs_total_for_perf_tracker() -> None:
     assert trades[0].regime == "TRENDING"
 
 
+def test_summary_trade_preserves_closed_trade_diagnostics() -> None:
+    config = RunConfig(run_id="r8e", ticker="MU", date="2026-02-06")
+    runner = SessionRunner(config)
+
+    ts = datetime(2026, 2, 6, 14, 34, tzinfo=timezone.utc)
+    bar = {"close": 100.2}
+    response = {
+        "regime": "MIXED",
+        "position_closed": {
+            "schema_version": 2,
+            "exit_price": 100.2,
+            "side": "long",
+            "exit_reason": "take_profit",
+            "pnl_pct": 0.42,
+            "pnl_dollars": 4.2,
+            "gross_pnl_dollars": 4.5,
+            "entry_price": 99.8,
+            "entry_time": "2026-02-06T14:20:00+00:00",
+            "take_profit": 100.6,
+            "size": 10.0,
+            "position_notional_usd": 998.0,
+            "bars_held": 10,
+            "strategy": "level_fade",
+            "setup_type": "touch_hold",
+            "setup_reason": "level_hold_confirmed",
+            "level_context": {"passed": True, "reason": "reclaim_confirmed"},
+            "flow_snapshot": {"signed_aggression": 0.11, "book_pressure_avg": 0.05},
+            "signal_metadata": {
+                "level_context": {"passed": True, "reason": "signal_level_context"},
+                "context_risk": {
+                    "risk_pct": 0.3,
+                    "effective_rr": 2.2,
+                    "sl_reason": "capped_fixed_floor:0.3000",
+                },
+                "risk_controls": {
+                    "stop_loss_mode": "capped",
+                    "effective_stop_loss": 99.7,
+                },
+                "break_even": {
+                    "armed": True,
+                    "trigger_rr": 1.0,
+                    "stop_price": 100.05,
+                },
+                "level_fade": {
+                    "setup_type_guess": "touch_hold",
+                    "penetration_ticks": 2,
+                    "entry_drift_ticks": 1,
+                },
+            },
+            "break_even": {
+                "armed": True,
+                "trigger_rr": 1.0,
+                "stop_price": 100.05,
+            },
+            "flow_strategy": True,
+            "book_pressure_confirmed": True,
+            "book_pressure_avg": 0.05,
+            "book_pressure_trend": 0.01,
+            "signed_aggression": 0.11,
+            "entry_quality_diagnostics": {
+                "is_first_bar_stop_loss": False,
+                "near_confluence_score": 3,
+            },
+            "trade_audit": {
+                "schema_version": 1,
+                "outcome": {"position_notional_usd": 998.0, "size": 10.0},
+                "setup": {
+                    "setup_type": "touch_hold",
+                    "setup_reason": "level_hold_confirmed",
+                },
+            },
+            "costs": {"total": 0.3},
+            "cost_usd": 0.3,
+        },
+    }
+    response_model = StrategyBarResponse.model_validate(response)
+
+    asyncio.run(
+        runner._process_decision_markers(
+            response,
+            bar,
+            ts,
+            response_model=response_model,
+        )
+    )
+    summary = runner.get_summary()["session_summary"] or {}
+    trade = summary["trades"][0]
+
+    assert trade["setup_type"] == "touch_hold"
+    assert trade["level_context"]["reason"] == "reclaim_confirmed"
+    assert trade["flow_snapshot"]["signed_aggression"] == 0.11
+    assert trade["signal_metadata"]["context_risk"]["effective_rr"] == 2.2
+    assert trade["signal_metadata"]["level_fade"]["penetration_ticks"] == 2
+    assert trade["break_even"]["armed"] is True
+    assert trade["entry_quality_diagnostics"]["near_confluence_score"] == 3
+    assert trade["size"] == 10.0
+    assert trade["position_notional_usd"] == 998.0
+    assert trade["gross_pnl_dollars"] == 4.5
+    assert trade["take_profit"] == 100.6
+    assert trade["setup_reason"] == "level_hold_confirmed"
+    assert trade["trade_audit"]["setup"]["setup_reason"] == "level_hold_confirmed"
+
+    breakdown = runner.perf_tracker.get_overall_stats()["level_fade_setup_breakdown"]
+    assert breakdown["touch_hold"]["total_trades"] == 1
+
+
 def test_summary_includes_entry_timing_diagnostics() -> None:
     config = RunConfig(
         run_id="r9",

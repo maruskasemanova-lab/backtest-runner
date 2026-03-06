@@ -177,4 +177,42 @@ describe("resolveActivationMinimumUpdates", () => {
 
     expect(mapped.min_confirming_sources).toBe(1);
   });
+
+  it("falls back to live level_context when rejection payload does not carry intraday level diagnostics", () => {
+    const data: StrategyConditionsPanelDataValue = {
+      ...buildBasePanelData(),
+      combinedScore: 61.9,
+      threshold: 58.4,
+      liveAnalysisSource: {
+        level_context: {
+          stats: { near_confluence_score: 5 },
+          market_activity: { rvol: 1.33 },
+        },
+      },
+    };
+
+    const updates = resolveActivationMinimumUpdates({ data });
+    const mapped = Object.fromEntries(updates.map((entry) => [entry.key, entry.value]));
+
+    expect(mapped.intraday_levels_min_confluence_score).toBe(5);
+    expect(mapped.intraday_levels_rvol_min_threshold).toBe(1.33);
+    expect(mapped.intraday_levels_pullback_rvol_min_threshold).toBe(1.33);
+  });
+
+  it("does not suggest context-risk minima below the active strategy floor", () => {
+    const data: StrategyConditionsPanelDataValue = {
+      ...buildBasePanelData(),
+      selectedStrategy: "momentum_flow",
+      contextRisk: {
+        room_pct: 0.0293,
+        effective_rr: 0.3774,
+      },
+    };
+
+    const updates = resolveActivationMinimumUpdates({ data });
+    const mapped = Object.fromEntries(updates.map((entry) => [entry.key, entry.value]));
+
+    expect(mapped.context_risk_min_room_pct).toBe(0.08);
+    expect(mapped.context_risk_min_effective_rr).toBe(0.8);
+  });
 });

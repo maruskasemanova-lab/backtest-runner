@@ -1,4 +1,5 @@
 import type { StrategyConditionsPanelDataValue } from "./StrategyConditionsPanelData";
+import { resolveContextRiskStrategyFloor } from "./strategyAnalyzerContextRiskFloors";
 import type { ThresholdOverrides } from "./useStrategyAnalyzerThresholdOverrides";
 
 type ActivationOverrideKey =
@@ -63,11 +64,20 @@ function normalizeOverrideValue(
 
 function pullLevelContext(data: StrategyConditionsPanelDataValue): Record<string, unknown> | null {
   const rejection = data.rejectionDetails;
-  if (!rejection || typeof rejection !== "object") return null;
+  if (!rejection || typeof rejection !== "object") {
+    const liveLevelContext = data.liveAnalysisSource?.level_context;
+    return liveLevelContext && typeof liveLevelContext === "object"
+      ? (liveLevelContext as Record<string, unknown>)
+      : null;
+  }
   const fromField = (rejection as Record<string, unknown>).level_context;
   if (fromField && typeof fromField === "object") return fromField as Record<string, unknown>;
   if ((rejection as Record<string, unknown>).gate === "intraday_levels_entry_quality") {
     return rejection as Record<string, unknown>;
+  }
+  const liveLevelContext = data.liveAnalysisSource?.level_context;
+  if (liveLevelContext && typeof liveLevelContext === "object") {
+    return liveLevelContext as Record<string, unknown>;
   }
   return null;
 }
@@ -160,8 +170,21 @@ export function resolveActivationMinimumUpdates({
 
   const roomPct = toFiniteNumber((data.contextRisk as Record<string, unknown> | null)?.room_pct);
   const effectiveRr = toFiniteNumber((data.contextRisk as Record<string, unknown> | null)?.effective_rr);
-  maybeAssign(next, "context_risk_min_room_pct", roomPct);
-  maybeAssign(next, "context_risk_min_effective_rr", effectiveRr);
+  const contextRiskStrategyFloor = resolveContextRiskStrategyFloor(data.selectedStrategy);
+  maybeAssign(
+    next,
+    "context_risk_min_room_pct",
+    roomPct == null
+      ? null
+      : Math.max(contextRiskStrategyFloor?.minRoomPct ?? 0, roomPct),
+  );
+  maybeAssign(
+    next,
+    "context_risk_min_effective_rr",
+    effectiveRr == null
+      ? null
+      : Math.max(contextRiskStrategyFloor?.minEffectiveRr ?? 0, effectiveRr),
+  );
 
   const confluenceScore = toFiniteNumber(levelStats?.near_confluence_score);
   maybeAssign(next, "intraday_levels_min_confluence_score", confluenceScore);

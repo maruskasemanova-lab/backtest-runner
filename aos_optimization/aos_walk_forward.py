@@ -317,8 +317,20 @@ class AOSWalkForwardRunner:
             "pnl_pct": trade.pnl_pct,
             "pnl_dollars": trade.pnl_dollars,
             "exit_reason": trade.exit_reason,
+            "gross_pnl_dollars": getattr(trade, "gross_pnl_dollars", None),
+            "position_notional_usd": getattr(trade, "position_notional_usd", None),
+            "cost_usd": getattr(trade, "cost_usd", None),
+            "cost_pct": getattr(trade, "cost_pct", None),
+            "signal_bar_index": getattr(trade, "signal_bar_index", None),
+            "entry_bar_index": getattr(trade, "entry_bar_index", None),
+            "signal_timestamp": getattr(trade, "signal_timestamp", None),
+            "signal_price": getattr(trade, "signal_price", None),
+            "take_profit": getattr(trade, "take_profit", None),
+            "setup_type": getattr(trade, "setup_type", None),
+            "setup_reason": getattr(trade, "setup_reason", None),
             "signal_metadata": trade.signal_metadata,
             "flow_snapshot": trade.flow_snapshot,
+            "trade_audit": getattr(trade, "trade_audit", None),
         }
 
     async def run(

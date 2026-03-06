@@ -35,9 +35,17 @@ export function useStrategyAnalyzerBarsLoader({
     setBarCount(0);
   }, []);
 
-  const loadBars = useCallback(async () => {
-    if (!ticker || !dateFrom || !dateTo) return;
-    const orderedRange = orderIsoDateRange(dateFrom, dateTo);
+  const loadBarsFor = useCallback(async ({
+    ticker: tickerOverride,
+    dateFrom: dateFromOverride,
+    dateTo: dateToOverride,
+  }: {
+    ticker: string;
+    dateFrom: string;
+    dateTo: string;
+  }) => {
+    if (!tickerOverride || !dateFromOverride || !dateToOverride) return;
+    const orderedRange = orderIsoDateRange(dateFromOverride, dateToOverride);
     const effectiveDateFrom = orderedRange.dateFrom;
     const effectiveDateTo = orderedRange.dateTo;
     if (!effectiveDateFrom || !effectiveDateTo) return;
@@ -53,7 +61,9 @@ export function useStrategyAnalyzerBarsLoader({
     resetBarsState();
     resetSelectionForNewData();
     try {
-      const url = `/api/chart-preview/bars?ticker=${encodeURIComponent(ticker)}&date_from=${effectiveDateFrom}&date_to=${effectiveDateTo}`;
+      const url = `/api/chart-preview/bars?ticker=${encodeURIComponent(
+        tickerOverride,
+      )}&date_from=${effectiveDateFrom}&date_to=${effectiveDateTo}`;
       const resp = await fetch(url, { signal: abortController.signal });
       if (!resp.ok) {
         const detail = await resp.json().catch(() => ({}));
@@ -79,13 +89,19 @@ export function useStrategyAnalyzerBarsLoader({
         setLoading(false);
       }
     }
-  }, [ticker, dateFrom, dateTo, setError, resetBarsState, resetSelectionForNewData]);
+  }, [setError, resetBarsState, resetSelectionForNewData]);
+
+  const loadBars = useCallback(async () => {
+    if (!ticker || !dateFrom || !dateTo) return;
+    await loadBarsFor({ ticker, dateFrom, dateTo });
+  }, [ticker, dateFrom, dateTo, loadBarsFor]);
 
   return {
     bars,
     loading,
     barCount,
     loadBars,
+    loadBarsFor,
     resetBarsState,
   };
 }

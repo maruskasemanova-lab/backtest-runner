@@ -35,8 +35,58 @@ export type WebMcpRuntimeSnapshot = {
   snapshot_updated_at_utc: string;
 };
 
+type StrategyAnalyzerWebMcpBridgeState = {
+  active?: boolean;
+  ticker?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
+  loading?: boolean;
+  error?: string | null;
+  bar_count?: number | null;
+  preview_bars?: Array<Record<string, unknown>>;
+  run_bars?: Array<Record<string, unknown>>;
+  chart_bars?: Array<Record<string, unknown>>;
+  current_bar?: Record<string, unknown> | null;
+  selected_range?: Record<string, unknown> | null;
+  chart_state?: { from: number; to: number } | null;
+  attached_run?: boolean;
+  run_key?: string | null;
+  run_phase?: string | null;
+  is_playing?: boolean;
+  comparable_mode?: boolean;
+  cold_start_each_day?: boolean;
+  include_extended_hours?: boolean;
+  trade_eval_mode?: string | null;
+  context_risk_preset?: string | null;
+  decision_events?: Array<Record<string, unknown>>;
+  visible_decision_events?: Array<Record<string, unknown>>;
+  selected_marker?: Record<string, unknown> | null;
+  latest_bar_analysis?: Record<string, unknown> | null;
+  scrub?: Record<string, unknown> | null;
+  has_conditions_panel_data?: boolean;
+  conditions_panel_badge?: Record<string, unknown> | null;
+  thresholds?: Record<string, unknown> | null;
+  snapshot_updated_at_utc?: string;
+};
+
+type StrategyAnalyzerWebMcpBridge = {
+  getState: () => StrategyAnalyzerWebMcpBridgeState | null;
+  openDay: (args?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  startReplay: () => Promise<Record<string, unknown>>;
+  playReplay: (options?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  pauseReplay: () => Promise<Record<string, unknown>>;
+  stepReplay: (steps?: number) => Promise<Record<string, unknown>>;
+  clearReplay: () => Promise<Record<string, unknown>>;
+  setThresholdOverride: (key: string, value: unknown) => Promise<Record<string, unknown>>;
+  bulkSetThresholdOverrides: (
+    overrides: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  clearThresholdOverrides: (key?: string) => Promise<Record<string, unknown>>;
+};
+
 type WebMcpWindowState = Window & {
   __backtestWebMcpSnapshot?: WebMcpRuntimeSnapshot | null;
+  __backtestStrategyAnalyzerWebMcpBridge?: StrategyAnalyzerWebMcpBridge | null;
 };
 
 type NavSectionKey =
@@ -65,6 +115,8 @@ const TOOL_NAME_GET_BARS_SLICE = "backtest_get_bars_slice";
 const TOOL_NAME_FIND_BAR = "backtest_find_bar";
 const TOOL_NAME_READ_STRATEGY_ANALYSIS = "backtest_read_strategy_analysis";
 const TOOL_NAME_NAVIGATE_STRATEGY_RUN = "backtest_navigate_strategy_run";
+const TOOL_NAME_STRATEGY_ANALYZER_SESSION = "backtest_strategy_analyzer_session";
+const TOOL_NAME_STRATEGY_ANALYZER_THRESHOLDS = "backtest_strategy_analyzer_thresholds";
 const REGISTRATION_FLAG = "__backtestWebMcpToolsRegistered";
 const SNAPSHOT_KEY = "__backtestWebMcpSnapshot";
 
@@ -159,6 +211,90 @@ const readSnapshot = (): WebMcpRuntimeSnapshot | null => {
   const snapshot = runtimeWindow[SNAPSHOT_KEY];
   if (!snapshot || !isRecord(snapshot)) return null;
   return snapshot as WebMcpRuntimeSnapshot;
+};
+
+const readStrategyAnalyzerBridge = (): StrategyAnalyzerWebMcpBridge | null => {
+  if (typeof window === "undefined") return null;
+  const runtimeWindow = window as WebMcpWindowState;
+  const bridge = runtimeWindow.__backtestStrategyAnalyzerWebMcpBridge;
+  if (!bridge || typeof bridge.getState !== "function") return null;
+  return bridge;
+};
+
+const readStrategyAnalyzerBridgeState = (): StrategyAnalyzerWebMcpBridgeState | null => {
+  const bridge = readStrategyAnalyzerBridge();
+  if (!bridge) return null;
+  const state = bridge.getState();
+  if (!state || !isRecord(state)) return null;
+  return state;
+};
+
+const readEffectiveSnapshot = (): WebMcpRuntimeSnapshot | null => {
+  const snapshot = readSnapshot();
+  if (!snapshot) return null;
+  if (snapshot.active_view !== "strategy-analyzer") return snapshot;
+
+  const strategyAnalyzerState = readStrategyAnalyzerBridgeState();
+  if (!strategyAnalyzerState) return snapshot;
+
+  const previewBars = Array.isArray(strategyAnalyzerState.preview_bars)
+    ? strategyAnalyzerState.preview_bars
+    : [];
+  const runBars = Array.isArray(strategyAnalyzerState.run_bars)
+    ? strategyAnalyzerState.run_bars
+    : [];
+  const chartBars = Array.isArray(strategyAnalyzerState.chart_bars)
+    ? strategyAnalyzerState.chart_bars
+    : [];
+  const effectiveBars = runBars.length > 0 ? runBars : previewBars;
+  const effectiveDisplayedBars = chartBars.length > 0 ? chartBars : effectiveBars;
+
+  return {
+    ...snapshot,
+    selected_ticker:
+      typeof strategyAnalyzerState.ticker === "string"
+        ? strategyAnalyzerState.ticker
+        : snapshot.selected_ticker,
+    run_key:
+      typeof strategyAnalyzerState.run_key === "string"
+        ? strategyAnalyzerState.run_key
+        : snapshot.run_key,
+    run_phase:
+      typeof strategyAnalyzerState.run_phase === "string"
+        ? strategyAnalyzerState.run_phase
+        : snapshot.run_phase,
+    chart_state:
+      strategyAnalyzerState.chart_state &&
+      Number.isFinite(Number(strategyAnalyzerState.chart_state.from)) &&
+      Number.isFinite(Number(strategyAnalyzerState.chart_state.to))
+        ? {
+            from: Number(strategyAnalyzerState.chart_state.from),
+            to: Number(strategyAnalyzerState.chart_state.to),
+          }
+        : snapshot.chart_state,
+    bars: effectiveBars,
+    displayed_bars: effectiveDisplayedBars,
+    current_bar:
+      strategyAnalyzerState.current_bar && isRecord(strategyAnalyzerState.current_bar)
+        ? strategyAnalyzerState.current_bar
+        : snapshot.current_bar,
+    decision_events: Array.isArray(strategyAnalyzerState.decision_events)
+      ? strategyAnalyzerState.decision_events
+      : snapshot.decision_events,
+    selected_marker:
+      strategyAnalyzerState.selected_marker && isRecord(strategyAnalyzerState.selected_marker)
+        ? strategyAnalyzerState.selected_marker
+        : null,
+    latest_bar_analysis:
+      strategyAnalyzerState.latest_bar_analysis &&
+      isRecord(strategyAnalyzerState.latest_bar_analysis)
+        ? strategyAnalyzerState.latest_bar_analysis
+        : null,
+    snapshot_updated_at_utc:
+      typeof strategyAnalyzerState.snapshot_updated_at_utc === "string"
+        ? strategyAnalyzerState.snapshot_updated_at_utc
+        : snapshot.snapshot_updated_at_utc,
+  };
 };
 
 const readBarsFromSnapshot = (
@@ -308,6 +444,145 @@ const setStrategyRunScrubOffset = async (
   };
 };
 
+const buildStrategyAnalyzerSessionStatus = () => {
+  const snapshot = readEffectiveSnapshot();
+  const bridgeState = readStrategyAnalyzerBridgeState();
+  const scrub = bridgeState?.scrub && isRecord(bridgeState.scrub) ? bridgeState.scrub : null;
+  const selectedRange =
+    bridgeState?.selected_range && isRecord(bridgeState.selected_range)
+      ? bridgeState.selected_range
+      : null;
+  const visibleDecisionEvents = Array.isArray(bridgeState?.visible_decision_events)
+    ? bridgeState?.visible_decision_events
+    : [];
+  return {
+    active_view: snapshot?.active_view ?? null,
+    strategy_view_active: snapshot?.active_view === "strategy-analyzer",
+    ticker:
+      typeof bridgeState?.ticker === "string"
+        ? bridgeState.ticker
+        : snapshot?.selected_ticker ?? null,
+    date_from:
+      typeof bridgeState?.date_from === "string" ? bridgeState.date_from : null,
+    date_to:
+      typeof bridgeState?.date_to === "string" ? bridgeState.date_to : null,
+    loading: Boolean(bridgeState?.loading),
+    error: typeof bridgeState?.error === "string" ? bridgeState.error : null,
+    bar_count:
+      toFiniteNumber(bridgeState?.bar_count) ??
+      (Array.isArray(snapshot?.bars) ? snapshot?.bars.length : 0),
+    preview_bars_count: Array.isArray(bridgeState?.preview_bars)
+      ? bridgeState.preview_bars.length
+      : 0,
+    run_bars_count: Array.isArray(bridgeState?.run_bars)
+      ? bridgeState.run_bars.length
+      : 0,
+    chart_bars_count: Array.isArray(bridgeState?.chart_bars)
+      ? bridgeState.chart_bars.length
+      : 0,
+    selected_range: selectedRange,
+    attached_run: Boolean(bridgeState?.attached_run),
+    run_key:
+      typeof bridgeState?.run_key === "string" ? bridgeState.run_key : snapshot?.run_key ?? null,
+    run_phase:
+      typeof bridgeState?.run_phase === "string"
+        ? bridgeState.run_phase
+        : snapshot?.run_phase ?? null,
+    is_playing: Boolean(bridgeState?.is_playing),
+    comparable_mode:
+      typeof bridgeState?.comparable_mode === "boolean"
+        ? bridgeState.comparable_mode
+        : null,
+    cold_start_each_day:
+      typeof bridgeState?.cold_start_each_day === "boolean"
+        ? bridgeState.cold_start_each_day
+        : null,
+    include_extended_hours:
+      typeof bridgeState?.include_extended_hours === "boolean"
+        ? bridgeState.include_extended_hours
+        : null,
+    trade_eval_mode:
+      typeof bridgeState?.trade_eval_mode === "string"
+        ? bridgeState.trade_eval_mode
+        : null,
+    context_risk_preset:
+      typeof bridgeState?.context_risk_preset === "string"
+        ? bridgeState.context_risk_preset
+        : null,
+    scrub,
+    decision_events_count: Array.isArray(bridgeState?.decision_events)
+      ? bridgeState.decision_events.length
+      : Array.isArray(snapshot?.decision_events)
+        ? snapshot.decision_events.length
+        : 0,
+    visible_decision_events_count: visibleDecisionEvents.length,
+    has_conditions_panel_data: Boolean(bridgeState?.has_conditions_panel_data),
+    conditions_panel_badge:
+      bridgeState?.conditions_panel_badge && isRecord(bridgeState.conditions_panel_badge)
+        ? bridgeState.conditions_panel_badge
+        : null,
+    current_bar_timestamp_utc: toIsoTimestamp(
+      toEpochSeconds(bridgeState?.current_bar?.time ?? bridgeState?.current_bar?.timestamp),
+    ),
+    snapshot_updated_at_utc:
+      typeof bridgeState?.snapshot_updated_at_utc === "string"
+        ? bridgeState.snapshot_updated_at_utc
+        : snapshot?.snapshot_updated_at_utc ?? null,
+  };
+};
+
+const buildStrategyAnalyzerThresholdStatus = () => {
+  const bridgeState = readStrategyAnalyzerBridgeState();
+  const thresholds = bridgeState?.thresholds && isRecord(bridgeState.thresholds)
+    ? bridgeState.thresholds
+    : null;
+  return {
+    attached_run: Boolean(bridgeState?.attached_run),
+    run_key: typeof bridgeState?.run_key === "string" ? bridgeState.run_key : null,
+    run_phase: typeof bridgeState?.run_phase === "string" ? bridgeState.run_phase : null,
+    is_playing: Boolean(bridgeState?.is_playing),
+    is_interactive:
+      thresholds && typeof thresholds.is_interactive === "boolean"
+        ? thresholds.is_interactive
+        : false,
+    has_pending_overrides:
+      thresholds && typeof thresholds.has_pending_overrides === "boolean"
+        ? thresholds.has_pending_overrides
+        : false,
+    overrides:
+      thresholds?.overrides && isRecord(thresholds.overrides) ? thresholds.overrides : {},
+    effective_overrides:
+      thresholds?.effective_overrides && isRecord(thresholds.effective_overrides)
+        ? thresholds.effective_overrides
+        : {},
+    payload:
+      thresholds?.payload && isRecord(thresholds.payload) ? thresholds.payload : {},
+    effective_payload:
+      thresholds?.effective_payload && isRecord(thresholds.effective_payload)
+        ? thresholds.effective_payload
+        : {},
+    selected_strategy:
+      typeof thresholds?.selected_strategy === "string"
+        ? thresholds.selected_strategy
+        : null,
+    context_risk_strategy_floor:
+      thresholds?.context_risk_strategy_floor &&
+      isRecord(thresholds.context_risk_strategy_floor)
+        ? thresholds.context_risk_strategy_floor
+        : null,
+    supported_keys: Array.isArray(thresholds?.supported_keys)
+      ? thresholds.supported_keys
+      : [],
+    boolean_keys: Array.isArray(thresholds?.boolean_keys)
+      ? thresholds.boolean_keys
+      : [],
+    snapshot_updated_at_utc:
+      typeof bridgeState?.snapshot_updated_at_utc === "string"
+        ? bridgeState.snapshot_updated_at_utc
+        : null,
+  };
+};
+
 export const publishWebMcpSnapshot = (snapshot: WebMcpRuntimeSnapshot | null): void => {
   if (typeof window === "undefined") return;
   const runtimeWindow = window as WebMcpWindowState;
@@ -442,7 +717,7 @@ const registerGetChartStateTool = (
       additionalProperties: false,
     },
     execute: () => {
-      const snapshot = readSnapshot();
+      const snapshot = readEffectiveSnapshot();
       if (!snapshot) {
         return {
           ok: false,
@@ -533,7 +808,7 @@ const registerGetBarsSliceTool = (
       newest_first?: boolean;
       include_placeholders?: boolean;
     }) => {
-      const snapshot = readSnapshot();
+      const snapshot = readEffectiveSnapshot();
       if (!snapshot) {
         return {
           ok: false,
@@ -631,7 +906,7 @@ const registerFindBarTool = (
       mode?: "exact" | "nearest";
       neighbors?: number;
     }) => {
-      const snapshot = readSnapshot();
+      const snapshot = readEffectiveSnapshot();
       if (!snapshot) {
         return {
           ok: false,
@@ -756,7 +1031,7 @@ const registerReadStrategyAnalysisTool = (
       include_latest_bar_analysis?: boolean;
       include_selected_marker?: boolean;
     }) => {
-      const snapshot = readSnapshot();
+      const snapshot = readEffectiveSnapshot();
       if (!snapshot) {
         return {
           ok: false,
@@ -841,7 +1116,7 @@ const registerNavigateStrategyRunTool = (
       offset?: number;
       progress_pct?: number;
     }) => {
-      const snapshot = readSnapshot();
+      const snapshot = readEffectiveSnapshot();
       const controls = findStrategyRunScrubControls();
       if (!controls) {
         return {
@@ -960,6 +1235,294 @@ const registerNavigateStrategyRunTool = (
   });
 };
 
+const registerStrategyAnalyzerSessionTool = (
+  modelContext: WebMcpModelContext,
+  existingTools: Set<string>,
+): void => {
+  if (existingTools.has(TOOL_NAME_STRATEGY_ANALYZER_SESSION)) {
+    return;
+  }
+  modelContext.registerTool({
+    name: TOOL_NAME_STRATEGY_ANALYZER_SESSION,
+    description:
+      "Prepares a one-day Strategy Analyzer session, starts/clears replay, and reports analyzer session state.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["status", "open_day", "start_replay", "play", "pause", "step", "clear_replay"],
+          description: "Analyzer session action. Default 'status'.",
+        },
+        ticker: {
+          type: "string",
+          description: "Ticker symbol for open_day.",
+        },
+        iso_date: {
+          type: "string",
+          description: "Trading day in YYYY-MM-DD format for open_day.",
+        },
+        include_extended_hours: {
+          type: "boolean",
+          description: "Optional extended-hours toggle for open_day.",
+        },
+        comparable_mode: {
+          type: "boolean",
+          description: "Optional comparable_mode setting for open_day.",
+        },
+        cold_start_each_day: {
+          type: "boolean",
+          description: "Optional cold_start_each_day setting for open_day.",
+        },
+        trade_eval_mode: {
+          type: "string",
+          enum: ["standard", "intrabar_1s", "intrabar_5s"],
+          description: "Optional trade evaluation mode for open_day.",
+        },
+        warmup_bars: {
+          type: "number",
+          description: "Optional warmup bars override for open_day.",
+        },
+        context_risk_preset: {
+          type: "string",
+          description: "Optional analyzer context risk preset key for open_day.",
+        },
+        steps: {
+          type: "number",
+          description: "Optional number of single-step advances for step.",
+        },
+      },
+      additionalProperties: false,
+    },
+    execute: async (args: {
+      action?: "status" | "open_day" | "start_replay" | "play" | "pause" | "step" | "clear_replay";
+      ticker?: string;
+      iso_date?: string;
+      include_extended_hours?: boolean;
+      comparable_mode?: boolean;
+      cold_start_each_day?: boolean;
+      trade_eval_mode?: "standard" | "intrabar_1s" | "intrabar_5s";
+      warmup_bars?: number;
+      context_risk_preset?: string;
+      steps?: number;
+    }) => {
+      const action = args?.action || "status";
+      const bridge = readStrategyAnalyzerBridge();
+      if (!bridge) {
+        const snapshot = readSnapshot();
+        return {
+          ok: false,
+          error:
+            "Strategy Analyzer bridge unavailable. Open the Strategy Analyzer view before using this tool.",
+          active_view: snapshot?.active_view ?? null,
+        };
+      }
+
+      if (action === "status") {
+        return {
+          ok: true,
+          action,
+          state: buildStrategyAnalyzerSessionStatus(),
+        };
+      }
+
+      if (action === "open_day") {
+        const result = await bridge.openDay({
+          ticker: args?.ticker,
+          iso_date: args?.iso_date,
+          include_extended_hours: args?.include_extended_hours,
+          comparable_mode: args?.comparable_mode,
+          cold_start_each_day: args?.cold_start_each_day,
+          trade_eval_mode: args?.trade_eval_mode,
+          warmup_bars: args?.warmup_bars,
+          context_risk_preset: args?.context_risk_preset,
+        });
+        await waitForUiTick(60);
+        return {
+          ok: result?.ok !== false,
+          action,
+          result,
+          state: buildStrategyAnalyzerSessionStatus(),
+        };
+      }
+
+      if (action === "start_replay") {
+        const result = await bridge.startReplay();
+        await waitForUiTick(120);
+        return {
+          ok: result?.ok !== false,
+          action,
+          result,
+          state: buildStrategyAnalyzerSessionStatus(),
+        };
+      }
+
+      if (action === "play") {
+        const result = await bridge.playReplay();
+        await waitForUiTick(80);
+        return {
+          ok: result?.ok !== false,
+          action,
+          result,
+          state: buildStrategyAnalyzerSessionStatus(),
+        };
+      }
+
+      if (action === "pause") {
+        const result = await bridge.pauseReplay();
+        await waitForUiTick(40);
+        return {
+          ok: result?.ok !== false,
+          action,
+          result,
+          state: buildStrategyAnalyzerSessionStatus(),
+        };
+      }
+
+      if (action === "step") {
+        const result = await bridge.stepReplay(args?.steps);
+        await waitForUiTick(40);
+        return {
+          ok: result?.ok !== false,
+          action,
+          result,
+          state: buildStrategyAnalyzerSessionStatus(),
+        };
+      }
+
+      if (action === "clear_replay") {
+        const result = await bridge.clearReplay();
+        await waitForUiTick(40);
+        return {
+          ok: result?.ok !== false,
+          action,
+          result,
+          state: buildStrategyAnalyzerSessionStatus(),
+        };
+      }
+
+      return {
+        ok: false,
+        action,
+        error: "Unsupported action.",
+      };
+    },
+  });
+};
+
+const registerStrategyAnalyzerThresholdsTool = (
+  modelContext: WebMcpModelContext,
+  existingTools: Set<string>,
+): void => {
+  if (existingTools.has(TOOL_NAME_STRATEGY_ANALYZER_THRESHOLDS)) {
+    return;
+  }
+  modelContext.registerTool({
+    name: TOOL_NAME_STRATEGY_ANALYZER_THRESHOLDS,
+    description:
+      "Reads, sets, bulk-updates, or clears Strategy Analyzer threshold overrides used by the evidence panel.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["status", "set", "bulk_set", "clear"],
+          description: "Threshold action. Default 'status'.",
+        },
+        key: {
+          type: "string",
+          description: "Override key for set/clear.",
+        },
+        value: {
+          description: "Override value for set; number or boolean depending on the key.",
+        },
+        overrides: {
+          type: "object",
+          description: "Override map for bulk_set.",
+          additionalProperties: true,
+        },
+      },
+      additionalProperties: false,
+    },
+    execute: async (args: {
+      action?: "status" | "set" | "bulk_set" | "clear";
+      key?: string;
+      value?: unknown;
+      overrides?: Record<string, unknown>;
+    }) => {
+      const action = args?.action || "status";
+      const bridge = readStrategyAnalyzerBridge();
+      if (!bridge) {
+        return {
+          ok: false,
+          error:
+            "Strategy Analyzer bridge unavailable. Open the Strategy Analyzer view before using this tool.",
+        };
+      }
+
+      if (action === "status") {
+        return {
+          ok: true,
+          action,
+          state: buildStrategyAnalyzerThresholdStatus(),
+        };
+      }
+
+      if (action === "set") {
+        const key = typeof args?.key === "string" ? args.key.trim() : "";
+        if (!key) {
+          return {
+            ok: false,
+            action,
+            error: "Missing threshold override key.",
+            state: buildStrategyAnalyzerThresholdStatus(),
+          };
+        }
+        const result = await bridge.setThresholdOverride(key, args?.value);
+        await waitForUiTick(20);
+        return {
+          ok: result?.ok !== false,
+          action,
+          key,
+          result,
+          state: buildStrategyAnalyzerThresholdStatus(),
+        };
+      }
+
+      if (action === "bulk_set") {
+        const overrides = args?.overrides && isRecord(args.overrides) ? args.overrides : {};
+        const result = await bridge.bulkSetThresholdOverrides(overrides);
+        await waitForUiTick(20);
+        return {
+          ok: result?.ok !== false,
+          action,
+          result,
+          state: buildStrategyAnalyzerThresholdStatus(),
+        };
+      }
+
+      if (action === "clear") {
+        const key = typeof args?.key === "string" ? args.key.trim() : "";
+        const result = await bridge.clearThresholdOverrides(key || undefined);
+        await waitForUiTick(20);
+        return {
+          ok: result?.ok !== false,
+          action,
+          key: key || null,
+          result,
+          state: buildStrategyAnalyzerThresholdStatus(),
+        };
+      }
+
+      return {
+        ok: false,
+        action,
+        error: "Unsupported action.",
+      };
+    },
+  });
+};
+
 const tryRegisterTools = (): boolean => {
   const modelContext = resolveModelContext();
   if (!modelContext) {
@@ -978,6 +1541,8 @@ const tryRegisterTools = (): boolean => {
   registerFindBarTool(modelContext, existingTools);
   registerReadStrategyAnalysisTool(modelContext, existingTools);
   registerNavigateStrategyRunTool(modelContext, existingTools);
+  registerStrategyAnalyzerSessionTool(modelContext, existingTools);
+  registerStrategyAnalyzerThresholdsTool(modelContext, existingTools);
   return true;
 };
 

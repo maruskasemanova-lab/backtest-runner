@@ -214,6 +214,7 @@ class StartRunDeps:
     load_aos_config: Callable[..., Dict[str, Any]]
     get_ticker_positioning_config: Callable[[str], Dict[str, Any]]
     positioning_config_keys: Iterable[str]
+    build_heatmap_memory_catalog: Callable[..., Optional[Dict[str, Any]]]
     configure_session: Callable[..., Awaitable[Any]]
     broadcast: Callable[[Dict[str, Any]], Awaitable[None]]
     run_config_cls: Any
@@ -588,6 +589,7 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
             run_key=identity.run_key,
             ticker=identity.ticker,
             range_start=identity.range_start,
+            bars=list(load_phase.bars),
             comparable_mode=identity.comparable_mode,
             execution_cfg=bootstrap.execution_cfg,
             l2_stats=load_phase.l2_stats,
@@ -600,6 +602,7 @@ async def start_run(request: StartRunRequest, deps: StartRunDeps):
             logger=deps.logger,
             configure_session=deps.configure_session,
             force_enable_all_remote_strategies=_force_enable_all_sync,
+            build_heatmap_memory_catalog=deps.build_heatmap_memory_catalog,
         ),
         record_phase_ms=_record_phase_ms,
     )

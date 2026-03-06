@@ -146,6 +146,8 @@ export type StrategyAnalyzerRunBarAnalysisSnapshot = {
   micro_confirmation?: StrategyAnalyzerAnyObject | null;
   level_context?: StrategyAnalyzerAnyObject | null;
   context_risk?: StrategyAnalyzerAnyObject | null;
+  entry_quality_diagnostics?: StrategyAnalyzerAnyObject | null;
+  tcbbo_confirmation?: StrategyAnalyzerAnyObject | null;
   warmup_only?: boolean;
   bar_index?: number | null;
   timestamp?: string | number | null;

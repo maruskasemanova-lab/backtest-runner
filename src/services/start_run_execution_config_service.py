@@ -784,7 +784,13 @@ def _build_trading_config_payload(
         "cold_start_each_day": bool(request.cold_start_each_day),
         "strategy_selection_mode": strategy_cfg["effective_strategy_selection_mode"],
         "max_active_strategies": strategy_cfg["effective_max_active_strategies"],
+        "trade_audit_level": str(getattr(request, "trade_audit_level", "full") or "full"),
     }
+    trade_audit_fields = getattr(request, "trade_audit_fields", None)
+    if trade_audit_fields is not None:
+        payload["trade_audit_fields"] = [
+            str(item).strip() for item in trade_audit_fields if str(item).strip()
+        ]
     if positioning_values["effective_max_daily_trades"] is not None:
         payload["max_daily_trades"] = positioning_values["effective_max_daily_trades"]
     if positioning_values["effective_mu_choppy_hard_block_enabled"] is not None:

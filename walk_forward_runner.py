@@ -100,6 +100,21 @@ class WalkForwardRunner:
             "max_active_strategies": max_active,
         }
 
+    @staticmethod
+    def _extract_level_fade_setup_type(
+        signal_metadata: Dict[str, Any],
+    ) -> Optional[str]:
+        if not isinstance(signal_metadata, dict):
+            return None
+        level_fade_md = signal_metadata.get("level_fade")
+        if isinstance(level_fade_md, dict):
+            setup_type = str(level_fade_md.get("setup_type_guess") or "").strip().lower()
+            if setup_type:
+                return setup_type
+        if bool(signal_metadata.get("sweep_triggered", False)):
+            return "sweep_reclaim"
+        return None
+
     async def run_single_day(self, ticker: str, date: str) -> DailyResult:
         """Run backtest for a single day."""
         run_id = f"wf-{ticker}-{date}-{int(datetime.now().timestamp())}"
@@ -179,6 +194,7 @@ class WalkForwardRunner:
                     book_pressure_avg=book_pressure_avg,
                     book_pressure_trend=book_pressure_trend,
                     signed_aggression=signed_aggression,
+                    setup_type=self._extract_level_fade_setup_type(signal_metadata),
                 )
 
             if self.config.verbose:
@@ -226,8 +242,20 @@ class WalkForwardRunner:
             "exit_reason": trade.exit_reason,
             "gross_pnl_pct": trade.gross_pnl_pct,
             "total_costs": trade.total_costs,
+            "gross_pnl_dollars": getattr(trade, "gross_pnl_dollars", None),
+            "position_notional_usd": getattr(trade, "position_notional_usd", None),
+            "cost_usd": getattr(trade, "cost_usd", None),
+            "cost_pct": getattr(trade, "cost_pct", None),
+            "signal_bar_index": getattr(trade, "signal_bar_index", None),
+            "entry_bar_index": getattr(trade, "entry_bar_index", None),
+            "signal_timestamp": getattr(trade, "signal_timestamp", None),
+            "signal_price": getattr(trade, "signal_price", None),
+            "take_profit": getattr(trade, "take_profit", None),
+            "setup_type": getattr(trade, "setup_type", None),
+            "setup_reason": getattr(trade, "setup_reason", None),
             "signal_metadata": trade.signal_metadata,
             "flow_snapshot": trade.flow_snapshot,
+            "trade_audit": getattr(trade, "trade_audit", None),
         }
 
     async def run(self) -> Dict[str, Any]:
@@ -353,6 +381,7 @@ class WalkForwardRunner:
             "by_ticker": ticker_results,
             "by_regime": regime_results,
             "by_strategy": strategy_results,
+            "level_fade_setup_breakdown": self.tracker.get_level_fade_setup_breakdown(),
             "strategy_rankings": self.tracker.get_strategy_rankings(),
             "regime_summaries": {
                 regime: self.tracker.get_regime_summary(regime)
@@ -440,6 +469,18 @@ class WalkForwardRunner:
             print(
                 f"  {strategy:15} | Days: {data['days']:3} | Trades: {data['trades']:3} | PnL: {icon} ${data['pnl']:+.2f}"
             )
+
+        level_fade_breakdown = report.get("level_fade_setup_breakdown", {})
+        if isinstance(level_fade_breakdown, dict) and level_fade_breakdown:
+            print(f"\nLevel Fade Setups:")
+            for setup_type, data in level_fade_breakdown.items():
+                pnl_value = float(data.get("total_pnl_dollars", 0.0) or 0.0)
+                icon = "🟢" if pnl_value >= 0 else "🔴"
+                print(
+                    f"  {setup_type:15} | Trades: {int(data.get('total_trades', 0)):3} | "
+                    f"Win Rate: {float(data.get('win_rate', 0.0) or 0.0):5.1f}% | "
+                    f"PnL: {icon} ${pnl_value:+.2f}"
+                )
 
         print(f"\nTop Strategies by Score:")
         rankings = report["strategy_rankings"][:5]

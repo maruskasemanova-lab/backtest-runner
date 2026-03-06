@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import {
   deriveScrubbedLiveAnalysis,
   hasDecisionPayload,
+  resolveScrubbedDecisionMarker,
 } from "./scrubConditionsUtils";
 import { useStrategyAnalyzerScrubEval } from "./useStrategyAnalyzerScrubEval";
 import type {
@@ -14,6 +15,7 @@ import type {
 
 type Params = {
   rangeScrubMeta: StrategyAnalyzerConditionsRangeScrubMeta;
+  scrubMarkers?: StrategyAnalyzerDecisionMarker[];
   selectedMarker: StrategyAnalyzerDecisionMarker | null;
   latestBarAnalysis: StrategyAnalyzerConditionsLiveAnalysis;
   onEvaluateIntrabarSlice?: (ts: number) => Promise<StrategyAnalyzerConditionsLiveAnalysis>;
@@ -21,6 +23,7 @@ type Params = {
 
 export function useStrategyAnalyzerConditions({
   rangeScrubMeta,
+  scrubMarkers = [],
   selectedMarker,
   latestBarAnalysis,
   onEvaluateIntrabarSlice,
@@ -44,38 +47,71 @@ export function useStrategyAnalyzerConditions({
   const scrubbedConditionsActive = Boolean(
     rangeScrubMeta && Number(rangeScrubMeta.progressedPoints || 0) > 0
   );
-  const effectiveConditionsMarker = scrubbedConditionsActive ? null : selectedMarker;
-  const effectiveConditionsLiveAnalysis: StrategyAnalyzerConditionsLiveAnalysis = effectiveConditionsMarker
-    ? null
-    : scrubbedConditionsActive
-      ? (() => {
-          const base = scrubbedCheckpointHasDecisionPayload
-            ? scrubbedLiveAnalysis
-            : scrubLiveAnalysis
-              ? {
-                  ...scrubbedLiveAnalysis,
-                  ...scrubLiveAnalysis,
-                  candidate_diagnostics:
-                    scrubLiveAnalysis.candidate_diagnostics ||
-                    scrubLiveAnalysis.signal?.metadata?.candidate_diagnostics ||
-                    scrubbedLiveAnalysis?.candidate_diagnostics,
-                  signal_rejected:
-                    scrubLiveAnalysis.signal_rejected || scrubbedLiveAnalysis?.signal_rejected,
-                  checkpoint_mode: false,
-                  intrabar_only_checkpoint: false,
-                }
-              : scrubbedLiveAnalysis ||
-                ((rangeScrubMeta?.clampedOffset ?? -1) === (rangeScrubMeta?.progressedMaxOffset ?? -2)
-                  ? latestBarAnalysis
-                  : null);
-          if (base && !base.timestamp && rangeScrubMeta?.targetTime) {
-            return { ...base, timestamp: rangeScrubMeta.targetTime };
-          }
-          return base;
-        })()
-      : !selectedMarker
-        ? latestBarAnalysis
-        : null;
+  const scrubbedConditionsMarker = useMemo(
+    () =>
+      scrubbedConditionsActive
+        ? resolveScrubbedDecisionMarker(rangeScrubMeta, scrubMarkers)
+        : null,
+    [scrubbedConditionsActive, rangeScrubMeta, scrubMarkers],
+  );
+  const effectiveConditionsMarker = scrubbedConditionsActive
+    ? scrubbedConditionsMarker
+    : selectedMarker;
+  const effectiveConditionsLiveAnalysis: StrategyAnalyzerConditionsLiveAnalysis = scrubbedConditionsActive
+    ? (() => {
+        const base = scrubbedCheckpointHasDecisionPayload
+          ? scrubbedLiveAnalysis
+          : scrubLiveAnalysis
+            ? {
+                ...scrubbedLiveAnalysis,
+                ...scrubLiveAnalysis,
+                layer_scores:
+                  scrubLiveAnalysis.layer_scores || scrubbedLiveAnalysis?.layer_scores,
+                candidate_diagnostics:
+                  scrubLiveAnalysis.candidate_diagnostics ||
+                  scrubLiveAnalysis.signal?.metadata?.candidate_diagnostics ||
+                  scrubbedLiveAnalysis?.candidate_diagnostics,
+                signal_rejected:
+                  scrubLiveAnalysis.signal_rejected || scrubbedLiveAnalysis?.signal_rejected,
+                intrabar_1s: scrubLiveAnalysis.intrabar_1s || scrubbedLiveAnalysis?.intrabar_1s,
+                intrabar_eval_trace:
+                  scrubLiveAnalysis.intrabar_eval_trace ||
+                  scrubbedLiveAnalysis?.intrabar_eval_trace,
+                intraday_levels:
+                  scrubLiveAnalysis.intraday_levels || scrubbedLiveAnalysis?.intraday_levels,
+                intrabar_confirmation:
+                  scrubLiveAnalysis.intrabar_confirmation ||
+                  scrubbedLiveAnalysis?.intrabar_confirmation,
+                micro_confirmation:
+                  scrubLiveAnalysis.micro_confirmation ||
+                  scrubbedLiveAnalysis?.micro_confirmation,
+                level_context:
+                  scrubLiveAnalysis.level_context || scrubbedLiveAnalysis?.level_context,
+                context_risk:
+                  scrubLiveAnalysis.context_risk || scrubbedLiveAnalysis?.context_risk,
+                entry_quality_diagnostics:
+                  scrubLiveAnalysis.entry_quality_diagnostics ||
+                  scrubbedLiveAnalysis?.entry_quality_diagnostics,
+                tcbbo_confirmation:
+                  scrubLiveAnalysis.tcbbo_confirmation ||
+                  scrubbedLiveAnalysis?.tcbbo_confirmation,
+                bar_action: scrubLiveAnalysis.bar_action || scrubbedLiveAnalysis?.bar_action,
+                bar_reason: scrubLiveAnalysis.bar_reason || scrubbedLiveAnalysis?.bar_reason,
+                checkpoint_mode: false,
+                intrabar_only_checkpoint: false,
+              }
+            : scrubbedLiveAnalysis ||
+              ((rangeScrubMeta?.clampedOffset ?? -1) === (rangeScrubMeta?.progressedMaxOffset ?? -2)
+                ? latestBarAnalysis
+                : null);
+        if (base && !base.timestamp && rangeScrubMeta?.targetTime) {
+          return { ...base, timestamp: rangeScrubMeta.targetTime };
+        }
+        return base;
+      })()
+    : !selectedMarker
+      ? latestBarAnalysis
+      : null;
 
   useEffect(() => {
     if (!scrubbedConditionsActive) {

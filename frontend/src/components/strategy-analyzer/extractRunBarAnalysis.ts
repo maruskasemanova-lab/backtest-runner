@@ -1,5 +1,14 @@
 import type { StrategyAnalyzerRunBarAnalysisSnapshot } from "./types";
 
+const pickFirstObject = (...values: unknown[]): Record<string, any> | null => {
+  for (const value of values) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, any>;
+    }
+  }
+  return null;
+};
+
 export function extractRunBarAnalysis(bar: any): StrategyAnalyzerRunBarAnalysisSnapshot | null {
   if (!bar || typeof bar !== "object") return null;
   const hasLayerScoresOnBar = Boolean(
@@ -16,6 +25,14 @@ export function extractRunBarAnalysis(bar: any): StrategyAnalyzerRunBarAnalysisS
   const checkpointCandidateDiagnostics =
     bar.candidate_diagnostics && typeof bar.candidate_diagnostics === "object"
       ? bar.candidate_diagnostics
+      : null;
+  const checkpointEntryQualityDiagnostics =
+    bar.entry_quality_diagnostics && typeof bar.entry_quality_diagnostics === "object"
+      ? bar.entry_quality_diagnostics
+      : null;
+  const checkpointTcbboConfirmation =
+    bar.tcbbo_confirmation && typeof bar.tcbbo_confirmation === "object"
+      ? bar.tcbbo_confirmation
       : null;
   const checkpointLike =
     !hasLayerScoresOnBar &&
@@ -41,6 +58,8 @@ export function extractRunBarAnalysis(bar: any): StrategyAnalyzerRunBarAnalysisS
         bar.level_context && typeof bar.level_context === "object" ? bar.level_context : null,
       context_risk:
         bar.context_risk && typeof bar.context_risk === "object" ? bar.context_risk : null,
+      entry_quality_diagnostics: checkpointEntryQualityDiagnostics,
+      tcbbo_confirmation: checkpointTcbboConfirmation,
       warmup_only: false,
       bar_index: null,
       checkpoint_mode: true,
@@ -63,44 +82,89 @@ export function extractRunBarAnalysis(bar: any): StrategyAnalyzerRunBarAnalysisS
       bar.strategy_analysis.layer_scores) ||
     null;
   const intradayLevels =
-    (bar.intraday_levels && typeof bar.intraday_levels === "object" ? bar.intraday_levels : null) ||
-    (bar.analysis?.intraday_levels && typeof bar.analysis.intraday_levels === "object"
-      ? bar.analysis.intraday_levels
-      : null) ||
-    (bar.analysis?.metadata?.intraday_levels &&
-    typeof bar.analysis.metadata.intraday_levels === "object"
-      ? bar.analysis.metadata.intraday_levels
-      : null) ||
-    (bar.analysis?.signal_metadata?.intraday_levels &&
-    typeof bar.analysis.signal_metadata.intraday_levels === "object"
-      ? bar.analysis.signal_metadata.intraday_levels
-      : null) ||
-    (bar.analysis?.signal?.metadata?.intraday_levels &&
-    typeof bar.analysis.signal.metadata.intraday_levels === "object"
-      ? bar.analysis.signal.metadata.intraday_levels
-      : null) ||
-    (bar.strategy_analysis?.intraday_levels &&
-    typeof bar.strategy_analysis.intraday_levels === "object"
-      ? bar.strategy_analysis.intraday_levels
-      : null) ||
-    (bar.strategy_analysis?.metadata?.intraday_levels &&
-    typeof bar.strategy_analysis.metadata.intraday_levels === "object"
-      ? bar.strategy_analysis.metadata.intraday_levels
-      : null) ||
-    (bar.strategy_analysis?.signal_metadata?.intraday_levels &&
-    typeof bar.strategy_analysis.signal_metadata.intraday_levels === "object"
-      ? bar.strategy_analysis.signal_metadata.intraday_levels
-      : null) ||
-    null;
-  if (!layerScores && !intradayLevels) return null;
+    pickFirstObject(
+      bar.intraday_levels,
+      bar.analysis?.intraday_levels,
+      bar.analysis?.metadata?.intraday_levels,
+      bar.analysis?.signal_metadata?.intraday_levels,
+      bar.analysis?.signal?.metadata?.intraday_levels,
+      bar.strategy_analysis?.intraday_levels,
+      bar.strategy_analysis?.metadata?.intraday_levels,
+      bar.strategy_analysis?.signal_metadata?.intraday_levels,
+    );
 
-  const signalRejected =
-    bar.signal_rejected ?? bar.analysis?.signal_rejected ?? bar.strategy_analysis?.signal_rejected ?? null;
-  const candidateDiagnostics =
-    bar.candidate_diagnostics ??
-    bar.analysis?.candidate_diagnostics ??
-    bar.strategy_analysis?.candidate_diagnostics ??
-    null;
+  const signalRejected = pickFirstObject(
+    bar.signal_rejected,
+    bar.analysis?.signal_rejected,
+    bar.strategy_analysis?.signal_rejected,
+  );
+  const candidateDiagnostics = pickFirstObject(
+    bar.candidate_diagnostics,
+    bar.analysis?.candidate_diagnostics,
+    bar.strategy_analysis?.candidate_diagnostics,
+  );
+  const intrabar1s = pickFirstObject(
+    bar.intrabar_1s,
+    bar.analysis?.intrabar_1s,
+    bar.strategy_analysis?.intrabar_1s,
+  );
+  const intrabarEvalTrace = pickFirstObject(
+    bar.intrabar_eval_trace,
+    bar.analysis?.intrabar_eval_trace,
+    bar.strategy_analysis?.intrabar_eval_trace,
+  );
+  const intrabarConfirmation = pickFirstObject(
+    bar.intrabar_confirmation,
+    bar.analysis?.intrabar_confirmation,
+    bar.strategy_analysis?.intrabar_confirmation,
+  );
+  const microConfirmation = pickFirstObject(
+    bar.micro_confirmation,
+    bar.analysis?.micro_confirmation,
+    bar.strategy_analysis?.micro_confirmation,
+  );
+  const levelContext = pickFirstObject(
+    bar.level_context,
+    bar.analysis?.level_context,
+    bar.analysis?.signal_metadata?.level_context,
+    bar.strategy_analysis?.level_context,
+    bar.strategy_analysis?.signal_metadata?.level_context,
+  );
+  const contextRisk = pickFirstObject(
+    bar.context_risk,
+    bar.analysis?.context_risk,
+    bar.strategy_analysis?.context_risk,
+  );
+  const entryQualityDiagnostics = pickFirstObject(
+    bar.entry_quality_diagnostics,
+    bar.analysis?.entry_quality_diagnostics,
+    bar.strategy_analysis?.entry_quality_diagnostics,
+  );
+  const tcbboConfirmation = pickFirstObject(
+    bar.tcbbo_confirmation,
+    bar.analysis?.tcbbo_confirmation,
+    bar.analysis?.signal_metadata?.tcbbo_confirmation,
+    bar.strategy_analysis?.tcbbo_confirmation,
+    bar.strategy_analysis?.signal_metadata?.tcbbo_confirmation,
+  );
+
+  if (
+    !layerScores &&
+    !signalRejected &&
+    !candidateDiagnostics &&
+    !intrabar1s &&
+    !intrabarEvalTrace &&
+    !intradayLevels &&
+    !intrabarConfirmation &&
+    !microConfirmation &&
+    !levelContext &&
+    !contextRisk &&
+    !entryQualityDiagnostics &&
+    !tcbboConfirmation
+  ) {
+    return null;
+  }
+
   const warmupOnly =
     typeof bar.warmup_only === "boolean"
       ? bar.warmup_only
@@ -116,27 +180,15 @@ export function extractRunBarAnalysis(bar: any): StrategyAnalyzerRunBarAnalysisS
     layer_scores: layerScores,
     signal_rejected: signalRejected,
     candidate_diagnostics: candidateDiagnostics,
-    intrabar_1s:
-      (bar.intrabar_1s && typeof bar.intrabar_1s === "object" ? bar.intrabar_1s : null) ||
-      (bar.analysis?.intrabar_1s && typeof bar.analysis.intrabar_1s === "object"
-        ? bar.analysis.intrabar_1s
-        : null) ||
-      (bar.strategy_analysis?.intrabar_1s &&
-      typeof bar.strategy_analysis.intrabar_1s === "object"
-        ? bar.strategy_analysis.intrabar_1s
-        : null),
-    intrabar_eval_trace:
-      (bar.intrabar_eval_trace && typeof bar.intrabar_eval_trace === "object"
-        ? bar.intrabar_eval_trace
-        : null) ||
-      (bar.analysis?.intrabar_eval_trace && typeof bar.analysis.intrabar_eval_trace === "object"
-        ? bar.analysis.intrabar_eval_trace
-        : null) ||
-      (bar.strategy_analysis?.intrabar_eval_trace &&
-      typeof bar.strategy_analysis.intrabar_eval_trace === "object"
-        ? bar.strategy_analysis.intrabar_eval_trace
-        : null),
+    intrabar_1s: intrabar1s,
+    intrabar_eval_trace: intrabarEvalTrace,
     intraday_levels: intradayLevels,
+    intrabar_confirmation: intrabarConfirmation,
+    micro_confirmation: microConfirmation,
+    level_context: levelContext,
+    context_risk: contextRisk,
+    entry_quality_diagnostics: entryQualityDiagnostics,
+    tcbbo_confirmation: tcbboConfirmation,
     bar_index: Number.isFinite(Number(barIndexCandidate)) ? Number(barIndexCandidate) : null,
     warmup_only: warmupOnly,
     timestamp: bar.timestamp || bar.analysis?.timestamp || bar.strategy_analysis?.timestamp || null,

@@ -23,14 +23,14 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
 | `wfo_optimizer.py` | yes | 918 | `6c4716f 2026-02-28` |
-| `walk_forward_runner.py` | yes | 526 | `1273b21 2026-02-23` |
-| `performance_tracker.py` | yes | 878 | `6c4716f 2026-02-28` |
+| `walk_forward_runner.py` | yes | 567 | `1273b21 2026-02-23` |
+| `performance_tracker.py` | yes | 993 | `6c4716f 2026-02-28` |
 | `oos_validator.py` | yes | 223 | `6c4716f 2026-02-28` |
 | `monte_carlo.py` | yes | 193 | `1273b21 2026-02-23` |
 | `tuning_runner.py` | yes | 367 | `6c4716f 2026-02-28` |
-| `aos_optimization/aos_walk_forward.py` | yes | 641 | `6c4716f 2026-02-28` |
+| `aos_optimization/aos_walk_forward.py` | yes | 653 | `6c4716f 2026-02-28` |
 | `aos_optimization/aos_optimizer.py` | yes | 425 | `0248cab 2026-02-28` |
-| `run_strategy_test.py` | yes | 644 | `58ebada 2026-02-27` |
+| `run_strategy_test.py` | yes | 668 | `58ebada 2026-02-27` |
 | `batch_runner.py` | yes | 214 | `58ebada 2026-02-27` |
 
 ## Change Checks
@@ -73,13 +73,13 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 - `class` `WalkForwardConfig` (line 21)
 - `class` `DailyResult` (line 37)
 - `class` `WalkForwardRunner` (line 54)
-- `async_function` `main` (line 459)
+- `async_function` `main` (line 500)
 
 ### `performance_tracker.py`
 - `class` `Regime` (line 16)
 - `class` `TradeRecord` (line 25)
-- `class` `StrategyPerformance` (line 95)
-- `class` `PerformanceTracker` (line 298)
+- `class` `StrategyPerformance` (line 153)
+- `class` `PerformanceTracker` (line 356)
 
 ### `oos_validator.py`
 - `class` `SplitResult` (line 30)
@@ -117,7 +117,7 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 - `class` `AOSConfig` (line 45)
 - `class` `DailyAOSResult` (line 55)
 - `class` `AOSWalkForwardRunner` (line 75)
-- `async_function` `main` (line 596)
+- `async_function` `main` (line 608)
 
 ### `aos_optimization/aos_optimizer.py`
 - `class` `OptimizationResult` (line 40)
@@ -126,9 +126,9 @@ Own parameter search, walk-forward, OOS validation, and Monte Carlo robustness a
 
 ### `run_strategy_test.py`
 - `class` `TradeResult` (line 19)
-- `class` `BacktestReport` (line 40)
-- `class` `StrategyTester` (line 75)
-- `async_function` `main` (line 594)
+- `class` `BacktestReport` (line 52)
+- `class` `StrategyTester` (line 87)
+- `async_function` `main` (line 618)
 
 ### `batch_runner.py`
 - `class` `BatchReport` (line 19)

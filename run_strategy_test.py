@@ -26,14 +26,26 @@ class TradeResult:
     exit_price: float
     entry_time: str
     exit_time: str
-    size: int
+    size: float
     pnl_pct: float
     pnl_dollars: float
     exit_reason: str
     gross_pnl_pct: Optional[float] = None
     total_costs: Optional[float] = None
+    gross_pnl_dollars: Optional[float] = None
+    position_notional_usd: Optional[float] = None
+    cost_usd: Optional[float] = None
+    cost_pct: Optional[float] = None
+    signal_bar_index: Optional[int] = None
+    entry_bar_index: Optional[int] = None
+    signal_timestamp: Optional[str] = None
+    signal_price: Optional[float] = None
+    take_profit: Optional[float] = None
+    setup_type: Optional[str] = None
+    setup_reason: Optional[str] = None
     signal_metadata: Optional[Dict[str, Any]] = None
     flow_snapshot: Optional[Dict[str, Any]] = None
+    trade_audit: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -392,14 +404,26 @@ class StrategyTester:
                                 exit_price=t.get("exit_price", 0),
                                 entry_time=t.get("entry_time", ""),
                                 exit_time=t.get("exit_time", ""),
-                                size=int(self._coerce_float(t.get("size", 0), 0.0)),
+                                size=self._coerce_float(t.get("size", 0), 0.0),
                                 pnl_pct=t.get("pnl_pct", 0),
                                 pnl_dollars=t.get("pnl_dollars", 0),
                                 exit_reason=t.get("exit_reason", ""),
                                 gross_pnl_pct=t.get("gross_pnl_pct"),
                                 total_costs=trade_cost,
+                                gross_pnl_dollars=t.get("gross_pnl_dollars"),
+                                position_notional_usd=t.get("position_notional_usd"),
+                                cost_usd=t.get("cost_usd"),
+                                cost_pct=t.get("cost_pct"),
+                                signal_bar_index=t.get("signal_bar_index"),
+                                entry_bar_index=t.get("entry_bar_index"),
+                                signal_timestamp=t.get("signal_timestamp"),
+                                signal_price=t.get("signal_price"),
+                                take_profit=t.get("take_profit"),
+                                setup_type=t.get("setup_type"),
+                                setup_reason=t.get("setup_reason"),
                                 signal_metadata=t.get("signal_metadata"),
                                 flow_snapshot=t.get("flow_snapshot"),
+                                trade_audit=t.get("trade_audit"),
                             )
                             report.trades.append(trade)
 

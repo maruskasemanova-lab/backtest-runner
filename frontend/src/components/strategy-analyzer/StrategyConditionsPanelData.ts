@@ -107,6 +107,10 @@ export function extractStrategyConditionsPanelData(
       details?.signal_metadata?.tcbbo_confirmation ||
       {};
     const levelCtx = details?.level_context || metadata?.level_context || details?.signal_metadata?.level_context || {};
+    const contextRisk =
+      details?.context_risk && typeof details.context_risk === "object"
+        ? details.context_risk
+        : null;
     const resolvedSignalDirection = resolveSignalDirection(
       signalRejected?.signal_type,
       signalRejected?.signal_direction,
@@ -148,14 +152,18 @@ export function extractStrategyConditionsPanelData(
       headwindBoost: safeNum(ls.headwind_threshold_boost),
       top3: Array.isArray(cd.top3) ? cd.top3 : [],
       activeStrategies: Array.isArray(cd.active_strategies) ? cd.active_strategies : [],
-      selectedStrategy: cd.strategy_name || marker?.strategy || null,
+      selectedStrategy:
+        cd.strategy_name ||
+        contextRisk?.strategy_key ||
+        marker?.strategy ||
+        null,
       sweepDetected: typeof ls.sweep_detected === "boolean" ? ls.sweep_detected : null,
       tcbboPassed: typeof tcbbo?.passed === "boolean" ? tcbbo.passed : null,
       signalDirection: resolvedSignalDirection,
       rejectionGate: signalRejected?.gate || null,
       rejectionReason: signalRejected?.reason || null,
       rejectionDetails,
-      contextRisk: details?.context_risk && typeof details.context_risk === "object" ? details.context_risk : null,
+      contextRisk,
       levelQuality: safeNum(levelCtx?.quality_score ?? levelCtx?.entry_quality),
       intrabarCoverage: safeNum(intrabarSnapshot?.coverage_points),
       intrabarMovePct: safeNum(intrabarSnapshot?.mid_move_pct),
@@ -182,7 +190,18 @@ export function extractStrategyConditionsPanelData(
     const sr = liveAnalysis?.signal_rejected || {};
     const cd = liveAnalysis?.candidate_diagnostics || {};
     const intrabar = liveAnalysis?.intrabar_1s || {};
-    const tcbbo = liveAnalysis?.tcbbo_confirmation || {};
+    const tcbbo =
+      liveAnalysis?.tcbbo_confirmation ||
+      liveAnalysis?.signal?.metadata?.tcbbo_confirmation ||
+      {};
+    const levelCtx =
+      liveAnalysis?.level_context ||
+      liveAnalysis?.entry_quality_diagnostics?.level_context ||
+      {};
+    const contextRisk =
+      liveAnalysis?.context_risk && typeof liveAnalysis.context_risk === "object"
+        ? liveAnalysis.context_risk
+        : null;
     const intrabarOnlyCheckpoint = Boolean(liveAnalysis?.checkpoint_mode && liveAnalysis?.intrabar_only_checkpoint);
     const resolvedSignalDirection = resolveSignalDirection(
       sr?.signal_type,
@@ -222,16 +241,15 @@ export function extractStrategyConditionsPanelData(
       headwindBoost: safeNum(ls.headwind_threshold_boost),
       top3: Array.isArray(cd.top3) ? cd.top3 : [],
       activeStrategies: Array.isArray(cd.active_strategies) ? cd.active_strategies : [],
-      selectedStrategy: cd.strategy_name || null,
+      selectedStrategy: cd.strategy_name || contextRisk?.strategy_key || null,
       sweepDetected: typeof ls.sweep_detected === "boolean" ? ls.sweep_detected : null,
-      tcbboPassed: tcbbo?.enabled === true ? (typeof tcbbo?.passed === "boolean" ? tcbbo.passed : null) : null,
+      tcbboPassed: typeof tcbbo?.passed === "boolean" ? tcbbo.passed : null,
       signalDirection: resolvedSignalDirection,
       rejectionGate: sr?.gate || null,
       rejectionReason: sr?.reason || null,
       rejectionDetails,
-      contextRisk:
-        liveAnalysis?.context_risk && typeof liveAnalysis.context_risk === "object" ? liveAnalysis.context_risk : null,
-      levelQuality: null,
+      contextRisk,
+      levelQuality: safeNum(levelCtx?.quality_score ?? levelCtx?.entry_quality),
       intrabarCoverage: safeNum(intrabar?.coverage_points),
       intrabarMovePct: safeNum(intrabar?.mid_move_pct),
       intrabarPushRatio: safeNum(intrabar?.push_ratio),

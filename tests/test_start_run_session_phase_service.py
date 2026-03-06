@@ -25,6 +25,7 @@ def _build_inputs(
     intrabar_execution_recalc_1s: Any = None,
     use_l2: bool = True,
     has_l2: bool = True,
+    trading_config: Dict[str, Any] | None = None,
 ) -> SessionPhaseInputs:
     request = SimpleNamespace(
         run_id="run-1",
@@ -42,8 +43,15 @@ def _build_inputs(
         execution_cfg={
             "effective_strategy_selection_mode": "adaptive_top_n",
             "effective_max_active_strategies": 3,
-            "trading_config": {},
+            "trading_config": dict(trading_config or {}),
         },
+        bars=[
+            {
+                "timestamp": "2026-02-10T14:30:00Z",
+                "open": 100.0,
+                "close": 100.2,
+            }
+        ],
         l2_stats={"has_l2": has_l2},
         requested_l2_confirm=False,
         use_l2=use_l2,
@@ -66,6 +74,10 @@ def _run_phase(inputs: SessionPhaseInputs) -> Dict[str, Any]:
                 logger=SimpleNamespace(warning=lambda *args, **kwargs: None),
                 configure_session=recorder.configure_session,
                 force_enable_all_remote_strategies=_force_enable,
+                build_heatmap_memory_catalog=lambda **_kwargs: {
+                    "summary": {"catalog_days": 1, "populated_days": 1},
+                    "days": {"2026-02-10": {"zones": []}},
+                },
             ),
             record_phase_ms=lambda key, _started: phase_timing.setdefault(key, 0.0),
         )
@@ -135,3 +147,32 @@ def test_session_phase_falls_back_to_l2_auto_intrabar_behavior() -> None:
     assert result.effective_trade_eval_mode == "intrabar_1s"
     assert result.effective_intrabar_execution_recalc_1s is True
     assert result.effective_intrabar_eval_step_seconds == 1
+
+
+def test_session_phase_includes_heatmap_summary_and_configure_payload() -> None:
+    payload = _run_phase(_build_inputs())
+    result = payload["result"]
+    configure_calls = payload["configure_calls"]
+
+    assert result.session_config_snapshot["heatmap_memory_summary"] == {
+        "catalog_days": 1,
+        "populated_days": 1,
+    }
+    assert len(configure_calls) == 1
+    _, kwargs = configure_calls[0]
+    assert kwargs["heatmap_memory_catalog"]["days"]["2026-02-10"]["zones"] == []
+
+
+def test_session_phase_forwards_trade_audit_config() -> None:
+    payload = _run_phase(
+        _build_inputs(
+            trading_config={
+                "trade_audit_level": "core",
+                "trade_audit_fields": ["outcome", "raw.signal_metadata"],
+            }
+        )
+    )
+    _, kwargs = payload["configure_calls"][0]
+
+    assert kwargs["trade_audit_level"] == "core"
+    assert kwargs["trade_audit_fields"] == ["outcome", "raw.signal_metadata"]

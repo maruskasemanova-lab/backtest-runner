@@ -13,6 +13,7 @@ class SessionPhaseInputs:
     run_key: str
     ticker: str
     range_start: str
+    bars: list[Any]
     comparable_mode: bool
     execution_cfg: Dict[str, Any]
     l2_stats: Dict[str, Any]
@@ -27,6 +28,7 @@ class SessionPhaseDeps:
     logger: Any
     configure_session: Callable[..., Awaitable[Any]]
     force_enable_all_remote_strategies: Callable[[], Awaitable[Dict[str, Any]]]
+    build_heatmap_memory_catalog: Callable[..., Optional[Dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -108,6 +110,14 @@ async def run_start_session_phase(
             for r in inputs.request.regime_filter
             if str(r).strip()
         ]
+    heatmap_memory_catalog = deps.build_heatmap_memory_catalog(
+        ticker=inputs.ticker,
+        bars=inputs.bars,
+    )
+    if isinstance(heatmap_memory_catalog, dict):
+        summary = heatmap_memory_catalog.get("summary")
+        if isinstance(summary, dict):
+            session_config_snapshot["heatmap_memory_summary"] = dict(summary)
 
     phase_started = perf_counter()
     await deps.configure_session(
@@ -115,6 +125,7 @@ async def run_start_session_phase(
         inputs.request.run_id,
         inputs.ticker,
         inputs.range_start,
+        heatmap_memory_catalog=heatmap_memory_catalog,
         **session_config_snapshot,
     )
     record_phase_ms("configure_session", phase_started)

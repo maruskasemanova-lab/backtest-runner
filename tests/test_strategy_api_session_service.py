@@ -37,6 +37,7 @@ class _ClientSessionStub:
         self._captured["url"] = url
         self._captured["params"] = dict(kwargs.get("params") or {})
         self._captured["headers"] = dict(kwargs.get("headers") or {})
+        self._captured["json"] = kwargs.get("json")
         return _PostResponse(status=200)
 
 
@@ -70,6 +71,8 @@ def test_configure_session_forwards_extra_params(
         intraday_levels_spike_detection_enabled=True,
         strategy_selection_mode="adaptive_top_n",
         max_active_strategies=3,
+        trade_audit_level="core",
+        trade_audit_fields=["outcome", "raw.signal_metadata"],
     )
     payload = request.model_dump()
     payload.pop("strategy_api_url", None)
@@ -91,4 +94,8 @@ def test_configure_session_forwards_extra_params(
     assert params.get("context_aware_risk_enabled") == 1
     assert params.get("context_risk_min_sl_pct") == 0.5
     assert params.get("context_risk_min_room_pct") == 0.08
-    assert params.get("extra_blob") == '{"mode":"test"}'
+    assert params.get("trade_audit_level") == "core"
+    assert captured.get("json") == {
+        "trade_audit_fields": ["outcome", "raw.signal_metadata"],
+        "extra_blob": {"mode": "test"},
+    }

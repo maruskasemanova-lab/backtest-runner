@@ -20,6 +20,7 @@ import type {
   ThresholdOverrides,
   ThresholdOverrideKey,
 } from "./useStrategyAnalyzerThresholdOverrides";
+import { resolveContextRiskStrategyFloor } from "./strategyAnalyzerContextRiskFloors";
 import { resolveActivationMinimumUpdates } from "./strategyAnalyzerActivationMinimums";
 
 /* ── gate badge (compact) ────────────────────────────────────────── */
@@ -336,8 +337,23 @@ export default function StrategyConditionsPanel({
     // Re-evaluate context risk: room_pct and effective_rr vs overridden minimums
     if (patched.contextRisk && typeof patched.contextRisk === "object") {
       const cr = { ...patched.contextRisk };
-      const overriddenMinRoom = thresholdOverrides.context_risk_min_room_pct;
-      const overriddenMinRr = thresholdOverrides.context_risk_min_effective_rr;
+      const strategyFloor = resolveContextRiskStrategyFloor(patched.selectedStrategy);
+      const overriddenMinRoom =
+        typeof thresholdOverrides.context_risk_min_room_pct === "number" &&
+        Number.isFinite(thresholdOverrides.context_risk_min_room_pct)
+          ? Math.max(
+              strategyFloor?.minRoomPct ?? 0,
+              thresholdOverrides.context_risk_min_room_pct,
+            )
+          : null;
+      const overriddenMinRr =
+        typeof thresholdOverrides.context_risk_min_effective_rr === "number" &&
+        Number.isFinite(thresholdOverrides.context_risk_min_effective_rr)
+          ? Math.max(
+              strategyFloor?.minEffectiveRr ?? 0,
+              thresholdOverrides.context_risk_min_effective_rr,
+            )
+          : null;
       const roomPct = safeNum(cr.room_pct);
       const effectiveRr = safeNum(cr.effective_rr);
 
@@ -423,6 +439,36 @@ export default function StrategyConditionsPanel({
 
     return patched;
   }, [rawData, thresholdOverrides, isThresholdInteractive]);
+
+  const contextRiskStrategyFloor = useMemo(
+    () => resolveContextRiskStrategyFloor(data?.selectedStrategy ?? rawData?.selectedStrategy),
+    [data?.selectedStrategy, rawData?.selectedStrategy],
+  );
+  const displayContextRiskMinRoom = useMemo(() => {
+    const rawOverride = thresholdOverrides?.context_risk_min_room_pct;
+    if (typeof rawOverride !== "number" || !Number.isFinite(rawOverride)) {
+      return rawOverride ?? null;
+    }
+    if (!contextRiskStrategyFloor) return rawOverride;
+    return Math.max(contextRiskStrategyFloor.minRoomPct, rawOverride);
+  }, [thresholdOverrides?.context_risk_min_room_pct, contextRiskStrategyFloor]);
+  const displayContextRiskMinEffectiveRr = useMemo(() => {
+    const rawOverride = thresholdOverrides?.context_risk_min_effective_rr;
+    if (typeof rawOverride !== "number" || !Number.isFinite(rawOverride)) {
+      return rawOverride ?? null;
+    }
+    if (!contextRiskStrategyFloor) return rawOverride;
+    return Math.max(contextRiskStrategyFloor.minEffectiveRr, rawOverride);
+  }, [thresholdOverrides?.context_risk_min_effective_rr, contextRiskStrategyFloor]);
+  const contextRiskFloorClamped =
+    (typeof thresholdOverrides?.context_risk_min_room_pct === "number" &&
+      displayContextRiskMinRoom != null &&
+      displayContextRiskMinRoom >
+        thresholdOverrides.context_risk_min_room_pct + 1e-9) ||
+    (typeof thresholdOverrides?.context_risk_min_effective_rr === "number" &&
+      displayContextRiskMinEffectiveRr != null &&
+      displayContextRiskMinEffectiveRr >
+        thresholdOverrides.context_risk_min_effective_rr + 1e-9);
 
   const applyAutoActivationMinimums = () => {
     if (
@@ -673,6 +719,14 @@ export default function StrategyConditionsPanel({
               Threshold changes apply on next Play/Step
             </div>
           )}
+          {isThresholdInteractive && contextRiskStrategyFloor && (
+            <div className="sa-note is-muted is-tight">
+              Context Risk floor for {contextRiskStrategyFloor.strategyKey}: room{" "}
+              {contextRiskStrategyFloor.minRoomPct.toFixed(2)}, RR{" "}
+              {contextRiskStrategyFloor.minEffectiveRr.toFixed(2)}
+              {contextRiskFloorClamped ? " (current override is clamped to this floor)" : ""}
+            </div>
+          )}
 
           {/* Threshold info - cleaned up (hidden when interactive to avoid clutter) */}
           {!isThresholdInteractive && data.threshold != null && (
@@ -752,39 +806,33 @@ export default function StrategyConditionsPanel({
                 />
                 <InteractiveMiniBar
                   label="Ctx Risk Min Room %"
-                  value={thresholdOverrides?.context_risk_min_room_pct ?? 0.15}
+                  value={displayContextRiskMinRoom ?? 0.15}
                   threshold={null}
                   showThresholdLine={false}
                   interactive
-                  thresholdOverride={
-                    thresholdOverrides?.context_risk_min_room_pct ?? null
-                  }
+                  thresholdOverride={displayContextRiskMinRoom}
                   onThresholdChange={(v) =>
                     onThresholdOverrideChange?.("context_risk_min_room_pct", v)
                   }
-                  thresholdMin={0}
+                  thresholdMin={contextRiskStrategyFloor?.minRoomPct ?? 0}
                   thresholdMax={1}
                   max={1}
                   suffix="%"
                 />
                 <InteractiveMiniBar
                   label="Ctx Risk Min RR"
-                  value={
-                    thresholdOverrides?.context_risk_min_effective_rr ?? 0.8
-                  }
+                  value={displayContextRiskMinEffectiveRr ?? 0.8}
                   threshold={null}
                   showThresholdLine={false}
                   interactive
-                  thresholdOverride={
-                    thresholdOverrides?.context_risk_min_effective_rr ?? null
-                  }
+                  thresholdOverride={displayContextRiskMinEffectiveRr}
                   onThresholdChange={(v) =>
                     onThresholdOverrideChange?.(
                       "context_risk_min_effective_rr",
                       v,
                     )
                   }
-                  thresholdMin={0}
+                  thresholdMin={contextRiskStrategyFloor?.minEffectiveRr ?? 0}
                   thresholdMax={3}
                   max={3}
                 />

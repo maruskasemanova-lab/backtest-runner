@@ -40,13 +40,30 @@ class TradeRecord:
     gross_pnl_pct: float
     total_costs: float
     exit_reason: str
+    size: Optional[float] = None
+    position_notional_usd: Optional[float] = None
+    gross_pnl_dollars: Optional[float] = None
+    cost_usd: Optional[float] = None
+    cost_pct: Optional[float] = None
+    take_profit: Optional[float] = None
+    signal_bar_index: Optional[int] = None
+    entry_bar_index: Optional[int] = None
+    signal_timestamp: Optional[str] = None
+    signal_price: Optional[float] = None
     bars_held: int = 0
     flow_strategy: bool = False
     book_pressure_confirmed: Optional[bool] = None
     book_pressure_avg: Optional[float] = None
     book_pressure_trend: Optional[float] = None
     signed_aggression: Optional[float] = None
+    setup_type: Optional[str] = None
+    setup_reason: Optional[str] = None
+    level_context: Optional[Dict[str, Any]] = None
+    flow_snapshot: Optional[Dict[str, Any]] = None
+    signal_metadata: Optional[Dict[str, Any]] = None
+    break_even: Optional[Dict[str, Any]] = None
     entry_quality_diagnostics: Optional[Dict[str, Any]] = None
+    trade_audit: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -65,6 +82,28 @@ class TradeRecord:
             "gross_pnl_pct": round(self.gross_pnl_pct, 4),
             "total_costs": round(self.total_costs, 4),
             "exit_reason": self.exit_reason,
+            "size": round(self.size, 6) if self.size is not None else None,
+            "position_notional_usd": (
+                round(self.position_notional_usd, 4)
+                if self.position_notional_usd is not None
+                else None
+            ),
+            "gross_pnl_dollars": (
+                round(self.gross_pnl_dollars, 4)
+                if self.gross_pnl_dollars is not None
+                else None
+            ),
+            "cost_usd": round(self.cost_usd, 4) if self.cost_usd is not None else None,
+            "cost_pct": round(self.cost_pct, 6) if self.cost_pct is not None else None,
+            "take_profit": (
+                round(self.take_profit, 6) if self.take_profit is not None else None
+            ),
+            "signal_bar_index": self.signal_bar_index,
+            "entry_bar_index": self.entry_bar_index,
+            "signal_timestamp": self.signal_timestamp,
+            "signal_price": (
+                round(self.signal_price, 6) if self.signal_price is not None else None
+            ),
             "bars_held": self.bars_held,
             "flow_strategy": self.flow_strategy,
             "book_pressure_confirmed": self.book_pressure_confirmed,
@@ -83,10 +122,29 @@ class TradeRecord:
                 if self.signed_aggression is not None
                 else None
             ),
+            "setup_type": self.setup_type,
+            "setup_reason": self.setup_reason,
+            "level_context": (
+                dict(self.level_context) if isinstance(self.level_context, dict) else None
+            ),
+            "flow_snapshot": (
+                dict(self.flow_snapshot) if isinstance(self.flow_snapshot, dict) else None
+            ),
+            "signal_metadata": (
+                dict(self.signal_metadata)
+                if isinstance(self.signal_metadata, dict)
+                else None
+            ),
+            "break_even": (
+                dict(self.break_even) if isinstance(self.break_even, dict) else None
+            ),
             "entry_quality_diagnostics": (
                 dict(self.entry_quality_diagnostics)
                 if isinstance(self.entry_quality_diagnostics, dict)
                 else None
+            ),
+            "trade_audit": (
+                dict(self.trade_audit) if isinstance(self.trade_audit, dict) else None
             ),
         }
 
@@ -339,13 +397,30 @@ class PerformanceTracker:
         gross_pnl_pct: float = 0.0,
         total_costs: float = 0.0,
         exit_reason: str = "unknown",
+        size: Optional[float] = None,
+        position_notional_usd: Optional[float] = None,
+        gross_pnl_dollars: Optional[float] = None,
+        cost_usd: Optional[float] = None,
+        cost_pct: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        signal_bar_index: Optional[int] = None,
+        entry_bar_index: Optional[int] = None,
+        signal_timestamp: Optional[str] = None,
+        signal_price: Optional[float] = None,
         bars_held: int = 0,
         flow_strategy: bool = False,
         book_pressure_confirmed: Optional[bool] = None,
         book_pressure_avg: Optional[float] = None,
         book_pressure_trend: Optional[float] = None,
         signed_aggression: Optional[float] = None,
+        setup_type: Optional[str] = None,
+        setup_reason: Optional[str] = None,
+        level_context: Optional[Dict[str, Any]] = None,
+        flow_snapshot: Optional[Dict[str, Any]] = None,
+        signal_metadata: Optional[Dict[str, Any]] = None,
+        break_even: Optional[Dict[str, Any]] = None,
         entry_quality_diagnostics: Optional[Dict[str, Any]] = None,
+        trade_audit: Optional[Dict[str, Any]] = None,
     ) -> TradeRecord:
         """
         Record a completed trade.
@@ -371,17 +446,40 @@ class PerformanceTracker:
             gross_pnl_pct=gross_pnl_pct,
             total_costs=total_costs,
             exit_reason=exit_reason,
+            size=size,
+            position_notional_usd=position_notional_usd,
+            gross_pnl_dollars=gross_pnl_dollars,
+            cost_usd=cost_usd,
+            cost_pct=cost_pct,
+            take_profit=take_profit,
+            signal_bar_index=signal_bar_index,
+            entry_bar_index=entry_bar_index,
+            signal_timestamp=signal_timestamp,
+            signal_price=signal_price,
             bars_held=bars_held,
             flow_strategy=flow_strategy,
             book_pressure_confirmed=book_pressure_confirmed,
             book_pressure_avg=book_pressure_avg,
             book_pressure_trend=book_pressure_trend,
             signed_aggression=signed_aggression,
+            setup_type=(str(setup_type).strip().lower() if setup_type else None),
+            setup_reason=(str(setup_reason).strip().lower() if setup_reason else None),
+            level_context=(
+                dict(level_context) if isinstance(level_context, dict) else None
+            ),
+            flow_snapshot=(
+                dict(flow_snapshot) if isinstance(flow_snapshot, dict) else None
+            ),
+            signal_metadata=(
+                dict(signal_metadata) if isinstance(signal_metadata, dict) else None
+            ),
+            break_even=(dict(break_even) if isinstance(break_even, dict) else None),
             entry_quality_diagnostics=(
                 dict(entry_quality_diagnostics)
                 if isinstance(entry_quality_diagnostics, dict)
                 else None
             ),
+            trade_audit=(dict(trade_audit) if isinstance(trade_audit, dict) else None),
         )
 
         # Add to all trades list
@@ -598,6 +696,21 @@ class PerformanceTracker:
             "without_book_pressure": self._summarize_trade_subset(without_book),
         }
 
+    def get_level_fade_setup_breakdown(self) -> Dict[str, Any]:
+        """Aggregate level_fade trades by setup branch label."""
+        setup_buckets: Dict[str, List[TradeRecord]] = {}
+        for trade in self._all_trades:
+            strategy_key = str(trade.strategy or "").strip().lower()
+            if strategy_key != "level_fade":
+                continue
+            setup_key = str(trade.setup_type or "unknown").strip().lower() or "unknown"
+            setup_buckets.setdefault(setup_key, []).append(trade)
+
+        return {
+            key: self._summarize_trade_subset(bucket)
+            for key, bucket in sorted(setup_buckets.items())
+        }
+
     def get_entry_timing_breakdown(self) -> Dict[str, Any]:
         """Summarize fast stop-outs (<= 1 bar) with diagnostic tag counts."""
         if not self._all_trades:
@@ -705,6 +818,7 @@ class PerformanceTracker:
                 "total_strategies": 0,
                 "total_regimes": 0,
                 "flow_breakdown": self.get_flow_breakdown(),
+                "level_fade_setup_breakdown": self.get_level_fade_setup_breakdown(),
                 "entry_timing_breakdown": self.get_entry_timing_breakdown(),
             }
 
@@ -730,6 +844,7 @@ class PerformanceTracker:
             "total_regimes": len(regimes),
             "tickers_tested": list(tickers),
             "flow_breakdown": self.get_flow_breakdown(),
+            "level_fade_setup_breakdown": self.get_level_fade_setup_breakdown(),
             "entry_timing_breakdown": self.get_entry_timing_breakdown(),
             "date_range": {
                 "first": min(t.date for t in self._all_trades),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type AvailableTicker = {
   ticker: string;
@@ -8,6 +8,9 @@ type AvailableTicker = {
 
 type Params = {
   selectedTicker: string | null;
+  ticker: string;
+  dateFrom: string;
+  dateTo: string;
   onTickerChange: (ticker: string) => void;
   setTicker: (value: string) => void;
   setDateFrom: (value: string) => void;
@@ -17,6 +20,9 @@ type Params = {
 
 export function useStrategyAnalyzerTickerCatalog({
   selectedTicker,
+  ticker,
+  dateFrom,
+  dateTo,
   onTickerChange,
   setTicker,
   setDateFrom,
@@ -25,6 +31,18 @@ export function useStrategyAnalyzerTickerCatalog({
 }: Params) {
   const [tickers, setTickers] = useState<AvailableTicker[]>([]);
   const [loadingTickers, setLoadingTickers] = useState(false);
+  const latestSelectionRef = useRef({
+    selectedTicker,
+    ticker,
+    dateFrom,
+    dateTo,
+  });
+  latestSelectionRef.current = {
+    selectedTicker,
+    ticker,
+    dateFrom,
+    dateTo,
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -74,13 +92,23 @@ export function useStrategyAnalyzerTickerCatalog({
         const match = exactMatch || fallbackWithDates || list[0] || null;
         if (match) {
           const normalizedMatchTicker = String(match.ticker || "").trim().toUpperCase();
-          const normalizedSelectedTicker = String(selectedTicker || "").trim().toUpperCase();
+          const latestSelection = latestSelectionRef.current;
+          const normalizedSelectedTicker = String(latestSelection.selectedTicker || "").trim().toUpperCase();
+          const normalizedCurrentTicker = String(latestSelection.ticker || "").trim().toUpperCase();
+          const hasExplicitLocalRange = Boolean(
+            String(latestSelection.dateFrom || "").trim() && String(latestSelection.dateTo || "").trim(),
+          );
+          const shouldSyncTicker =
+            Boolean(normalizedMatchTicker) && normalizedMatchTicker !== normalizedCurrentTicker;
+
           if (normalizedMatchTicker && normalizedMatchTicker !== normalizedSelectedTicker) {
             setTicker(normalizedMatchTicker);
             onTickerChange(normalizedMatchTicker);
           }
-          setDateFrom(String(match.start_date || ""));
-          setDateTo(String(match.end_date || ""));
+          if (!hasExplicitLocalRange || shouldSyncTicker) {
+            setDateFrom(String(match.start_date || ""));
+            setDateTo(String(match.end_date || ""));
+          }
         }
       } catch {
         if (cancelled) return;

@@ -21,9 +21,9 @@ Own regime detection, signal generation, position management, learning component
 
 | File | Exists | Lines | Last Commit |
 |---|---:|---:|---|
-| `../market_regime_detection/api_server.py` | yes | 1135 | `56c4990 2026-03-05` |
-| `../market_regime_detection/src/api_models.py` | yes | 278 | `89d7179 2026-02-28` |
-| `../market_regime_detection/src/day_trading_manager.py` | yes | 1110 | `56c4990 2026-03-05` |
+| `../market_regime_detection/api_server.py` | yes | 1136 | `56c4990 2026-03-05` |
+| `../market_regime_detection/src/api_models.py` | yes | 282 | `89d7179 2026-02-28` |
+| `../market_regime_detection/src/day_trading_manager.py` | yes | 1124 | `56c4990 2026-03-05` |
 | `../market_regime_detection/src/intraday_levels.py` | yes | 814 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/multi_layer_decision.py` | yes | 41 | `a0fc856 2026-02-23` |
 | `../market_regime_detection/src/trading_orchestrator.py` | yes | 473 | `562a066 2026-02-25` |
@@ -35,8 +35,9 @@ Own regime detection, signal generation, position management, learning component
 | `../market_regime_detection/src/position_sizing.py` | yes | 145 | `d33cc78 2026-02-07` |
 | `../market_regime_detection/src/evidence_decision.py` | yes | 538 | `c149629 2026-03-05` |
 | `../market_regime_detection/src/strategy_factory.py` | yes | 44 | `6267f1a 2026-03-04` |
-| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 724 | `c149629 2026-03-05` |
-| `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 193 | `56c4990 2026-03-05` |
+| `../market_regime_detection/src/strategies/base_strategy.py` | yes | 724 | `da4dfb3 2026-03-05` |
+| `../market_regime_detection/src/strategies/pullback.py` | yes | 375 | `89d7179 2026-02-28` |
+| `../market_regime_detection/src/strategies/momentum_flow.py` | yes | 193 | `da4dfb3 2026-03-05` |
 | `../market_regime_detection/src/strategies/absorption_reversal.py` | yes | 186 | `56c4990 2026-03-05` |
 | `../market_regime_detection/src/strategies/exhaustion_fade.py` | yes | 207 | `c149629 2026-03-05` |
 | `../market_regime_detection/src/strategies/trailing_stop.py` | yes | 301 | `94c21fc 2026-02-01` |
@@ -61,6 +62,8 @@ Own regime detection, signal generation, position management, learning component
 - `tests/test_multilayer_strategy_only_threshold.py`
 - `tests/test_multilayer_weight_source.py`
 - `tests/test_day_trading_manager_atr_fallback.py`
+- `/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_pullback_strategy_behavior.py`
+- `/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_pullback_quality_gate.py`
 - `/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_trading_orchestrator_reset.py`
 - `/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_checkpoint.py`
 - `/Users/hotovo/.gemini/antigravity/scratch/market_regime_detection/tests/test_adaptive_regime.py`
@@ -94,7 +97,7 @@ Own regime detection, signal generation, position management, learning component
 - `class` `TradingConfig` (line 98)
 
 ### `../market_regime_detection/src/day_trading_manager.py`
-- `class` `DayTradingManager` (line 92)
+- `class` `DayTradingManager` (line 93)
 
 ### `../market_regime_detection/src/intraday_levels.py`
 - `function` `_level_tolerance` (line 16)
@@ -167,6 +170,9 @@ Own regime detection, signal generation, position management, learning component
 - `class` `Signal` (line 33)
 - `class` `Position` (line 64)
 - `class` `BaseStrategy` (line 204)
+
+### `../market_regime_detection/src/strategies/pullback.py`
+- `class` `PullbackStrategy` (line 11)
 
 ### `../market_regime_detection/src/strategies/momentum_flow.py`
 - `class` `MomentumFlowStrategy` (line 12)

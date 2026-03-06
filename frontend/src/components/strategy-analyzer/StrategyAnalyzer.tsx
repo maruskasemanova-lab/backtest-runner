@@ -10,7 +10,16 @@ import StrategyAnalyzerUnifiedConfigWrapper from "./StrategyAnalyzerUnifiedConfi
 import StrategyAnalyzerHeaderControls from "./StrategyAnalyzerHeaderControls";
 import StrategyAnalyzerRangeActions from "./StrategyAnalyzerRangeActions";
 import { filterMarkersByChartWindow } from "./filterMarkersByChartWindow";
-import { useStrategyAnalyzerThresholdOverrides } from "./useStrategyAnalyzerThresholdOverrides";
+import { extractStrategyConditionsPanelData } from "./StrategyConditionsPanelData";
+import {
+  clampContextRiskThresholdOverrides,
+  resolveContextRiskStrategyFloor,
+} from "./strategyAnalyzerContextRiskFloors";
+import {
+  BOOLEAN_THRESHOLD_OVERRIDE_KEYS,
+  SUPPORTED_THRESHOLD_OVERRIDE_KEYS,
+  useStrategyAnalyzerThresholdOverrides,
+} from "./useStrategyAnalyzerThresholdOverrides";
 import type {
   StrategyAnalyzerChartHandle,
   StrategyAnalyzerAttachedRunState,
@@ -27,6 +36,10 @@ import type {
   StrategyAnalyzerTradeEvalMode,
   StrategyAnalyzerRunBarLike,
 } from "./types";
+import type {
+  ThresholdOverrideKey,
+  ThresholdOverrides,
+} from "./useStrategyAnalyzerThresholdOverrides";
 import { useStrategyAnalyzerChartData } from "./useStrategyAnalyzerChartData";
 import { useStrategyAnalyzerConditions } from "./useStrategyAnalyzerConditions";
 import { useIntradayLevelsDialog } from "./useIntradayLevelsDialog";
@@ -45,6 +58,37 @@ import { useStrategyAnalyzerWfo } from "./useStrategyAnalyzerWfo";
 import { DEFAULT_STRATEGY_ANALYZER_CONTEXT_RISK_PRESET } from "./strategyAnalyzerContextRiskPresets";
 
 const TERMINAL_RUN_PHASES = new Set(["COMPLETED", "END_OF_DAY", "ERROR", "FAILED", "STOPPED"]);
+const STRATEGY_ANALYZER_THRESHOLD_KEY_SET = new Set<string>(SUPPORTED_THRESHOLD_OVERRIDE_KEYS);
+const STRATEGY_ANALYZER_BOOLEAN_THRESHOLD_KEY_SET = new Set<string>(BOOLEAN_THRESHOLD_OVERRIDE_KEYS);
+
+const waitForStrategyAnalyzerBridgeTick = async (delayMs = 0): Promise<void> =>
+  new Promise((resolve) => window.setTimeout(resolve, delayMs));
+
+type StrategyAnalyzerWebMcpBridge = {
+  getState: () => Record<string, unknown>;
+  openDay: (args?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  startReplay: () => Promise<Record<string, unknown>>;
+  playReplay: (options?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  pauseReplay: () => Promise<Record<string, unknown>>;
+  stepReplay: (steps?: number) => Promise<Record<string, unknown>>;
+  clearReplay: () => Promise<Record<string, unknown>>;
+  setThresholdOverride: (
+    key: string,
+    value: unknown,
+  ) => Promise<Record<string, unknown>>;
+  bulkSetThresholdOverrides: (
+    overrides: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  clearThresholdOverrides: (key?: string) => Promise<Record<string, unknown>>;
+};
+
+const setThresholdOverrideValue = (
+  target: ThresholdOverrides,
+  key: ThresholdOverrideKey,
+  value: number | boolean | null,
+) => {
+  (target as Record<string, number | boolean | null | undefined>)[key] = value;
+};
 
 interface StrategyAnalyzerProps {
   selectedTicker: string | null;
@@ -148,7 +192,7 @@ export default function StrategyAnalyzer({
     setAnalyzerRunKey(null);
   }, []);
 
-  const { bars, loading, barCount, loadBars, resetBarsState } = useStrategyAnalyzerBarsLoader({
+  const { bars, loading, barCount, loadBars, loadBarsFor, resetBarsState } = useStrategyAnalyzerBarsLoader({
     ticker,
     dateFrom,
     dateTo,
@@ -174,6 +218,9 @@ export default function StrategyAnalyzer({
 
   const { tickers, loadingTickers, handleTickerChange } = useStrategyAnalyzerTickerCatalog({
     selectedTicker,
+    ticker,
+    dateFrom,
+    dateTo,
     onTickerChange,
     setTicker,
     setDateFrom,
@@ -208,6 +255,11 @@ export default function StrategyAnalyzer({
     !attachedRunState?.is_running &&
     (TERMINAL_RUN_PHASES.has(analyzerRunPhase) || analyzerProgressLooksComplete);
 
+  const thresholdPayloadContextData = useMemo(
+    () => extractStrategyConditionsPanelData(selectedMarker, latestBarAnalysis),
+    [selectedMarker, latestBarAnalysis],
+  );
+
   // ── threshold overrides (interactive sliders when paused) ─────
   const activeRunApiBase = useMemo(
     () => buildRunApiBase(parseRunKey(attachedRunKey)),
@@ -218,12 +270,15 @@ export default function StrategyAnalyzer({
     isThresholdInteractive,
     hasPendingOverrides,
     updateThresholdOverride,
+    replaceThresholdOverrides,
+    resetThresholdOverrides,
     buildThresholdPayload,
   } = useStrategyAnalyzerThresholdOverrides({
     isAnalyzerAttachedRun,
     isPlayingRun,
     analyzerRunTerminal,
     activeRunApiBase,
+    contextRiskStrategyKey: thresholdPayloadContextData?.selectedStrategy ?? null,
   });
 
   const { timelineCacheVersion } = useStrategyAnalyzerTimelineCache({
@@ -340,10 +395,45 @@ export default function StrategyAnalyzer({
     conditionsPanelBadge,
   } = useStrategyAnalyzerConditions({
     rangeScrubMeta,
+    scrubMarkers: analyzerChartMarkers,
     selectedMarker,
     latestBarAnalysis,
     onEvaluateIntrabarSlice,
   });
+  const effectiveThresholdContextData = useMemo(
+    () =>
+      extractStrategyConditionsPanelData(
+        effectiveConditionsMarker,
+        stableConditionsLiveAnalysis,
+      ),
+    [effectiveConditionsMarker, stableConditionsLiveAnalysis],
+  );
+  const effectiveThresholdStrategyFloor = useMemo(
+    () =>
+      resolveContextRiskStrategyFloor(
+        effectiveThresholdContextData?.selectedStrategy ?? null,
+      ),
+    [effectiveThresholdContextData],
+  );
+  const thresholdStatusSelectedStrategy =
+    effectiveThresholdContextData?.selectedStrategy ??
+    thresholdPayloadContextData?.selectedStrategy ??
+    null;
+  const thresholdStatusStrategyFloor =
+    effectiveThresholdStrategyFloor ??
+    resolveContextRiskStrategyFloor(thresholdPayloadContextData?.selectedStrategy ?? null);
+  const effectiveThresholdOverridesForDisplay = useMemo(
+    () =>
+      clampContextRiskThresholdOverrides(
+        thresholdOverrides,
+        thresholdStatusSelectedStrategy,
+      ),
+    [thresholdOverrides, thresholdStatusSelectedStrategy],
+  );
+  const effectiveThresholdPayloadForDisplay = useMemo(
+    () => buildThresholdPayload(effectiveThresholdOverridesForDisplay),
+    [buildThresholdPayload, effectiveThresholdOverridesForDisplay],
+  );
   const {
     selectedIntradayLevels,
     handleAnalyzerBarClick,
@@ -410,23 +500,403 @@ export default function StrategyAnalyzer({
     setRangeScrubOffset(0);
   }, []);
 
-  const handleStartAction = useCallback(() => {
-    if (wfoEnabled) {
-      void handleRunWfo();
-      return;
+  const currentBarForBridge = useMemo(() => {
+    if (rangeScrubMeta?.targetBar && typeof rangeScrubMeta.targetBar === "object") {
+      return rangeScrubMeta.targetBar;
     }
-    void handleStartTest();
-  }, [wfoEnabled, handleRunWfo, handleStartTest]);
+    if (isAnalyzerAttachedRun && attachedRunBars.length > 0) {
+      return attachedRunBars[attachedRunBars.length - 1];
+    }
+    if (chartBars.length > 0) {
+      return chartBars[chartBars.length - 1];
+    }
+    if (bars.length > 0) {
+      return bars[bars.length - 1];
+    }
+    return null;
+  }, [rangeScrubMeta, isAnalyzerAttachedRun, attachedRunBars, chartBars, bars]);
 
-  // ── play/step wrapped with threshold overrides + scrub seek ───
+  const strategyAnalyzerBridgeState = useMemo<Record<string, unknown>>(
+    () => ({
+      active: true,
+      ticker,
+      date_from: dateFrom || null,
+      date_to: dateTo || null,
+      loading,
+      error,
+      bar_count: barCount,
+      preview_bars: Array.isArray(bars) ? bars : [],
+      run_bars: isAnalyzerAttachedRun && Array.isArray(attachedRunBars) ? attachedRunBars : [],
+      chart_bars: Array.isArray(chartBars) ? chartBars : [],
+      current_bar: currentBarForBridge,
+      selected_range: {
+        from: selectedRangeFrom,
+        to: selectedRangeTo,
+      },
+      chart_state:
+        analyzerChartState &&
+        Number.isFinite(Number(analyzerChartState.from)) &&
+        Number.isFinite(Number(analyzerChartState.to))
+          ? {
+              from: Number(analyzerChartState.from),
+              to: Number(analyzerChartState.to),
+            }
+          : null,
+      attached_run: isAnalyzerAttachedRun,
+      run_key:
+        (isAnalyzerAttachedRun
+          ? String(attachedRunKey || analyzerRunKey || "").trim()
+          : String(analyzerRunKey || "").trim()) || null,
+      run_phase: analyzerDisplayPhase || null,
+      is_playing: isPlayingRun,
+      comparable_mode: comparableMode,
+      cold_start_each_day: comparableMode ? true : coldStartEachDay,
+      include_extended_hours: includeExtendedHours,
+      trade_eval_mode: analyzerTradeEvalMode,
+      context_risk_preset: contextRiskPresetKey,
+      decision_events: Array.isArray(analyzerDecisionEvents) ? analyzerDecisionEvents : [],
+      visible_decision_events: Array.isArray(analyzerDecisionEventsForDisplay)
+        ? analyzerDecisionEventsForDisplay
+        : [],
+      selected_marker:
+        (effectiveConditionsMarker ?? selectedMarker) &&
+        typeof (effectiveConditionsMarker ?? selectedMarker) === "object"
+          ? (effectiveConditionsMarker ?? selectedMarker)
+          : null,
+      latest_bar_analysis:
+        stableConditionsLiveAnalysis && typeof stableConditionsLiveAnalysis === "object"
+          ? stableConditionsLiveAnalysis
+          : null,
+      scrub: rangeScrubMeta
+        ? {
+            current_offset: rangeScrubMeta.clampedOffset,
+            min_offset: 0,
+            max_offset: rangeScrubMeta.progressedMaxOffset,
+            target_time: rangeScrubMeta.targetTime ?? null,
+            target_local: rangeScrubMeta.targetLocal ?? null,
+            target_bar_index:
+              rangeScrubMeta.targetBar?.bar_index != null
+                ? Number(rangeScrubMeta.targetBar.bar_index)
+                : null,
+            progress_pct: rangeScrubBase?.progressPct ?? null,
+            step_bars: rangeScrubBase?.sliderStepBars ?? null,
+          }
+        : null,
+      has_conditions_panel_data: hasConditionsPanelData,
+      conditions_panel_badge: conditionsPanelBadge,
+      thresholds: {
+        overrides: thresholdOverrides,
+        effective_overrides: effectiveThresholdOverridesForDisplay,
+        payload: buildThresholdPayload(thresholdOverrides),
+        effective_payload: effectiveThresholdPayloadForDisplay,
+        has_pending_overrides: hasPendingOverrides,
+        is_interactive: isThresholdInteractive,
+        selected_strategy: thresholdStatusSelectedStrategy,
+        context_risk_strategy_floor: thresholdStatusStrategyFloor,
+        supported_keys: [...SUPPORTED_THRESHOLD_OVERRIDE_KEYS],
+        boolean_keys: [...BOOLEAN_THRESHOLD_OVERRIDE_KEYS],
+      },
+      snapshot_updated_at_utc: new Date().toISOString(),
+    }),
+    [
+      ticker,
+      dateFrom,
+      dateTo,
+      loading,
+      error,
+      barCount,
+      bars,
+      isAnalyzerAttachedRun,
+      attachedRunBars,
+      chartBars,
+      currentBarForBridge,
+      selectedRangeFrom,
+      selectedRangeTo,
+      analyzerChartState,
+      attachedRunKey,
+      analyzerRunKey,
+      analyzerDisplayPhase,
+      isPlayingRun,
+      comparableMode,
+      coldStartEachDay,
+      includeExtendedHours,
+      analyzerTradeEvalMode,
+      contextRiskPresetKey,
+      analyzerDecisionEvents,
+      analyzerDecisionEventsForDisplay,
+      effectiveConditionsMarker,
+      selectedMarker,
+      stableConditionsLiveAnalysis,
+      rangeScrubMeta,
+      rangeScrubBase,
+      hasConditionsPanelData,
+      conditionsPanelBadge,
+      thresholdOverrides,
+      effectiveThresholdOverridesForDisplay,
+      hasPendingOverrides,
+      isThresholdInteractive,
+      buildThresholdPayload,
+      effectiveThresholdPayloadForDisplay,
+      thresholdStatusSelectedStrategy,
+      thresholdStatusStrategyFloor,
+    ],
+  );
+
+  const setBridgeThresholdOverride = useCallback(
+    async (rawKey: string, rawValue: unknown) => {
+      const key = String(rawKey || "").trim() as ThresholdOverrideKey;
+      if (!STRATEGY_ANALYZER_THRESHOLD_KEY_SET.has(key)) {
+        return {
+          ok: false,
+          error: "Unknown threshold override key.",
+          key: rawKey,
+          supported_keys: [...SUPPORTED_THRESHOLD_OVERRIDE_KEYS],
+        };
+      }
+
+      let normalizedValue: number | boolean | null = null;
+      if (rawValue != null) {
+        if (STRATEGY_ANALYZER_BOOLEAN_THRESHOLD_KEY_SET.has(key)) {
+          normalizedValue = Boolean(rawValue);
+        } else {
+          const numericValue = Number(rawValue);
+          if (!Number.isFinite(numericValue)) {
+            return {
+              ok: false,
+              error: "Threshold override value must be numeric.",
+              key,
+              value: rawValue,
+            };
+          }
+          normalizedValue = numericValue;
+        }
+      }
+
+      const nextOverrides: ThresholdOverrides = { ...thresholdOverrides };
+      if (normalizedValue == null) {
+        delete nextOverrides[key];
+      } else {
+        setThresholdOverrideValue(nextOverrides, key, normalizedValue);
+      }
+      replaceThresholdOverrides(nextOverrides);
+      await waitForStrategyAnalyzerBridgeTick();
+
+      return {
+        ok: true,
+        key,
+        value: normalizedValue,
+        overrides: nextOverrides,
+        effective_overrides: clampContextRiskThresholdOverrides(
+          nextOverrides,
+          thresholdStatusSelectedStrategy,
+        ),
+        payload: buildThresholdPayload(nextOverrides),
+        effective_payload: buildThresholdPayload(
+          clampContextRiskThresholdOverrides(
+            nextOverrides,
+            thresholdStatusSelectedStrategy,
+          ),
+        ),
+      };
+    },
+    [
+      thresholdOverrides,
+      replaceThresholdOverrides,
+      buildThresholdPayload,
+      thresholdStatusSelectedStrategy,
+    ],
+  );
+
+  const bulkSetBridgeThresholdOverrides = useCallback(
+    async (overrides: Record<string, unknown>) => {
+      const nextOverrides: ThresholdOverrides = { ...thresholdOverrides };
+      const ignoredKeys: string[] = [];
+
+      for (const [rawKey, rawValue] of Object.entries(overrides || {})) {
+        const key = String(rawKey || "").trim() as ThresholdOverrideKey;
+        if (!STRATEGY_ANALYZER_THRESHOLD_KEY_SET.has(key)) {
+          ignoredKeys.push(rawKey);
+          continue;
+        }
+        if (rawValue == null) {
+          delete nextOverrides[key];
+          continue;
+        }
+        if (STRATEGY_ANALYZER_BOOLEAN_THRESHOLD_KEY_SET.has(key)) {
+          setThresholdOverrideValue(nextOverrides, key, Boolean(rawValue));
+          continue;
+        }
+        const numericValue = Number(rawValue);
+        if (!Number.isFinite(numericValue)) {
+          ignoredKeys.push(rawKey);
+          continue;
+        }
+        setThresholdOverrideValue(nextOverrides, key, numericValue);
+      }
+
+      replaceThresholdOverrides(nextOverrides);
+      await waitForStrategyAnalyzerBridgeTick();
+
+      return {
+        ok: true,
+        overrides: nextOverrides,
+        effective_overrides: clampContextRiskThresholdOverrides(
+          nextOverrides,
+          thresholdStatusSelectedStrategy,
+        ),
+        payload: buildThresholdPayload(nextOverrides),
+        effective_payload: buildThresholdPayload(
+          clampContextRiskThresholdOverrides(
+            nextOverrides,
+            thresholdStatusSelectedStrategy,
+          ),
+        ),
+        ignored_keys: ignoredKeys,
+      };
+    },
+    [thresholdOverrides, replaceThresholdOverrides, buildThresholdPayload, thresholdStatusSelectedStrategy],
+  );
+
+  const clearBridgeThresholdOverrides = useCallback(
+    async (rawKey?: string) => {
+      const key = typeof rawKey === "string" ? rawKey.trim() : "";
+      if (!key) {
+        resetThresholdOverrides();
+        await waitForStrategyAnalyzerBridgeTick();
+        return {
+          ok: true,
+          cleared_all: true,
+          overrides: {},
+          effective_overrides: {},
+          payload: {},
+          effective_payload: {},
+        };
+      }
+      if (!STRATEGY_ANALYZER_THRESHOLD_KEY_SET.has(key)) {
+        return {
+          ok: false,
+          error: "Unknown threshold override key.",
+          key,
+          supported_keys: [...SUPPORTED_THRESHOLD_OVERRIDE_KEYS],
+        };
+      }
+
+      const nextOverrides: ThresholdOverrides = { ...thresholdOverrides };
+      delete nextOverrides[key as ThresholdOverrideKey];
+      replaceThresholdOverrides(nextOverrides);
+      await waitForStrategyAnalyzerBridgeTick();
+
+      return {
+        ok: true,
+        cleared_all: false,
+        key,
+        overrides: nextOverrides,
+        effective_overrides: clampContextRiskThresholdOverrides(
+          nextOverrides,
+          thresholdStatusSelectedStrategy,
+        ),
+        payload: buildThresholdPayload(nextOverrides),
+        effective_payload: buildThresholdPayload(
+          clampContextRiskThresholdOverrides(
+            nextOverrides,
+            thresholdStatusSelectedStrategy,
+          ),
+        ),
+      };
+    },
+    [
+      thresholdOverrides,
+      resetThresholdOverrides,
+      replaceThresholdOverrides,
+      buildThresholdPayload,
+      thresholdStatusSelectedStrategy,
+    ],
+  );
+
+  const openDayForBridge = useCallback(
+    async (args?: Record<string, unknown>) => {
+      const targetTicker = String(args?.ticker || args?.symbol || ticker || "MU")
+        .trim()
+        .toUpperCase();
+      const targetDate = String(args?.iso_date || args?.date || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+        return {
+          ok: false,
+          error: "Invalid or missing iso_date. Expected YYYY-MM-DD.",
+          iso_date: targetDate || null,
+        };
+      }
+
+      const rawWarmupBars = Number(args?.warmup_bars);
+      if (Number.isFinite(rawWarmupBars) && rawWarmupBars >= 0) {
+        setWarmupBars(Math.trunc(rawWarmupBars));
+      }
+
+      if (typeof args?.include_extended_hours === "boolean") {
+        setIncludeExtendedHours(args.include_extended_hours);
+      }
+      if (typeof args?.comparable_mode === "boolean") {
+        setComparableMode(args.comparable_mode);
+      }
+      if (typeof args?.cold_start_each_day === "boolean") {
+        setColdStartEachDay(args.cold_start_each_day);
+      }
+      if (
+        args?.trade_eval_mode === "standard" ||
+        args?.trade_eval_mode === "intrabar_1s" ||
+        args?.trade_eval_mode === "intrabar_5s"
+      ) {
+        setAnalyzerTradeEvalMode(args.trade_eval_mode);
+      }
+      if (typeof args?.context_risk_preset === "string" && args.context_risk_preset.trim()) {
+        setContextRiskPresetKey(args.context_risk_preset.trim() as StrategyAnalyzerContextRiskPresetKey);
+      }
+
+      setError(null);
+      setRangeSelectMode(false);
+      setSelectedRangeFrom(null);
+      setSelectedRangeTo(null);
+      setRangeScrubOffset(0);
+      setAnalyzerRunKey(null);
+      if (targetTicker !== ticker) {
+        setTicker(targetTicker);
+      }
+      setDateFrom(targetDate);
+      setDateTo(targetDate);
+
+      await loadBarsFor({
+        ticker: targetTicker,
+        dateFrom: targetDate,
+        dateTo: targetDate,
+      });
+
+      setSelectedRangeFrom(`${targetDate}T00:00`);
+      setSelectedRangeTo(`${targetDate}T23:59`);
+      setRangeScrubOffset(0);
+      await waitForStrategyAnalyzerBridgeTick();
+
+      return {
+        ok: true,
+        ticker: targetTicker,
+        iso_date: targetDate,
+      };
+    },
+    [ticker, loadBarsFor],
+  );
+
+  const startReplayForBridge = useCallback(async () => {
+    await handleStartTest();
+    await waitForStrategyAnalyzerBridgeTick(40);
+    return { ok: true };
+  }, [handleStartTest]);
+
+  // Wrap play/step requests so replay controls and bridge calls share identical overrides behavior.
   const handlePlayWithOverrides: typeof onPlayRun = useCallback(
     async (options?: any) => {
-      // Embed transformed overrides in request body for atomicity
       const merged: any = hasPendingOverrides
         ? { ...options, threshold_overrides: buildThresholdPayload(thresholdOverrides) }
         : { ...options };
       merged.keep_in_memory_after_completion = true;
-      // If user scrubbed back from end, include seek position
       if (
         rangeScrubMeta &&
         rangeScrubMeta.clampedOffset < rangeScrubMeta.progressedMaxOffset &&
@@ -438,6 +908,7 @@ export default function StrategyAnalyzer({
     },
     [hasPendingOverrides, onPlayRun, thresholdOverrides, rangeScrubMeta, buildThresholdPayload],
   );
+
   const handleStepWithOverrides: typeof onStepRun = useCallback(
     async (options?: any) => {
       const merged: any = hasPendingOverrides
@@ -455,13 +926,94 @@ export default function StrategyAnalyzer({
     [hasPendingOverrides, onStepRun, thresholdOverrides, rangeScrubMeta, buildThresholdPayload],
   );
 
+  const playReplayForBridge = useCallback(
+    async (options?: Record<string, unknown>) => {
+      await handlePlayWithOverrides(options);
+      await waitForStrategyAnalyzerBridgeTick(40);
+      return { ok: true };
+    },
+    [handlePlayWithOverrides],
+  );
+
+  const pauseReplayForBridge = useCallback(async () => {
+    await onPauseRun?.();
+    await waitForStrategyAnalyzerBridgeTick();
+    return { ok: true };
+  }, [onPauseRun]);
+
+  const stepReplayForBridge = useCallback(
+    async (steps = 1) => {
+      const boundedSteps = Math.max(1, Math.min(500, Math.trunc(Number(steps) || 1)));
+      for (let idx = 0; idx < boundedSteps; idx += 1) {
+        await handleStepWithOverrides();
+      }
+      await waitForStrategyAnalyzerBridgeTick();
+      return { ok: true, steps: boundedSteps };
+    },
+    [handleStepWithOverrides],
+  );
+
+  const clearReplayForBridge = useCallback(async () => {
+    await handleClearAnalyzerRun();
+    await waitForStrategyAnalyzerBridgeTick();
+    return { ok: true };
+  }, [handleClearAnalyzerRun]);
+
+  const strategyAnalyzerWebMcpBridge = useMemo<StrategyAnalyzerWebMcpBridge>(
+    () => ({
+      getState: () => strategyAnalyzerBridgeState,
+      openDay: openDayForBridge,
+      startReplay: startReplayForBridge,
+      playReplay: playReplayForBridge,
+      pauseReplay: pauseReplayForBridge,
+      stepReplay: stepReplayForBridge,
+      clearReplay: clearReplayForBridge,
+      setThresholdOverride: setBridgeThresholdOverride,
+      bulkSetThresholdOverrides: bulkSetBridgeThresholdOverrides,
+      clearThresholdOverrides: clearBridgeThresholdOverrides,
+    }),
+    [
+      strategyAnalyzerBridgeState,
+      openDayForBridge,
+      startReplayForBridge,
+      playReplayForBridge,
+      pauseReplayForBridge,
+      stepReplayForBridge,
+      clearReplayForBridge,
+      setBridgeThresholdOverride,
+      bulkSetBridgeThresholdOverrides,
+      clearBridgeThresholdOverrides,
+    ],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const runtimeWindow = window as Window & {
+      __backtestStrategyAnalyzerWebMcpBridge?: StrategyAnalyzerWebMcpBridge | null;
+    };
+    runtimeWindow.__backtestStrategyAnalyzerWebMcpBridge = strategyAnalyzerWebMcpBridge;
+    return () => {
+      if (runtimeWindow.__backtestStrategyAnalyzerWebMcpBridge === strategyAnalyzerWebMcpBridge) {
+        runtimeWindow.__backtestStrategyAnalyzerWebMcpBridge = null;
+      }
+    };
+  }, [strategyAnalyzerWebMcpBridge]);
+
+  const handleStartAction = useCallback(() => {
+    if (wfoEnabled) {
+      void handleRunWfo();
+      return;
+    }
+    void handleStartTest();
+  }, [wfoEnabled, handleRunWfo, handleStartTest]);
+
   const entryConditionsContent = (
     <StrategyAnalyzerEntryConditionsContent
       effectiveConditionsMarker={effectiveConditionsMarker}
       stableConditionsLiveAnalysis={stableConditionsLiveAnalysis}
       isScrubbingLiveEval={isScrubbingLiveEval}
       isThresholdInteractive={isThresholdInteractive}
-      thresholdOverrides={thresholdOverrides}
+      thresholdOverrides={effectiveThresholdOverridesForDisplay}
       onThresholdOverrideChange={updateThresholdOverride}
       hasPendingOverrides={hasPendingOverrides}
     />

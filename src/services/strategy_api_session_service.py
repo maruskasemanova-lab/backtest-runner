@@ -110,6 +110,8 @@ async def configure_session(
     max_active_strategies: int,
     momentum_diversification_json: Optional[str],
     deps: StrategyApiIntegrationDeps,
+    trade_audit_level: str = "full",
+    trade_audit_fields: Optional[List[str]] = None,
     max_daily_trades: Optional[int] = None,
     mu_choppy_hard_block_enabled: Optional[bool] = None,
     regime_filter: Optional[List[str]] = None,
@@ -242,9 +244,15 @@ async def configure_session(
         "cold_start_each_day": int(bool(cold_start_each_day)),
         "strategy_selection_mode": str(strategy_selection_mode),
         "max_active_strategies": int(max_active_strategies),
+        "trade_audit_level": str(trade_audit_level or "full"),
     }
+    body_payload: Dict[str, Any] = {}
     if momentum_diversification_json:
         params["momentum_diversification_json"] = str(momentum_diversification_json)
+    if trade_audit_fields is not None:
+        body_payload["trade_audit_fields"] = [
+            str(item).strip() for item in trade_audit_fields if str(item).strip()
+        ]
     if max_daily_trades is not None:
         params["max_daily_trades"] = int(max_daily_trades)
     if mu_choppy_hard_block_enabled is not None:
@@ -255,12 +263,12 @@ async def configure_session(
         for key, value in extra_params.items():
             if value is None:
                 continue
-            if isinstance(value, bool):
+            if isinstance(value, (dict, list)):
+                body_payload[str(key)] = value
+            elif isinstance(value, bool):
                 params[str(key)] = int(value)
             elif isinstance(value, (int, float, str)):
                 params[str(key)] = value
-            elif isinstance(value, (dict, list)):
-                params[str(key)] = json.dumps(value, separators=(",", ":"))
             else:
                 params[str(key)] = str(value)
     base_url = normalize_strategy_api_base_url(strategy_api_url)
@@ -273,6 +281,7 @@ async def configure_session(
             async with session.post(
                 f"{base_url}/api/session/config",
                 params=params,
+                json=body_payload or None,
                 headers=_strategy_api_headers(strategy_api_url),
             ) as resp:
                 if resp.status != 200:

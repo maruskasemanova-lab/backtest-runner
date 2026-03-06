@@ -343,6 +343,38 @@ def resolve_closed_trade_regime(
     )
 
 
+def extract_level_fade_setup_type(
+    signal_metadata: Any,
+    *,
+    strategy: Optional[str] = None,
+) -> Optional[str]:
+    strategy_key = str(strategy or "").strip().lower()
+    if strategy_key and strategy_key != "level_fade":
+        return None
+    if not isinstance(signal_metadata, dict):
+        return None
+
+    level_fade_payload = signal_metadata.get("level_fade")
+    if isinstance(level_fade_payload, dict):
+        setup_type = str(
+            level_fade_payload.get("setup_type_guess")
+            or level_fade_payload.get("setup_type")
+            or ""
+        ).strip().lower()
+        if setup_type:
+            return setup_type
+
+    setup_type = str(
+        signal_metadata.get("setup_type_guess") or signal_metadata.get("setup_type") or ""
+    ).strip().lower()
+    if setup_type:
+        return setup_type
+
+    if bool(signal_metadata.get("sweep_triggered", False)):
+        return "sweep_reclaim"
+    return None
+
+
 def build_closed_trade_record_kwargs(
     position_payload: Any,
     response: Any,
@@ -353,6 +385,8 @@ def build_closed_trade_record_kwargs(
     default_exit_price: Any,
 ) -> Dict[str, Any]:
     if isinstance(position_payload, StrategyPositionClosedPayload):
+        signal_metadata = dump_payload_or_none(position_payload.signal_metadata)
+        position_data = dump_payload(position_payload)
         return {
             "strategy": position_payload.strategy or "unknown",
             "regime": resolve_closed_trade_regime(position_payload, response),
@@ -372,18 +406,50 @@ def build_closed_trade_record_kwargs(
             "gross_pnl_pct": position_payload.gross_pnl_pct or 0.0,
             "total_costs": resolve_closed_trade_cost_usd(position_payload),
             "exit_reason": position_payload.exit_reason or "unknown",
+            "size": position_payload.size,
+            "position_notional_usd": position_payload.position_notional_usd,
+            "gross_pnl_dollars": position_payload.gross_pnl_dollars,
+            "cost_usd": position_payload.cost_usd,
+            "cost_pct": position_payload.cost_pct,
+            "take_profit": position_data.get("take_profit"),
+            "signal_bar_index": position_data.get("signal_bar_index"),
+            "entry_bar_index": position_data.get("entry_bar_index"),
+            "signal_timestamp": position_data.get("signal_timestamp"),
+            "signal_price": position_data.get("signal_price"),
             "bars_held": position_payload.bars_held or 0,
             "flow_strategy": bool(position_payload.flow_strategy),
             "book_pressure_confirmed": position_payload.book_pressure_confirmed,
             "book_pressure_avg": position_payload.book_pressure_avg,
             "book_pressure_trend": position_payload.book_pressure_trend,
             "signed_aggression": position_payload.signed_aggression,
+            "setup_type": (
+                position_data.get("setup_type")
+                or extract_level_fade_setup_type(
+                    signal_metadata,
+                    strategy=position_payload.strategy,
+                )
+            ),
+            "setup_reason": position_data.get("setup_reason"),
+            "level_context": dump_payload_or_none(position_payload.level_context),
+            "flow_snapshot": dump_payload_or_none(position_payload.flow_snapshot),
+            "signal_metadata": signal_metadata,
+            "break_even": dump_payload_or_none(position_payload.break_even),
             "entry_quality_diagnostics": dump_payload_or_none(
                 position_payload.entry_quality_diagnostics
+            ),
+            "trade_audit": (
+                dict(position_data.get("trade_audit", {}))
+                if isinstance(position_data.get("trade_audit"), dict)
+                else None
             ),
         }
 
     position_data = dump_payload(position_payload)
+    signal_metadata = (
+        dict(position_data.get("signal_metadata") or {})
+        if isinstance(position_data.get("signal_metadata"), dict)
+        else None
+    )
     return {
         "strategy": position_data.get("strategy", "unknown"),
         "regime": resolve_closed_trade_regime(position_payload, response),
@@ -399,15 +465,51 @@ def build_closed_trade_record_kwargs(
         "gross_pnl_pct": position_data.get("gross_pnl_pct", 0.0),
         "total_costs": resolve_closed_trade_cost_usd(position_payload),
         "exit_reason": position_data.get("exit_reason", "unknown"),
+        "size": position_data.get("size"),
+        "position_notional_usd": position_data.get("position_notional_usd"),
+        "gross_pnl_dollars": position_data.get("gross_pnl_dollars"),
+        "cost_usd": position_data.get("cost_usd"),
+        "cost_pct": position_data.get("cost_pct"),
+        "take_profit": position_data.get("take_profit"),
+        "signal_bar_index": position_data.get("signal_bar_index"),
+        "entry_bar_index": position_data.get("entry_bar_index"),
+        "signal_timestamp": position_data.get("signal_timestamp"),
+        "signal_price": position_data.get("signal_price"),
         "bars_held": position_data.get("bars_held", 0),
         "flow_strategy": position_data.get("flow_strategy", False),
         "book_pressure_confirmed": position_data.get("book_pressure_confirmed"),
         "book_pressure_avg": position_data.get("book_pressure_avg"),
         "book_pressure_trend": position_data.get("book_pressure_trend"),
         "signed_aggression": position_data.get("signed_aggression"),
+        "setup_type": extract_level_fade_setup_type(
+            signal_metadata,
+            strategy=position_data.get("strategy"),
+        ) if not position_data.get("setup_type") else position_data.get("setup_type"),
+        "setup_reason": position_data.get("setup_reason"),
+        "level_context": (
+            dict(position_data.get("level_context", {}))
+            if isinstance(position_data.get("level_context"), dict)
+            else None
+        ),
+        "flow_snapshot": (
+            dict(position_data.get("flow_snapshot", {}))
+            if isinstance(position_data.get("flow_snapshot"), dict)
+            else None
+        ),
+        "signal_metadata": signal_metadata,
+        "break_even": (
+            dict(position_data.get("break_even", {}))
+            if isinstance(position_data.get("break_even"), dict)
+            else None
+        ),
         "entry_quality_diagnostics": (
             dict(position_data.get("entry_quality_diagnostics", {}))
             if isinstance(position_data.get("entry_quality_diagnostics"), dict)
+            else None
+        ),
+        "trade_audit": (
+            dict(position_data.get("trade_audit", {}))
+            if isinstance(position_data.get("trade_audit"), dict)
             else None
         ),
     }

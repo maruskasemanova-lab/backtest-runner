@@ -99,6 +99,9 @@ from src.services.start_run_service import (
     prewarm_run_data as service_prewarm_run,
     start_run as service_start_run,
 )
+from src.services.heatmap_memory_zone_service import (
+    build_heatmap_memory_catalog as service_build_heatmap_memory_catalog,
+)
 from src.services.adaptive_tuner_worker_service import (
     AdaptiveTunerWorkerDeps,
     run_adaptive_tuner_job as service_run_adaptive_tuner_job,
@@ -639,6 +642,11 @@ def _build_start_run_deps() -> StartRunDeps:
         load_aos_config=_load_aos_config,
         get_ticker_positioning_config=_get_ticker_positioning_config,
         positioning_config_keys=POSITIONING_CONFIG_KEYS,
+        build_heatmap_memory_catalog=lambda *, ticker, bars: service_build_heatmap_memory_catalog(
+            ticker=ticker,
+            bars=bars,
+            state_store=v2_services.store,
+        ),
         configure_session=_configure_session,
         broadcast=broadcast,
         run_config_cls=RunConfig,
